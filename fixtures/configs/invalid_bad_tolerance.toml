@@ -1,0 +1,8 @@
+[output]
+path = "out.glb"
+format = "glb"
+
+[[tessellation_rules]]
+name_glob = "*"
+max_segments_circle = -1
+fallback = "skip"

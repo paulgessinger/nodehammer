@@ -1,0 +1,60 @@
+[output]
+path = "out.glb"
+format = "glb"
+embed_extras = true
+
+[[materials]]
+name = "aluminum"
+base_color = [0.75, 0.75, 0.85, 1.0]
+metallic = 0.1
+roughness = 0.4
+double_sided = false
+
+[[materials]]
+name = "copper"
+base_color = [0.72, 0.45, 0.20, 1.0]
+metallic = 0.9
+roughness = 0.2
+
+[[selection]]
+action = "keep_if"
+closure = "descendants"
+[selection.predicate]
+type = "name_glob"
+pattern = "*Tracker*"
+
+[[selection]]
+action = "drop_if"
+closure = "none"
+[selection.predicate]
+type = "tag"
+key = "sensitive"
+value = "false"
+
+[[selection]]
+action = "keep_if"
+closure = "none"
+[selection.predicate]
+type = "and"
+operands = [
+  {type = "name_glob", pattern = "*Silicon*"},
+  {type = "is_leaf"},
+]
+
+[[material_rules]]
+name_glob = "*Silicon*"
+material = "aluminum"
+
+[[material_rules]]
+name_glob = "*Copper*"
+material = "copper"
+
+[[tessellation_rules]]
+name_glob = "*Tracker*"
+max_segments_circle = 32
+fallback = "skip"
+
+[[tessellation_rules]]
+name_glob = "*"
+max_segments_circle = 64
+fallback = "skip"

@@ -1,0 +1,9 @@
+[output]
+path = "out.glb"
+format = "glb"
+
+# No [[materials]] section — references below are undefined.
+
+[[material_rules]]
+name_glob = "*"
+material = "doesNotExist"

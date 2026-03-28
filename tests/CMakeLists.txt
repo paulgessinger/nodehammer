@@ -3,6 +3,12 @@ add_executable(nodehammer_tests
     ir/test_semantic_ir.cpp
     ir/test_json_roundtrip.cpp
     ir/test_shape_variant.cpp
+    config/test_config_loader.cpp
+    config/test_config_validator.cpp
+)
+
+target_compile_definitions(nodehammer_tests PRIVATE
+    NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
 )
 
 target_link_libraries(nodehammer_tests PRIVATE
