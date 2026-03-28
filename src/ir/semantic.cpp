@@ -4,12 +4,14 @@
 namespace nodehammer {
 
 void SemanticScene::computeWorldTransforms() {
-    if (nodes.empty())
+    if (nodes.empty()) {
         return;
+    }
 
     auto it = nodes.find(rootId);
-    if (it == nodes.end())
+    if (it == nodes.end()) {
         return;
+    }
 
     // BFS from root: compose parent worldTransform × child localTransform
     std::queue<SemanticNodeId> queue;

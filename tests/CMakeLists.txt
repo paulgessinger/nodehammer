@@ -2,6 +2,7 @@ add_executable(nodehammer_tests
     test_main.cpp
     ir/test_semantic_ir.cpp
     ir/test_json_roundtrip.cpp
+    ir/test_shape_variant.cpp
 )
 
 target_link_libraries(nodehammer_tests PRIVATE

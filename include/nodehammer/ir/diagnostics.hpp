@@ -73,16 +73,18 @@ class DiagnosticList {
 
     [[nodiscard]] bool hasFatal() const noexcept {
         for (const auto &d : items_) {
-            if (d.isFatal())
+            if (d.isFatal()) {
                 return true;
+            }
         }
         return false;
     }
 
     [[nodiscard]] bool hasErrors() const noexcept {
         for (const auto &d : items_) {
-            if (d.severity >= DiagnosticSeverity::Error)
+            if (d.severity >= DiagnosticSeverity::Error) {
                 return true;
+            }
         }
         return false;
     }

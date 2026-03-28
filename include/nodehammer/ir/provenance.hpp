@@ -1,24 +1,32 @@
 #pragma once
 
-#include <cstdint>
+#include <bitset>
+#include <cstddef>
 #include <string>
 
 namespace nodehammer {
 
-/// Bitmask flags recording what information was lost or degraded during import.
+/// Bit positions for degradation flags. Pass to DegradationFlags::set()/has().
+enum class DegradationBit : std::size_t {
+    UnknownShape = 0,    ///< Shape type not recognized; placeholder emitted
+    MaterialMissing = 1, ///< No material info available
+    TransformApprox = 2, ///< Transform decomposed with approximation
+    TruncatedName = 3,   ///< Node name was truncated
+    Count_               ///< Sentinel — not a real flag
+};
+
+/// Bitmask recording what information was lost or degraded during import.
 struct DegradationFlags {
-    static constexpr uint32_t None = 0;
-    static constexpr uint32_t UnknownShape =
-        1u << 0; ///< Shape type not recognized; placeholder emitted
-    static constexpr uint32_t MaterialMissing = 1u << 1; ///< No material info available
-    static constexpr uint32_t TransformApprox = 1u
-                                                << 2;  ///< Transform decomposed with approximation
-    static constexpr uint32_t TruncatedName = 1u << 3; ///< Node name was truncated
+    std::bitset<static_cast<std::size_t>(DegradationBit::Count_)> bits;
 
-    uint32_t value{None};
+    void set(DegradationBit bit) noexcept { bits.set(static_cast<std::size_t>(bit)); }
 
-    void set(uint32_t flag) noexcept { value |= flag; }
-    [[nodiscard]] bool has(uint32_t flag) const noexcept { return (value & flag) != 0; }
+    [[nodiscard]] bool has(DegradationBit bit) const noexcept {
+        return bits.test(static_cast<std::size_t>(bit));
+    }
+
+    [[nodiscard]] bool any() const noexcept { return bits.any(); }
+    [[nodiscard]] bool none() const noexcept { return bits.none(); }
 };
 
 /// Records the origin of a node in the source geometry system.

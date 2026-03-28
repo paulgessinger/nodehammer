@@ -6,8 +6,10 @@
 #include <nodehammer/detail/glm_json.hpp>
 #include <nodehammer/ir/provenance.hpp>
 
+#include <array>
 #include <cstdint>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -47,54 +49,78 @@ template <typename Tag> struct std::hash<nodehammer::StrongId<Tag>> {
 namespace nodehammer {
 
 // ── Shape types ───────────────────────────────────────────────────────────────
+// All shape types must be complete before SemanticShapeVariant is instantiated.
 
 struct BoxShape {
-    double dx{0}, dy{0}, dz{0}; ///< Half-lengths
+    double dx{0};
+    double dy{0};
+    double dz{0}; ///< Half-lengths
 };
 
 struct TubeShape {
-    double rMin{0}, rMax{0}, dz{0};
-    double phiStart{0}, phiDelta{6.283185307179586}; ///< radians, default full circle
+    double rMin{0};
+    double rMax{0};
+    double dz{0};
+    double phiStart{0};
+    double phiDelta{2.0 * std::numbers::pi};
 };
 
 struct ConeShape {
-    double rMin1{0}, rMax1{0};
-    double rMin2{0}, rMax2{0};
+    double rMin1{0};
+    double rMax1{0};
+    double rMin2{0};
+    double rMax2{0};
     double dz{0};
-    double phiStart{0}, phiDelta{6.283185307179586};
+    double phiStart{0};
+    double phiDelta{2.0 * std::numbers::pi};
 };
 
 struct TrdShape {
-    double dx1{0}, dx2{0};
-    double dy1{0}, dy2{0};
+    double dx1{0};
+    double dx2{0};
+    double dy1{0};
+    double dy2{0};
     double dz{0};
 };
 
 struct ParaShape {
-    double dx{0}, dy{0}, dz{0};
-    double alpha{0}, theta{0}, phi{0}; ///< radians
+    double dx{0};
+    double dy{0};
+    double dz{0};
+    double alpha{0}; ///< radians
+    double theta{0};
+    double phi{0};
 };
 
 struct PconShape {
-    double phiStart{0}, phiDelta{6.283185307179586};
+    double phiStart{0};
+    double phiDelta{2.0 * std::numbers::pi};
     struct Section {
-        double z{0}, rMin{0}, rMax{0};
+        double z{0};
+        double rMin{0};
+        double rMax{0};
     };
     std::vector<Section> sections;
 };
 
 struct PgonShape {
-    double phiStart{0}, phiDelta{6.283185307179586};
+    double phiStart{0};
+    double phiDelta{2.0 * std::numbers::pi};
     int nSides{4};
     struct Section {
-        double z{0}, rMin{0}, rMax{0};
+        double z{0};
+        double rMin{0};
+        double rMax{0};
     };
     std::vector<Section> sections;
 };
 
 struct TorusShape {
-    double rMin{0}, rMax{0}, rTor{0};
-    double phiStart{0}, phiDelta{6.283185307179586};
+    double rMin{0};
+    double rMax{0};
+    double rTor{0};
+    double phiStart{0};
+    double phiDelta{2.0 * std::numbers::pi};
 };
 
 struct TessellatedShape {
@@ -104,19 +130,11 @@ struct TessellatedShape {
     std::vector<Triangle> triangles;
 };
 
-struct BooleanUnion;
-struct BooleanIntersection;
-struct BooleanSubtraction;
-
-using SemanticShapeVariant =
-    std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape, PgonShape,
-                 TorusShape, TessellatedShape, BooleanUnion, BooleanIntersection,
-                 BooleanSubtraction, struct UnknownShape>;
-
 struct UnknownShape {
     std::string originalType; ///< Class name from the source system
 };
 
+/// Boolean composition shapes — operands reference shapes already registered in SemanticScene.
 struct BooleanUnion {
     SemanticShapeId left;
     SemanticShapeId right;
@@ -135,6 +153,11 @@ struct BooleanSubtraction {
     glm::dmat4 rightTransform{1.0};
 };
 
+using SemanticShapeVariant =
+    std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape, PgonShape,
+                 TorusShape, TessellatedShape, BooleanUnion, BooleanIntersection,
+                 BooleanSubtraction, UnknownShape>;
+
 struct SemanticShape {
     SemanticShapeId id;
     SemanticShapeVariant data;
@@ -145,7 +168,7 @@ struct SemanticShape {
 struct SourceMaterial {
     SemanticMaterialId id;
     std::string name;
-    std::optional<glm::vec3> color; ///< Linear RGB, [0,1] range; optional
+    std::optional<glm::vec3> color; ///< Linear RGB, [0,1]; optional
     double density{0};              ///< g/cm³
 };
 
@@ -209,7 +232,7 @@ class SemanticScene {
 
 template <typename Tag> void to_json(nlohmann::json &j, const StrongId<Tag> &id) { j = id.value; }
 
-inline void to_json(nlohmann::json &j, const DegradationFlags &f) { j = f.value; }
+inline void to_json(nlohmann::json &j, const DegradationFlags &f) { j = f.bits.to_ulong(); }
 
 inline void to_json(nlohmann::json &j, const Provenance &p) {
     j = {
@@ -217,8 +240,9 @@ inline void to_json(nlohmann::json &j, const Provenance &p) {
         {"sourceName", p.sourceName},
         {"degradation", p.degradation},
     };
-    if (!p.sourceFile.empty())
+    if (!p.sourceFile.empty()) {
         j["sourceFile"] = p.sourceFile;
+    }
 }
 
 inline void to_json(nlohmann::json &j, const BoxShape &s) {
@@ -244,16 +268,18 @@ inline void to_json(nlohmann::json &j, const ParaShape &s) {
 inline void to_json(nlohmann::json &j, const PconShape &s) {
     j = {{"type", "pcon"}, {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}};
     auto secs = nlohmann::json::array();
-    for (const auto &sec : s.sections)
+    for (const auto &sec : s.sections) {
         secs.push_back({{"z", sec.z}, {"rMin", sec.rMin}, {"rMax", sec.rMax}});
+    }
     j["sections"] = secs;
 }
 inline void to_json(nlohmann::json &j, const PgonShape &s) {
     j = {
         {"type", "pgon"}, {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}, {"nSides", s.nSides}};
     auto secs = nlohmann::json::array();
-    for (const auto &sec : s.sections)
+    for (const auto &sec : s.sections) {
         secs.push_back({{"z", sec.z}, {"rMin", sec.rMin}, {"rMax", sec.rMax}});
+    }
     j["sections"] = secs;
 }
 inline void to_json(nlohmann::json &j, const TorusShape &s) {
@@ -283,8 +309,9 @@ inline void to_json(nlohmann::json &j, const SemanticShape &s) {
 
 inline void to_json(nlohmann::json &j, const SourceMaterial &m) {
     j = {{"id", m.id}, {"name", m.name}, {"density", m.density}};
-    if (m.color)
+    if (m.color) {
         j["color"] = *m.color;
+    }
 }
 
 inline void to_json(nlohmann::json &j, const SemanticLogicalVolume &lv) {
@@ -302,27 +329,31 @@ inline void to_json(nlohmann::json &j, const SemanticNode &n) {
         {"tags", n.tags},
         {"provenance", n.provenance},
     };
-    if (n.parentId)
+    if (n.parentId) {
         j["parentId"] = *n.parentId;
+    }
 }
 
 inline void to_json(nlohmann::json &j, const SemanticScene &sc) {
-    // nodes array
     auto nodes = nlohmann::json::array();
-    for (const auto &[id, n] : sc.nodes)
+    for (const auto &[id, n] : sc.nodes) {
         nodes.push_back(n);
+    }
 
     auto logVols = nlohmann::json::array();
-    for (const auto &[id, lv] : sc.logVols)
+    for (const auto &[id, lv] : sc.logVols) {
         logVols.push_back(lv);
+    }
 
     auto shapes = nlohmann::json::array();
-    for (const auto &[id, s] : sc.shapes)
+    for (const auto &[id, s] : sc.shapes) {
         shapes.push_back(s);
+    }
 
     auto mats = nlohmann::json::array();
-    for (const auto &[id, m] : sc.materials)
+    for (const auto &[id, m] : sc.materials) {
         mats.push_back(m);
+    }
 
     j = {
         {"rootId", sc.rootId}, {"nodes", nodes},    {"logVols", logVols},
