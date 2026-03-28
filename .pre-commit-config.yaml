@@ -1,0 +1,19 @@
+# https://pre-commit.com/ — compatible with prek (https://github.com/j178/prek)
+# Install: brew install prek  (or see prek README)
+# Enable:  prek install
+# Run:     prek run --all-files
+
+repos:
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v22.1.2
+    hooks:
+      - id: clang-format
+        types_or: [c++, c, cuda]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
