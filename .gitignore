@@ -1,2 +1,6 @@
 /.claude
+/AGENTS.md
+/CLAUDE.md
 /build
+/compile_commands.json
+/.cache

@@ -50,7 +50,7 @@ target_link_libraries(nodehammer_lib PUBLIC
     tomlplusplus::tomlplusplus
     nlohmann_json::nlohmann_json
     glm::glm
-    fx-gltf
+    tinygltf
     CLI11::CLI11
 )
 
