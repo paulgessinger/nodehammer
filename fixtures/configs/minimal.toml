@@ -1,3 +1,2 @@
-[output]
-path = "out.glb"
-format = "glb"
+# Minimal nodehammer config — no materials, no rules.
+# Output path/format are specified at the CLI level, not here.

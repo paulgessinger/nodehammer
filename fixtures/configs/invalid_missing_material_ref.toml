@@ -1,9 +1,4 @@
-[output]
-path = "out.glb"
-format = "glb"
-
-# No [[materials]] section — references below are undefined.
+# Parses successfully but fails ConfigValidator: material reference is undefined.
 
 [[material_rules]]
-name_glob = "*"
-material = "doesNotExist"
+apply.material = "doesNotExist"

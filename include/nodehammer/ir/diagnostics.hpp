@@ -52,17 +52,22 @@ class DiagnosticList {
   public:
     void add(Diagnostic d) { items_.push_back(std::move(d)); }
 
-    void info(std::string code, std::string message, std::string context = {}) {
-        add({DiagnosticSeverity::Info, std::move(code), std::move(message), std::move(context)});
+    // std::string_view overloads accept literals, constexpr constants, and std::string alike.
+    void info(std::string_view code, std::string_view message, std::string_view context = {}) {
+        add({DiagnosticSeverity::Info, std::string{code}, std::string{message},
+             std::string{context}});
     }
-    void warn(std::string code, std::string message, std::string context = {}) {
-        add({DiagnosticSeverity::Warning, std::move(code), std::move(message), std::move(context)});
+    void warn(std::string_view code, std::string_view message, std::string_view context = {}) {
+        add({DiagnosticSeverity::Warning, std::string{code}, std::string{message},
+             std::string{context}});
     }
-    void error(std::string code, std::string message, std::string context = {}) {
-        add({DiagnosticSeverity::Error, std::move(code), std::move(message), std::move(context)});
+    void error(std::string_view code, std::string_view message, std::string_view context = {}) {
+        add({DiagnosticSeverity::Error, std::string{code}, std::string{message},
+             std::string{context}});
     }
-    void fatal(std::string code, std::string message, std::string context = {}) {
-        add({DiagnosticSeverity::Fatal, std::move(code), std::move(message), std::move(context)});
+    void fatal(std::string_view code, std::string_view message, std::string_view context = {}) {
+        add({DiagnosticSeverity::Fatal, std::string{code}, std::string{message},
+             std::string{context}});
     }
 
     void append(const DiagnosticList &other) {

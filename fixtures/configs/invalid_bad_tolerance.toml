@@ -1,8 +1,5 @@
-[output]
-path = "out.glb"
-format = "glb"
+# Parses successfully but fails ConfigValidator: max_segments_circle must be > 0.
 
 [[tessellation_rules]]
-name_glob = "*"
 max_segments_circle = -1
 fallback = "skip"

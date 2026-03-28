@@ -19,26 +19,18 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
     for (const auto &rule : cfg.materialRules) {
         if (!definedMaterials.contains(rule.materialName)) {
             diags.error(
-                std::string{codes::kErrUndefinedMaterialRef},
-                std::format("material_rule references undefined material '{}'", rule.materialName),
-                rule.nameGlob);
+                codes::kErrUndefinedMaterialRef,
+                std::format("material_rule references undefined material '{}'", rule.materialName));
         }
     }
 
     // tessellation_rules: max_segments_circle must be positive.
     for (const auto &rule : cfg.tessellationRules) {
         if (rule.maxSegmentsCircle <= 0) {
-            diags.error(std::string{codes::kErrNegativeTolerance},
+            diags.error(codes::kErrNegativeTolerance,
                         std::format("tessellation_rule max_segments_circle must be > 0, got {}",
-                                    rule.maxSegmentsCircle),
-                        rule.nameGlob);
+                                    rule.maxSegmentsCircle));
         }
-    }
-
-    // output: path must be set.
-    if (cfg.exportCfg.outputPath.empty()) {
-        diags.error(std::string{codes::kErrMissingOutputPath},
-                    "output.path is required but not set");
     }
 
     return diags;

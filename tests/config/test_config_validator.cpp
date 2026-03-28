@@ -5,18 +5,26 @@
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-static nodehammer::NHConfig validBaseConfig() {
+static nodehammer::NHConfig configWithAluminum() {
     nodehammer::NHConfig cfg;
-    cfg.exportCfg.outputPath = "out.glb";
-    cfg.exportCfg.format = "glb";
-    cfg.materials.push_back({"aluminum", glm::vec4{0.75f, 0.75f, 0.85f, 1.0f}, 0.1f, 0.4f});
+    nodehammer::MaterialDef mat;
+    mat.name = "aluminum";
+    mat.metallic = 0.1f;
+    mat.roughness = 0.4f;
+    cfg.materials.push_back(mat);
     return cfg;
 }
 
 // ── Valid config ───────────────────────────────────────────────────────────────
 
 TEST_CASE("ConfigValidator: valid config produces no diagnostics", "[config][validator]") {
-    auto cfg = validBaseConfig();
+    auto cfg = configWithAluminum();
+    auto diags = nodehammer::ConfigValidator::validate(cfg);
+    REQUIRE(diags.empty());
+}
+
+TEST_CASE("ConfigValidator: empty config produces no diagnostics", "[config][validator]") {
+    nodehammer::NHConfig cfg;
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.empty());
 }
@@ -25,8 +33,10 @@ TEST_CASE("ConfigValidator: valid config produces no diagnostics", "[config][val
 
 TEST_CASE("ConfigValidator: material_rule referencing undefined material → Error",
           "[config][validator]") {
-    auto cfg = validBaseConfig();
-    cfg.materialRules.push_back({"*", "doesNotExist"});
+    auto cfg = configWithAluminum();
+    nodehammer::MaterialRule rule;
+    rule.materialName = "doesNotExist";
+    cfg.materialRules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.hasErrors());
     REQUIRE(diags.items().size() == 1);
@@ -35,8 +45,10 @@ TEST_CASE("ConfigValidator: material_rule referencing undefined material → Err
 
 TEST_CASE("ConfigValidator: material_rule referencing defined material → no error",
           "[config][validator]") {
-    auto cfg = validBaseConfig();
-    cfg.materialRules.push_back({"*", "aluminum"});
+    auto cfg = configWithAluminum();
+    nodehammer::MaterialRule rule;
+    rule.materialName = "aluminum";
+    cfg.materialRules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE_FALSE(diags.hasErrors());
 }
@@ -44,87 +56,87 @@ TEST_CASE("ConfigValidator: material_rule referencing defined material → no er
 // ── Tessellation rule constraints ─────────────────────────────────────────────
 
 TEST_CASE("ConfigValidator: negative max_segments_circle → Error", "[config][validator]") {
-    auto cfg = validBaseConfig();
-    cfg.tessellationRules.push_back({"*", -1, nodehammer::BooleanFallback::Skip});
+    nodehammer::NHConfig cfg;
+    nodehammer::TessellationRule rule;
+    rule.maxSegmentsCircle = -1;
+    rule.fallback = nodehammer::BooleanFallback::Skip;
+    cfg.tessellationRules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.hasErrors());
     REQUIRE(diags.items().front().code == nodehammer::codes::kErrNegativeTolerance);
 }
 
 TEST_CASE("ConfigValidator: zero max_segments_circle → Error", "[config][validator]") {
-    auto cfg = validBaseConfig();
-    cfg.tessellationRules.push_back({"*", 0, nodehammer::BooleanFallback::Skip});
+    nodehammer::NHConfig cfg;
+    nodehammer::TessellationRule rule;
+    rule.maxSegmentsCircle = 0;
+    cfg.tessellationRules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.hasErrors());
 }
 
 TEST_CASE("ConfigValidator: positive max_segments_circle → no error", "[config][validator]") {
-    auto cfg = validBaseConfig();
-    cfg.tessellationRules.push_back({"*", 32, nodehammer::BooleanFallback::Skip});
+    nodehammer::NHConfig cfg;
+    nodehammer::TessellationRule rule;
+    rule.maxSegmentsCircle = 32;
+    cfg.tessellationRules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE_FALSE(diags.hasErrors());
-}
-
-// ── Output path required ──────────────────────────────────────────────────────
-
-TEST_CASE("ConfigValidator: missing output path → Error", "[config][validator]") {
-    nodehammer::NHConfig cfg;
-    // No outputPath set
-    auto diags = nodehammer::ConfigValidator::validate(cfg);
-    REQUIRE(diags.hasErrors());
-    bool hasMissingPath = false;
-    for (const auto &d : diags.items()) {
-        if (d.code == nodehammer::codes::kErrMissingOutputPath) {
-            hasMissingPath = true;
-        }
-    }
-    REQUIRE(hasMissingPath);
 }
 
 // ── Multiple errors accumulate ────────────────────────────────────────────────
 
 TEST_CASE("ConfigValidator: multiple violations all reported", "[config][validator]") {
     nodehammer::NHConfig cfg;
-    // No output path
-    cfg.materialRules.push_back({"*", "ghost"}); // undefined material
-    cfg.tessellationRules.push_back({"*", -5, nodehammer::BooleanFallback::Skip}); // bad segments
+    nodehammer::MaterialRule matRule;
+    matRule.materialName = "ghost";
+    cfg.materialRules.push_back(matRule);
+    nodehammer::TessellationRule tessRule;
+    tessRule.maxSegmentsCircle = -5;
+    cfg.tessellationRules.push_back(tessRule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
-    REQUIRE(diags.items().size() >= 3); // missing path + undefined material + bad segments
+    REQUIRE(diags.items().size() >= 2); // undefined material + bad segments
 }
 
 // ── Round-trip via loadFromString ─────────────────────────────────────────────
 
-TEST_CASE("ConfigValidator: invalid_missing_material_ref TOML → validator catches it",
+TEST_CASE("ConfigValidator: undefined material ref via TOML → validator catches it",
           "[config][validator]") {
     constexpr std::string_view toml = R"(
-[output]
-path = "out.glb"
-format = "glb"
-
 [[material_rules]]
-name_glob = "*"
-material = "ghost"
+apply.material = "ghost"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(loaded.has_value()); // parses fine — validator catches the semantic error
+    REQUIRE(loaded.has_value()); // parses fine — semantic error caught by validator
     auto diags = nodehammer::ConfigValidator::validate(*loaded);
     REQUIRE(diags.hasErrors());
 }
 
-TEST_CASE("ConfigValidator: invalid_bad_tolerance TOML → validator catches it",
+TEST_CASE("ConfigValidator: negative max_segments_circle via TOML → validator catches it",
           "[config][validator]") {
     constexpr std::string_view toml = R"(
-[output]
-path = "out.glb"
-format = "glb"
-
 [[tessellation_rules]]
-name_glob = "*"
 max_segments_circle = -1
 fallback = "skip"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(loaded.has_value()); // parses fine — validator catches it
+    REQUIRE(loaded.has_value()); // parses fine — semantic error caught by validator
     auto diags = nodehammer::ConfigValidator::validate(*loaded);
     REQUIRE(diags.hasErrors());
+}
+
+TEST_CASE("ConfigValidator: defined material ref via TOML → validator passes",
+          "[config][validator]") {
+    constexpr std::string_view toml = R"(
+[materials.aluminum]
+metallic = 0.1
+roughness = 0.4
+
+[[material_rules]]
+apply.material = "aluminum"
+)";
+    auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(loaded.has_value());
+    auto diags = nodehammer::ConfigValidator::validate(*loaded);
+    REQUIRE_FALSE(diags.hasErrors());
 }

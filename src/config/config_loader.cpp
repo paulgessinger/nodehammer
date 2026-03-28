@@ -27,16 +27,6 @@ std::optional<ClosurePolicy> parseClosure(std::string_view s) {
     return std::nullopt;
 }
 
-std::optional<SelectionAction> parseAction(std::string_view s) {
-    if (s == "keep_if") {
-        return SelectionAction::KeepIf;
-    }
-    if (s == "drop_if") {
-        return SelectionAction::DropIf;
-    }
-    return std::nullopt;
-}
-
 std::optional<BooleanFallback> parseFallback(std::string_view s) {
     if (s == "skip") {
         return BooleanFallback::Skip;
@@ -59,8 +49,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
                                             std::string_view context) {
     auto typeOpt = tbl["type"].value<std::string>();
     if (!typeOpt) {
-        diags.error(std::string{codes::kErrConfigParse},
-                    "predicate is missing required 'type' field", std::string{context});
+        diags.error(codes::kErrConfigParse, "predicate is missing required 'type' field", context);
         return std::nullopt;
     }
     const std::string &type = *typeOpt;
@@ -68,8 +57,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
     if (type == "name_glob") {
         auto pat = tbl["pattern"].value<std::string>();
         if (!pat) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        "name_glob predicate missing 'pattern'", std::string{context});
+            diags.error(codes::kErrConfigParse, "name_glob predicate missing 'pattern'", context);
             return std::nullopt;
         }
         return PredicateExpr{NameGlobPredicate{*pat}};
@@ -78,8 +66,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
     if (type == "path_glob") {
         auto pat = tbl["pattern"].value<std::string>();
         if (!pat) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        "path_glob predicate missing 'pattern'", std::string{context});
+            diags.error(codes::kErrConfigParse, "path_glob predicate missing 'pattern'", context);
             return std::nullopt;
         }
         return PredicateExpr{PathGlobPredicate{*pat}};
@@ -88,12 +75,10 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
     if (type == "tag") {
         auto key = tbl["key"].value<std::string>();
         if (!key) {
-            diags.error(std::string{codes::kErrConfigParse}, "tag predicate missing 'key'",
-                        std::string{context});
+            diags.error(codes::kErrConfigParse, "tag predicate missing 'key'", context);
             return std::nullopt;
         }
-        auto value = tbl["value"].value<std::string>();
-        return PredicateExpr{TagPredicate{*key, value}};
+        return PredicateExpr{TagPredicate{*key, tbl["value"].value<std::string>()}};
     }
 
     if (type == "is_leaf") {
@@ -101,11 +86,10 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
     }
 
     if (type == "and" || type == "or") {
-        auto *operandsArr = tbl["operands"].as_array();
+        const auto *operandsArr = tbl["operands"].as_array();
         if (!operandsArr) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        std::format("'{}' predicate missing 'operands' array", type),
-                        std::string{context});
+            diags.error(codes::kErrConfigParse,
+                        std::format("'{}' predicate missing 'operands' array", type), context);
             return std::nullopt;
         }
         std::vector<PredicateExpr> operands;
@@ -113,8 +97,8 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
         for (const auto &elem : *operandsArr) {
             const auto *subTbl = elem.as_table();
             if (!subTbl) {
-                diags.error(std::string{codes::kErrConfigParse},
-                            "operand in compound predicate must be a table", std::string{context});
+                diags.error(codes::kErrConfigParse, "operand in compound predicate must be a table",
+                            context);
                 return std::nullopt;
             }
             auto sub = parsePredicate(*subTbl, diags, context);
@@ -132,8 +116,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
     if (type == "not") {
         const auto *operandTbl = tbl["operand"].as_table();
         if (!operandTbl) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        "'not' predicate missing 'operand' table", std::string{context});
+            diags.error(codes::kErrConfigParse, "'not' predicate missing 'operand' table", context);
             return std::nullopt;
         }
         auto sub = parsePredicate(*operandTbl, diags, context);
@@ -143,70 +126,53 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
         return PredicateExpr{std::make_shared<NotPredicate>(std::move(*sub))};
     }
 
-    diags.error(std::string{codes::kErrConfigParse},
-                std::format("unknown predicate type '{}'", type), std::string{context});
+    diags.error(codes::kErrConfigParse, std::format("unknown predicate type '{}'", type), context);
     return std::nullopt;
 }
 
 // ── Section parsers ───────────────────────────────────────────────────────────
 
-glm::vec4 parseVec4(const toml::array &arr, glm::vec4 fallback) {
-    if (arr.size() < 4) {
-        return fallback;
-    }
-    return glm::vec4{
-        arr.at(0).value<float>().value_or(fallback.r),
-        arr.at(1).value<float>().value_or(fallback.g),
-        arr.at(2).value<float>().value_or(fallback.b),
-        arr.at(3).value<float>().value_or(fallback.a),
-    };
-}
-
-glm::vec3 parseVec3(const toml::array &arr, glm::vec3 fallback) {
-    if (arr.size() < 3) {
-        return fallback;
-    }
-    return glm::vec3{
-        arr.at(0).value<float>().value_or(fallback.r),
-        arr.at(1).value<float>().value_or(fallback.g),
-        arr.at(2).value<float>().value_or(fallback.b),
-    };
-}
-
+/// [materials.<name>] — the table key is the material name.
 void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
-    const auto *arr = root["materials"].as_array();
-    if (!arr) {
+    const auto *matsTable = root["materials"].as_table();
+    if (!matsTable) {
         return;
     }
-    for (const auto &entry : *arr) {
-        const auto *tbl = entry.as_table();
+    for (const auto &[key, node] : *matsTable) {
+        const auto *tbl = node.as_table();
         if (!tbl) {
-            continue;
-        }
-        auto name = (*tbl)["name"].value<std::string>();
-        if (!name) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        "material entry missing required 'name' field");
+            diags.error(codes::kErrConfigParse,
+                        std::format("materials.{} must be a table, not a scalar", key.str()));
             continue;
         }
         MaterialDef def;
-        def.name = *name;
+        def.name = key.str();
 
         if (const auto *colorArr = (*tbl)["base_color"].as_array()) {
-            def.baseColor = parseVec4(*colorArr, def.baseColor);
+            if (colorArr->size() >= 4) {
+                def.baseColor.r = colorArr->at(0).value<float>().value_or(def.baseColor.r);
+                def.baseColor.g = colorArr->at(1).value<float>().value_or(def.baseColor.g);
+                def.baseColor.b = colorArr->at(2).value<float>().value_or(def.baseColor.b);
+                def.baseColor.a = colorArr->at(3).value<float>().value_or(def.baseColor.a);
+            }
         }
         def.metallic = (*tbl)["metallic"].value<float>().value_or(def.metallic);
         def.roughness = (*tbl)["roughness"].value<float>().value_or(def.roughness);
         def.doubleSided = (*tbl)["double_sided"].value<bool>().value_or(def.doubleSided);
         if (const auto *emissArr = (*tbl)["emissive"].as_array()) {
-            def.emissive = parseVec3(*emissArr, def.emissive);
+            if (emissArr->size() >= 3) {
+                def.emissive.r = emissArr->at(0).value<float>().value_or(def.emissive.r);
+                def.emissive.g = emissArr->at(1).value<float>().value_or(def.emissive.g);
+                def.emissive.b = emissArr->at(2).value<float>().value_or(def.emissive.b);
+            }
         }
         cfg.materials.push_back(std::move(def));
     }
 }
 
-void parseSelection(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
-    const auto *arr = root["selection"].as_array();
+/// [[selection_rules]] — action determined by presence of keep_if or drop_if key.
+void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
+    const auto *arr = root["selection_rules"].as_array();
     if (!arr) {
         return;
     }
@@ -215,27 +181,23 @@ void parseSelection(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
         if (!tbl) {
             continue;
         }
-        auto actionStr = (*tbl)["action"].value<std::string>();
-        if (!actionStr) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        "selection rule missing required 'action' field");
-            continue;
-        }
-        auto action = parseAction(*actionStr);
-        if (!action) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        std::format("unknown selection action '{}'; expected keep_if or drop_if",
-                                    *actionStr));
+
+        SelectionAction action;
+        const toml::table *predTbl = nullptr;
+
+        if (const auto *kif = (*tbl)["keep_if"].as_table()) {
+            action = SelectionAction::KeepIf;
+            predTbl = kif;
+        } else if (const auto *dif = (*tbl)["drop_if"].as_table()) {
+            action = SelectionAction::DropIf;
+            predTbl = dif;
+        } else {
+            diags.error(codes::kErrConfigParse,
+                        "selection_rule must have either a 'keep_if' or 'drop_if' table");
             continue;
         }
 
-        const auto *predTbl = (*tbl)["predicate"].as_table();
-        if (!predTbl) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        "selection rule missing required 'predicate' table");
-            continue;
-        }
-        auto pred = parsePredicate(*predTbl, diags, "selection");
+        auto pred = parsePredicate(*predTbl, diags, "selection_rules");
         if (!pred) {
             continue;
         }
@@ -244,17 +206,27 @@ void parseSelection(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
         if (auto closureStr = (*tbl)["closure"].value<std::string>()) {
             auto parsed = parseClosure(*closureStr);
             if (!parsed) {
-                diags.warn(std::string{codes::kErrConfigParse},
-                           std::format("unknown closure '{}'; defaulting to 'none'", *closureStr));
-            } else {
-                closure = *parsed;
+                diags.error(codes::kErrConfigParse,
+                            std::format("unknown closure '{}'; expected none, ancestors, "
+                                        "descendants, or full",
+                                        *closureStr));
+                continue;
             }
+            closure = *parsed;
         }
 
-        cfg.selection.push_back(SelectionRule{*action, std::move(*pred), closure});
+        SelectionRule rule;
+        rule.action = action;
+        rule.predicate = std::move(*pred);
+        rule.closure = closure;
+        if (auto scope = (*tbl)["scope"].value<std::string>()) {
+            rule.scope = std::move(*scope);
+        }
+        cfg.selection.push_back(std::move(rule));
     }
 }
 
+/// [[material_rules]] — scope (optional), match (optional predicate), apply.material (required).
 void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
     const auto *arr = root["material_rules"].as_array();
     if (!arr) {
@@ -265,20 +237,32 @@ void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &
         if (!tbl) {
             continue;
         }
-        auto nameGlob = (*tbl)["name_glob"].value<std::string>();
-        auto material = (*tbl)["material"].value<std::string>();
+
+        auto material = (*tbl)["apply"]["material"].value<std::string>();
         if (!material) {
-            diags.error(std::string{codes::kErrConfigParse},
-                        "material_rule missing required 'material' field");
+            diags.error(codes::kErrConfigParse,
+                        "material_rule missing required 'apply.material' field");
             continue;
         }
+
         MaterialRule rule;
-        rule.nameGlob = nameGlob.value_or("*");
         rule.materialName = *material;
+
+        if (auto scope = (*tbl)["scope"].value<std::string>()) {
+            rule.scope = std::move(*scope);
+        }
+        if (const auto *matchTbl = (*tbl)["match"].as_table()) {
+            auto pred = parsePredicate(*matchTbl, diags, "material_rules");
+            if (!pred) {
+                continue;
+            }
+            rule.match = std::move(*pred);
+        }
         cfg.materialRules.push_back(std::move(rule));
     }
 }
 
+/// [[tessellation_rules]] — scope (optional), max_segments_circle, fallback.
 void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
     const auto *arr = root["tessellation_rules"].as_array();
     if (!arr) {
@@ -290,33 +274,25 @@ void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticLi
             continue;
         }
         TessellationRule rule;
-        rule.nameGlob = (*tbl)["name_glob"].value<std::string>().value_or("*");
+
+        if (auto scope = (*tbl)["scope"].value<std::string>()) {
+            rule.scope = std::move(*scope);
+        }
         rule.maxSegmentsCircle = (*tbl)["max_segments_circle"].value<int>().value_or(64);
 
         if (auto fallbackStr = (*tbl)["fallback"].value<std::string>()) {
             auto parsed = parseFallback(*fallbackStr);
             if (!parsed) {
-                diags.warn(
-                    std::string{codes::kErrConfigParse},
-                    std::format("unknown fallback '{}'; defaulting to 'skip'", *fallbackStr));
-            } else {
-                rule.fallback = *parsed;
+                diags.error(codes::kErrConfigParse,
+                            std::format("unknown fallback '{}'; expected skip, bbox, or fail",
+                                        *fallbackStr),
+                            "tessellation_rules");
+                continue;
             }
+            rule.fallback = *parsed;
         }
         cfg.tessellationRules.push_back(std::move(rule));
     }
-}
-
-void parseOutput(const toml::table &root, NHConfig &cfg, DiagnosticList & /*diags*/) {
-    const auto *tbl = root["output"].as_table();
-    if (!tbl) {
-        return;
-    }
-    if (auto path = (*tbl)["path"].value<std::string>()) {
-        cfg.exportCfg.outputPath = *path;
-    }
-    cfg.exportCfg.format = (*tbl)["format"].value<std::string>().value_or("");
-    cfg.exportCfg.embedExtras = (*tbl)["embed_extras"].value<bool>().value_or(false);
 }
 
 // ── Top-level parse driver ────────────────────────────────────────────────────
@@ -325,9 +301,8 @@ std::expected<NHConfig, DiagnosticList> parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
-    parseOutput(tbl, cfg, diags);
     parseMaterials(tbl, cfg, diags);
-    parseSelection(tbl, cfg, diags);
+    parseSelectionRules(tbl, cfg, diags);
     parseMaterialRules(tbl, cfg, diags);
     parseTessellationRules(tbl, cfg, diags);
 
@@ -349,11 +324,11 @@ ConfigLoader::loadFromFile(const std::filesystem::path &path) {
         return parseTable(tbl);
     } catch (const toml::parse_error &e) {
         diags.error(
-            std::string{codes::kErrConfigParse}, std::format("{}", e.description()),
+            codes::kErrConfigParse, e.description(),
             std::format("{}:{}:{}", path.string(), e.source().begin.line, e.source().begin.column));
         return std::unexpected(std::move(diags));
     } catch (const std::exception &e) {
-        diags.error(std::string{codes::kErrImportFileNotFound},
+        diags.error(codes::kErrImportFileNotFound,
                     std::format("could not read config file: {}", e.what()), path.string());
         return std::unexpected(std::move(diags));
     }
@@ -367,7 +342,7 @@ std::expected<NHConfig, DiagnosticList> ConfigLoader::loadFromString(std::string
         return parseTable(tbl);
     } catch (const toml::parse_error &e) {
         diags.error(
-            std::string{codes::kErrConfigParse}, std::format("{}", e.description()),
+            codes::kErrConfigParse, e.description(),
             std::format("{}:{}:{}", sourceName, e.source().begin.line, e.source().begin.column));
         return std::unexpected(std::move(diags));
     }

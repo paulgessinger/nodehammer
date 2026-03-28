@@ -1,7 +1,5 @@
 #pragma once
 
-#include <filesystem>
-#include <glm/glm.hpp>
 #include <memory>
 #include <optional>
 #include <string>
@@ -17,7 +15,10 @@ enum class SelectionAction { KeepIf, DropIf };
 enum class BooleanFallback { Skip, BBox, Fail };
 
 // ── Predicate AST ─────────────────────────────────────────────────────────────
-// Recursive predicates are broken via shared_ptr so PredicateExpr stays copyable.
+// Compound predicates are held via shared_ptr so PredicateExpr stays copyable.
+//
+// TOML representation uses structured inline tables. String expression predicates
+// (e.g. "semantic == 'sensor'") would require a mini-parser and are deferred.
 
 struct NameGlobPredicate {
     std::string pattern;
@@ -27,16 +28,16 @@ struct PathGlobPredicate {
     std::string pattern;
 };
 
-/// Matches if a node carries the given tag key, and optionally a specific value.
+/// True when a node carries the given tag key, and optionally a specific value.
+/// value = nullopt means "key exists"; value = "x" means "key == 'x'".
 struct TagPredicate {
     std::string key;
-    std::optional<std::string> value; ///< nullopt = "key exists", else "key == value"
+    std::optional<std::string> value;
 };
 
 /// True only for nodes that have no children in the scene.
 struct IsLeafPredicate {};
 
-// Forward declarations for compound predicates stored via shared_ptr.
 struct AndPredicate;
 struct OrPredicate;
 struct NotPredicate;
@@ -61,53 +62,60 @@ struct NotPredicate {
     PredicateExpr operand;
 };
 
+// ── Color ─────────────────────────────────────────────────────────────────────
+
+struct Color {
+    float r{0.0f};
+    float g{0.0f};
+    float b{0.0f};
+    float a{1.0f};
+};
+
 // ── Material definition ───────────────────────────────────────────────────────
+// In TOML: [materials.<name>] — the key becomes MaterialDef::name.
 
 struct MaterialDef {
-    std::string name;
-    glm::vec4 baseColor{0.8f, 0.8f, 0.8f, 1.0f}; ///< Linear RGBA
+    std::string name; ///< Populated from the TOML table key
+    Color baseColor{0.8f, 0.8f, 0.8f, 1.0f};
     float metallic{0.0f};
     float roughness{0.5f};
-    glm::vec3 emissive{0.0f};
+    Color emissive{0.0f, 0.0f, 0.0f, 1.0f};
     bool doubleSided{false};
 };
 
 // ── Rules ─────────────────────────────────────────────────────────────────────
+// In TOML: [[selection_rules]] with keys keep_if or drop_if (not action = "...").
+// scope is an optional path glob that restricts the rule to a subtree.
 
 struct SelectionRule {
     SelectionAction action{SelectionAction::KeepIf};
+    std::optional<std::string> scope; ///< Optional path glob pre-filter
     PredicateExpr predicate{NameGlobPredicate{"*"}};
     ClosurePolicy closure{ClosurePolicy::None};
 };
 
-/// Assigns a named MaterialDef to nodes matching a name glob.
+/// Assigns a named material to nodes in an optional scope, with an optional additional predicate.
+/// In TOML: apply.material = "name" (dotted key); scope and match are optional.
 struct MaterialRule {
-    std::string nameGlob{"*"};
-    std::string materialName; ///< Must reference a MaterialDef::name
+    std::optional<std::string> scope;   ///< Optional path glob pre-filter
+    std::optional<PredicateExpr> match; ///< Optional additional predicate within scope
+    std::string materialName;           ///< References a MaterialDef::name
 };
 
 struct TessellationRule {
-    std::string nameGlob{"*"};
-    int maxSegmentsCircle{64}; ///< Segments for circular cross-sections
+    std::optional<std::string> scope; ///< Optional path glob (matches all if absent)
+    int maxSegmentsCircle{64};
     BooleanFallback fallback{BooleanFallback::Skip};
 };
 
-// ── Export config ─────────────────────────────────────────────────────────────
-
-struct ExportConfig {
-    std::filesystem::path outputPath;
-    std::string format; ///< "glb", "gltf", "obj"
-    bool embedExtras{false};
-};
-
 // ── Top-level config ──────────────────────────────────────────────────────────
+// Output path/format are CLI concerns, not config concerns.
 
 struct NHConfig {
     std::vector<MaterialDef> materials;
     std::vector<SelectionRule> selection;
     std::vector<MaterialRule> materialRules;
     std::vector<TessellationRule> tessellationRules;
-    ExportConfig exportCfg;
 };
 
 } // namespace nodehammer
