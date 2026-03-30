@@ -181,7 +181,7 @@ closure = "none"
     REQUIRE(result.diags.hasErrors());
 }
 
-TEST_CASE("ConfigLoader: material rule apply.material is required → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: material rule material is required → Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[material_rules]]
 scope = "/World/**"

@@ -250,7 +250,8 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
     }
 }
 
-/// [[material_rules]] — scope (optional), match (optional predicate), apply.material (required).
+/// [[material_rules]] — scope (optional), match (optional predicate), material (required).
+/// Future: match may also be a string expression DSL (e.g. match = "tag.semantic == sensor").
 void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
     const auto *arr = root["material_rules"].as_array();
     if (!arr) {
@@ -262,11 +263,10 @@ void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &
             continue;
         }
 
-        warnUnknownKeys(*tbl, {"scope", "match", "apply"}, "material_rules", diags);
-        auto material = (*tbl)["apply"]["material"].value<std::string>();
+        warnUnknownKeys(*tbl, {"scope", "match", "material"}, "material_rules", diags);
+        auto material = (*tbl)["material"].value<std::string>();
         if (!material) {
-            diags.error(codes::kErrConfigParse,
-                        "material_rule missing required 'apply.material' field");
+            diags.error(codes::kErrConfigParse, "material_rule missing required 'material' field");
             continue;
         }
 
@@ -282,6 +282,11 @@ void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &
                 continue;
             }
             rule.match = std::move(*pred);
+        } else if ((*tbl)["match"].as_string()) {
+            diags.error(codes::kErrConfigParse,
+                        "string expression DSL for 'match' is not yet supported; use a table",
+                        "material_rules");
+            continue;
         }
         cfg.materialRules.push_back(std::move(rule));
     }

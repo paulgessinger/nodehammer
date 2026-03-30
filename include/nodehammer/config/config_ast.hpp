@@ -95,7 +95,9 @@ struct SelectionRule {
 };
 
 /// Assigns a named material to nodes in an optional scope, with an optional additional predicate.
-/// In TOML: apply.material = "name" (dotted key); scope and match are optional.
+/// In TOML: material = "name"; scope and match are optional.
+/// Future: match may be a string expression (match = "tag.semantic == sensor") once a DSL parser
+/// is added; the structured table form will remain valid.
 struct MaterialRule {
     std::optional<std::string> scope;   ///< Optional path glob pre-filter
     std::optional<PredicateExpr> match; ///< Optional additional predicate within scope

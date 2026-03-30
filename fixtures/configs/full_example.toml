@@ -33,7 +33,7 @@ operands = [
 
 [[material_rules]]
 scope = "/World/Tracker/**"
-apply.material = "aluminum"
+material = "aluminum"
 [material_rules.match]
 type = "tag"
 key = "semantic"
@@ -41,7 +41,7 @@ value = "sensor"
 
 [[material_rules]]
 scope = "/World/Tracker/BeamPipe/**"
-apply.material = "copper"
+material = "copper"
 
 [[tessellation_rules]]
 scope = "/World/Tracker/**"

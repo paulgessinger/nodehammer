@@ -104,7 +104,7 @@ TEST_CASE("ConfigValidator: undefined material ref via TOML → validator catche
           "[config][validator]") {
     constexpr std::string_view toml = R"(
 [[material_rules]]
-apply.material = "ghost"
+material = "ghost"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(loaded.diags.hasErrors()); // parses fine — semantic error caught by validator
@@ -133,7 +133,7 @@ metallic = 0.1
 roughness = 0.4
 
 [[material_rules]]
-apply.material = "aluminum"
+material = "aluminum"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(loaded.diags.hasErrors());
