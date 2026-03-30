@@ -17,6 +17,19 @@ target_link_libraries(nodehammer_tests PRIVATE
     Catch2::Catch2WithMain
 )
 
+if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
+    target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_TGEO=1)
+endif()
+
+if(NODEHAMMER_WITH_TGEO)
+    target_sources(nodehammer_tests PRIVATE import/test_tgeo_importer.cpp)
+endif()
+
+if(NODEHAMMER_WITH_DD4HEP)
+    target_sources(nodehammer_tests PRIVATE import/test_dd4hep_importer.cpp)
+    target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_DD4HEP=1)
+endif()
+
 nodehammer_set_compiler_options(nodehammer_tests)
 
 include(CTest)

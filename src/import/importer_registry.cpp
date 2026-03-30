@@ -1,6 +1,13 @@
 #include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/import/synthetic.hpp>
 
+#ifdef NH_WITH_TGEO
+#include <nodehammer/import/tgeo/tgeo_importer.hpp>
+#endif
+#ifdef NH_WITH_DD4HEP
+#include <nodehammer/import/dd4hep/dd4hep_importer.hpp>
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <string>
@@ -62,6 +69,12 @@ const std::vector<std::unique_ptr<IImporter>> &ImporterRegistry::importers() con
 ImporterRegistry makeDefaultRegistry() {
     ImporterRegistry reg;
     reg.registerImporter(std::make_unique<SyntheticImporter>());
+#ifdef NH_WITH_TGEO
+    reg.registerImporter(std::make_unique<TGeoImporter>());
+#endif
+#ifdef NH_WITH_DD4HEP
+    reg.registerImporter(std::make_unique<DD4hepImporter>());
+#endif
     return reg;
 }
 

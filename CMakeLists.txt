@@ -58,25 +58,22 @@ target_link_libraries(nodehammer_lib PUBLIC
 nodehammer_set_compiler_options(nodehammer_lib)
 
 # ── Optional backends ──────────────────────────────────────────────────────────
-if(NODEHAMMER_WITH_TGEO)
+if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
     find_package(ROOT REQUIRED COMPONENTS Geom)
-    target_sources(nodehammer_lib PRIVATE
-        src/import/tgeo/tgeo_shape_dispatch.cpp
-        src/import/tgeo/tgeo_importer.cpp
-    )
+    target_sources(nodehammer_lib PRIVATE src/import/tgeo/tgeo_shape_dispatch.cpp)
     target_link_libraries(nodehammer_lib PUBLIC ROOT::Geom)
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_TGEO=1)
 endif()
 
+if(NODEHAMMER_WITH_TGEO)
+    target_sources(nodehammer_lib PRIVATE src/import/tgeo/tgeo_importer.cpp)
+endif()
+
 if(NODEHAMMER_WITH_DD4HEP)
     find_package(DD4hep REQUIRED)
-    find_package(ROOT REQUIRED COMPONENTS Geom)
-    target_sources(nodehammer_lib PRIVATE
-        src/import/tgeo/tgeo_shape_dispatch.cpp
-        src/import/dd4hep/dd4hep_importer.cpp
-    )
-    target_link_libraries(nodehammer_lib PUBLIC DD4hep::DDCore ROOT::Geom)
-    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_DD4HEP=1 NH_WITH_TGEO=1)
+    target_sources(nodehammer_lib PRIVATE src/import/dd4hep/dd4hep_importer.cpp)
+    target_link_libraries(nodehammer_lib PUBLIC DD4hep::DDCore)
+    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_DD4HEP=1)
 endif()
 
 if(NODEHAMMER_WITH_GEANT4)

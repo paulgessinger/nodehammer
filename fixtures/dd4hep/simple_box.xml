@@ -1,0 +1,58 @@
+<lccdd>
+  <info name="simple_box" title="Simple box test geometry"
+        author="nodehammer" status="test" version="1"/>
+
+  <define>
+    <constant name="world_side" value="1000*mm"/>
+    <constant name="world_x"    value="world_side"/>
+    <constant name="world_y"    value="world_side"/>
+    <constant name="world_z"    value="world_side"/>
+    <constant name="box_half"   value="50*mm"/>
+  </define>
+
+  <includes>
+    <gdmlFile ref="${DD4hepINSTALL}/DDDetectors/compact/elements.xml"/>
+  </includes>
+
+  <materials>
+    <material name="Vacuum">
+      <D type="density" unit="g/cm3" value="1e-25"/>
+      <fraction n="1.0" ref="N"/>
+    </material>
+    <material name="Air">
+      <D type="density" unit="g/cm3" value="0.00129"/>
+      <fraction n="0.754" ref="N"/>
+      <fraction n="0.246" ref="O"/>
+    </material>
+  </materials>
+
+  <solids>
+    <box name="WorldSolid"   x="world_side"  y="world_side"  z="world_side"/>
+    <box name="TestBoxSolid" x="box_half*2"  y="box_half*2"  z="box_half*2"/>
+  </solids>
+
+  <structure>
+    <volume name="TestBox_vol">
+      <materialref ref="Aluminum"/>
+      <solidref    ref="TestBoxSolid"/>
+    </volume>
+    <volume name="world_volume">
+      <materialref ref="Air"/>
+      <solidref    ref="WorldSolid"/>
+      <physvol>
+        <volumeref ref="TestBox_vol"/>
+        <position  name="center" x="0" y="0" z="0"/>
+      </physvol>
+    </volume>
+  </structure>
+
+  <detectors>
+    <detector id="1" name="SimpleBox" type="DD4hep_SubdetectorAssembly" vis="invisible">
+      <composite name="TestBox_vol"/>
+    </detector>
+  </detectors>
+
+  <setup name="Default" version="1.0">
+    <world ref="world_volume"/>
+  </setup>
+</lccdd>
