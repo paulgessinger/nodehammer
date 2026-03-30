@@ -11,6 +11,7 @@
 #include <map>
 #include <numbers>
 #include <optional>
+#include <queue>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -214,6 +215,23 @@ class SemanticScene {
 
     /// BFS pass: compose parent × local to set worldTransform on every node.
     void computeWorldTransforms();
+
+    /// BFS traversal from root; calls fn(const SemanticNode &) for every reachable node.
+    template <typename Fn> void visitBFS(Fn &&fn) const {
+        if (nodes.empty()) {
+            return;
+        }
+        std::queue<SemanticNodeId> q;
+        q.push(rootId);
+        while (!q.empty()) {
+            const auto &node = nodes.at(q.front());
+            q.pop();
+            fn(node);
+            for (const auto childId : node.children) {
+                q.push(childId);
+            }
+        }
+    }
 
     // ID allocation
     SemanticNodeId nextNodeId() { return SemanticNodeId{nextNodeId_++}; }

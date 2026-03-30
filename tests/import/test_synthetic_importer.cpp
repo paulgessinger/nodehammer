@@ -6,7 +6,6 @@
 #include <nodehammer/ir/provenance.hpp>
 #include <nodehammer/ir/semantic.hpp>
 
-#include <queue>
 #include <unordered_set>
 
 // ── SyntheticSceneBuilder: buildSingleBox ─────────────────────────────────────
@@ -52,16 +51,7 @@ TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — all nodes reachable from 
     auto scene = nodehammer::SyntheticSceneBuilder::buildNestedBoxes();
 
     std::unordered_set<nodehammer::SemanticNodeId> visited;
-    std::queue<nodehammer::SemanticNodeId> queue;
-    queue.push(scene.rootId);
-    while (!queue.empty()) {
-        auto id = queue.front();
-        queue.pop();
-        visited.insert(id);
-        for (auto child : scene.nodes.at(id).children) {
-            queue.push(child);
-        }
-    }
+    scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == scene.nodes.size());
 }
 
