@@ -152,28 +152,17 @@ std::vector<std::string> DD4hepImporter::supportedExtensions() const { return {}
 ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     ImportResult result;
 
-    dd4hep::Detector *detPtr = nullptr;
+    std::unique_ptr<dd4hep::Detector> detOwner;
     try {
-        // @TODO: use   std::unique_ptr<dd4hep::Detector> detector =
-        //   dd4hep::Detector::make_unique(cfg.name);
-        //   for (const auto& file : cfg.xmlFileNames) {
-        //     detector->fromCompact(file);
-        //   }
-        detPtr = &dd4hep::Detector::getInstance();
-        detPtr->fromCompact(path.string());
+        detOwner = dd4hep::Detector::make_unique("");
+        detOwner->fromCompact(path.string());
     } catch (const std::exception &ex) {
         result.diags.error(codes::kErrTgeoOpenFailed,
                            std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()));
-        if (detPtr) {
-            try {
-                dd4hep::Detector::destroyInstance();
-            } catch (...) {
-            }
-        }
         return result;
     }
 
-    dd4hep::Detector &det = *detPtr;
+    dd4hep::Detector &det = *detOwner;
     ImportState st{result.scene, result.diags, path.string(), det, {}, {}, {}};
 
     // Build the set of sensitive detector names
@@ -218,11 +207,6 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     importStructural(det.manager().GetTopNode(), std::nullopt, st);
 
     result.scene.computeWorldTransforms();
-
-    try {
-        dd4hep::Detector::destroyInstance();
-    } catch (...) {
-    }
 
     return result;
 }
