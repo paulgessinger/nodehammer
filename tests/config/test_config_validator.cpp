@@ -107,8 +107,8 @@ TEST_CASE("ConfigValidator: undefined material ref via TOML → validator catche
 apply.material = "ghost"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(loaded.has_value()); // parses fine — semantic error caught by validator
-    auto diags = nodehammer::ConfigValidator::validate(*loaded);
+    REQUIRE_FALSE(loaded.diags.hasErrors()); // parses fine — semantic error caught by validator
+    auto diags = nodehammer::ConfigValidator::validate(loaded.config);
     REQUIRE(diags.hasErrors());
 }
 
@@ -120,8 +120,8 @@ max_segments_circle = -1
 fallback = "skip"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(loaded.has_value()); // parses fine — semantic error caught by validator
-    auto diags = nodehammer::ConfigValidator::validate(*loaded);
+    REQUIRE_FALSE(loaded.diags.hasErrors()); // parses fine — semantic error caught by validator
+    auto diags = nodehammer::ConfigValidator::validate(loaded.config);
     REQUIRE(diags.hasErrors());
 }
 
@@ -136,7 +136,7 @@ roughness = 0.4
 apply.material = "aluminum"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(loaded.has_value());
-    auto diags = nodehammer::ConfigValidator::validate(*loaded);
+    REQUIRE_FALSE(loaded.diags.hasErrors());
+    auto diags = nodehammer::ConfigValidator::validate(loaded.config);
     REQUIRE_FALSE(diags.hasErrors());
 }

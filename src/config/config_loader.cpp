@@ -4,10 +4,30 @@
 #include <toml++/toml.hpp>
 
 #include <format>
+#include <utility>
 
 namespace nodehammer {
 
 namespace {
+
+// ── Unknown-key helper ────────────────────────────────────────────────────────
+
+void warnUnknownKeys(const toml::table &tbl, std::initializer_list<std::string_view> known,
+                     std::string_view context, DiagnosticList &diags) {
+    for (const auto &[key, _] : tbl) {
+        bool found = false;
+        for (auto k : known) {
+            if (key.str() == k) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            diags.warn(codes::kWarnConfigUnknownKey, std::format("unknown key '{}'", key.str()),
+                       context);
+        }
+    }
+}
 
 // ── Enum parsers ──────────────────────────────────────────────────────────────
 
@@ -145,6 +165,8 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
                         std::format("materials.{} must be a table, not a scalar", key.str()));
             continue;
         }
+        warnUnknownKeys(*tbl, {"base_color", "metallic", "roughness", "double_sided", "emissive"},
+                        std::format("materials.{}", key.str()), diags);
         MaterialDef def;
         def.name = key.str();
 
@@ -181,6 +203,8 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
         if (!tbl) {
             continue;
         }
+
+        warnUnknownKeys(*tbl, {"keep_if", "drop_if", "scope", "closure"}, "selection_rules", diags);
 
         SelectionAction action;
         const toml::table *predTbl = nullptr;
@@ -238,6 +262,7 @@ void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &
             continue;
         }
 
+        warnUnknownKeys(*tbl, {"scope", "match", "apply"}, "material_rules", diags);
         auto material = (*tbl)["apply"]["material"].value<std::string>();
         if (!material) {
             diags.error(codes::kErrConfigParse,
@@ -273,6 +298,8 @@ void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticLi
         if (!tbl) {
             continue;
         }
+        warnUnknownKeys(*tbl, {"scope", "max_segments_circle", "fallback"}, "tessellation_rules",
+                        diags);
         TessellationRule rule;
 
         if (auto scope = (*tbl)["scope"].value<std::string>()) {
@@ -297,27 +324,25 @@ void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticLi
 
 // ── Top-level parse driver ────────────────────────────────────────────────────
 
-std::expected<NHConfig, DiagnosticList> parseTable(const toml::table &tbl) {
+ConfigResult parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
+    warnUnknownKeys(tbl, {"materials", "selection_rules", "material_rules", "tessellation_rules"},
+                    "<top-level>", diags);
     parseMaterials(tbl, cfg, diags);
     parseSelectionRules(tbl, cfg, diags);
     parseMaterialRules(tbl, cfg, diags);
     parseTessellationRules(tbl, cfg, diags);
 
-    if (diags.hasErrors()) {
-        return std::unexpected(std::move(diags));
-    }
-    return cfg;
+    return ConfigResult{std::move(cfg), std::move(diags)};
 }
 
 } // namespace
 
 // ── ConfigLoader ──────────────────────────────────────────────────────────────
 
-std::expected<NHConfig, DiagnosticList>
-ConfigLoader::loadFromFile(const std::filesystem::path &path) {
+ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
     DiagnosticList diags;
     try {
         auto tbl = toml::parse_file(path.string());
@@ -326,16 +351,14 @@ ConfigLoader::loadFromFile(const std::filesystem::path &path) {
         diags.error(
             codes::kErrConfigParse, e.description(),
             std::format("{}:{}:{}", path.string(), e.source().begin.line, e.source().begin.column));
-        return std::unexpected(std::move(diags));
     } catch (const std::exception &e) {
         diags.error(codes::kErrImportFileNotFound,
                     std::format("could not read config file: {}", e.what()), path.string());
-        return std::unexpected(std::move(diags));
     }
+    return ConfigResult{{}, std::move(diags)};
 }
 
-std::expected<NHConfig, DiagnosticList> ConfigLoader::loadFromString(std::string_view content,
-                                                                     std::string_view sourceName) {
+ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName) {
     DiagnosticList diags;
     try {
         auto tbl = toml::parse(content, sourceName);
@@ -344,8 +367,8 @@ std::expected<NHConfig, DiagnosticList> ConfigLoader::loadFromString(std::string
         diags.error(
             codes::kErrConfigParse, e.description(),
             std::format("{}:{}:{}", sourceName, e.source().begin.line, e.source().begin.column));
-        return std::unexpected(std::move(diags));
     }
+    return ConfigResult{{}, std::move(diags)};
 }
 
 } // namespace nodehammer

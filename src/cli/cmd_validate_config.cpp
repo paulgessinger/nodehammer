@@ -9,31 +9,30 @@ void register_cmd_validate_config(CLI::App &app) {
 
     auto *configOpt = sub->add_option("-c,--config", "TOML config file")->required();
 
-    sub->callback([=] {
-        std::string configPath;
-        configOpt->results(configPath);
-
-        auto result = nodehammer::ConfigLoader::loadFromFile(configPath);
-        if (!result) {
-            for (const auto &d : result.error().items()) {
-                std::println(stderr, "[{}] {} {}", nodehammer::severityName(d.severity), d.code,
-                             d.message);
-                if (!d.context.empty()) {
-                    std::println(stderr, "       at {}", d.context);
-                }
-            }
-            std::println(stderr, "config: INVALID (parse errors)");
-            return;
-        }
-
-        auto validationDiags = nodehammer::ConfigValidator::validate(*result);
-        for (const auto &d : validationDiags.items()) {
+    auto printDiags = [](const nodehammer::DiagnosticList &diags) {
+        for (const auto &d : diags.items()) {
             std::println(stderr, "[{}] {} {}", nodehammer::severityName(d.severity), d.code,
                          d.message);
             if (!d.context.empty()) {
                 std::println(stderr, "       at {}", d.context);
             }
         }
+    };
+
+    sub->callback([=] {
+        std::string configPath;
+        configOpt->results(configPath);
+
+        auto result = nodehammer::ConfigLoader::loadFromFile(configPath);
+        printDiags(result.diags);
+
+        if (result.diags.hasErrors()) {
+            std::println(stderr, "config: INVALID (parse errors)");
+            return;
+        }
+
+        auto validationDiags = nodehammer::ConfigValidator::validate(result.config);
+        printDiags(validationDiags);
 
         if (validationDiags.hasErrors()) {
             std::println(stderr, "config: INVALID");

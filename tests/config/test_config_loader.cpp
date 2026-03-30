@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/config/config_loader.hpp>
+#include <nodehammer/ir/diagnostic_codes.hpp>
 
 #ifndef NODEHAMMER_FIXTURES_DIR
 #error "NODEHAMMER_FIXTURES_DIR must be defined by CMake"
@@ -11,18 +12,17 @@ static std::filesystem::path fixturesDir{NODEHAMMER_FIXTURES_DIR};
 
 TEST_CASE("ConfigLoader: loadFromString succeeds on empty config", "[config][loader]") {
     auto result = nodehammer::ConfigLoader::loadFromString("# empty\n");
-    REQUIRE(result.has_value());
-    REQUIRE(result->materials.empty());
-    REQUIRE(result->selection.empty());
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.materials.empty());
+    REQUIRE(result.config.selection.empty());
 }
 
 TEST_CASE("ConfigLoader: invalid TOML syntax → Error diagnostic with source position",
           "[config][loader]") {
     constexpr std::string_view bad = "[unclosed\nkey = 1\n";
     auto result = nodehammer::ConfigLoader::loadFromString(bad, "test_input");
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE_FALSE(result.error().empty());
-    const auto &d = result.error().items().front();
+    REQUIRE(result.diags.hasErrors());
+    const auto &d = result.diags.items().front();
     REQUIRE(d.severity == nodehammer::DiagnosticSeverity::Error);
     REQUIRE(d.context.find("test_input") != std::string::npos);
 }
@@ -42,21 +42,22 @@ TEST_CASE("ConfigLoader: NHConfig is constructible from C++ without TOML", "[con
 
 TEST_CASE("ConfigLoader: minimal.toml loads without diagnostics", "[config][loader][fixtures]") {
     auto result = nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/minimal.toml");
-    REQUIRE(result.has_value());
-    REQUIRE(result->materials.empty());
-    REQUIRE(result->selection.empty());
-    REQUIRE(result->materialRules.empty());
-    REQUIRE(result->tessellationRules.empty());
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.materials.empty());
+    REQUIRE(result.config.selection.empty());
+    REQUIRE(result.config.materialRules.empty());
+    REQUIRE(result.config.tessellationRules.empty());
+    REQUIRE(result.diags.empty());
 }
 
 TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loader][fixtures]") {
     auto result = nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/full_example.toml");
-    REQUIRE(result.has_value());
-    const auto &cfg = *result;
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.diags.empty()); // clean fixture — no warnings
+    const auto &cfg = result.config;
 
     // Materials — named subtables, key is the name
     REQUIRE(cfg.materials.size() == 2);
-    // toml++ iterates in insertion order; find by name
     bool hasAluminum = false;
     bool hasCopper = false;
     for (const auto &m : cfg.materials) {
@@ -90,7 +91,7 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
     REQUIRE(cfg.materialRules.at(0).scope == "/World/Tracker/**");
     REQUIRE(cfg.materialRules.at(0).match.has_value());
     REQUIRE(cfg.materialRules.at(1).materialName == "copper");
-    REQUIRE_FALSE(cfg.materialRules.at(1).match.has_value()); // no match = apply to entire scope
+    REQUIRE_FALSE(cfg.materialRules.at(1).match.has_value());
 
     // Tessellation rules
     REQUIRE(cfg.tessellationRules.size() == 2);
@@ -102,8 +103,7 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
 
 TEST_CASE("ConfigLoader: missing file → Error diagnostic", "[config][loader]") {
     auto result = nodehammer::ConfigLoader::loadFromFile("/nonexistent/path/config.toml");
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE(result.error().hasErrors());
+    REQUIRE(result.diags.hasErrors());
 }
 
 // ── Predicate parsing ─────────────────────────────────────────────────────────
@@ -116,10 +116,10 @@ type = "path_glob"
 pattern = "/world/Tracker/**"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(result.has_value());
-    REQUIRE(result->selection.size() == 1);
-    REQUIRE(result->selection.at(0).action == nodehammer::SelectionAction::KeepIf);
-    const auto &pred = result->selection.at(0).predicate;
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.selection.size() == 1);
+    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::KeepIf);
+    const auto &pred = result.config.selection.at(0).predicate;
     REQUIRE(std::holds_alternative<nodehammer::PathGlobPredicate>(pred.data));
     REQUIRE(std::get<nodehammer::PathGlobPredicate>(pred.data).pattern == "/world/Tracker/**");
 }
@@ -131,10 +131,10 @@ TEST_CASE("ConfigLoader: drop_if with is_leaf parses correctly", "[config][loade
 type = "is_leaf"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(result.has_value());
-    REQUIRE(result->selection.at(0).action == nodehammer::SelectionAction::DropIf);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::DropIf);
     REQUIRE(std::holds_alternative<nodehammer::IsLeafPredicate>(
-        result->selection.at(0).predicate.data));
+        result.config.selection.at(0).predicate.data));
 }
 
 TEST_CASE("ConfigLoader: not predicate parses correctly", "[config][loader]") {
@@ -146,9 +146,9 @@ type = "not"
 type = "is_leaf"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(result.has_value());
+    REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::NotPredicate>>(
-        result->selection.at(0).predicate.data));
+        result.config.selection.at(0).predicate.data));
 }
 
 TEST_CASE("ConfigLoader: unknown predicate type → Error", "[config][loader]") {
@@ -158,8 +158,7 @@ TEST_CASE("ConfigLoader: unknown predicate type → Error", "[config][loader]") 
 type = "not_a_real_type"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE(result.error().hasErrors());
+    REQUIRE(result.diags.hasErrors());
 }
 
 TEST_CASE("ConfigLoader: unknown closure value → Error", "[config][loader]") {
@@ -170,8 +169,7 @@ closure = "sideways"
 type = "is_leaf"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE_FALSE(result.has_value());
-    REQUIRE(result.error().hasErrors());
+    REQUIRE(result.diags.hasErrors());
 }
 
 TEST_CASE("ConfigLoader: rule missing keep_if or drop_if → Error", "[config][loader]") {
@@ -180,7 +178,7 @@ TEST_CASE("ConfigLoader: rule missing keep_if or drop_if → Error", "[config][l
 closure = "none"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.diags.hasErrors());
 }
 
 TEST_CASE("ConfigLoader: material rule apply.material is required → Error", "[config][loader]") {
@@ -189,7 +187,7 @@ TEST_CASE("ConfigLoader: material rule apply.material is required → Error", "[
 scope = "/World/**"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.diags.hasErrors());
 }
 
 TEST_CASE("ConfigLoader: unknown fallback → Error", "[config][loader]") {
@@ -199,5 +197,98 @@ max_segments_circle = 32
 fallback = "explode"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.diags.hasErrors());
+}
+
+// ── Unknown-key warnings ──────────────────────────────────────────────────────
+
+TEST_CASE("ConfigLoader: unknown top-level key → Warning", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[tessellation_rulesx]
+max_segments_circle = 32
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors()); // still succeeds
+    bool found = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+            d.code == nodehammer::codes::kWarnConfigUnknownKey &&
+            d.message.find("tessellation_rulesx") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("ConfigLoader: unknown key in material table → Warning", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[materials.steel]
+metallick = 0.8
+roughness = 0.2
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    bool found = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+            d.message.find("metallick") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+    REQUIRE(result.config.materials.at(0).metallic == 0.0f); // ignored, stays at default
+}
+
+TEST_CASE("ConfigLoader: unknown key in tessellation_rule → Warning", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[tessellation_rules]]
+xmax_segments_circle = 32
+fallback = "skip"
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    bool found = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+            d.message.find("xmax_segments_circle") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+    REQUIRE(result.config.tessellationRules.at(0).maxSegmentsCircle == 64); // default
+}
+
+TEST_CASE("ConfigLoader: unknown key in selection_rule → Warning", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[selection_rules]]
+scop = "/World/**"
+[selection_rules.keep_if]
+type = "is_leaf"
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    bool found = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+            d.message.find("scop") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+    REQUIRE_FALSE(result.config.selection.at(0).scope.has_value()); // ignored
+}
+
+TEST_CASE("ConfigLoader: clean config produces no warnings", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[materials.steel]
+metallic = 0.8
+roughness = 0.2
+
+[[tessellation_rules]]
+max_segments_circle = 32
+fallback = "skip"
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.diags.empty());
 }
