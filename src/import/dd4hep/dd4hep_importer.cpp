@@ -187,7 +187,34 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     const SemanticNodeId rootId = importDetElement(world, std::nullopt, st, sensNames);
     result.scene.rootId = rootId;
 
-    // Pass 2: structural TGeo nodes not reached by DetElement tree
+    // Pass 2: structural TGeo nodes not reached by DetElement tree.
+    //
+    // NOTE: in practice this pass is currently a no-op for well-formed DD4hep
+    // geometries.  Pass 1 inserts det.world().placement().ptr() — the top
+    // TGeoNode — into visitedNodes, so importStructural immediately returns
+    // when called with GetTopNode() and never recurses into its children.
+    //
+    // Consequence: the SemanticScene contains exactly one node per DetElement
+    // (the logical detector hierarchy), but NOT the TGeoNode sub-volumes that
+    // live inside each DetElement's volume (e.g. individual sensor wafers,
+    // readout ASICs, glue layers).  For ODD this gives ~64k nodes vs ~186k
+    // in the raw TGeo tree.
+    //
+    // Whether this is a bug or a feature depends on the use case:
+    //   - For visualisation and high-level geometry validation the DetElement
+    //     granularity is usually the right semantic cut, and sub-volumes are
+    //     internal implementation detail.
+    //   - For full-geometry export (parity with TGeoImporter) Pass 2 should
+    //     recurse into the TGeoNode daughters of each DetElement node that
+    //     Pass 1 visited.  This requires storing the SemanticNodeId alongside
+    //     each TGeoNode* in visitedNodes so that structural children can be
+    //     parented correctly.
+    //
+    // Suggested follow-up: add a dd4hep_depth config option
+    // ("detector_element" | "full") and only activate the corrected Pass 2
+    // when "full" is requested.  Validate visually by comparing the DD4hep
+    // and TGeo import paths on the same geometry once glTF export is available
+    // (Checkpoint 7).
     importStructural(det.manager().GetTopNode(), std::nullopt, st);
 
     result.scene.computeWorldTransforms();
