@@ -13,14 +13,6 @@
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Import from the currently active gGeoManager by writing to a temp file.
-static nodehammer::ImportResult importCurrent() {
-    const char *tmpFile = "/tmp/nodehammer_tgeo_test.root";
-    gGeoManager->Export(tmpFile);
-    nodehammer::TGeoImporter imp;
-    return imp.import(tmpFile);
-}
-
 /// Delete any lingering gGeoManager and start fresh.
 static void resetManager() {
     delete gGeoManager;
@@ -44,7 +36,8 @@ TEST_CASE("TGeoImporter: TGeoBBox -> BoxShape", "[import][tgeo]") {
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    auto result = importCurrent();
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
 
     bool found = false;
@@ -69,7 +62,8 @@ TEST_CASE("TGeoImporter: TGeoTube -> TubeShape", "[import][tgeo]") {
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    auto result = importCurrent();
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
 
     bool found = false;
@@ -96,7 +90,8 @@ TEST_CASE("TGeoImporter: nested volumes -> correct parent-child hierarchy", "[im
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    auto result = importCurrent();
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.scene.nodes.size() == 2);
 
@@ -121,7 +116,8 @@ TEST_CASE("TGeoImporter: same TGeoVolume placed twice -> one LV, two nodes", "[i
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    auto result = importCurrent();
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
     REQUIRE(result.scene.nodes.size() == 3);   // world + 2 placements
     REQUIRE(result.scene.logVols.size() == 2); // world LV + brick LV (deduplicated)
 }
@@ -142,7 +138,8 @@ TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") 
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    auto result = importCurrent();
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
 
     bool hasBool = false;
     for (const auto &[id, s] : result.scene.shapes) {
@@ -156,6 +153,107 @@ TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") 
     REQUIRE(hasBool);
 }
 
+TEST_CASE("TGeoImporter: TGeoRotation -> localTransform rotation columns", "[import][tgeo]") {
+    resetManager();
+    auto *mgr = new TGeoManager("rotTest", "rotTest");
+    auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
+    auto *med = new TGeoMedium("vacuum", 1, mat);
+    auto *top = mgr->MakeBox("world", med, 500, 500, 500);
+    auto *child = mgr->MakeBox("rotated", med, 10, 10, 10);
+    // 90° around Z (ZXZ Euler: phi=90, theta=0, psi=0)
+    // local x-axis → world (0, 1, 0); local y-axis → world (-1, 0, 0)
+    top->AddNode(child, 1, new TGeoRotation("rot90z", 90, 0, 0));
+    mgr->SetTopVolume(top);
+    mgr->CloseGeometry();
+
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    const auto &root = result.scene.nodes.at(result.scene.rootId);
+    const auto &lt = result.scene.nodes.at(root.children.front()).localTransform;
+
+    // col 0 = local x-axis expressed in world frame: (0, 1, 0)
+    REQUIRE(lt[0][0] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[0][1] == Catch::Approx(1.0).margin(1e-10));
+    REQUIRE(lt[0][2] == Catch::Approx(0.0).margin(1e-10));
+    // col 1 = local y-axis in world frame: (-1, 0, 0)
+    REQUIRE(lt[1][0] == Catch::Approx(-1.0).margin(1e-10));
+    REQUIRE(lt[1][1] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[1][2] == Catch::Approx(0.0).margin(1e-10));
+    // col 2 = local z-axis in world frame: (0, 0, 1) — unchanged
+    REQUIRE(lt[2][0] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[2][1] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[2][2] == Catch::Approx(1.0).margin(1e-10));
+    // col 3 = translation: (0, 0, 0)
+    REQUIRE(lt[3][0] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[3][1] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[3][2] == Catch::Approx(0.0).margin(1e-10));
+}
+
+TEST_CASE("TGeoImporter: TGeoCombiTrans -> localTransform rotation and translation",
+          "[import][tgeo]") {
+    resetManager();
+    auto *mgr = new TGeoManager("combiTest", "combiTest");
+    auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
+    auto *med = new TGeoMedium("vacuum", 1, mat);
+    auto *top = mgr->MakeBox("world", med, 500, 500, 500);
+    auto *child = mgr->MakeBox("combi", med, 10, 10, 10);
+    // 90° Z rotation + translation (50, 25, 10)
+    top->AddNode(child, 1, new TGeoCombiTrans(50, 25, 10, new TGeoRotation("r", 90, 0, 0)));
+    mgr->SetTopVolume(top);
+    mgr->CloseGeometry();
+
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    const auto &root = result.scene.nodes.at(result.scene.rootId);
+    const auto &lt = result.scene.nodes.at(root.children.front()).localTransform;
+
+    // Rotation columns identical to pure-rotation test
+    REQUIRE(lt[0][0] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[0][1] == Catch::Approx(1.0).margin(1e-10));
+    REQUIRE(lt[1][0] == Catch::Approx(-1.0).margin(1e-10));
+    REQUIRE(lt[1][1] == Catch::Approx(0.0).margin(1e-10));
+    REQUIRE(lt[2][2] == Catch::Approx(1.0).margin(1e-10));
+    // Translation column
+    REQUIRE(lt[3][0] == Catch::Approx(50.0));
+    REQUIRE(lt[3][1] == Catch::Approx(25.0));
+    REQUIRE(lt[3][2] == Catch::Approx(10.0));
+}
+
+TEST_CASE("TGeoImporter: worldTransform composes parent rotation with child translation",
+          "[import][tgeo]") {
+    resetManager();
+    auto *mgr = new TGeoManager("composeTest", "composeTest");
+    auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
+    auto *med = new TGeoMedium("vacuum", 1, mat);
+    auto *top = mgr->MakeBox("world", med, 500, 500, 500);
+    // mid: 90° Z rotation at origin
+    auto *mid = mgr->MakeBox("mid", med, 200, 200, 200);
+    top->AddNode(mid, 1, new TGeoRotation("rot90z", 90, 0, 0));
+    // child: (100, 0, 0) in mid's local frame → world position (0, 100, 0)
+    auto *child = mgr->MakeBox("child", med, 10, 10, 10);
+    mid->AddNode(child, 1, new TGeoTranslation(100, 0, 0));
+    mgr->SetTopVolume(top);
+    mgr->CloseGeometry();
+
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.scene.nodes.size() == 3);
+
+    const auto &root = result.scene.nodes.at(result.scene.rootId);
+    const auto midId = root.children.front();
+    const auto childId = result.scene.nodes.at(midId).children.front();
+    const auto &wt = result.scene.nodes.at(childId).worldTransform;
+
+    REQUIRE(wt[3][0] == Catch::Approx(0.0).margin(1e-10)); // x: 0
+    REQUIRE(wt[3][1] == Catch::Approx(100.0));             // y: 100
+    REQUIRE(wt[3][2] == Catch::Approx(0.0).margin(1e-10)); // z: 0
+}
+
 TEST_CASE("TGeoImporter: root worldTransform is identity", "[import][tgeo]") {
     resetManager();
     auto *mgr = new TGeoManager("identityTest", "identityTest");
@@ -165,7 +263,8 @@ TEST_CASE("TGeoImporter: root worldTransform is identity", "[import][tgeo]") {
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    auto result = importCurrent();
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
     const auto &root = result.scene.nodes.at(result.scene.rootId);
     REQUIRE(root.worldTransform == glm::dmat4{1.0});
 }
@@ -178,7 +277,8 @@ TEST_CASE("TGeoImporter: provenance.sourceSystem is tgeo", "[import][tgeo]") {
     mgr->SetTopVolume(mgr->MakeBox("world", med, 100, 100, 100));
     mgr->CloseGeometry();
 
-    auto result = importCurrent();
+    nodehammer::TGeoImporter imp;
+    auto result = imp.import(gGeoManager);
     const auto &root = result.scene.nodes.at(result.scene.rootId);
     REQUIRE(root.provenance.sourceSystem == "tgeo");
 }

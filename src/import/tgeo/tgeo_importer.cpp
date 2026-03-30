@@ -113,6 +113,19 @@ SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> pa
     return id;
 }
 
+ImportResult traverseManager(TGeoManager *mgr, std::string sourceFile) {
+    ImportResult result;
+    ImportState st{result.scene, result.diags, std::move(sourceFile), {}, {}};
+
+    TGeoNode *topNode = mgr->GetTopNode();
+    const SemanticNodeId rootId = importNode(topNode, std::nullopt, st);
+    result.scene.rootId = rootId;
+    result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
+
+    result.scene.computeWorldTransforms();
+    return result;
+}
+
 } // namespace
 
 std::string_view TGeoImporter::formatName() const noexcept { return "tgeo"; }
@@ -120,33 +133,28 @@ std::string_view TGeoImporter::formatName() const noexcept { return "tgeo"; }
 std::vector<std::string> TGeoImporter::supportedExtensions() const { return {".root"}; }
 
 ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
-    ImportResult result;
-
-    // Suppress ROOT's verbose output during import
     const int savedLevel = gErrorIgnoreLevel;
     gErrorIgnoreLevel = kError;
-
     TGeoManager *mgr = TGeoManager::Import(path.c_str());
-
     gErrorIgnoreLevel = savedLevel;
 
     if (!mgr) {
+        ImportResult result;
         result.diags.error(codes::kErrTgeoOpenFailed,
                            std::format("failed to open ROOT file '{}'", path.string()));
         return result;
     }
 
-    ImportState st{result.scene, result.diags, path.string(), {}, {}};
+    return traverseManager(mgr, path.string());
+}
 
-    // Root node: the top volume itself is wrapped in a TGeoNodeMatrix
-    TGeoNode *topNode = mgr->GetTopNode();
-
-    const SemanticNodeId rootId = importNode(topNode, std::nullopt, st);
-    result.scene.rootId = rootId;
-    result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
-
-    result.scene.computeWorldTransforms();
-    return result;
+ImportResult TGeoImporter::import(TGeoManager *mgr) const {
+    if (!mgr) {
+        ImportResult result;
+        result.diags.error(codes::kErrTgeoOpenFailed, "null TGeoManager pointer");
+        return result;
+    }
+    return traverseManager(mgr, mgr->GetName());
 }
 
 } // namespace nodehammer
