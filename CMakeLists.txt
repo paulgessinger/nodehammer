@@ -28,6 +28,7 @@ add_library(nodehammer_lib STATIC
     src/config/config_loader.cpp
     src/config/config_validator.cpp
     src/import/synthetic.cpp
+    src/import/importer_registry.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
     src/selection/closure.cpp

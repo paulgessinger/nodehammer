@@ -1,15 +1,119 @@
 #include <CLI/CLI.hpp>
+#include <map>
+#include <nodehammer/import/importer_registry.hpp>
+#include <nodehammer/ir/semantic.hpp>
 #include <print>
+#include <string>
 
 void register_cmd_inspect(CLI::App &app) {
     auto *sub = app.add_subcommand("inspect", "Inspect a geometry file and print a summary");
 
-    auto *input = sub->add_option("-i,--input", "Input geometry file")->required();
-    auto *input_format =
-        sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
+    auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");
+    auto *formatOpt =
+        sub->add_option("--input-format", "Input format (required when --input is not given)");
 
-    (void)input;
-    (void)input_format;
+    sub->callback([=] {
+        std::string inputPath;
+        std::string formatStr;
+        if (*inputOpt) {
+            inputOpt->results(inputPath);
+        }
+        if (*formatOpt) {
+            formatOpt->results(formatStr);
+        }
 
-    sub->callback([] { std::println(stderr, "nodehammer inspect: not yet implemented"); });
+        if (inputPath.empty() && formatStr.empty()) {
+            std::println(stderr, "inspect: provide --input and/or --input-format");
+            return;
+        }
+
+        auto registry = nodehammer::makeDefaultRegistry();
+        const auto *imp = registry.resolve(inputPath, formatStr);
+        if (!imp) {
+            std::println(stderr, "[error] NH0101 cannot determine input format{}",
+                         inputPath.empty() ? "" : " for " + inputPath);
+            return;
+        }
+
+        auto result = imp->import(inputPath);
+
+        // Shape histogram via std::visit
+        std::map<std::string, int> shapeCounts;
+        for (const auto &[id, shape] : result.scene.shapes) {
+            std::string typeName = std::visit(
+                []<typename T>(const T &) -> std::string {
+                    if constexpr (std::is_same_v<T, nodehammer::BoxShape>) {
+                        return "box";
+                    } else if constexpr (std::is_same_v<T, nodehammer::TubeShape>) {
+                        return "tube";
+                    } else if constexpr (std::is_same_v<T, nodehammer::ConeShape>) {
+                        return "cone";
+                    } else if constexpr (std::is_same_v<T, nodehammer::TrdShape>) {
+                        return "trd";
+                    } else if constexpr (std::is_same_v<T, nodehammer::ParaShape>) {
+                        return "para";
+                    } else if constexpr (std::is_same_v<T, nodehammer::PconShape>) {
+                        return "pcon";
+                    } else if constexpr (std::is_same_v<T, nodehammer::PgonShape>) {
+                        return "pgon";
+                    } else if constexpr (std::is_same_v<T, nodehammer::TorusShape>) {
+                        return "torus";
+                    } else if constexpr (std::is_same_v<T, nodehammer::TessellatedShape>) {
+                        return "tessellated";
+                    } else if constexpr (std::is_same_v<T, nodehammer::BooleanUnion>) {
+                        return "union";
+                    } else if constexpr (std::is_same_v<T, nodehammer::BooleanIntersection>) {
+                        return "intersection";
+                    } else if constexpr (std::is_same_v<T, nodehammer::BooleanSubtraction>) {
+                        return "subtraction";
+                    } else if constexpr (std::is_same_v<T, nodehammer::UnknownShape>) {
+                        return "unknown";
+                    } else {
+                        return "?";
+                    }
+                },
+                shape.data);
+            shapeCounts[typeName]++;
+        }
+
+        // Material names
+        std::vector<std::string> matNames;
+        matNames.reserve(result.scene.materials.size());
+        for (const auto &[id, mat] : result.scene.materials) {
+            matNames.push_back(mat.name);
+        }
+
+        int warnings = 0;
+        int errors = 0;
+        for (const auto &d : result.diags.items()) {
+            if (d.severity == nodehammer::DiagnosticSeverity::Warning) {
+                ++warnings;
+            }
+            if (d.severity >= nodehammer::DiagnosticSeverity::Error) {
+                ++errors;
+            }
+        }
+
+        std::println("Format:    {}", imp->formatName());
+        std::println("Nodes:     {}", result.scene.nodes.size());
+
+        std::string shapeStr;
+        for (const auto &[name, count] : shapeCounts) {
+            if (!shapeStr.empty()) {
+                shapeStr += ", ";
+            }
+            shapeStr += std::format("{}={}", name, count);
+        }
+        std::println("Shapes:    {}", shapeStr.empty() ? "(none)" : shapeStr);
+
+        std::string matStr;
+        for (const auto &n : matNames) {
+            if (!matStr.empty()) {
+                matStr += ", ";
+            }
+            matStr += n;
+        }
+        std::println("Materials ({}): {}", matNames.size(), matStr.empty() ? "(none)" : matStr);
+        std::println("Warnings: {}  Errors: {}", warnings, errors);
+    });
 }

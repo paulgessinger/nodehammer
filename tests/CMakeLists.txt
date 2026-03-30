@@ -5,6 +5,7 @@ add_executable(nodehammer_tests
     ir/test_shape_variant.cpp
     config/test_config_loader.cpp
     config/test_config_validator.cpp
+    import/test_synthetic_importer.cpp
 )
 
 target_compile_definitions(nodehammer_tests PRIVATE
