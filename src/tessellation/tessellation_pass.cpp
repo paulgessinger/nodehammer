@@ -150,6 +150,14 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         TessellationParams params;
         params.maxSegmentsCircle = rule.maxSegmentsCircle;
 
+        // skip_geometry: add the node to the render tree as a structural node but produce no mesh.
+        if (rule.skipGeometry) {
+            result.scene.nodes[rnId] = rn;
+            for (const auto childId : semNode.children)
+                q.push(childId);
+            continue;
+        }
+
         // ── Resolve shape ──────────────────────────────────────────────────────
         if (!scene.logVols.contains(semNode.logVolId)) {
             result.scene.nodes[rnId] = rn;

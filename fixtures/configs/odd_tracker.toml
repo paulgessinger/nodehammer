@@ -31,12 +31,17 @@ pattern = "*"
 [selection_rules.keep_if]
 type = "and"
 operands = [
-  {type = "tag", key = "sensitive", value = "true"},
-  {type = "or", operands = [
-    {type = "tag", key = "subdetector", value = "PixelBarrel"},
-    {type = "tag", key = "subdetector", value = "PixelEndcapN"},
-    {type = "tag", key = "subdetector", value = "PixelEndcapP"},
-  ]},
+  { type = "tag", key = "sensitive", value = "true" },
+  { type = "or", operands = [
+    { type = "path_glob", pattern = "**/Pixels/**" },
+    { type = "path_glob", pattern = "**/ShortStrips/**" },
+    { type = "path_glob", pattern = "**/LongStrips/**" },
+  ] },
+  # {type = "or", operands = [
+  #   {type = "tag", key = "subdetector", value = "PixelBarrel"},
+  #   {type = "tag", key = "subdetector", value = "PixelEndcapN"},
+  #   {type = "tag", key = "subdetector", value = "PixelEndcapP"},
+  # ]},
 ]
 
 # Material rules
@@ -52,6 +57,10 @@ value = "true"
 material = "support"
 
 # Tessellation
+
+[[tessellation_rules]]
+scope = "/world"
+skip_geometry = true
 
 [[tessellation_rules]]
 max_segments_circle = 48

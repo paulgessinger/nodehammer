@@ -303,13 +303,14 @@ void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticLi
         if (!tbl) {
             continue;
         }
-        warnUnknownKeys(*tbl, {"scope", "max_segments_circle", "fallback"}, "tessellation_rules",
-                        diags);
+        warnUnknownKeys(*tbl, {"scope", "skip_geometry", "max_segments_circle", "fallback"},
+                        "tessellation_rules", diags);
         TessellationRule rule;
 
         if (auto scope = (*tbl)["scope"].value<std::string>()) {
             rule.scope = std::move(*scope);
         }
+        rule.skipGeometry = (*tbl)["skip_geometry"].value<bool>().value_or(false);
         rule.maxSegmentsCircle = (*tbl)["max_segments_circle"].value<int>().value_or(64);
 
         if (auto fallbackStr = (*tbl)["fallback"].value<std::string>()) {

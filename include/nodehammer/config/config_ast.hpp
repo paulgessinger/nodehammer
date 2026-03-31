@@ -106,6 +106,7 @@ struct MaterialRule {
 
 struct TessellationRule {
     std::optional<std::string> scope; ///< Optional path glob (matches all if absent)
+    bool skipGeometry{false};         ///< If true, node is kept in tree but produces no mesh
     int maxSegmentsCircle{64};
     BooleanFallback fallback{BooleanFallback::Skip};
 };
