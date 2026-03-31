@@ -1,80 +1,84 @@
 #include <CLI/CLI.hpp>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <nodehammer/config/config_ast.hpp>
+#include <nodehammer/config/config_loader.hpp>
+#include <nodehammer/import/importer_registry.hpp>
+#include <nodehammer/import/synthetic.hpp>
 #include <nodehammer/ir/render.hpp>
+#include <nodehammer/tessellation/tessellation_pass.hpp>
 #include <print>
 #include <string>
-
-namespace {
-
-nodehammer::RenderScene buildSyntheticRenderScene() {
-    nodehammer::RenderScene scene;
-
-    // Mesh asset: a box (6 faces × 4 verts = 24 verts, 12 tris = 36 indices)
-    // Just a stub with 0 geometry for CP1 — real tessellation in CP6.
-    auto meshId = scene.nextMeshId();
-    nodehammer::MeshAsset mesh;
-    mesh.id = meshId;
-    mesh.name = "box_mesh";
-    mesh.provenance.sourceSystem = "synthetic";
-    mesh.provenance.sourceName = "boxLV";
-    scene.meshAssets[meshId] = mesh;
-
-    // Material
-    auto matId = scene.nextMaterialId();
-    nodehammer::RenderMaterial mat;
-    mat.id = matId;
-    mat.name = "aluminum";
-    mat.baseColorFactor = glm::vec4{0.75f, 0.75f, 0.85f, 1.f};
-    mat.metallicFactor = 0.1f;
-    mat.roughnessFactor = 0.4f;
-    scene.materials[matId] = mat;
-
-    // Root render node
-    auto nodeId = scene.nextNodeId();
-    nodehammer::RenderNode node;
-    node.id = nodeId;
-    node.name = "world";
-    node.semanticNodeId = nodehammer::SemanticNodeId{1};
-    node.meshBindings.push_back({meshId, matId});
-    scene.nodes[nodeId] = node;
-
-    scene.rootId = nodeId;
-    return scene;
-}
-
-} // namespace
 
 void register_cmd_dump_render(CLI::App &app) {
     auto *sub = app.add_subcommand("dump-render", "Dump the render IR of a geometry as JSON");
 
-    auto *input = sub->add_option("-i,--input", "Input geometry file");
-    auto *input_format =
+    auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");
+    auto *formatOpt =
         sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
-    auto *config = sub->add_option("-c,--config", "TOML config file");
-    auto *output = sub->add_option("-o,--output", "Output JSON file (default: stdout)");
-
+    auto *configOpt = sub->add_option("-c,--config", "TOML config file");
+    auto *outputOpt = sub->add_option("-o,--output", "Output JSON file (default: stdout)");
     auto *syntheticBoxOpt =
-        sub->add_flag("--synthetic-box", "Use a hardcoded synthetic box scene as input");
-
-    (void)input;
-    (void)input_format;
-    (void)config;
+        sub->add_flag("--synthetic-box", "Use a synthetic single-box scene as input");
 
     sub->callback([=] {
-        if (!syntheticBoxOpt->count()) {
-            std::println(
-                stderr,
-                "nodehammer dump-render: --synthetic-box is the only supported source in CP1");
+        // ── Load config ────────────────────────────────────────────────────────
+        nodehammer::NHConfig cfg;
+        if (*configOpt) {
+            std::string cfgPath;
+            configOpt->results(cfgPath);
+            auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
+            if (loaded.diags.hasErrors()) {
+                for (const auto &d : loaded.diags.items()) {
+                    std::println(stderr, "[{}] {}", d.code, d.message);
+                }
+                return;
+            }
+            cfg = std::move(loaded.config);
+        }
+
+        // ── Import scene ───────────────────────────────────────────────────────
+        nodehammer::SemanticScene semScene;
+        if (syntheticBoxOpt->count()) {
+            semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
+        } else if (*inputOpt) {
+            std::string inputPath, fmt;
+            inputOpt->results(inputPath);
+            if (*formatOpt)
+                formatOpt->results(fmt);
+
+            const auto reg = nodehammer::makeDefaultRegistry();
+            const auto *imp = reg.resolve(inputPath, fmt);
+            if (!imp) {
+                std::println(stderr, "nodehammer dump-render: cannot determine input format");
+                return;
+            }
+            auto importResult = imp->import(inputPath);
+            for (const auto &d : importResult.diags.items()) {
+                std::println(stderr, "[{}] {}", d.code, d.message);
+            }
+            if (importResult.diags.hasErrors())
+                return;
+            semScene = std::move(importResult.scene);
+        } else {
+            std::println(stderr,
+                         "nodehammer dump-render: specify --input <file> or --synthetic-box");
             return;
         }
 
-        auto scene = buildSyntheticRenderScene();
-        nlohmann::json j = scene;
-        std::string out_path;
-        if (*output) {
-            output->results(out_path);
-            std::ofstream f{out_path};
+        // ── Tessellate ─────────────────────────────────────────────────────────
+        nodehammer::TessellationPass pass{cfg};
+        auto passResult = pass.lower(semScene);
+        for (const auto &d : passResult.diags.items()) {
+            std::println(stderr, "[{}] {}", d.code, d.message);
+        }
+
+        // ── Serialize ──────────────────────────────────────────────────────────
+        nlohmann::json j = passResult.scene;
+        std::string outPath;
+        if (*outputOpt) {
+            outputOpt->results(outPath);
+            std::ofstream f{outPath};
             f << j.dump(2) << '\n';
         } else {
             std::println("{}", j.dump(2));

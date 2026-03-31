@@ -9,6 +9,8 @@ add_executable(nodehammer_tests
     selection/test_predicate.cpp
     selection/test_closure.cpp
     selection/test_selector.cpp
+    tessellation/test_primitive_tessellator.cpp
+    tessellation/test_tessellation_pass.cpp
 )
 
 target_compile_definitions(nodehammer_tests PRIVATE
