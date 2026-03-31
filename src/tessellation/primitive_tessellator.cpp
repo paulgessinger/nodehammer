@@ -1,3 +1,4 @@
+#include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
 
@@ -7,6 +8,8 @@
 #include <numbers>
 
 namespace nodehammer {
+
+using detail::overloaded;
 
 namespace {
 
@@ -856,39 +859,30 @@ bool PrimitiveTessellator::canTessellate(const SemanticShapeVariant &shape) cons
 TessellationOutput PrimitiveTessellator::tessellate(const SemanticShapeVariant &shape,
                                                     const TessellationParams &params) const {
     return std::visit(
-        [&](const auto &s) -> TessellationOutput {
-            using T = std::decay_t<decltype(s)>;
-            if constexpr (std::is_same_v<T, BoxShape>) {
-                return tessellateBox(s);
-            } else if constexpr (std::is_same_v<T, TubeShape>) {
-                return tessellateTube(s, params);
-            } else if constexpr (std::is_same_v<T, ConeShape>) {
-                return tessellateCone(s, params);
-            } else if constexpr (std::is_same_v<T, TrdShape>) {
-                return tessellateTrd(s);
-            } else if constexpr (std::is_same_v<T, ParaShape>) {
-                return tessellatePara(s);
-            } else if constexpr (std::is_same_v<T, TorusShape>) {
-                return tessellateTorus(s, params);
-            } else if constexpr (std::is_same_v<T, PconShape>) {
-                return tessellatePcon(s, params);
-            } else if constexpr (std::is_same_v<T, PgonShape>) {
-                return tessellatePgon(s, params);
-            } else if constexpr (std::is_same_v<T, TessellatedShape>) {
-                return tessellateTessellated(s);
-            } else if constexpr (std::is_same_v<T, UnknownShape>) {
+        overloaded{
+            [&](const BoxShape &s) { return tessellateBox(s); },
+            [&](const TubeShape &s) { return tessellateTube(s, params); },
+            [&](const ConeShape &s) { return tessellateCone(s, params); },
+            [&](const TrdShape &s) { return tessellateTrd(s); },
+            [&](const ParaShape &s) { return tessellatePara(s); },
+            [&](const TorusShape &s) -> TessellationOutput { return tessellateTorus(s, params); },
+            [&](const PconShape &s) { return tessellatePcon(s, params); },
+            [&](const PgonShape &s) { return tessellatePgon(s, params); },
+            [&](const TessellatedShape &s) { return tessellateTessellated(s); },
+            [](const UnknownShape &s) {
                 TessellationOutput err;
                 err.diags.error(codes::kErrTessUnknownShape,
                                 "cannot tessellate unknown shape: " + s.originalType,
                                 s.originalType);
                 return err;
-            } else {
+            },
+            [](const auto &) {
                 // Boolean — caller should have checked canTessellate()
                 TessellationOutput err;
                 err.diags.error(codes::kErrTessUnknownShape,
                                 "boolean shape passed to PrimitiveTessellator", "boolean");
                 return err;
-            }
+            },
         },
         shape);
 }

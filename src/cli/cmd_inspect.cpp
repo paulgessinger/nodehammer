@@ -1,5 +1,6 @@
 #include <CLI/CLI.hpp>
 #include <map>
+#include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/semantic.hpp>
 #include <print>
@@ -41,36 +42,26 @@ void register_cmd_inspect(CLI::App &app) {
         std::map<std::string, int> shapeCounts;
         for (const auto &[id, shape] : result.scene.shapes) {
             std::string typeName = std::visit(
-                []<typename T>(const T &) -> std::string {
-                    if constexpr (std::is_same_v<T, nodehammer::BoxShape>) {
-                        return "box";
-                    } else if constexpr (std::is_same_v<T, nodehammer::TubeShape>) {
-                        return "tube";
-                    } else if constexpr (std::is_same_v<T, nodehammer::ConeShape>) {
-                        return "cone";
-                    } else if constexpr (std::is_same_v<T, nodehammer::TrdShape>) {
-                        return "trd";
-                    } else if constexpr (std::is_same_v<T, nodehammer::ParaShape>) {
-                        return "para";
-                    } else if constexpr (std::is_same_v<T, nodehammer::PconShape>) {
-                        return "pcon";
-                    } else if constexpr (std::is_same_v<T, nodehammer::PgonShape>) {
-                        return "pgon";
-                    } else if constexpr (std::is_same_v<T, nodehammer::TorusShape>) {
-                        return "torus";
-                    } else if constexpr (std::is_same_v<T, nodehammer::TessellatedShape>) {
+                nodehammer::detail::overloaded{
+                    [](const nodehammer::BoxShape &) -> std::string { return "box"; },
+                    [](const nodehammer::TubeShape &) -> std::string { return "tube"; },
+                    [](const nodehammer::ConeShape &) -> std::string { return "cone"; },
+                    [](const nodehammer::TrdShape &) -> std::string { return "trd"; },
+                    [](const nodehammer::ParaShape &) -> std::string { return "para"; },
+                    [](const nodehammer::PconShape &) -> std::string { return "pcon"; },
+                    [](const nodehammer::PgonShape &) -> std::string { return "pgon"; },
+                    [](const nodehammer::TorusShape &) -> std::string { return "torus"; },
+                    [](const nodehammer::TessellatedShape &) -> std::string {
                         return "tessellated";
-                    } else if constexpr (std::is_same_v<T, nodehammer::BooleanUnion>) {
-                        return "union";
-                    } else if constexpr (std::is_same_v<T, nodehammer::BooleanIntersection>) {
+                    },
+                    [](const nodehammer::BooleanUnion &) -> std::string { return "union"; },
+                    [](const nodehammer::BooleanIntersection &) -> std::string {
                         return "intersection";
-                    } else if constexpr (std::is_same_v<T, nodehammer::BooleanSubtraction>) {
+                    },
+                    [](const nodehammer::BooleanSubtraction &) -> std::string {
                         return "subtraction";
-                    } else if constexpr (std::is_same_v<T, nodehammer::UnknownShape>) {
-                        return "unknown";
-                    } else {
-                        return "?";
-                    }
+                    },
+                    [](const nodehammer::UnknownShape &) -> std::string { return "unknown"; },
                 },
                 shape.data);
             shapeCounts[typeName]++;

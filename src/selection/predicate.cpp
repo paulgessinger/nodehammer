@@ -1,3 +1,4 @@
+#include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/selection/predicate.hpp>
 
 namespace nodehammer {
@@ -116,37 +117,30 @@ Predicate makeNotPredicate(Predicate operand) {
 
 Predicate compilePredicate(const PredicateExpr &expr) {
     return std::visit(
-        [](const auto &node) -> Predicate {
-            using T = std::decay_t<decltype(node)>;
-
-            if constexpr (std::is_same_v<T, NameGlobPredicate>) {
-                return makeNameGlobPredicate(node.pattern);
-            } else if constexpr (std::is_same_v<T, PathGlobPredicate>) {
-                return makePathGlobPredicate(node.pattern);
-            } else if constexpr (std::is_same_v<T, TagPredicate>) {
-                return makeTagPredicate(node.key, node.value);
-            } else if constexpr (std::is_same_v<T, IsLeafPredicate>) {
-                return makeIsLeafPredicate();
-            } else if constexpr (std::is_same_v<T, std::shared_ptr<AndPredicate>>) {
+        detail::overloaded{
+            [](const NameGlobPredicate &node) { return makeNameGlobPredicate(node.pattern); },
+            [](const PathGlobPredicate &node) { return makePathGlobPredicate(node.pattern); },
+            [](const TagPredicate &node) { return makeTagPredicate(node.key, node.value); },
+            [](const IsLeafPredicate &) { return makeIsLeafPredicate(); },
+            [](const std::shared_ptr<AndPredicate> &node) -> Predicate {
                 std::vector<Predicate> ops;
                 ops.reserve(node->operands.size());
                 for (const auto &operand : node->operands) {
                     ops.push_back(compilePredicate(operand));
                 }
                 return makeAndPredicate(std::move(ops));
-            } else if constexpr (std::is_same_v<T, std::shared_ptr<OrPredicate>>) {
+            },
+            [](const std::shared_ptr<OrPredicate> &node) {
                 std::vector<Predicate> ops;
                 ops.reserve(node->operands.size());
                 for (const auto &operand : node->operands) {
                     ops.push_back(compilePredicate(operand));
                 }
                 return makeOrPredicate(std::move(ops));
-            } else if constexpr (std::is_same_v<T, std::shared_ptr<NotPredicate>>) {
+            },
+            [](const std::shared_ptr<NotPredicate> &node) {
                 return makeNotPredicate(compilePredicate(node->operand));
-            } else {
-                static_assert(!sizeof(T),
-                              "Unhandled PredicateVariant alternative in compilePredicate");
-            }
+            },
         },
         expr.data);
 }
