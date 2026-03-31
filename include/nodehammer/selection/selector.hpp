@@ -38,7 +38,7 @@ struct SelectionResult {
 ///     is a no-op and emits NH0401.
 class SelectionEngine {
   public:
-    explicit SelectionEngine(std::vector<SelectionRule> rules);
+    explicit SelectionEngine(std::vector<SelectionRule> rules, bool hoistOrphans = false);
 
     /// Compute which nodes would be kept or dropped without modifying the scene.
     [[nodiscard]] SelectionResult dryRun(const SemanticScene &scene) const;
@@ -52,6 +52,7 @@ class SelectionEngine {
 
   private:
     std::vector<SelectionRule> rules_;
+    bool hoistOrphans_{false};
 
     /// Core evaluation logic shared by dryRun() and prune().
     [[nodiscard]] SelectionResult evaluate(const SemanticScene &scene) const;

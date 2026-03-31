@@ -114,6 +114,7 @@ struct TessellationRule {
 // Output path/format are CLI concerns, not config concerns.
 
 struct NHConfig {
+    bool hoistOrphans{false};
     std::vector<MaterialDef> materials;
     std::vector<SelectionRule> selection;
     std::vector<MaterialRule> materialRules;

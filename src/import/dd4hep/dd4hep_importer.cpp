@@ -5,12 +5,18 @@
 
 #include <DD4hep/DetElement.h>
 #include <DD4hep/Detector.h>
+#include <DD4hep/Printout.h>
 #include <DD4hep/Volumes.h>
 
 #include <TGeoManager.h>
 #include <TGeoMatrix.h>
 #include <TGeoNode.h>
 #include <TGeoVolume.h>
+
+#include <RtypesCore.h> // gErrorIgnoreLevel
+
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <format>
 #include <unordered_map>
@@ -80,8 +86,7 @@ SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
 
 // Pass 1: walk the DD4hep DetElement tree, building SemanticNodes with metadata tags.
 SemanticNodeId importDetElement(const dd4hep::DetElement &elem,
-                                std::optional<SemanticNodeId> parentId, ImportState &st,
-                                const std::unordered_set<std::string> &sensNames) {
+                                std::optional<SemanticNodeId> parentId, ImportState &st) {
     const SemanticNodeId id = st.scene.nextNodeId();
 
     dd4hep::PlacedVolume pv = elem.placement();
@@ -100,14 +105,14 @@ SemanticNodeId importDetElement(const dd4hep::DetElement &elem,
     if (!std::string{elem.type()}.empty()) {
         sn.tags["subdetector"] = elem.type();
     }
-    if (sensNames.count(elem.name())) {
+    if (elem.volume().isSensitive()) {
         sn.tags["sensitive"] = "true";
     }
 
     st.scene.nodes[id] = sn;
 
     for (const auto &[childName, childElem] : elem.children()) {
-        const SemanticNodeId childId = importDetElement(childElem, id, st, sensNames);
+        const SemanticNodeId childId = importDetElement(childElem, id, st);
         st.scene.nodes[id].children.push_back(childId);
     }
 
@@ -152,6 +157,12 @@ std::vector<std::string> DD4hepImporter::supportedExtensions() const { return {}
 ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     ImportResult result;
 
+    // Suppress ROOT and DD4hep noise so stdout stays clean for JSON piping.
+    const int savedRootLevel = gErrorIgnoreLevel;
+    const dd4hep::PrintLevel savedDd4hepLevel = dd4hep::printLevel();
+    gErrorIgnoreLevel = kError;
+    dd4hep::setPrintLevel(dd4hep::ERROR);
+
     std::unique_ptr<dd4hep::Detector> detOwner;
     try {
         detOwner = dd4hep::Detector::make_unique("");
@@ -159,21 +170,16 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     } catch (const std::exception &ex) {
         result.diags.error(codes::kErrTgeoOpenFailed,
                            std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()));
+        gErrorIgnoreLevel = savedRootLevel;
+        dd4hep::setPrintLevel(savedDd4hepLevel);
         return result;
     }
 
-    dd4hep::Detector &det = *detOwner;
-    ImportState st{result.scene, result.diags, path.string(), det, {}, {}, {}};
-
-    // Build the set of sensitive detector names
-    std::unordered_set<std::string> sensNames;
-    for (const auto &[name, sd] : det.sensitiveDetectors()) {
-        sensNames.insert(name);
-    }
+    ImportState st{result.scene, result.diags, path.string(), *detOwner, {}, {}, {}};
 
     // Pass 1: DetElement tree
-    const dd4hep::DetElement world = det.world();
-    const SemanticNodeId rootId = importDetElement(world, std::nullopt, st, sensNames);
+    const dd4hep::DetElement world = detOwner->world();
+    const SemanticNodeId rootId = importDetElement(world, std::nullopt, st);
     result.scene.rootId = rootId;
 
     // Pass 2: structural TGeo nodes not reached by DetElement tree.
@@ -204,10 +210,12 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     // when "full" is requested.  Validate visually by comparing the DD4hep
     // and TGeo import paths on the same geometry once glTF export is available
     // (Checkpoint 7).
-    importStructural(det.manager().GetTopNode(), std::nullopt, st);
+    importStructural(detOwner->manager().GetTopNode(), std::nullopt, st);
 
     result.scene.computeWorldTransforms();
 
+    gErrorIgnoreLevel = savedRootLevel;
+    dd4hep::setPrintLevel(savedDd4hepLevel);
     return result;
 }
 

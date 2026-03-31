@@ -31,10 +31,12 @@ using Predicate = std::function<bool(const NodeView &)>;
 
 /// Matches node name against a glob pattern.
 /// '*' matches any sequence of characters (name has no '/', so '**' behaves identically).
+/// @TODO: add `[abc]` syntax for character class matching.
 [[nodiscard]] Predicate makeNameGlobPredicate(std::string pattern);
 
 /// Matches node path against a glob pattern.
 /// '*' matches any sequence of non-'/' characters; '**' matches any sequence including '/'.
+/// @TODO: add `[abc]` syntax for character class matching.
 [[nodiscard]] Predicate makePathGlobPredicate(std::string pattern);
 
 /// True when the node has the given tag key; if value is set, also matches the value.

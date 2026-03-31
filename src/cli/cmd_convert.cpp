@@ -84,7 +84,7 @@ void register_cmd_convert(CLI::App &app) {
 
         // ── Select ─────────────────────────────────────────────────────────────
         if (!cfg.selection.empty()) {
-            nodehammer::SelectionEngine sel{cfg.selection};
+            nodehammer::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
             auto selDiags = sel.prune(importResult.scene);
             printDiags(selDiags);
             if (selDiags.hasErrors()) {

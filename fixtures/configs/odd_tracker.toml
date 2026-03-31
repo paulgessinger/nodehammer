@@ -1,0 +1,98 @@
+# nodehammer config - ODD tracker only
+#
+# hoist_orphans = true: when an intermediate structural container is dropped,
+# its kept children are re-parented to the nearest surviving ancestor (or root)
+# with their world transform rebased. This lets us drop large container volumes
+# while keeping sensor geometry at the correct world positions.
+
+hoist_orphans = true
+
+[materials.silicon]
+base_color = [0.2, 0.6, 0.9, 1.0]
+metallic = 0.1
+roughness = 0.4
+
+[materials.support]
+base_color = [0.5, 0.5, 0.5, 1.0]
+metallic = 0.0
+roughness = 0.7
+
+# The ODD DetElement tree is flat: every sensitive element is a direct child of world.
+# isSensitive() is true for all of them, so we select by subdetector type instead.
+
+[[selection_rules]]
+[selection_rules.drop_if]
+type = "name_glob"
+pattern = "*"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "PixelBarrel"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "PixelEndcapN"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "PixelEndcapP"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "ShortStripBarrel"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "ShortStripEndcapN"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "ShortStripEndcapP"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "LongStripBarrel"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "LongStripEndcapN"
+
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "tag"
+key = "subdetector"
+value = "LongStripEndcapP"
+
+# Material rules
+
+[[material_rules]]
+material = "silicon"
+[material_rules.match]
+type = "tag"
+key = "sensitive"
+value = "true"
+
+[[material_rules]]
+material = "support"
+
+# Tessellation
+
+[[tessellation_rules]]
+max_segments_circle = 48
+fallback = "skip"

@@ -1,7 +1,10 @@
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/import/synthetic.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/selection/selector.hpp>
+
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <unordered_set>
 
@@ -383,4 +386,192 @@ TEST_CASE("SelectionEngine: scope restricts which nodes a rule evaluates",
     REQUIRE(result.dropped.contains(sensorId));
     REQUIRE(result.kept.contains(trackerId));
     REQUIRE(result.kept.contains(rootId));
+}
+
+// ── Hoist helpers ─────────────────────────────────────────────────────────────
+
+// Build a minimal SemanticScene with given names and double-precision
+// translation-only local transforms. Returns node IDs in insertion order.
+// Parent chain: nodes[0] is root, nodes[i] is parent of nodes[i+1].
+static SemanticScene
+makeLinearScene(const std::vector<std::string> &names,
+                const std::vector<glm::dvec3> &translations) // local translation per node
+{
+    SemanticScene scene;
+
+    SemanticShapeId shapeId = scene.nextShapeId();
+    scene.shapes[shapeId] = {shapeId, BoxShape{1, 1, 1}};
+    SemanticMaterialId matId = scene.nextMaterialId();
+    scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
+    SemanticLogVolId lvId = scene.nextLogVolId();
+    scene.logVols[lvId] = {lvId, "lv", shapeId, matId};
+
+    std::vector<SemanticNodeId> ids;
+    ids.reserve(names.size());
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        SemanticNodeId id = scene.nextNodeId();
+        ids.push_back(id);
+        SemanticNode node;
+        node.id = id;
+        node.name = names[i];
+        node.logVolId = lvId;
+        node.localTransform = glm::translate(glm::dmat4(1.0), translations[i]);
+        if (i > 0) {
+            node.parentId = ids[i - 1];
+            scene.nodes.at(ids[i - 1]).children.push_back(id);
+        }
+        scene.nodes[id] = node;
+    }
+    scene.rootId = ids[0];
+    scene.computeWorldTransforms();
+    return scene;
+}
+
+// ── Hoist tests ───────────────────────────────────────────────────────────────
+
+TEST_CASE("SelectionEngine hoist: orphan re-parented to nearest kept ancestor",
+          "[selection][selector][hoist]") {
+    // root(0,0,0) -> A(10,0,0) -> B(5,0,0) [dropped] -> C(3,0,0)
+    // world(A)=10, world(B)=15, world(C)=18
+    // After hoist: C.parentId = A, C.localTransform = translate(8,0,0)
+    auto scene =
+        makeLinearScene({"root", "A", "B", "C"}, {{0, 0, 0}, {10, 0, 0}, {5, 0, 0}, {3, 0, 0}});
+    SemanticNodeId aId, bId, cId;
+    for (const auto &[id, n] : scene.nodes) {
+        if (n.name == "A")
+            aId = id;
+        if (n.name == "B")
+            bId = id;
+        if (n.name == "C")
+            cId = id;
+    }
+
+    // drop_if * , then keep_if A and C explicitly
+    SelectionRule dropAll;
+    dropAll.action = SelectionAction::DropIf;
+    dropAll.predicate = PredicateExpr{NameGlobPredicate{"*"}};
+
+    SelectionRule keepA;
+    keepA.action = SelectionAction::KeepIf;
+    keepA.predicate = PredicateExpr{NameGlobPredicate{"A"}};
+
+    SelectionRule keepC;
+    keepC.action = SelectionAction::KeepIf;
+    keepC.predicate = PredicateExpr{NameGlobPredicate{"C"}};
+
+    SelectionEngine eng{{dropAll, keepA, keepC}, /*hoistOrphans=*/true};
+    auto diags = eng.prune(scene);
+
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE(scene.nodes.contains(aId));
+    REQUIRE(scene.nodes.contains(cId));
+    REQUIRE_FALSE(scene.nodes.contains(bId));
+
+    // C is now a child of A
+    REQUIRE(scene.nodes.at(cId).parentId == aId);
+    REQUIRE_FALSE(scene.nodes.at(aId).children.empty());
+
+    // C's new localTransform should translate by (8,0,0) relative to A's world
+    const glm::dvec3 t = glm::dvec3(scene.nodes.at(cId).localTransform[3]);
+    REQUIRE(t.x == Catch::Approx(8.0));
+    REQUIRE(t.y == Catch::Approx(0.0));
+    REQUIRE(t.z == Catch::Approx(0.0));
+}
+
+TEST_CASE("SelectionEngine hoist: no kept ancestor falls back to root",
+          "[selection][selector][hoist]") {
+    // root(0,0,0) -> A(5,0,0) [dropped] -> B(3,0,0) [kept]
+    // world(B) = (8,0,0). After hoist: B.parentId = root, localTransform = translate(8,0,0)
+    auto scene = makeLinearScene({"root", "A", "B"}, {{0, 0, 0}, {5, 0, 0}, {3, 0, 0}});
+    auto rootId = scene.rootId;
+    SemanticNodeId aId, bId;
+    for (const auto &[id, n] : scene.nodes) {
+        if (n.name == "A")
+            aId = id;
+        if (n.name == "B")
+            bId = id;
+    }
+
+    SelectionRule dropAll;
+    dropAll.action = SelectionAction::DropIf;
+    dropAll.predicate = PredicateExpr{NameGlobPredicate{"*"}};
+
+    SelectionRule keepB;
+    keepB.action = SelectionAction::KeepIf;
+    keepB.predicate = PredicateExpr{NameGlobPredicate{"B"}};
+
+    SelectionEngine eng{{dropAll, keepB}, /*hoistOrphans=*/true};
+    auto diags = eng.prune(scene);
+
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE(scene.nodes.contains(rootId));
+    REQUIRE(scene.nodes.contains(bId));
+    REQUIRE_FALSE(scene.nodes.contains(aId));
+
+    REQUIRE(scene.nodes.at(bId).parentId == rootId);
+
+    const glm::dvec3 t = glm::dvec3(scene.nodes.at(bId).localTransform[3]);
+    REQUIRE(t.x == Catch::Approx(8.0));
+    REQUIRE(t.y == Catch::Approx(0.0));
+    REQUIRE(t.z == Catch::Approx(0.0));
+}
+
+TEST_CASE("SelectionEngine hoist: subtree of hoisted node is preserved",
+          "[selection][selector][hoist]") {
+    // root -> A(5,0,0) [dropped] -> B(3,0,0) [kept] -> C(2,0,0) [kept]
+    // B hoists to root; C stays child of B with its original localTransform.
+    auto scene =
+        makeLinearScene({"root", "A", "B", "C"}, {{0, 0, 0}, {5, 0, 0}, {3, 0, 0}, {2, 0, 0}});
+    auto rootId = scene.rootId;
+    SemanticNodeId aId, bId, cId;
+    for (const auto &[id, n] : scene.nodes) {
+        if (n.name == "A")
+            aId = id;
+        if (n.name == "B")
+            bId = id;
+        if (n.name == "C")
+            cId = id;
+    }
+
+    SelectionRule dropAll;
+    dropAll.action = SelectionAction::DropIf;
+    dropAll.predicate = PredicateExpr{NameGlobPredicate{"*"}};
+
+    SelectionRule keepB;
+    keepB.action = SelectionAction::KeepIf;
+    keepB.predicate = PredicateExpr{NameGlobPredicate{"B"}};
+
+    SelectionRule keepC;
+    keepC.action = SelectionAction::KeepIf;
+    keepC.predicate = PredicateExpr{NameGlobPredicate{"C"}};
+
+    SelectionEngine eng{{dropAll, keepB, keepC}, /*hoistOrphans=*/true};
+    auto diags = eng.prune(scene);
+
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE_FALSE(scene.nodes.contains(aId));
+    REQUIRE(scene.nodes.contains(bId));
+    REQUIRE(scene.nodes.contains(cId));
+
+    // B is now a child of root
+    REQUIRE(scene.nodes.at(bId).parentId == rootId);
+    // C is still a child of B with its original local translation of (2,0,0)
+    REQUIRE(scene.nodes.at(cId).parentId == bId);
+    const glm::dvec3 tc = glm::dvec3(scene.nodes.at(cId).localTransform[3]);
+    REQUIRE(tc.x == Catch::Approx(2.0));
+}
+
+TEST_CASE("SelectionEngine hoist: no effect when all parents are kept",
+          "[selection][selector][hoist]") {
+    auto [scene, rootId, trackerId, sensorId] = makeThreeLevelScene();
+
+    // No drop rules — everything kept. Hoist should be a no-op.
+    SelectionEngine eng{{}, /*hoistOrphans=*/true};
+    auto diags = eng.prune(scene);
+
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE(scene.nodes.contains(rootId));
+    REQUIRE(scene.nodes.contains(trackerId));
+    REQUIRE(scene.nodes.contains(sensorId));
+    REQUIRE(scene.nodes.at(sensorId).parentId == trackerId);
 }

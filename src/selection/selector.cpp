@@ -3,6 +3,8 @@
 #include <nodehammer/selection/predicate.hpp>
 #include <nodehammer/selection/selector.hpp>
 
+#include <glm/gtc/matrix_inverse.hpp>
+
 #include <format>
 #include <queue>
 #include <stdexcept>
@@ -101,7 +103,8 @@ collectReferencedShapes(const SemanticScene &scene,
 
 // ── SelectionEngine ───────────────────────────────────────────────────────────
 
-SelectionEngine::SelectionEngine(std::vector<SelectionRule> rules) : rules_(std::move(rules)) {}
+SelectionEngine::SelectionEngine(std::vector<SelectionRule> rules, bool hoistOrphans)
+    : rules_(std::move(rules)), hoistOrphans_(hoistOrphans) {}
 
 SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     SelectionResult result;
@@ -159,7 +162,10 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     // If a parent is dropped and a child is kept, the child has a contradictory
     // disposition: it can't be structurally connected to the scene without its
     // parent. We emit NH0400 and force-drop the child.
-    {
+    //
+    // When hoistOrphans is enabled this invariant is resolved by prune() via
+    // re-parenting instead of force-dropping, so we skip the enforcement here.
+    if (!hoistOrphans_) {
         std::queue<SemanticNodeId> q;
         if (scene.nodes.contains(scene.rootId)) {
             q.push(scene.rootId);
@@ -184,7 +190,7 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
                 q.push(childId);
             }
         }
-    }
+    } // end if (!hoistOrphans_)
 
     // ── Step 4: separate into kept / dropped sets. ────────────────────────────
     // disposition was built from paths, so every ID here is reachable from root.
@@ -210,6 +216,43 @@ SelectionResult SelectionEngine::dryRun(const SemanticScene &scene) const {
 
 DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
     auto selResult = evaluate(scene);
+
+    // ── Hoist orphans: re-parent KeepIf nodes whose parent is DropIf ─────────────
+    // Walk the parentId chain upward to find the nearest KeepIf ancestor and
+    // rebase the node's localTransform to that ancestor's world frame.
+    // Falls back to root (which is force-kept) when no KeepIf ancestor exists.
+    if (hoistOrphans_) {
+        // Force-keep root so there is always a valid hoist target.
+        selResult.dropped.erase(scene.rootId);
+        selResult.kept.insert(scene.rootId);
+
+        for (const auto id : selResult.kept) {
+            const SemanticNode &node = scene.nodes.at(id);
+            if (!node.parentId.has_value())
+                continue; // root itself
+            if (selResult.kept.contains(*node.parentId))
+                continue; // parent already kept — no hoisting needed
+
+            // Walk up to find nearest kept ancestor.
+            SemanticNodeId newParent = scene.rootId;
+            auto cur = node.parentId;
+            while (cur.has_value()) {
+                if (selResult.kept.contains(*cur)) {
+                    newParent = *cur;
+                    break;
+                }
+                cur = scene.nodes.at(*cur).parentId;
+            }
+
+            // Rebase localTransform to the new parent's world frame.
+            const glm::dmat4 &worldNode = scene.nodes.at(id).worldTransform;
+            const glm::dmat4 &worldParent = scene.nodes.at(newParent).worldTransform;
+            scene.nodes.at(id).localTransform = glm::affineInverse(worldParent) * worldNode;
+            scene.nodes.at(id).parentId = newParent;
+            // Register with the new parent; the old parent will be pruned away.
+            scene.nodes.at(newParent).children.push_back(id);
+        }
+    }
 
     // Root-dropped guard: leave scene untouched and emit an error.
     if (selResult.dropped.contains(scene.rootId)) {

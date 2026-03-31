@@ -333,8 +333,12 @@ ConfigResult parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
-    warnUnknownKeys(tbl, {"materials", "selection_rules", "material_rules", "tessellation_rules"},
-                    "<top-level>", diags);
+    warnUnknownKeys(
+        tbl,
+        {"hoist_orphans", "materials", "selection_rules", "material_rules", "tessellation_rules"},
+        "<top-level>", diags);
+    if (auto v = tbl["hoist_orphans"].value<bool>())
+        cfg.hoistOrphans = *v;
     parseMaterials(tbl, cfg, diags);
     parseSelectionRules(tbl, cfg, diags);
     parseMaterialRules(tbl, cfg, diags);
