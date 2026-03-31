@@ -17,67 +17,27 @@ base_color = [0.5, 0.5, 0.5, 1.0]
 metallic = 0.0
 roughness = 0.7
 
-# The ODD DetElement tree is flat: every sensitive element is a direct child of world.
-# isSensitive() is true for all of them, so we select by subdetector type instead.
+# Keep only sensor nodes (sensitive=true) in the pixel subdetectors.
+# The tree is: world → OpenDataTracker → Pixels → {PixelBarrel, PixelEndcapN, PixelEndcapP} → modules → sensors
+# hoist_orphans re-parents the kept sensors to world with world-space transforms.
 
 [[selection_rules]]
 [selection_rules.drop_if]
 type = "name_glob"
 pattern = "*"
 
+# Keep nodes that are both sensitive AND belong to a pixel sub-detector.
 [[selection_rules]]
 [selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "PixelBarrel"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "PixelEndcapN"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "PixelEndcapP"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "ShortStripBarrel"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "ShortStripEndcapN"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "ShortStripEndcapP"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "LongStripBarrel"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "LongStripEndcapN"
-
-[[selection_rules]]
-[selection_rules.keep_if]
-type = "tag"
-key = "subdetector"
-value = "LongStripEndcapP"
+type = "and"
+operands = [
+  {type = "tag", key = "sensitive", value = "true"},
+  {type = "or", operands = [
+    {type = "tag", key = "subdetector", value = "PixelBarrel"},
+    {type = "tag", key = "subdetector", value = "PixelEndcapN"},
+    {type = "tag", key = "subdetector", value = "PixelEndcapP"},
+  ]},
+]
 
 # Material rules
 
