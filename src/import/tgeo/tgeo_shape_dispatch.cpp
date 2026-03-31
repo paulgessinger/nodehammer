@@ -106,17 +106,7 @@ SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, SemanticScene &scene,
                              tor->GetPhi1() * std::numbers::pi / 180.0,
                              tor->GetDphi() * std::numbers::pi / 180.0};
     }
-    // ── Pcon ──────────────────────────────────────────────────────────────────
-    else if (const auto *pcon = dynamic_cast<const TGeoPcon *>(shape)) {
-        PconShape ps;
-        ps.phiStart = pcon->GetPhi1() * std::numbers::pi / 180.0;
-        ps.phiDelta = pcon->GetDphi() * std::numbers::pi / 180.0;
-        for (int i = 0; i < pcon->GetNz(); ++i) {
-            ps.sections.push_back({pcon->GetZ(i), pcon->GetRmin(i), pcon->GetRmax(i)});
-        }
-        variant = std::move(ps);
-    }
-    // ── Pgon ──────────────────────────────────────────────────────────────────
+    // ── Pgon (must precede Pcon — TGeoPgon derives from TGeoPcon) ────────────
     else if (const auto *pgon = dynamic_cast<const TGeoPgon *>(shape)) {
         PgonShape ps;
         ps.phiStart = pgon->GetPhi1() * std::numbers::pi / 180.0;
@@ -124,6 +114,16 @@ SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, SemanticScene &scene,
         ps.nSides = pgon->GetNedges();
         for (int i = 0; i < pgon->GetNz(); ++i) {
             ps.sections.push_back({pgon->GetZ(i), pgon->GetRmin(i), pgon->GetRmax(i)});
+        }
+        variant = std::move(ps);
+    }
+    // ── Pcon ──────────────────────────────────────────────────────────────────
+    else if (const auto *pcon = dynamic_cast<const TGeoPcon *>(shape)) {
+        PconShape ps;
+        ps.phiStart = pcon->GetPhi1() * std::numbers::pi / 180.0;
+        ps.phiDelta = pcon->GetDphi() * std::numbers::pi / 180.0;
+        for (int i = 0; i < pcon->GetNz(); ++i) {
+            ps.sections.push_back({pcon->GetZ(i), pcon->GetRmin(i), pcon->GetRmax(i)});
         }
         variant = std::move(ps);
     }

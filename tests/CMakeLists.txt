@@ -28,6 +28,10 @@ endif()
 
 if(NODEHAMMER_WITH_TGEO)
     target_sources(nodehammer_tests PRIVATE import/test_tgeo_importer.cpp)
+    target_sources(nodehammer_tests PRIVATE tessellation/test_tgeo_tessellation.cpp)
+    target_compile_definitions(nodehammer_tests PRIVATE
+        NODEHAMMER_TESS_OBJ_DIR="${CMAKE_BINARY_DIR}/tessellation_obj"
+    )
 endif()
 
 if(NODEHAMMER_WITH_DD4HEP)

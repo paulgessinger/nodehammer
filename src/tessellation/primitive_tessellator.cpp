@@ -600,7 +600,7 @@ TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams
 //
 //   rMax  ___
 //        |   |___
-//   rMin  |___|   |___
+//   rMin  |___|   |___     ← inner wall only emitted where rMin > 0
 //         z0  z1  z2  z3
 //
 // Each consecutive pair of sections produces:
@@ -608,10 +608,10 @@ TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams
 //   - One inner wall strip (segs quads) if either end has rMin > 0,
 //     normals pointing radially inward.
 //
-// Note: caps are NOT generated here. The caller (Geant4/TGeo) stores the cap
-// geometry implicitly in the first and last section's rMin/rMax values.
-// For a complete closed solid, the sections should start and end with matching
-// rMin/rMax pairs.
+// End caps are emitted at the first and last section (bottom and top of the
+// stack). Each cap is either a filled circle fan (rMin ≈ 0) or an annular ring
+// (rMin > 0). The cap normal is (0,0,-1) for the bottom and (0,0,+1) for the
+// top.
 
 TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &p) {
     TessellationOutput out;
@@ -624,6 +624,7 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
         return phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
     };
 
+    // ── Walls (per section pair) ─────────────────────────────────────────────
     for (std::size_t k = 0; k + 1 < s.sections.size(); ++k) {
         const float z0 = static_cast<float>(s.sections[k].z);
         const float z1 = static_cast<float>(s.sections[k + 1].z);
@@ -640,8 +641,12 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
                        {glm::vec3{oBot * ca1, oBot * sa1, z0}, glm::vec3{ca1, sa1, 0}},
                        {glm::vec3{oTop * ca1, oTop * sa1, z1}, glm::vec3{ca1, sa1, 0}},
                        {glm::vec3{oTop * ca0, oTop * sa0, z1}, glm::vec3{ca0, sa0, 0}});
-            if (iBot > 0.0f || iTop > 0.0f) {
-                // Inner wall — normal points inward.
+            // Inner wall: skip when there is no surface area to emit. When
+            // z0==z1 and iBot==iTop the "wall" degenerates to a circle (zero
+            // area). The outer wall already handles the radial ring in that case.
+            const bool innerHasArea = (iBot > 0.0f || iTop > 0.0f) &&
+                                      !(std::abs(z1 - z0) < 1e-9f && std::abs(iTop - iBot) < 1e-9f);
+            if (innerHasArea) {
                 appendQuad(out, {glm::vec3{iTop * ca0, iTop * sa0, z1}, glm::vec3{-ca0, -sa0, 0}},
                            {glm::vec3{iTop * ca1, iTop * sa1, z1}, glm::vec3{-ca1, -sa1, 0}},
                            {glm::vec3{iBot * ca1, iBot * sa1, z0}, glm::vec3{-ca1, -sa1, 0}},
@@ -649,6 +654,50 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
             }
         }
     }
+
+    // ── End caps ─────────────────────────────────────────────────────────────
+    // sign=-1 → bottom cap at z=sections.front().z, normal (0,0,-1)
+    // sign=+1 → top cap    at z=sections.back().z,  normal (0,0,+1)
+    for (int sign = -1; sign <= 1; sign += 2) {
+        const auto &sec = (sign < 0) ? s.sections.front() : s.sections.back();
+        const float capZ = static_cast<float>(sec.z);
+        const float rOuter = static_cast<float>(sec.rMax);
+        const float rInner = static_cast<float>(sec.rMin);
+        if (rOuter < 1e-9f)
+            continue;
+        const glm::vec3 capN{0, 0, static_cast<float>(sign)};
+        for (int i = 0; i < segs; ++i) {
+            const float a0 = angle(i), a1 = angle(i + 1);
+            const float ca0 = std::cos(a0), sa0 = std::sin(a0);
+            const float ca1 = std::cos(a1), sa1 = std::sin(a1);
+            if (rInner > 0.0f) {
+                // Hollow: annular ring quad.
+                if (sign > 0) {
+                    appendQuad(out, {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN},
+                               {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                               {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                               {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN});
+                } else {
+                    appendQuad(out, {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN},
+                               {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                               {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                               {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN});
+                }
+            } else {
+                // Solid: triangle fan from the axis.
+                if (sign > 0) {
+                    appendTriangle(out, {glm::vec3{0, 0, capZ}, capN},
+                                   {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                                   {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN});
+                } else {
+                    appendTriangle(out, {glm::vec3{0, 0, capZ}, capN},
+                                   {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                                   {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN});
+                }
+            }
+        }
+    }
+
     return out;
 }
 
@@ -659,16 +708,24 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
 // segments is fixed to nSides (ignoring maxSegmentsCircle), since each side of
 // the polygon is a flat face with a single shared normal.
 //
-// Top view (nSides = 6, hexagonal):
+// ROOT (and Geant4) define rMax as the *apothem* — the perpendicular distance
+// from the Z axis to the midpoint of a face. The polygon vertices lie at the
+// circumradius = rMax / cos(π/nSides):
 //
-//          ____
-//         /    \
-//        /      \
-//        \      /
-//         \____/
+//   Top view (nSides = 6):
 //
-// The face normal for each side is the perpendicular bisector direction of that
-// angular slice, i.e. the direction at the midpoint angle amid = (a0+a1)/2.
+//       V-------V      ← vertices at circumradius = rMax / cos(π/6)
+//      / |     | \
+//     /  |←rMax→|  \   ← rMax = apothem (face midpoint distance)
+//     \  |     |  /
+//      \ |     | /
+//       V-------V
+//
+// The face normal for each side points from the axis to the face midpoint, i.e.
+// in the direction at the midpoint angle amid = (a0+a1)/2.
+//
+// End caps are emitted at the first and last section, using the same winding
+// convention as Pcon (solid polygon fan or annular polygon ring).
 
 TessellationOutput tessellatePgon(const PgonShape &s, const TessellationParams &p) {
     TessellationOutput out;
@@ -680,24 +737,87 @@ TessellationOutput tessellatePgon(const PgonShape &s, const TessellationParams &
     auto angle = [&](int i) {
         return phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
     };
+    // Convert apothem → circumradius. Each polygon face spans dphi/nSides
+    // radians; the half-angle of that sector gives the apothem/circumradius ratio.
+    const float cosPN = std::cos(dphi / (2.0f * static_cast<float>(segs)));
+    auto circumR = [cosPN](float apothem) -> float {
+        return (cosPN > 1e-9f) ? apothem / cosPN : apothem;
+    };
     (void)p;
 
+    // ── Walls (per section pair) ─────────────────────────────────────────────
     for (std::size_t k = 0; k + 1 < s.sections.size(); ++k) {
         const float z0 = static_cast<float>(s.sections[k].z);
         const float z1 = static_cast<float>(s.sections[k + 1].z);
-        const float oBot = static_cast<float>(s.sections[k].rMax);
-        const float oTop = static_cast<float>(s.sections[k + 1].rMax);
+        const float oBot = circumR(static_cast<float>(s.sections[k].rMax));
+        const float oTop = circumR(static_cast<float>(s.sections[k + 1].rMax));
+        const float iBot =
+            (s.sections[k].rMin > 0) ? circumR(static_cast<float>(s.sections[k].rMin)) : 0.0f;
+        const float iTop = (s.sections[k + 1].rMin > 0)
+                               ? circumR(static_cast<float>(s.sections[k + 1].rMin))
+                               : 0.0f;
         for (int i = 0; i < segs; ++i) {
             const float a0 = angle(i), a1 = angle(i + 1);
-            // Normal perpendicular to this flat polygon face, pointing outward.
+            // Outward normal perpendicular to this flat face.
             const float amid = (a0 + a1) * 0.5f;
-            const glm::vec3 n{std::cos(amid), std::sin(amid), 0};
-            appendQuad(out, {glm::vec3{oBot * std::cos(a0), oBot * std::sin(a0), z0}, n},
-                       {glm::vec3{oBot * std::cos(a1), oBot * std::sin(a1), z0}, n},
-                       {glm::vec3{oTop * std::cos(a1), oTop * std::sin(a1), z1}, n},
-                       {glm::vec3{oTop * std::cos(a0), oTop * std::sin(a0), z1}, n});
+            const glm::vec3 nOut{std::cos(amid), std::sin(amid), 0};
+            appendQuad(out, {glm::vec3{oBot * std::cos(a0), oBot * std::sin(a0), z0}, nOut},
+                       {glm::vec3{oBot * std::cos(a1), oBot * std::sin(a1), z0}, nOut},
+                       {glm::vec3{oTop * std::cos(a1), oTop * std::sin(a1), z1}, nOut},
+                       {glm::vec3{oTop * std::cos(a0), oTop * std::sin(a0), z1}, nOut});
+            if (iBot > 0.0f || iTop > 0.0f) {
+                // Inner wall — inward normal, reversed Z order for correct winding.
+                const glm::vec3 nIn{-std::cos(amid), -std::sin(amid), 0};
+                appendQuad(out, {glm::vec3{iTop * std::cos(a0), iTop * std::sin(a0), z1}, nIn},
+                           {glm::vec3{iTop * std::cos(a1), iTop * std::sin(a1), z1}, nIn},
+                           {glm::vec3{iBot * std::cos(a1), iBot * std::sin(a1), z0}, nIn},
+                           {glm::vec3{iBot * std::cos(a0), iBot * std::sin(a0), z0}, nIn});
+            }
         }
     }
+
+    // ── End caps ─────────────────────────────────────────────────────────────
+    // Same winding convention as Pcon caps.
+    for (int sign = -1; sign <= 1; sign += 2) {
+        const auto &sec = (sign < 0) ? s.sections.front() : s.sections.back();
+        const float capZ = static_cast<float>(sec.z);
+        const float rOuter = circumR(static_cast<float>(sec.rMax));
+        const float rInner = (sec.rMin > 0) ? circumR(static_cast<float>(sec.rMin)) : 0.0f;
+        if (rOuter < 1e-9f)
+            continue;
+        const glm::vec3 capN{0, 0, static_cast<float>(sign)};
+        for (int i = 0; i < segs; ++i) {
+            const float a0 = angle(i), a1 = angle(i + 1);
+            const float ca0 = std::cos(a0), sa0 = std::sin(a0);
+            const float ca1 = std::cos(a1), sa1 = std::sin(a1);
+            if (rInner > 0.0f) {
+                // Hollow: annular polygon ring.
+                if (sign > 0) {
+                    appendQuad(out, {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN},
+                               {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                               {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                               {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN});
+                } else {
+                    appendQuad(out, {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN},
+                               {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                               {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                               {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN});
+                }
+            } else {
+                // Solid: polygon fan from the axis.
+                if (sign > 0) {
+                    appendTriangle(out, {glm::vec3{0, 0, capZ}, capN},
+                                   {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                                   {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN});
+                } else {
+                    appendTriangle(out, {glm::vec3{0, 0, capZ}, capN},
+                                   {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                                   {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN});
+                }
+            }
+        }
+    }
+
     return out;
 }
 
