@@ -6,6 +6,9 @@ add_executable(nodehammer_tests
     config/test_config_loader.cpp
     config/test_config_validator.cpp
     import/test_synthetic_importer.cpp
+    selection/test_predicate.cpp
+    selection/test_closure.cpp
+    selection/test_selector.cpp
 )
 
 target_compile_definitions(nodehammer_tests PRIVATE

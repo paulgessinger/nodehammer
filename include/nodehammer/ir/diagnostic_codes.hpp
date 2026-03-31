@@ -37,6 +37,7 @@ inline constexpr std::string_view kWarnTgeoUnknownShape = "NH0301";
 
 // ── Selection engine ──────────────────────────────────────────────────────────
 inline constexpr std::string_view kWarnSelectionOrphan = "NH0400";
+inline constexpr std::string_view kErrSelectionRootDropped = "NH0401";
 
 // ── Tessellation ──────────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrTessUnknownShape = "NH0500";
