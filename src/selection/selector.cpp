@@ -17,10 +17,10 @@ namespace {
 
 // Compiled form of one SelectionRule: predicates are already turned into callables.
 struct CompiledRule {
-    SelectionAction action;
+    SelectionAction action{};
     std::optional<Predicate> scopePred; // nullopt when rule.scope is absent
     Predicate pred;
-    ClosurePolicy closure;
+    ClosurePolicy closure{};
 };
 
 std::vector<CompiledRule> compileRules(const std::vector<SelectionRule> &rules) {

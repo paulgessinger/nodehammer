@@ -45,9 +45,9 @@ SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, SemanticScene &scene,
         const SemanticShapeId rightId = dispatchTGeoShape(bn->GetRightShape(), scene, diags);
         const glm::dmat4 rightTransform = tgeoMatrixToGlm(bn->GetRightMatrix());
 
-        if (dynamic_cast<const TGeoUnion *>(bn)) {
+        if (dynamic_cast<const TGeoUnion *>(bn) != nullptr) {
             variant = BooleanUnion{leftId, rightId, rightTransform};
-        } else if (dynamic_cast<const TGeoSubtraction *>(bn)) {
+        } else if (dynamic_cast<const TGeoSubtraction *>(bn) != nullptr) {
             variant = BooleanSubtraction{leftId, rightId, rightTransform};
         } else {
             variant = BooleanIntersection{leftId, rightId, rightTransform};
@@ -61,7 +61,7 @@ SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, SemanticScene &scene,
             if (f.GetNvert() != 3) {
                 continue; // skip non-triangle facets
             }
-            TessellatedShape::Triangle tri;
+            TessellatedShape::Triangle tri{};
             for (int v = 0; v < 3; ++v) {
                 const auto &pt = tess->GetVertex(f[v]);
                 tri.vertices[static_cast<std::size_t>(v)] = glm::dvec3{pt.x(), pt.y(), pt.z()};

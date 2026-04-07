@@ -25,8 +25,9 @@ void ExporterRegistry::registerExporter(std::unique_ptr<IExporter> exporter) {
 
 const IExporter *ExporterRegistry::findByFormat(std::string_view formatName) const noexcept {
     for (const auto &exp : exporters_) {
-        if (exp->formatName() == formatName)
+        if (exp->formatName() == formatName) {
             return exp.get();
+        }
     }
     return nullptr;
 }
@@ -35,8 +36,9 @@ const IExporter *ExporterRegistry::findByExtension(std::string_view ext) const n
     const std::string needle = toLower(ext);
     for (const auto &exp : exporters_) {
         for (const auto &e : exp->supportedExtensions()) {
-            if (toLower(e) == needle)
+            if (toLower(e) == needle) {
                 return exp.get();
+            }
         }
     }
     return nullptr;
@@ -44,11 +46,13 @@ const IExporter *ExporterRegistry::findByExtension(std::string_view ext) const n
 
 const IExporter *ExporterRegistry::resolve(const std::filesystem::path &path,
                                            std::string_view formatHint) const noexcept {
-    if (!formatHint.empty())
+    if (!formatHint.empty()) {
         return findByFormat(formatHint);
+    }
     const std::string ext = path.extension().string();
-    if (ext.size() > 1)
+    if (ext.size() > 1) {
         return findByExtension(ext);
+    }
     return nullptr;
 }
 

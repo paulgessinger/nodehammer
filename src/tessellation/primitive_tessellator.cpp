@@ -362,8 +362,9 @@ TessellationOutput tessellateCone(const ConeShape &s, const TessellationParams &
         const float capZ = static_cast<float>(sign) * hz;
         const float rOuter = (sign > 0) ? rMax2 : rMax1;
         const float rInner = (sign > 0) ? rMin2 : rMin1;
-        if (rOuter < 1e-9f)
+        if (rOuter < 1e-9f) {
             continue;
+        }
         const glm::vec3 capN{0, 0, static_cast<float>(sign)};
         for (int i = 0; i < segs; ++i) {
             const float a0 = angle(i), a1 = angle(i + 1);
@@ -618,8 +619,9 @@ TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams
 
 TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &p) {
     TessellationOutput out;
-    if (s.sections.size() < 2)
+    if (s.sections.size() < 2) {
         return out;
+    }
     const int segs = std::max(3, p.maxSegmentsCircle);
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
@@ -666,8 +668,9 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
         const float capZ = static_cast<float>(sec.z);
         const float rOuter = static_cast<float>(sec.rMax);
         const float rInner = static_cast<float>(sec.rMin);
-        if (rOuter < 1e-9f)
+        if (rOuter < 1e-9f) {
             continue;
+        }
         const glm::vec3 capN{0, 0, static_cast<float>(sign)};
         for (int i = 0; i < segs; ++i) {
             const float a0 = angle(i), a1 = angle(i + 1);
@@ -732,8 +735,9 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
 
 TessellationOutput tessellatePgon(const PgonShape &s, const TessellationParams &p) {
     TessellationOutput out;
-    if (s.sections.size() < 2 || s.nSides < 3)
+    if (s.sections.size() < 2 || s.nSides < 3) {
         return out;
+    }
     const int segs = s.nSides; // one segment per polygon face
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
@@ -786,8 +790,9 @@ TessellationOutput tessellatePgon(const PgonShape &s, const TessellationParams &
         const float capZ = static_cast<float>(sec.z);
         const float rOuter = circumR(static_cast<float>(sec.rMax));
         const float rInner = (sec.rMin > 0) ? circumR(static_cast<float>(sec.rMin)) : 0.0f;
-        if (rOuter < 1e-9f)
+        if (rOuter < 1e-9f) {
             continue;
+        }
         const glm::vec3 capN{0, 0, static_cast<float>(sign)};
         for (int i = 0; i < segs; ++i) {
             const float a0 = angle(i), a1 = angle(i + 1);

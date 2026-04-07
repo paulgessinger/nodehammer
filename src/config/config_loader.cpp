@@ -107,7 +107,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
 
     if (type == "and" || type == "or") {
         const auto *operandsArr = tbl["operands"].as_array();
-        if (!operandsArr) {
+        if (operandsArr == nullptr) {
             diags.error(codes::kErrConfigParse,
                         std::format("'{}' predicate missing 'operands' array", type), context);
             return std::nullopt;
@@ -116,7 +116,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
         operands.reserve(operandsArr->size());
         for (const auto &elem : *operandsArr) {
             const auto *subTbl = elem.as_table();
-            if (!subTbl) {
+            if (subTbl == nullptr) {
                 diags.error(codes::kErrConfigParse, "operand in compound predicate must be a table",
                             context);
                 return std::nullopt;
@@ -135,7 +135,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
 
     if (type == "not") {
         const auto *operandTbl = tbl["operand"].as_table();
-        if (!operandTbl) {
+        if (operandTbl == nullptr) {
             diags.error(codes::kErrConfigParse, "'not' predicate missing 'operand' table", context);
             return std::nullopt;
         }
@@ -155,12 +155,12 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
 /// [materials.<name>] — the table key is the material name.
 void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
     const auto *matsTable = root["materials"].as_table();
-    if (!matsTable) {
+    if (matsTable == nullptr) {
         return;
     }
     for (const auto &[key, node] : *matsTable) {
         const auto *tbl = node.as_table();
-        if (!tbl) {
+        if (tbl == nullptr) {
             diags.error(codes::kErrConfigParse,
                         std::format("materials.{} must be a table, not a scalar", key.str()));
             continue;
@@ -195,18 +195,18 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
 /// [[selection_rules]] — action determined by presence of keep_if or drop_if key.
 void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
     const auto *arr = root["selection_rules"].as_array();
-    if (!arr) {
+    if (arr == nullptr) {
         return;
     }
     for (const auto &entry : *arr) {
         const auto *tbl = entry.as_table();
-        if (!tbl) {
+        if (tbl == nullptr) {
             continue;
         }
 
         warnUnknownKeys(*tbl, {"keep_if", "drop_if", "scope", "closure"}, "selection_rules", diags);
 
-        SelectionAction action;
+        SelectionAction action{};
         const toml::table *predTbl = nullptr;
 
         if (const auto *kif = (*tbl)["keep_if"].as_table()) {
@@ -254,12 +254,12 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
 /// Future: match may also be a string expression DSL (e.g. match = "tag.semantic == sensor").
 void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
     const auto *arr = root["material_rules"].as_array();
-    if (!arr) {
+    if (arr == nullptr) {
         return;
     }
     for (const auto &entry : *arr) {
         const auto *tbl = entry.as_table();
-        if (!tbl) {
+        if (tbl == nullptr) {
             continue;
         }
 
@@ -282,7 +282,7 @@ void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &
                 continue;
             }
             rule.match = std::move(*pred);
-        } else if ((*tbl)["match"].as_string()) {
+        } else if ((*tbl)["match"].as_string() != nullptr) {
             diags.error(codes::kErrConfigParse,
                         "string expression DSL for 'match' is not yet supported; use a table",
                         "material_rules");
@@ -295,12 +295,12 @@ void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &
 /// [[tessellation_rules]] — scope (optional), max_segments_circle, fallback.
 void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
     const auto *arr = root["tessellation_rules"].as_array();
-    if (!arr) {
+    if (arr == nullptr) {
         return;
     }
     for (const auto &entry : *arr) {
         const auto *tbl = entry.as_table();
-        if (!tbl) {
+        if (tbl == nullptr) {
             continue;
         }
         warnUnknownKeys(*tbl, {"scope", "skip_geometry", "max_segments_circle", "fallback"},
@@ -344,11 +344,13 @@ ConfigResult parseTable(const toml::table &tbl) {
     if (const auto *exportTbl = tbl["export"].as_table()) {
         for (const auto &[fmtKey, fmtVal] : *exportTbl) {
             const auto *fmtTbl = fmtVal.as_table();
-            if (!fmtTbl)
+            if (fmtTbl == nullptr) {
                 continue;
+            }
             ExportFormatConfig fmtCfg;
-            if (auto v = (*fmtTbl)["unit_scale"].value<double>())
+            if (auto v = (*fmtTbl)["unit_scale"].value<double>()) {
                 fmtCfg.unitScale = *v;
+            }
             cfg.exportFormats[std::string{fmtKey}] = fmtCfg;
         }
     }

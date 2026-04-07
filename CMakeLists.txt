@@ -23,8 +23,6 @@ option(NODEHAMMER_ENABLE_ASAN  "Enable AddressSanitizer"          OFF)
 # ── Library target ─────────────────────────────────────────────────────────────
 add_library(nodehammer_lib STATIC
     src/ir/semantic.cpp
-    src/ir/render.cpp
-    src/ir/diagnostics.cpp
     src/config/config_loader.cpp
     src/config/config_validator.cpp
     src/import/synthetic.cpp

@@ -40,7 +40,7 @@ struct ImportState {
 
 SemanticMaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
     const TGeoMaterial *mat = vol->GetMaterial();
-    if (!mat) {
+    if (mat == nullptr) {
         st.diags.warn(codes::kWarnImportNoMaterial,
                       std::format("volume '{}' has no material", vol->GetName()));
         const SemanticMaterialId id = st.scene.nextMaterialId();
@@ -138,7 +138,7 @@ ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
     TGeoManager *mgr = TGeoManager::Import(path.c_str());
     gErrorIgnoreLevel = savedLevel;
 
-    if (!mgr) {
+    if (mgr == nullptr) {
         ImportResult result;
         result.diags.error(codes::kErrTgeoOpenFailed,
                            std::format("failed to open ROOT file '{}'", path.string()));
@@ -149,7 +149,7 @@ ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
 }
 
 ImportResult TGeoImporter::import(TGeoManager *mgr) const {
-    if (!mgr) {
+    if (mgr == nullptr) {
         ImportResult result;
         result.diags.error(codes::kErrTgeoOpenFailed, "null TGeoManager pointer");
         return result;

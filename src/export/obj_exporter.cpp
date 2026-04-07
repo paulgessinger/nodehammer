@@ -50,19 +50,22 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
         // PBR metallic → OBJ specular: rough approximation
         const float s = mat.metallicFactor;
         mtlFile << "Ks " << s << " " << s << " " << s << "\n";
-        if (mat.baseColorFactor.a < 1.0f)
+        if (mat.baseColorFactor.a < 1.0f) {
             mtlFile << "d " << mat.baseColorFactor.a << "\n";
-        if (glm::any(glm::notEqual(mat.emissiveFactor, glm::vec3{0.f})))
+        }
+        if (glm::any(glm::notEqual(mat.emissiveFactor, glm::vec3{0.f}))) {
             mtlFile << "Ke " << mat.emissiveFactor.r << " " << mat.emissiveFactor.g << " "
                     << mat.emissiveFactor.b << "\n";
+        }
         mtlFile << "\n";
         matNames[id] = mat.name;
     }
 
     // ── Write geometry — BFS from root, world-space ───────────────────────────
 
-    if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId))
+    if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return result;
+    }
 
     std::size_t vtxOffset = 0; // running 1-based index base
 
@@ -72,20 +75,24 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
     while (!q.empty()) {
         const RenderNodeId rnId = q.front();
         q.pop();
-        if (!scene.nodes.contains(rnId))
+        if (!scene.nodes.contains(rnId)) {
             continue;
+        }
         const RenderNode &rn = scene.nodes.at(rnId);
 
         for (const auto &binding : rn.meshBindings) {
-            if (!scene.meshAssets.contains(binding.meshId))
+            if (!scene.meshAssets.contains(binding.meshId)) {
                 continue;
+            }
             const MeshAsset &ma = scene.meshAssets.at(binding.meshId);
-            if (ma.vertices.empty())
+            if (ma.vertices.empty()) {
                 continue;
+            }
 
             objFile << "o " << rn.name << "\n";
-            if (matNames.contains(binding.materialId))
+            if (matNames.contains(binding.materialId)) {
                 objFile << "usemtl " << matNames.at(binding.materialId) << "\n";
+            }
 
             // Normal transform: inverse-transpose of worldTransform (upper-left 3×3)
             const glm::mat4 &world = rn.worldTransform;
@@ -113,8 +120,9 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
             objFile << "\n";
         }
 
-        for (const auto childId : rn.children)
+        for (const auto childId : rn.children) {
             q.push(childId);
+        }
     }
 
     return result;

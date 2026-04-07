@@ -51,8 +51,9 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
 
     // Pad to 4-byte alignment (required for float and uint32 accessors).
     auto alignTo4 = [&]() {
-        while (buf.data.size() % 4 != 0)
+        while (buf.data.size() % 4 != 0) {
             buf.data.push_back(0);
+        }
     };
 
     // ── Materials ─────────────────────────────────────────────────────────────
@@ -89,8 +90,9 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
     std::unordered_map<MeshAssetId, MeshAccs> meshAccs;
 
     for (const auto &[id, ma] : scene.meshAssets) {
-        if (ma.vertices.empty() || ma.indices.empty())
+        if (ma.vertices.empty() || ma.indices.empty()) {
             continue;
+        }
 
         // Vertex buffer view (interleaved POSITION + NORMAL)
         alignTo4();
@@ -173,11 +175,13 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
     auto getOrCreateGltfMesh = [&](const MeshBinding &binding) -> int {
         const MeshKey key{binding.meshId.value, binding.materialId.value};
         auto it = meshKeyToGltf.find(key);
-        if (it != meshKeyToGltf.end())
+        if (it != meshKeyToGltf.end()) {
             return it->second;
+        }
 
-        if (!meshAccs.contains(binding.meshId))
+        if (!meshAccs.contains(binding.meshId)) {
             return -1;
+        }
 
         const auto &accs = meshAccs.at(binding.meshId);
         const int matI = matIdx.contains(binding.materialId) ? matIdx.at(binding.materialId) : -1;
@@ -190,8 +194,9 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         prim.material = matI;
 
         tinygltf::Mesh gm;
-        if (scene.meshAssets.contains(binding.meshId))
+        if (scene.meshAssets.contains(binding.meshId)) {
             gm.name = scene.meshAssets.at(binding.meshId).name;
+        }
         gm.primitives.push_back(std::move(prim));
 
         const int meshI = static_cast<int>(model.meshes.size());
@@ -210,19 +215,22 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         while (!q.empty()) {
             const RenderNodeId nid = q.front();
             q.pop();
-            if (!scene.nodes.contains(nid) || nodeIdx.contains(nid))
+            if (!scene.nodes.contains(nid) || nodeIdx.contains(nid)) {
                 continue;
+            }
             nodeIdx[nid] = static_cast<int>(model.nodes.size());
             model.nodes.emplace_back();
-            for (const auto childId : scene.nodes.at(nid).children)
+            for (const auto childId : scene.nodes.at(nid).children) {
                 q.push(childId);
+            }
         }
     }
 
     // Fill in node data now that all indices are known.
     for (const auto &[rnId, rn] : scene.nodes) {
-        if (!nodeIdx.contains(rnId))
+        if (!nodeIdx.contains(rnId)) {
             continue;
+        }
         tinygltf::Node &gn = model.nodes[static_cast<std::size_t>(nodeIdx.at(rnId))];
         gn.name = rn.name;
 
@@ -246,16 +254,18 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         };
 
         for (const auto childId : rn.children) {
-            if (nodeIdx.contains(childId))
+            if (nodeIdx.contains(childId)) {
                 gn.children.push_back(nodeIdx.at(childId));
+            }
         }
 
         // First mesh binding → glTF node mesh. (Multiple bindings are rare in practice;
         // subsequent bindings would need separate child nodes — not implemented here.)
         if (!rn.meshBindings.empty()) {
             const int mi = getOrCreateGltfMesh(rn.meshBindings.front());
-            if (mi >= 0)
+            if (mi >= 0) {
                 gn.mesh = mi;
+            }
         }
     }
 
@@ -263,8 +273,9 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
 
     tinygltf::Scene gscene;
     gscene.name = "scene";
-    if (nodeIdx.contains(scene.rootId))
+    if (nodeIdx.contains(scene.rootId)) {
         gscene.nodes = {nodeIdx.at(scene.rootId)};
+    }
     model.scenes.push_back(std::move(gscene));
     model.defaultScene = 0;
 
