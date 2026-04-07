@@ -4,6 +4,16 @@
 # its kept children are re-parented to the nearest surviving ancestor (or root)
 # with their world transform rebased. This lets us drop large container volumes
 # while keeping sensor geometry at the correct world positions.
+#
+# Hierarchy:
+#   /world/OpenDataTracker/Pixels/PixelBarrel/PixelLayer0/stave0/module0/sensor_0
+#   /world/OpenDataTracker/ShortStrips/ShortStripBarrel/ShortStripLayer0/...
+#   /world/OpenDataTracker/LongStrips/LongStripBarrel/LongStripLayer0/...
+#   /world/OpenDataTracker/Pixels/PixelEndcapN/PixelEndcapN0/...
+#
+# Strategy: keep subdetector and layer nodes as structural groups (no geometry),
+# keep sensor nodes underneath. hoist_orphans re-parents sensors to their
+# nearest kept ancestor (the layer node) with rebased transforms.
 
 hoist_orphans = true
 
@@ -17,16 +27,38 @@ base_color = [0.5, 0.5, 0.5, 1.0]
 metallic = 0.0
 roughness = 0.7
 
-# Keep only sensor nodes (sensitive=true) in the pixel subdetectors.
-# The tree is: world → OpenDataTracker → Pixels → {PixelBarrel, PixelEndcapN, PixelEndcapP} → modules → sensors
-# hoist_orphans re-parents the kept sensors to world with world-space transforms.
+# ── Selection ────────────────────────────────────────────────────────────────
 
+# Drop everything by default.
 [[selection_rules]]
 [selection_rules.drop_if]
 type = "name_glob"
 pattern = "*"
 
-# Keep nodes that are both sensitive AND belong to a pixel sub-detector.
+# Keep subdetector nodes as top-level structural groups.
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "or"
+operands = [
+  { type = "path_glob", pattern = "**/Pixels" },
+  { type = "path_glob", pattern = "**/ShortStrips" },
+  { type = "path_glob", pattern = "**/LongStrips" },
+]
+
+# Keep layer/endcap-ring nodes as structural groups (only within tracker).
+[[selection_rules]]
+[selection_rules.keep_if]
+type = "or"
+operands = [
+  { type = "path_glob", pattern = "**/Pixels/**/*Layer*" },
+  { type = "path_glob", pattern = "**/Pixels/*Endcap*/*Endcap*" },
+  { type = "path_glob", pattern = "**/ShortStrips/**/*Layer*" },
+  { type = "path_glob", pattern = "**/ShortStrips/*Endcap*/*Endcap*" },
+  { type = "path_glob", pattern = "**/LongStrips/**/*Layer*" },
+  { type = "path_glob", pattern = "**/LongStrips/*Endcap*/*Endcap*" },
+]
+
+# Keep sensor nodes (sensitive + tracker subdetectors).
 [[selection_rules]]
 [selection_rules.keep_if]
 type = "and"
@@ -37,14 +69,9 @@ operands = [
     { type = "path_glob", pattern = "**/ShortStrips/**" },
     { type = "path_glob", pattern = "**/LongStrips/**" },
   ] },
-  # {type = "or", operands = [
-  #   {type = "tag", key = "subdetector", value = "PixelBarrel"},
-  #   {type = "tag", key = "subdetector", value = "PixelEndcapN"},
-  #   {type = "tag", key = "subdetector", value = "PixelEndcapP"},
-  # ]},
 ]
 
-# Material rules
+# ── Material rules ───────────────────────────────────────────────────────────
 
 [[material_rules]]
 material = "silicon"
@@ -56,12 +83,34 @@ value = "true"
 [[material_rules]]
 material = "support"
 
-# Tessellation
+# ── Tessellation ─────────────────────────────────────────────────────────────
 
+# World and structural group nodes: no geometry.
 [[tessellation_rules]]
 scope = "/world"
 skip_geometry = true
 
+[[tessellation_rules]]
+scope = "**/Pixels"
+skip_geometry = true
+
+[[tessellation_rules]]
+scope = "**/ShortStrips"
+skip_geometry = true
+
+[[tessellation_rules]]
+scope = "**/LongStrips"
+skip_geometry = true
+
+[[tessellation_rules]]
+scope = "**/*Layer*"
+skip_geometry = true
+
+[[tessellation_rules]]
+scope = "**/*Endcap*/*Endcap*"
+skip_geometry = true
+
+# Everything else: tessellate normally.
 [[tessellation_rules]]
 max_segments_circle = 48
 fallback = "skip"
