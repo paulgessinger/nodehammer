@@ -195,6 +195,10 @@ struct SemanticNode {
     std::optional<SemanticNodeId> parentId;
     std::vector<SemanticNodeId> children;
 
+    /// Full path in the original source tree, e.g. "/world/ODD/PixelBarrel/sensor_0".
+    /// Set by computeOriginalPaths() before selection; preserved across hoisting.
+    std::string originalPath;
+
     /// Free-form metadata tags (e.g. "subdetector"="tracker", "sensitive"="true")
     std::map<std::string, std::string> tags;
 
@@ -215,6 +219,9 @@ class SemanticScene {
 
     /// BFS pass: compose parent × local to set worldTransform on every node.
     void computeWorldTransforms();
+
+    /// BFS pass: build originalPath from root for every reachable node.
+    void computeOriginalPaths();
 
     /// BFS traversal from root; calls fn(const SemanticNode &) for every reachable node.
     template <typename Fn> void visitBFS(Fn &&fn) const {
@@ -344,6 +351,7 @@ inline void to_json(nlohmann::json &j, const SemanticNode &n) {
         {"localTransform", n.localTransform},
         {"worldTransform", n.worldTransform},
         {"children", n.children},
+        {"originalPath", n.originalPath},
         {"tags", n.tags},
         {"provenance", n.provenance},
     };

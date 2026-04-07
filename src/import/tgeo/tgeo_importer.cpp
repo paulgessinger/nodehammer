@@ -123,6 +123,7 @@ ImportResult traverseManager(TGeoManager *mgr, std::string sourceFile) {
     result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
 
     result.scene.computeWorldTransforms();
+    result.scene.computeOriginalPaths();
     return result;
 }
 

@@ -213,6 +213,7 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     importStructural(detOwner->manager().GetTopNode(), std::nullopt, st);
 
     result.scene.computeWorldTransforms();
+    result.scene.computeOriginalPaths();
 
     gErrorIgnoreLevel = savedRootLevel;
     dd4hep::setPrintLevel(savedDd4hepLevel);

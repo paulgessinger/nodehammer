@@ -15,4 +15,17 @@ void SemanticScene::computeWorldTransforms() {
     });
 }
 
+void SemanticScene::computeOriginalPaths() {
+    if (nodes.empty() || !nodes.contains(rootId)) {
+        return;
+    }
+    nodes.at(rootId).originalPath = "/" + nodes.at(rootId).name;
+    visitBFS([this](const SemanticNode &node) {
+        for (const auto childId : node.children) {
+            auto &child = nodes.at(childId);
+            child.originalPath = node.originalPath + "/" + child.name;
+        }
+    });
+}
+
 } // namespace nodehammer

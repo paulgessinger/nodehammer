@@ -62,6 +62,7 @@ SemanticScene SyntheticSceneBuilder::buildSingleBox() {
     auto nodeId = addNode(scene, "world", lvId);
     scene.rootId = nodeId;
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
     return scene;
 }
 
@@ -81,6 +82,7 @@ SemanticScene SyntheticSceneBuilder::buildNestedBoxes() {
     addNode(scene, "inner", innerLv, rootId, childTransform);
 
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
     return scene;
 }
 
@@ -97,6 +99,7 @@ SemanticScene SyntheticSceneBuilder::buildTubeInBox() {
     addNode(scene, "tube", tubeLv, rootId);
 
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
     return scene;
 }
 
@@ -129,6 +132,7 @@ SemanticScene SyntheticSceneBuilder::buildBooleanSubtraction() {
     auto nodeId = addNode(scene, "world", lvId);
     scene.rootId = nodeId;
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
     return scene;
 }
 
@@ -161,6 +165,7 @@ ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     scene.nodes[nodeId] = node;
     scene.rootId = nodeId;
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
 
     diags.warn(codes::kWarnImportUnknownShape, "Unknown shape type: SyntheticUnknown", "world");
 
