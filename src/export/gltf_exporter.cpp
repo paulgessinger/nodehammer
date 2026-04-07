@@ -16,6 +16,7 @@
 #include <nodehammer/ir/diagnostic_codes.hpp>
 
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <cstddef>
 #include <format>
@@ -226,7 +227,13 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         gn.name = rn.name;
 
         // Local transform as column-major 4×4 matrix (GLM and glTF both column-major).
-        const glm::mat4 &m = rn.localTransform;
+        // Apply unit_scale to the root node so the entire scene is rescaled.
+        const glm::mat4 localWithScale =
+            (!rn.parentId.has_value() && config.unitScale != 1.0)
+                ? glm::mat4(glm::dmat4(rn.localTransform) *
+                            glm::dmat4(glm::scale(glm::dmat4(1.0), glm::dvec3(config.unitScale))))
+                : rn.localTransform;
+        const glm::mat4 &m = localWithScale;
         gn.matrix = {
             static_cast<double>(m[0][0]), static_cast<double>(m[0][1]),
             static_cast<double>(m[0][2]), static_cast<double>(m[0][3]),

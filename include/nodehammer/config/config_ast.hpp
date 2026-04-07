@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -111,11 +112,20 @@ struct TessellationRule {
     BooleanFallback fallback{BooleanFallback::Skip};
 };
 
+// ── Per-format export overrides ───────────────────────────────────────────────
+// In TOML: [export.gltf], [export.glb], [export.obj].
+// Each field is optional; absent means "use the format's built-in default".
+
+struct ExportFormatConfig {
+    std::optional<double> unitScale; ///< Overrides the format's default scale
+};
+
 // ── Top-level config ──────────────────────────────────────────────────────────
 // Output path/format are CLI concerns, not config concerns.
 
 struct NHConfig {
     bool hoistOrphans{false};
+    std::map<std::string, ExportFormatConfig> exportFormats; ///< keyed by "gltf", "glb", "obj"
     std::vector<MaterialDef> materials;
     std::vector<SelectionRule> selection;
     std::vector<MaterialRule> materialRules;

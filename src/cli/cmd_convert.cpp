@@ -120,6 +120,16 @@ void register_cmd_convert(CLI::App &app) {
         else if (outputFmt == "obj" || outExt == ".obj")
             ecfg.format = nodehammer::ExportConfig::Format::OBJ;
 
+        // Start from the format's built-in default, then apply config overrides.
+        ecfg.unitScale = nodehammer::ExportConfig::defaultUnitScale(ecfg.format);
+        const std::string fmtKey = (ecfg.format == nodehammer::ExportConfig::Format::GLB) ? "glb"
+                                   : (ecfg.format == nodehammer::ExportConfig::Format::GLTF)
+                                       ? "gltf"
+                                       : "obj";
+        if (cfg.exportFormats.contains(fmtKey))
+            if (auto v = cfg.exportFormats.at(fmtKey).unitScale)
+                ecfg.unitScale = *v;
+
         auto expResult = exp->write(tessResult.scene, outputPath, ecfg);
         printDiags(expResult.diags);
         if (expResult.diags.hasErrors()) {

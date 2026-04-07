@@ -16,7 +16,7 @@ std::string_view ObjExporter::formatName() const noexcept { return "obj"; }
 std::vector<std::string> ObjExporter::supportedExtensions() const { return {".obj"}; }
 
 ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem::path &path,
-                                const ExportConfig & /*config*/) const {
+                                const ExportConfig &config) const {
     ExportResult result;
 
     std::ofstream objFile{path};
@@ -91,9 +91,10 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
             const glm::mat4 &world = rn.worldTransform;
             const glm::mat3 normalMat = glm::mat3(glm::transpose(glm::affineInverse(world)));
 
+            const float s = static_cast<float>(config.unitScale);
             for (const auto &v : ma.vertices) {
                 const glm::vec4 wpos = world * glm::vec4(v.position, 1.0f);
-                objFile << "v " << wpos.x << " " << wpos.y << " " << wpos.z << "\n";
+                objFile << "v " << wpos.x * s << " " << wpos.y * s << " " << wpos.z * s << "\n";
             }
             for (const auto &v : ma.vertices) {
                 const glm::vec3 wn = glm::normalize(normalMat * v.normal);

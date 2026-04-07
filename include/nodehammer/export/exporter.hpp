@@ -15,7 +15,21 @@ namespace nodehammer {
 
 struct ExportConfig {
     enum class Format { GLB, GLTF, OBJ } format{Format::GLB};
-    bool embedExtras{false}; ///< Embed provenance info in glTF extras
+    double unitScale{1.0}; ///< Scale factor applied to the root node (e.g. 0.01 for cm→m)
+
+    /// Default unit scale for each format when the source system uses centimetres (DD4hep/TGeo).
+    /// glTF/GLB: 0.01  (spec mandates metres)
+    /// OBJ:      0.001 (unitless; treat source cm as mm for typical DCC tool expectations)
+    static constexpr double defaultUnitScale(Format fmt) noexcept {
+        switch (fmt) {
+        case Format::GLB:
+        case Format::GLTF:
+            return 0.01;
+        case Format::OBJ:
+            return 0.01;
+        }
+        return 1.0;
+    }
 };
 
 // ── ExportResult ──────────────────────────────────────────────────────────────

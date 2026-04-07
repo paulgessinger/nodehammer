@@ -104,6 +104,8 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
     // Cache: SemanticMaterialId → RenderMaterialId (avoid creating duplicate RenderMaterials
     // for nodes that share a SourceMaterial and match no named MaterialRule).
     std::unordered_map<SemanticMaterialId, RenderMaterialId> defaultMatCache;
+    // Cache: MaterialDef name → RenderMaterialId (avoid duplicating named config materials).
+    std::unordered_map<std::string, RenderMaterialId> namedMatCache;
     // Cache: (shapeId, maxSegmentsCircle) → MeshAssetId (LV deduplication).
     std::unordered_map<SemanticShapeId, std::unordered_map<int, MeshAssetId>> meshCache;
 
@@ -211,22 +213,27 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 const MaterialRule *mr = resolveMaterial(config_.materialRules, nodePath, view);
                 RenderMaterialId rmId;
                 if (mr) {
-                    // Find named material in config_.materials
-                    for (const auto &md : config_.materials) {
-                        if (md.name == mr->materialName) {
-                            RenderMaterial rm;
-                            rm.id = result.scene.nextMaterialId();
-                            rm.name = md.name;
-                            rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
-                                                           md.baseColor.b, md.baseColor.a};
-                            rm.metallicFactor = md.metallic;
-                            rm.roughnessFactor = md.roughness;
-                            rm.emissiveFactor =
-                                glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
-                            rm.doubleSided = md.doubleSided;
-                            rmId = rm.id;
-                            result.scene.materials[rmId] = std::move(rm);
-                            break;
+                    auto cit = namedMatCache.find(mr->materialName);
+                    if (cit != namedMatCache.end()) {
+                        rmId = cit->second;
+                    } else {
+                        for (const auto &md : config_.materials) {
+                            if (md.name == mr->materialName) {
+                                RenderMaterial rm;
+                                rm.id = result.scene.nextMaterialId();
+                                rm.name = md.name;
+                                rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
+                                                               md.baseColor.b, md.baseColor.a};
+                                rm.metallicFactor = md.metallic;
+                                rm.roughnessFactor = md.roughness;
+                                rm.emissiveFactor =
+                                    glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
+                                rm.doubleSided = md.doubleSided;
+                                rmId = rm.id;
+                                result.scene.materials[rmId] = std::move(rm);
+                                namedMatCache[md.name] = rmId;
+                                break;
+                            }
                         }
                     }
                 }
@@ -282,20 +289,26 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         const MaterialRule *mr = resolveMaterial(config_.materialRules, nodePath, view);
         RenderMaterialId rmId;
         if (mr) {
-            for (const auto &md : config_.materials) {
-                if (md.name == mr->materialName) {
-                    RenderMaterial rm;
-                    rm.id = result.scene.nextMaterialId();
-                    rm.name = md.name;
-                    rm.baseColorFactor =
-                        glm::vec4{md.baseColor.r, md.baseColor.g, md.baseColor.b, md.baseColor.a};
-                    rm.metallicFactor = md.metallic;
-                    rm.roughnessFactor = md.roughness;
-                    rm.emissiveFactor = glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
-                    rm.doubleSided = md.doubleSided;
-                    rmId = rm.id;
-                    result.scene.materials[rmId] = std::move(rm);
-                    break;
+            auto cit = namedMatCache.find(mr->materialName);
+            if (cit != namedMatCache.end()) {
+                rmId = cit->second;
+            } else {
+                for (const auto &md : config_.materials) {
+                    if (md.name == mr->materialName) {
+                        RenderMaterial rm;
+                        rm.id = result.scene.nextMaterialId();
+                        rm.name = md.name;
+                        rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
+                                                       md.baseColor.b, md.baseColor.a};
+                        rm.metallicFactor = md.metallic;
+                        rm.roughnessFactor = md.roughness;
+                        rm.emissiveFactor = glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
+                        rm.doubleSided = md.doubleSided;
+                        rmId = rm.id;
+                        result.scene.materials[rmId] = std::move(rm);
+                        namedMatCache[md.name] = rmId;
+                        break;
+                    }
                 }
             }
         }

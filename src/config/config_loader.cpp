@@ -334,12 +334,24 @@ ConfigResult parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
-    warnUnknownKeys(
-        tbl,
-        {"hoist_orphans", "materials", "selection_rules", "material_rules", "tessellation_rules"},
-        "<top-level>", diags);
-    if (auto v = tbl["hoist_orphans"].value<bool>())
+    warnUnknownKeys(tbl,
+                    {"hoist_orphans", "export", "materials", "selection_rules", "material_rules",
+                     "tessellation_rules"},
+                    "<top-level>", diags);
+    if (auto v = tbl["hoist_orphans"].value<bool>()) {
         cfg.hoistOrphans = *v;
+    }
+    if (const auto *exportTbl = tbl["export"].as_table()) {
+        for (const auto &[fmtKey, fmtVal] : *exportTbl) {
+            const auto *fmtTbl = fmtVal.as_table();
+            if (!fmtTbl)
+                continue;
+            ExportFormatConfig fmtCfg;
+            if (auto v = (*fmtTbl)["unit_scale"].value<double>())
+                fmtCfg.unitScale = *v;
+            cfg.exportFormats[std::string{fmtKey}] = fmtCfg;
+        }
+    }
     parseMaterials(tbl, cfg, diags);
     parseSelectionRules(tbl, cfg, diags);
     parseMaterialRules(tbl, cfg, diags);
