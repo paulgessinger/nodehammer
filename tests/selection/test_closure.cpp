@@ -56,6 +56,7 @@ static auto makeThreeLevelScene() {
 
     scene.rootId = rootId;
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
 
     struct Result {
         SemanticScene scene;

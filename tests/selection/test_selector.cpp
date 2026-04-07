@@ -60,6 +60,7 @@ static auto makeThreeLevelScene() {
 
     scene.rootId = rootId;
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
 
     struct Result {
         SemanticScene scene;
@@ -424,6 +425,7 @@ makeLinearScene(const std::vector<std::string> &names,
     }
     scene.rootId = ids[0];
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
     return scene;
 }
 

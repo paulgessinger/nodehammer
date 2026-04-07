@@ -11,37 +11,14 @@ namespace nodehammer {
 
 namespace {
 
-// Build BFS paths (same as SelectionEngine::buildPaths — duplicated here to
-// avoid a cross-module dependency; both are internal implementation details).
-std::unordered_map<SemanticNodeId, std::string> buildPaths(const SemanticScene &scene) {
-    std::unordered_map<SemanticNodeId, std::string> paths;
-    if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
-        return paths;
-    }
-    paths.reserve(scene.nodes.size());
-    paths[scene.rootId] = "/" + scene.nodes.at(scene.rootId).name;
-    std::queue<SemanticNodeId> q;
-    q.push(scene.rootId);
-    while (!q.empty()) {
-        const auto &node = scene.nodes.at(q.front());
-        q.pop();
-        for (const auto childId : node.children) {
-            if (!scene.nodes.contains(childId))
-                continue;
-            paths[childId] = paths.at(node.id) + "/" + scene.nodes.at(childId).name;
-            q.push(childId);
-        }
-    }
-    return paths;
-}
-
 // Return the TessellationRule that applies to nodePath (first scope match, or
 // last rule if none match, or a default if the vector is empty).
 const TessellationRule &resolveRule(const std::vector<TessellationRule> &rules,
                                     const std::string &nodePath) {
     static const TessellationRule kDefault;
-    if (rules.empty())
+    if (rules.empty()) {
         return kDefault;
+    }
     for (const auto &r : rules) {
         if (!r.scope.has_value() || matchGlob(*r.scope, nodePath)) {
             return r;
@@ -54,12 +31,14 @@ const TessellationRule &resolveRule(const std::vector<TessellationRule> &rules,
 const MaterialRule *resolveMaterial(const std::vector<MaterialRule> &matRules,
                                     const std::string &nodePath, const NodeView &view) {
     for (const auto &mr : matRules) {
-        if (mr.scope.has_value() && !matchGlob(*mr.scope, nodePath))
+        if (mr.scope.has_value() && !matchGlob(*mr.scope, nodePath)) {
             continue;
+        }
         if (mr.match.has_value()) {
             auto pred = compilePredicate(*mr.match);
-            if (!pred(view))
+            if (!pred(view)) {
                 continue;
+            }
         }
         return &mr;
     }
@@ -95,10 +74,10 @@ TessellationPass::TessellationPass(const NHConfig &config) : config_(config) {}
 
 TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const {
     TessellationPassResult result;
-    if (scene.nodes.empty())
+    if (scene.nodes.empty()) {
         return result;
+    }
 
-    const auto paths = buildPaths(scene);
     PrimitiveTessellator tess;
 
     // Cache: SemanticMaterialId → RenderMaterialId (avoid creating duplicate RenderMaterials
@@ -114,18 +93,20 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
     // BFS order ensures parents are processed before children.
     std::queue<SemanticNodeId> q;
-    if (!scene.nodes.contains(scene.rootId))
+    if (!scene.nodes.contains(scene.rootId)) {
         return result;
+    }
     q.push(scene.rootId);
 
     while (!q.empty()) {
         const auto semId = q.front();
         q.pop();
-        if (!scene.nodes.contains(semId))
+        if (!scene.nodes.contains(semId)) {
             continue;
+        }
 
         const SemanticNode &semNode = scene.nodes.at(semId);
-        const std::string &nodePath = paths.contains(semId) ? paths.at(semId) : "";
+        const std::string &nodePath = semNode.originalPath;
 
         // ── Create RenderNode ──────────────────────────────────────────────────
         const RenderNodeId rnId = result.scene.nextNodeId();
@@ -155,23 +136,26 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         // skip_geometry: add the node to the render tree as a structural node but produce no mesh.
         if (rule.skipGeometry) {
             result.scene.nodes[rnId] = rn;
-            for (const auto childId : semNode.children)
+            for (const auto childId : semNode.children) {
                 q.push(childId);
+            }
             continue;
         }
 
         // ── Resolve shape ──────────────────────────────────────────────────────
         if (!scene.logVols.contains(semNode.logVolId)) {
             result.scene.nodes[rnId] = rn;
-            for (const auto childId : semNode.children)
+            for (const auto childId : semNode.children) {
                 q.push(childId);
+            }
             continue;
         }
         const SemanticLogicalVolume &lv = scene.logVols.at(semNode.logVolId);
         if (!scene.shapes.contains(lv.shapeId)) {
             result.scene.nodes[rnId] = rn;
-            for (const auto childId : semNode.children)
+            for (const auto childId : semNode.children) {
                 q.push(childId);
+            }
             continue;
         }
         const SemanticShape &shape = scene.shapes.at(lv.shapeId);
@@ -212,7 +196,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 NodeView view{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
                 const MaterialRule *mr = resolveMaterial(config_.materialRules, nodePath, view);
                 RenderMaterialId rmId;
-                if (mr) {
+                if (mr != nullptr) {
                     auto cit = namedMatCache.find(mr->materialName);
                     if (cit != namedMatCache.end()) {
                         rmId = cit->second;
@@ -258,8 +242,9 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 break;
             }
             result.scene.nodes[rnId] = std::move(rn);
-            for (const auto childId : semNode.children)
+            for (const auto childId : semNode.children) {
                 q.push(childId);
+            }
             continue;
         }
 
@@ -288,7 +273,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         NodeView view{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
         const MaterialRule *mr = resolveMaterial(config_.materialRules, nodePath, view);
         RenderMaterialId rmId;
-        if (mr) {
+        if (mr != nullptr) {
             auto cit = namedMatCache.find(mr->materialName);
             if (cit != namedMatCache.end()) {
                 rmId = cit->second;
@@ -328,8 +313,9 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         }
 
         result.scene.nodes[rnId] = std::move(rn);
-        for (const auto childId : semNode.children)
+        for (const auto childId : semNode.children) {
             q.push(childId);
+        }
     }
 
     return result;

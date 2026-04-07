@@ -7,7 +7,6 @@
 
 #include <format>
 #include <queue>
-#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -39,29 +38,27 @@ std::vector<CompiledRule> compileRules(const std::vector<SelectionRule> &rules) 
     return out;
 }
 
-// BFS path builder: root gets "/<name>", children get parent_path + "/" + name.
-std::unordered_map<SemanticNodeId, std::string> buildPaths(const SemanticScene &scene) {
-    std::unordered_map<SemanticNodeId, std::string> paths;
+// BFS reachability: collect all node IDs reachable from root.
+std::unordered_set<SemanticNodeId> reachableNodes(const SemanticScene &scene) {
+    std::unordered_set<SemanticNodeId> reachable;
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
-        return paths;
+        return reachable;
     }
-    paths.reserve(scene.nodes.size());
-    paths[scene.rootId] = "/" + scene.nodes.at(scene.rootId).name;
-
+    reachable.reserve(scene.nodes.size());
     std::queue<SemanticNodeId> q;
     q.push(scene.rootId);
     while (!q.empty()) {
-        const auto &node = scene.nodes.at(q.front());
+        const auto id = q.front();
         q.pop();
-        for (const auto childId : node.children) {
-            if (!scene.nodes.contains(childId)) {
-                continue;
-            }
-            paths[childId] = paths.at(node.id) + "/" + scene.nodes.at(childId).name;
+        if (!scene.nodes.contains(id) || reachable.contains(id)) {
+            continue;
+        }
+        reachable.insert(id);
+        for (const auto childId : scene.nodes.at(id).children) {
             q.push(childId);
         }
     }
-    return paths;
+    return reachable;
 }
 
 // Transitively collect all SemanticShapeIds referenced by the given root shapes,
@@ -114,14 +111,12 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     }
 
     const auto compiledRules = compileRules(rules_);
-    const auto paths = buildPaths(scene);
+    const auto reachable = reachableNodes(scene);
 
     // ── Step 1: default disposition = KeepIf for every reachable node. ──────────
-    // Initialised from paths (not scene.nodes) so unreachable nodes are never
-    // entered — any node in scene.nodes but not in paths is a scene integrity bug.
     std::unordered_map<SemanticNodeId, SelectionAction> disposition;
-    disposition.reserve(paths.size());
-    for (const auto &[id, path] : paths) {
+    disposition.reserve(reachable.size());
+    for (const auto id : reachable) {
         disposition[id] = SelectionAction::KeepIf;
     }
 
@@ -134,11 +129,11 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     for (const auto &cr : compiledRules) {
         std::unordered_set<SemanticNodeId> seed;
 
-        for (const auto &[id, path] : paths) {
+        for (const auto id : reachable) {
             const auto &node = scene.nodes.at(id);
             NodeView view;
             view.name = node.name;
-            view.path = path;
+            view.path = node.originalPath;
             view.isLeaf = node.children.empty();
             view.tags = &node.tags;
 
@@ -193,13 +188,7 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     } // end if (!hoistOrphans_)
 
     // ── Step 4: separate into kept / dropped sets. ────────────────────────────
-    // disposition was built from paths, so every ID here is reachable from root.
-    // An ID missing from paths at this point would indicate a bug in evaluate().
     for (const auto &[id, action] : disposition) {
-        if (!paths.contains(id)) {
-            throw std::logic_error("SelectionEngine: disposition contains unreachable node ID — "
-                                   "scene integrity violated");
-        }
         if (action == SelectionAction::DropIf) {
             result.dropped.insert(id);
         } else {

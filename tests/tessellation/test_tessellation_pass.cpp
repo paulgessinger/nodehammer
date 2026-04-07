@@ -40,6 +40,7 @@ static SemanticScene makeBooleanScene() {
     scene.nodes[rootId] = root;
     scene.rootId = rootId;
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
     return scene;
 }
 
@@ -64,6 +65,7 @@ static SemanticScene makeUnknownShapeScene() {
     scene.nodes[rootId] = root;
     scene.rootId = rootId;
     scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
     return scene;
 }
 
