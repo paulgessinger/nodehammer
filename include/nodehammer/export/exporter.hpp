@@ -13,10 +13,19 @@ namespace nodehammer {
 
 // ── Export configuration ──────────────────────────────────────────────────────
 
+/// glTF/GLB-specific export options.
+struct GltfExportOptions {
+    bool multiScene{false};                ///< Split render tree into multiple glTF scenes
+    std::string sceneNameSeparator{" > "}; ///< Separator for hierarchical scene names
+};
+
 struct ExportConfig {
     enum class Format { GLB, GLTF, OBJ } format{Format::GLB};
     double unitScale{1.0};     ///< Scale factor applied to the root node (e.g. 0.01 for cm→m)
     bool bakeUnitScale{false}; ///< If true, scale vertices & translations instead of root matrix
+
+    /// Format-specific options (only the matching format's options are used).
+    GltfExportOptions gltf;
 
     /// Default unit scale for each format when the source system uses centimetres (DD4hep/TGeo).
     /// glTF/GLB: 0.01  (spec mandates metres)

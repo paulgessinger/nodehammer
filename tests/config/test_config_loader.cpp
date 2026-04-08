@@ -278,6 +278,69 @@ type = "is_leaf"
     REQUIRE_FALSE(result.config.selection.at(0).scope.has_value()); // ignored
 }
 
+// ── Format-specific export key validation ────────────────────────────────────
+
+TEST_CASE("ConfigLoader: gltf-only key under [export.obj] → Error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.obj]
+multi_scene = true
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(result.diags.hasErrors());
+    bool found = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.code == nodehammer::codes::kErrConfigParse &&
+            d.message.find("multi_scene") != std::string::npos &&
+            d.message.find("export.obj") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("ConfigLoader: gltf-only key under [export.gltf] → no error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.gltf]
+multi_scene = true
+scene_name_separator = " > "
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    const auto &gltfCfg =
+        std::get<nodehammer::GltfExportFormatConfig>(result.config.exportFormats.at("gltf"));
+    REQUIRE(gltfCfg.multiScene == true);
+    REQUIRE(gltfCfg.sceneNameSeparator == " > ");
+}
+
+TEST_CASE("ConfigLoader: gltf-only key under [export.glb] → no error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.glb]
+multi_scene = true
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    const auto &glbCfg =
+        std::get<nodehammer::GltfExportFormatConfig>(result.config.exportFormats.at("glb"));
+    REQUIRE(glbCfg.multiScene == true);
+}
+
+TEST_CASE("ConfigLoader: scene_name_separator under [export.obj] → Error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.obj]
+scene_name_separator = " / "
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(result.diags.hasErrors());
+    bool found = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.code == nodehammer::codes::kErrConfigParse &&
+            d.message.find("scene_name_separator") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+}
+
 TEST_CASE("ConfigLoader: clean config produces no warnings", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [materials.steel]

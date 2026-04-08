@@ -131,11 +131,18 @@ void register_cmd_convert(CLI::App &app) {
             if (!cfg.exportFormats.contains(key)) {
                 return false;
             }
-            const auto &fmtCfg = cfg.exportFormats.at(key);
-            if (auto v = fmtCfg.unitScale)
+            const auto &variant = cfg.exportFormats.at(key);
+            const auto &common = nodehammer::commonConfig(variant);
+            if (auto v = common.unitScale)
                 ecfg.unitScale = *v;
-            if (auto v = fmtCfg.bakeUnitScale)
+            if (auto v = common.bakeUnitScale)
                 ecfg.bakeUnitScale = *v;
+            if (const auto *gltfCfg = std::get_if<nodehammer::GltfExportFormatConfig>(&variant)) {
+                if (auto v = gltfCfg->multiScene)
+                    ecfg.gltf.multiScene = *v;
+                if (auto v = gltfCfg->sceneNameSeparator)
+                    ecfg.gltf.sceneNameSeparator = *v;
+            }
             return true;
         };
         const std::string fmtKey = (ecfg.format == nodehammer::ExportConfig::Format::GLB) ? "glb"

@@ -12,8 +12,9 @@ namespace {
 
 // ── Unknown-key helper ────────────────────────────────────────────────────────
 
-void warnUnknownKeys(const toml::table &tbl, std::initializer_list<std::string_view> known,
-                     std::string_view context, DiagnosticList &diags) {
+template <typename Range>
+void warnUnknownKeysImpl(const toml::table &tbl, const Range &known, std::string_view context,
+                         DiagnosticList &diags) {
     for (const auto &[key, _] : tbl) {
         bool found = false;
         for (auto k : known) {
@@ -27,6 +28,16 @@ void warnUnknownKeys(const toml::table &tbl, std::initializer_list<std::string_v
                        context);
         }
     }
+}
+
+void warnUnknownKeys(const toml::table &tbl, std::initializer_list<std::string_view> known,
+                     std::string_view context, DiagnosticList &diags) {
+    warnUnknownKeysImpl(tbl, known, context, diags);
+}
+
+void warnUnknownKeys(const toml::table &tbl, const std::vector<std::string_view> &known,
+                     std::string_view context, DiagnosticList &diags) {
+    warnUnknownKeysImpl(tbl, known, context, diags);
 }
 
 // ── Enum parsers ──────────────────────────────────────────────────────────────
@@ -355,19 +366,100 @@ ConfigResult parseTable(const toml::table &tbl) {
         cfg.hoistOrphans = *v;
     }
     if (const auto *exportTbl = tbl["export"].as_table()) {
-        for (const auto &[fmtKey, fmtVal] : *exportTbl) {
+        // ── Table-driven export config ───────────────────────────────────────
+        // Each key declares which formats accept it (empty = all).
+        // Each format group defines a factory that constructs its variant type
+        // from the parsed TOML table + common config.
+        struct ExportKeyDef {
+            std::string_view key;
+            std::initializer_list<std::string_view> formats;
+        };
+        static constexpr ExportKeyDef kExportKeys[] = {
+            {"unit_scale", {}},
+            {"bake_unit_scale", {}},
+            {"multi_scene", {"gltf", "glb"}},
+            {"scene_name_separator", {"gltf", "glb"}},
+        };
+
+        struct FormatGroup {
+            std::initializer_list<std::string_view> formats;
+            ExportFormatConfig (*build)(const toml::table &, const CommonExportConfig &);
+        };
+        static const FormatGroup kFormatGroups[] = {
+            {{"gltf", "glb"},
+             [](const toml::table &t, const CommonExportConfig &c) -> ExportFormatConfig {
+                 GltfExportFormatConfig cfg;
+                 cfg.common = c;
+                 if (auto v = t["multi_scene"].value<bool>()) {
+                     cfg.multiScene = *v;
+                 }
+                 if (auto v = t["scene_name_separator"].value<std::string>()) {
+                     cfg.sceneNameSeparator = std::move(*v);
+                 }
+                 return cfg;
+             }},
+            {{"obj"},
+             [](const toml::table &, const CommonExportConfig &c) -> ExportFormatConfig {
+                 ObjExportFormatConfig cfg;
+                 cfg.common = c;
+                 return cfg;
+             }},
+        };
+
+        for (const auto &[fmtKeyRaw, fmtVal] : *exportTbl) {
             const auto *fmtTbl = fmtVal.as_table();
             if (fmtTbl == nullptr) {
                 continue;
             }
-            ExportFormatConfig fmtCfg;
+            const std::string fmtKey{fmtKeyRaw.str()};
+            const std::string ctx = std::format("export.{}", fmtKey);
+
+            // Build the valid key set for this format and check for misplaced keys.
+            std::vector<std::string_view> validKeys;
+            for (const auto &kd : kExportKeys) {
+                const bool allowed =
+                    kd.formats.size() == 0 ||
+                    std::find(kd.formats.begin(), kd.formats.end(), fmtKey) != kd.formats.end();
+                if (allowed) {
+                    validKeys.push_back(kd.key);
+                } else if ((*fmtTbl)[kd.key]) {
+                    std::string validFmts;
+                    for (auto it = kd.formats.begin(); it != kd.formats.end(); ++it) {
+                        if (!validFmts.empty()) {
+                            validFmts += " or ";
+                        }
+                        validFmts += std::format("[export.{}]", *it);
+                    }
+                    diags.error(codes::kErrConfigParse,
+                                std::format("'{}' is only valid under {}, not [export.{}]", kd.key,
+                                            validFmts, fmtKey),
+                                ctx);
+                }
+            }
+            warnUnknownKeys(*fmtTbl, validKeys, ctx, diags);
+
+            // Parse common values.
+            CommonExportConfig common;
             if (auto v = (*fmtTbl)["unit_scale"].value<double>()) {
-                fmtCfg.unitScale = *v;
+                common.unitScale = *v;
             }
             if (auto v = (*fmtTbl)["bake_unit_scale"].value<bool>()) {
-                fmtCfg.bakeUnitScale = *v;
+                common.bakeUnitScale = *v;
             }
-            cfg.exportFormats[std::string{fmtKey}] = fmtCfg;
+
+            // Find the matching format group and build the variant.
+            bool matched = false;
+            for (const auto &fg : kFormatGroups) {
+                if (std::find(fg.formats.begin(), fg.formats.end(), fmtKey) != fg.formats.end()) {
+                    cfg.exportFormats[fmtKey] = fg.build(*fmtTbl, common);
+                    matched = true;
+                    break;
+                }
+            }
+            if (!matched) {
+                diags.warn(codes::kWarnConfigUnknownKey,
+                           std::format("unknown export format '{}'", fmtKey), ctx);
+            }
         }
     }
     parseMaterials(tbl, cfg, diags);

@@ -117,10 +117,28 @@ struct TessellationRule {
 // In TOML: [export.gltf], [export.glb], [export.obj].
 // Each field is optional; absent means "use the format's built-in default".
 
-struct ExportFormatConfig {
+/// Fields shared by all export formats.
+struct CommonExportConfig {
     std::optional<double> unitScale;   ///< Overrides the format's default scale
     std::optional<bool> bakeUnitScale; ///< Bake scale into vertices & translations
 };
+
+struct GltfExportFormatConfig {
+    CommonExportConfig common;
+    std::optional<bool> multiScene;                ///< Split render tree into multiple glTF scenes
+    std::optional<std::string> sceneNameSeparator; ///< Separator for hierarchical scene names
+};
+
+struct ObjExportFormatConfig {
+    CommonExportConfig common;
+};
+
+using ExportFormatConfig = std::variant<GltfExportFormatConfig, ObjExportFormatConfig>;
+
+/// Visitor to access common config fields from any format variant.
+inline const CommonExportConfig &commonConfig(const ExportFormatConfig &cfg) {
+    return std::visit([](const auto &c) -> const CommonExportConfig & { return c.common; }, cfg);
+}
 
 // ── Top-level config ──────────────────────────────────────────────────────────
 // Output path/format are CLI concerns, not config concerns.
