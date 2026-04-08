@@ -89,20 +89,32 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
     };
     std::unordered_map<MeshAssetId, MeshAccs> meshAccs;
 
+    const bool bake = config.bakeUnitScale;
+    const auto s = static_cast<float>(config.unitScale);
+
     for (const auto &[id, ma] : scene.meshAssets) {
         if (ma.vertices.empty() || ma.indices.empty()) {
             continue;
         }
 
+        // When baking, scale vertex positions into the target unit system.
+        std::vector<Vertex> scaledVerts;
+        const std::vector<Vertex> &verts = bake ? scaledVerts : ma.vertices;
+        if (bake) {
+            scaledVerts.reserve(ma.vertices.size());
+            for (const auto &v : ma.vertices) {
+                scaledVerts.push_back({v.position * s, v.normal});
+            }
+        }
+
         // Vertex buffer view (interleaved POSITION + NORMAL)
         alignTo4();
-        const std::size_t vtxOff =
-            appendRaw(ma.vertices.data(), ma.vertices.size() * sizeof(Vertex));
+        const std::size_t vtxOff = appendRaw(verts.data(), verts.size() * sizeof(Vertex));
 
         tinygltf::BufferView vtxBV;
         vtxBV.buffer = 0;
         vtxBV.byteOffset = vtxOff;
-        vtxBV.byteLength = ma.vertices.size() * sizeof(Vertex);
+        vtxBV.byteLength = verts.size() * sizeof(Vertex);
         vtxBV.byteStride = sizeof(Vertex);
         vtxBV.target = TINYGLTF_TARGET_ARRAY_BUFFER;
         const int vtxBVIdx = static_cast<int>(model.bufferViews.size());
@@ -124,7 +136,7 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         // Compute POSITION min/max (required by spec)
         glm::vec3 posMin{std::numeric_limits<float>::max()};
         glm::vec3 posMax{-std::numeric_limits<float>::max()};
-        for (const auto &v : ma.vertices) {
+        for (const auto &v : verts) {
             posMin = glm::min(posMin, v.position);
             posMax = glm::max(posMax, v.position);
         }
@@ -235,13 +247,15 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         gn.name = rn.name;
 
         // Local transform as column-major 4×4 matrix (GLM and glTF both column-major).
-        // Apply unit_scale to the root node so the entire scene is rescaled.
-        const glm::mat4 localWithScale =
-            (!rn.parentId.has_value() && config.unitScale != 1.0)
-                ? glm::mat4(glm::dmat4(rn.localTransform) *
-                            glm::dmat4(glm::scale(glm::dmat4(1.0), glm::dvec3(config.unitScale))))
-                : rn.localTransform;
-        const glm::mat4 &m = localWithScale;
+        glm::mat4 m = rn.localTransform;
+        if (bake) {
+            // Scale the translation component of every node's matrix.
+            m[3] = glm::vec4(glm::vec3(m[3]) * s, m[3].w);
+        } else if (!rn.parentId.has_value()) {
+            // Non-bake: apply unit_scale to the root node so the entire scene is rescaled.
+            m = glm::mat4(glm::dmat4(m) *
+                          glm::dmat4(glm::scale(glm::dmat4(1.0), glm::dvec3(config.unitScale))));
+        }
         gn.matrix = {
             static_cast<double>(m[0][0]), static_cast<double>(m[0][1]),
             static_cast<double>(m[0][2]), static_cast<double>(m[0][3]),

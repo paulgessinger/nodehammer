@@ -108,6 +108,7 @@ struct MaterialRule {
 struct TessellationRule {
     std::optional<std::string> scope; ///< Optional path glob (matches all if absent)
     bool skipGeometry{false};         ///< If true, node is kept in tree but produces no mesh
+    bool mergeChildren{false}; ///< If true, merge all descendant meshes into one on this node
     int maxSegmentsCircle{64};
     BooleanFallback fallback{BooleanFallback::Skip};
 };
@@ -117,7 +118,8 @@ struct TessellationRule {
 // Each field is optional; absent means "use the format's built-in default".
 
 struct ExportFormatConfig {
-    std::optional<double> unitScale; ///< Overrides the format's default scale
+    std::optional<double> unitScale;   ///< Overrides the format's default scale
+    std::optional<bool> bakeUnitScale; ///< Bake scale into vertices & translations
 };
 
 // ── Top-level config ──────────────────────────────────────────────────────────

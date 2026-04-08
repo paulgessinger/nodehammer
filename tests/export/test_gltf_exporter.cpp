@@ -161,6 +161,7 @@ TEST_CASE("ObjExporter: single box → OBJ + MTL files exist", "[export][obj]") 
 
     nodehammer::ObjExporter exp;
     nodehammer::ExportConfig cfg;
+    cfg.bakeUnitScale = true;
 
     auto result = exp.write(buildBoxRenderScene(), out, cfg);
     CHECK_FALSE(result.diags.hasErrors());

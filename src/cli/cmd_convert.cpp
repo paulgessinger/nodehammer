@@ -122,13 +122,29 @@ void register_cmd_convert(CLI::App &app) {
 
         // Start from the format's built-in default, then apply config overrides.
         ecfg.unitScale = nodehammer::ExportConfig::defaultUnitScale(ecfg.format);
+        // OBJ always bakes (no scene graph for root scaling).
+        if (ecfg.format == nodehammer::ExportConfig::Format::OBJ) {
+            ecfg.bakeUnitScale = true;
+        }
+        // Look up per-format config; GLB falls back to "gltf" if "glb" isn't set.
+        const auto applyFmtCfg = [&](const std::string &key) {
+            if (!cfg.exportFormats.contains(key)) {
+                return false;
+            }
+            const auto &fmtCfg = cfg.exportFormats.at(key);
+            if (auto v = fmtCfg.unitScale)
+                ecfg.unitScale = *v;
+            if (auto v = fmtCfg.bakeUnitScale)
+                ecfg.bakeUnitScale = *v;
+            return true;
+        };
         const std::string fmtKey = (ecfg.format == nodehammer::ExportConfig::Format::GLB) ? "glb"
                                    : (ecfg.format == nodehammer::ExportConfig::Format::GLTF)
                                        ? "gltf"
                                        : "obj";
-        if (cfg.exportFormats.contains(fmtKey))
-            if (auto v = cfg.exportFormats.at(fmtKey).unitScale)
-                ecfg.unitScale = *v;
+        if (!applyFmtCfg(fmtKey) && fmtKey == "glb") {
+            applyFmtCfg("gltf");
+        }
 
         auto expResult = exp->write(tessResult.scene, outputPath, ecfg);
         printDiags(expResult.diags);

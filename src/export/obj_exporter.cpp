@@ -19,6 +19,14 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
                                 const ExportConfig &config) const {
     ExportResult result;
 
+    if (!config.bakeUnitScale) {
+        result.diags.error(
+            codes::kErrExportWriteFailed,
+            "OBJ export requires bake_unit_scale = true (OBJ has no scene graph for root scaling)",
+            path.string());
+        return result;
+    }
+
     std::ofstream objFile{path};
     if (!objFile) {
         result.diags.error(codes::kErrExportWriteFailed,

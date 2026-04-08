@@ -303,14 +303,12 @@ void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticLi
         if (tbl == nullptr) {
             continue;
         }
-        warnUnknownKeys(*tbl, {"scope", "skip_geometry", "max_segments_circle", "fallback"},
-                        "tessellation_rules", diags);
+        warnUnknownKeys(
+            *tbl, {"scope", "skip_geometry", "merge_children", "max_segments_circle", "fallback"},
+            "tessellation_rules", diags);
         TessellationRule rule;
-
-        if (auto scope = (*tbl)["scope"].value<std::string>()) {
-            rule.scope = std::move(*scope);
-        }
         rule.skipGeometry = (*tbl)["skip_geometry"].value<bool>().value_or(false);
+        rule.mergeChildren = (*tbl)["merge_children"].value<bool>().value_or(false);
         rule.maxSegmentsCircle = (*tbl)["max_segments_circle"].value<int>().value_or(64);
 
         if (auto fallbackStr = (*tbl)["fallback"].value<std::string>()) {
@@ -324,7 +322,22 @@ void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticLi
             }
             rule.fallback = *parsed;
         }
-        cfg.tessellationRules.push_back(std::move(rule));
+
+        // scope can be a string or an array of strings; flatten into one rule per scope.
+        if (const auto *scopeArr = (*tbl)["scope"].as_array()) {
+            for (const auto &scopeEntry : *scopeArr) {
+                if (auto s = scopeEntry.value<std::string>()) {
+                    TessellationRule copy = rule;
+                    copy.scope = std::move(*s);
+                    cfg.tessellationRules.push_back(std::move(copy));
+                }
+            }
+        } else if (auto scope = (*tbl)["scope"].value<std::string>()) {
+            rule.scope = std::move(*scope);
+            cfg.tessellationRules.push_back(std::move(rule));
+        } else {
+            cfg.tessellationRules.push_back(std::move(rule));
+        }
     }
 }
 
@@ -350,6 +363,9 @@ ConfigResult parseTable(const toml::table &tbl) {
             ExportFormatConfig fmtCfg;
             if (auto v = (*fmtTbl)["unit_scale"].value<double>()) {
                 fmtCfg.unitScale = *v;
+            }
+            if (auto v = (*fmtTbl)["bake_unit_scale"].value<bool>()) {
+                fmtCfg.bakeUnitScale = *v;
             }
             cfg.exportFormats[std::string{fmtKey}] = fmtCfg;
         }

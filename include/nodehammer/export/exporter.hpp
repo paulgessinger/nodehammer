@@ -15,11 +15,12 @@ namespace nodehammer {
 
 struct ExportConfig {
     enum class Format { GLB, GLTF, OBJ } format{Format::GLB};
-    double unitScale{1.0}; ///< Scale factor applied to the root node (e.g. 0.01 for cm→m)
+    double unitScale{1.0};     ///< Scale factor applied to the root node (e.g. 0.01 for cm→m)
+    bool bakeUnitScale{false}; ///< If true, scale vertices & translations instead of root matrix
 
     /// Default unit scale for each format when the source system uses centimetres (DD4hep/TGeo).
     /// glTF/GLB: 0.01  (spec mandates metres)
-    /// OBJ:      0.001 (unitless; treat source cm as mm for typical DCC tool expectations)
+    /// OBJ:      0.01 (unitless; treat source cm as mm for typical DCC tool expectations)
     static constexpr double defaultUnitScale(Format fmt) noexcept {
         switch (fmt) {
         case Format::GLB:

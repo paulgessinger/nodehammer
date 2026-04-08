@@ -3,6 +3,8 @@
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 
+#include <glm/gtc/matrix_inverse.hpp>
+
 #include <format>
 #include <queue>
 #include <unordered_map>
@@ -139,6 +141,168 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
             for (const auto childId : semNode.children) {
                 q.push(childId);
             }
+            continue;
+        }
+
+        // merge_children: tessellate all descendants and combine into a single mesh
+        // on this node. Children are not added to the render tree.
+        if (rule.mergeChildren) {
+            const glm::dmat4 invWorld = glm::affineInverse(semNode.worldTransform);
+
+            std::vector<Vertex> mergedVerts;
+            std::vector<uint32_t> mergedIdx;
+            std::optional<SemanticMaterialId> firstMatId;
+            bool mixedMaterials = false;
+
+            // BFS descendants
+            std::queue<SemanticNodeId> descQ;
+            for (const auto childId : semNode.children) {
+                descQ.push(childId);
+            }
+            while (!descQ.empty()) {
+                const auto descId = descQ.front();
+                descQ.pop();
+                if (!scene.nodes.contains(descId)) {
+                    continue;
+                }
+                const SemanticNode &descNode = scene.nodes.at(descId);
+
+                // Enqueue grandchildren for recursive merge
+                for (const auto gcId : descNode.children) {
+                    descQ.push(gcId);
+                }
+
+                if (!scene.logVols.contains(descNode.logVolId)) {
+                    continue;
+                }
+                const SemanticLogicalVolume &descLv = scene.logVols.at(descNode.logVolId);
+                if (!scene.shapes.contains(descLv.shapeId)) {
+                    continue;
+                }
+
+                // Track material consistency
+                if (!firstMatId.has_value()) {
+                    firstMatId = descLv.materialId;
+                } else if (*firstMatId != descLv.materialId) {
+                    mixedMaterials = true;
+                }
+
+                // Tessellate (using cache)
+                const SemanticShape &descShape = scene.shapes.at(descLv.shapeId);
+                auto &descSegMap = meshCache[descLv.shapeId];
+                MeshAssetId descMid;
+                if (!descSegMap.contains(params.maxSegmentsCircle)) {
+                    auto tessOut = tess.tessellate(descShape.data, params);
+                    result.diags.append(tessOut.diags);
+                    if (tessOut.vertices.empty()) {
+                        continue;
+                    }
+                    MeshAsset ma;
+                    ma.id = result.scene.nextMeshId();
+                    ma.name = descLv.name;
+                    ma.vertices = std::move(tessOut.vertices);
+                    ma.indices = std::move(tessOut.indices);
+                    ma.provenance.sourceSystem = "tessellation_pass";
+                    ma.provenance.sourceName = descLv.name;
+                    descMid = ma.id;
+                    result.scene.meshAssets[descMid] = std::move(ma);
+                    descSegMap[params.maxSegmentsCircle] = descMid;
+                } else {
+                    descMid = descSegMap.at(params.maxSegmentsCircle);
+                }
+
+                if (!result.scene.meshAssets.contains(descMid)) {
+                    continue;
+                }
+                const MeshAsset &srcMesh = result.scene.meshAssets.at(descMid);
+                if (srcMesh.vertices.empty()) {
+                    continue;
+                }
+
+                // Transform vertices into merge node's local frame
+                const glm::mat4 toLocal = glm::mat4(invWorld * descNode.worldTransform);
+                const glm::mat3 normalMat =
+                    glm::mat3(glm::transpose(glm::inverse(glm::mat3(toLocal))));
+
+                const auto idxBase = static_cast<uint32_t>(mergedVerts.size());
+                for (const auto &v : srcMesh.vertices) {
+                    Vertex tv;
+                    tv.position = glm::vec3(toLocal * glm::vec4(v.position, 1.0f));
+                    tv.normal = glm::normalize(normalMat * v.normal);
+                    mergedVerts.push_back(tv);
+                }
+                for (const auto idx : srcMesh.indices) {
+                    mergedIdx.push_back(idx + idxBase);
+                }
+            }
+
+            if (mixedMaterials) {
+                result.diags.warn(
+                    codes::kWarnTessMergeMixedMaterials,
+                    std::format("merge_children on '{}': descendants have mixed materials; "
+                                "using first material encountered",
+                                semNode.name),
+                    semNode.name);
+            }
+
+            // Create merged mesh asset
+            if (!mergedVerts.empty()) {
+                MeshAssetId mid = result.scene.nextMeshId();
+                MeshAsset ma;
+                ma.id = mid;
+                ma.name = semNode.name + "_merged";
+                ma.vertices = std::move(mergedVerts);
+                ma.indices = std::move(mergedIdx);
+                ma.provenance.sourceSystem = "tessellation_pass";
+                ma.provenance.sourceName = semNode.name;
+                result.scene.meshAssets[mid] = std::move(ma);
+
+                // Resolve material from the first descendant
+                RenderMaterialId rmId;
+                if (firstMatId.has_value()) {
+                    const auto &srcMat = scene.materials.at(*firstMatId);
+                    const std::string &descPath = semNode.originalPath;
+                    NodeView view{semNode.name, descPath, false, &semNode.tags};
+                    const MaterialRule *mr = resolveMaterial(config_.materialRules, descPath, view);
+                    if (mr != nullptr) {
+                        auto cit = namedMatCache.find(mr->materialName);
+                        if (cit != namedMatCache.end()) {
+                            rmId = cit->second;
+                        } else {
+                            for (const auto &md : config_.materials) {
+                                if (md.name == mr->materialName) {
+                                    RenderMaterial rm;
+                                    rm.id = result.scene.nextMaterialId();
+                                    rm.name = md.name;
+                                    rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
+                                                                   md.baseColor.b, md.baseColor.a};
+                                    rm.metallicFactor = md.metallic;
+                                    rm.roughnessFactor = md.roughness;
+                                    rm.emissiveFactor =
+                                        glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
+                                    rm.doubleSided = md.doubleSided;
+                                    rmId = rm.id;
+                                    result.scene.materials[rmId] = std::move(rm);
+                                    namedMatCache[md.name] = rmId;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!result.scene.materials.contains(rmId)) {
+                        if (!defaultMatCache.contains(*firstMatId)) {
+                            auto dm = makeDefaultMaterial(result.scene, srcMat);
+                            defaultMatCache[*firstMatId] = dm.id;
+                            result.scene.materials[dm.id] = std::move(dm);
+                        }
+                        rmId = defaultMatCache.at(*firstMatId);
+                    }
+                }
+                rn.meshBindings.push_back({mid, rmId});
+            }
+
+            // Don't enqueue children — they've been consumed by the merge.
+            result.scene.nodes[rnId] = std::move(rn);
             continue;
         }
 

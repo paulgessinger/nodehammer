@@ -11,11 +11,20 @@
 #   /world/OpenDataTracker/LongStrips/LongStripBarrel/LongStripLayer0/...
 #   /world/OpenDataTracker/Pixels/PixelEndcapN/PixelEndcapN0/...
 #
-# Strategy: keep subdetector and layer nodes as structural groups (no geometry),
-# keep sensor nodes underneath. hoist_orphans re-parents sensors to their
-# nearest kept ancestor (the layer node) with rebased transforms.
+# Strategy: keep subdetector and layer nodes as structural groups, keep sensor
+# nodes underneath. Layer/endcap-ring nodes merge their children into a single
+# mesh per group. hoist_orphans re-parents sensors to their nearest kept
+# ancestor (the layer node) with rebased transforms.
 
 hoist_orphans = true
+
+[export.gltf]
+# unit_scale = 10.0 # phoenix
+unit_scale = 1.0       # blender
+bake_unit_scale = true
+
+[export.obj]
+unit_scale = 1.0
 
 [materials.silicon]
 base_color = [0.2, 0.6, 0.9, 1.0]
@@ -85,32 +94,20 @@ material = "support"
 
 # ── Tessellation ─────────────────────────────────────────────────────────────
 
-# World and structural group nodes: no geometry.
+# World and subdetector nodes: structural only, no geometry.
 [[tessellation_rules]]
-scope = "/world"
+scope = ["/world", "**/Pixels", "**/ShortStrips", "**/LongStrips"]
 skip_geometry = true
 
+# Layer/endcap-ring nodes: merge all descendant sensor meshes into one.
 [[tessellation_rules]]
-scope = "**/Pixels"
-skip_geometry = true
+scope = ["**/*Layer*", "**/*Endcap*/*Endcap*"]
+merge_children = true
+# skip_geometry = true
+max_segments_circle = 48
+fallback = "skip"
 
-[[tessellation_rules]]
-scope = "**/ShortStrips"
-skip_geometry = true
-
-[[tessellation_rules]]
-scope = "**/LongStrips"
-skip_geometry = true
-
-[[tessellation_rules]]
-scope = "**/*Layer*"
-skip_geometry = true
-
-[[tessellation_rules]]
-scope = "**/*Endcap*/*Endcap*"
-skip_geometry = true
-
-# Everything else: tessellate normally.
+# Fallback for anything else.
 [[tessellation_rules]]
 max_segments_circle = 48
 fallback = "skip"
