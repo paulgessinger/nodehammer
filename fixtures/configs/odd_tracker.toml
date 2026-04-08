@@ -19,9 +19,9 @@
 hoist_orphans = true
 
 [export.gltf]
-# unit_scale = 10.0 # phoenix
-unit_scale = 1.0       # blender
+unit_scale = 10.0
 bake_unit_scale = true
+multi_scene = true
 
 [export.obj]
 unit_scale = 1.0

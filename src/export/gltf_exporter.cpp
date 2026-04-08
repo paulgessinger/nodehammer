@@ -283,15 +283,95 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         }
     }
 
-    // ── Scene ─────────────────────────────────────────────────────────────────
+    // ── Scene(s) ──────────────────────────────────────────────────────────────
 
-    tinygltf::Scene gscene;
-    gscene.name = "scene";
-    if (nodeIdx.contains(scene.rootId)) {
-        gscene.nodes = {nodeIdx.at(scene.rootId)};
+    if (config.gltf.multiScene) {
+        // Build name path for each render node by walking parent chain.
+        const auto &sep = config.gltf.sceneNameSeparator;
+        std::unordered_map<RenderNodeId, std::string> namePaths;
+
+        // BFS to build paths (parents before children).
+        {
+            std::queue<RenderNodeId> pq;
+            if (scene.nodes.contains(scene.rootId)) {
+                pq.push(scene.rootId);
+            }
+            while (!pq.empty()) {
+                const auto nid = pq.front();
+                pq.pop();
+                if (!scene.nodes.contains(nid)) {
+                    continue;
+                }
+                const auto &rn = scene.nodes.at(nid);
+                if (!rn.parentId.has_value()) {
+                    // Root node: empty prefix so children start without "world > ".
+                    namePaths[nid] = "";
+                } else if (!namePaths.contains(*rn.parentId) ||
+                           namePaths.at(*rn.parentId).empty()) {
+                    namePaths[nid] = rn.name;
+                } else {
+                    const auto &parentPath = namePaths.at(*rn.parentId);
+                    namePaths[nid] = parentPath + sep + rn.name;
+                }
+                for (const auto childId : rn.children) {
+                    pq.push(childId);
+                }
+            }
+        }
+
+        // Create one scene per mesh-bearing node.
+        for (const auto &[rnId, rn] : scene.nodes) {
+            if (rn.meshBindings.empty() || !nodeIdx.contains(rnId)) {
+                continue;
+            }
+
+            // Create a new standalone node with world transform for this scene.
+            tinygltf::Node sn;
+            sn.name = rn.name;
+
+            // Use world transform (scaled if baking).
+            glm::mat4 wm = rn.worldTransform;
+            if (bake) {
+                wm[3] = glm::vec4(glm::vec3(wm[3]) * s, wm[3].w);
+            } else {
+                wm = glm::mat4(
+                    glm::dmat4(wm) *
+                    glm::dmat4(glm::scale(glm::dmat4(1.0), glm::dvec3(config.unitScale))));
+            }
+            sn.matrix = {
+                static_cast<double>(wm[0][0]), static_cast<double>(wm[0][1]),
+                static_cast<double>(wm[0][2]), static_cast<double>(wm[0][3]),
+                static_cast<double>(wm[1][0]), static_cast<double>(wm[1][1]),
+                static_cast<double>(wm[1][2]), static_cast<double>(wm[1][3]),
+                static_cast<double>(wm[2][0]), static_cast<double>(wm[2][1]),
+                static_cast<double>(wm[2][2]), static_cast<double>(wm[2][3]),
+                static_cast<double>(wm[3][0]), static_cast<double>(wm[3][1]),
+                static_cast<double>(wm[3][2]), static_cast<double>(wm[3][3]),
+            };
+
+            const int mi = getOrCreateGltfMesh(rn.meshBindings.front());
+            if (mi >= 0) {
+                sn.mesh = mi;
+            }
+
+            const int snIdx = static_cast<int>(model.nodes.size());
+            model.nodes.push_back(std::move(sn));
+
+            tinygltf::Scene gs;
+            gs.name = namePaths.contains(rnId) ? namePaths.at(rnId) : rn.name;
+            gs.nodes = {snIdx};
+            model.scenes.push_back(std::move(gs));
+        }
+        model.defaultScene = 0;
+    } else {
+        tinygltf::Scene gscene;
+        gscene.name = "scene";
+        if (nodeIdx.contains(scene.rootId)) {
+            gscene.nodes = {nodeIdx.at(scene.rootId)};
+        }
+        model.scenes.push_back(std::move(gscene));
+        model.defaultScene = 0;
     }
-    model.scenes.push_back(std::move(gscene));
-    model.defaultScene = 0;
 
     // ── Finalize buffer ───────────────────────────────────────────────────────
 
