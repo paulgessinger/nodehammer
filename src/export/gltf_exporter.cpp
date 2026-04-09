@@ -27,6 +27,44 @@
 
 namespace nodehammer {
 
+namespace {
+
+/// Recursively convert nlohmann::json to tinygltf::Value.
+tinygltf::Value jsonToGltfValue(const nlohmann::json &j) {
+    if (j.is_boolean()) {
+        return tinygltf::Value(j.get<bool>());
+    }
+    if (j.is_number_integer()) {
+        return tinygltf::Value(static_cast<int>(j.get<int64_t>()));
+    }
+    if (j.is_number_float()) {
+        return tinygltf::Value(j.get<double>());
+    }
+    if (j.is_string()) {
+        return tinygltf::Value(j.get<std::string>());
+    }
+    if (j.is_array()) {
+        tinygltf::Value::Array arr;
+        for (const auto &elem : j) {
+            arr.push_back(jsonToGltfValue(elem));
+        }
+        return tinygltf::Value(std::move(arr));
+    }
+    if (j.is_object()) {
+        tinygltf::Value::Object obj;
+        for (const auto &[k, v] : j.items()) {
+            obj[k] = jsonToGltfValue(v);
+        }
+        return tinygltf::Value(std::move(obj));
+    }
+    return {};
+}
+
+/// Convert RenderExtrasMap (nlohmann::json) to a tinygltf::Value for extras.
+tinygltf::Value extrasToValue(const RenderExtrasMap &extras) { return jsonToGltfValue(extras); }
+
+} // namespace
+
 std::string_view GltfExporter::formatName() const noexcept { return "gltf"; }
 
 std::vector<std::string> GltfExporter::supportedExtensions() const { return {".glb", ".gltf"}; }
@@ -281,6 +319,10 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
                 gn.mesh = mi;
             }
         }
+
+        if (!rn.extras.is_null() && !rn.extras.empty()) {
+            gn.extras = extrasToValue(rn.extras);
+        }
     }
 
     // ── Scene(s) ──────────────────────────────────────────────────────────────
@@ -360,6 +402,9 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
             tinygltf::Scene gs;
             gs.name = namePaths.contains(rnId) ? namePaths.at(rnId) : rn.name;
             gs.nodes = {snIdx};
+            if (!rn.extras.is_null() && !rn.extras.empty()) {
+                gs.extras = extrasToValue(rn.extras);
+            }
             model.scenes.push_back(std::move(gs));
         }
         model.defaultScene = 0;

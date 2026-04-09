@@ -261,10 +261,43 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
     }
 }
 
-/// [[material_rules]] — scope (optional), match (optional predicate), material (required).
-/// Future: match may also be a string expression DSL (e.g. match = "tag.semantic == sensor").
-void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
-    const auto *arr = root["material_rules"].as_array();
+/// Recursively convert a TOML value to nlohmann::json.
+nlohmann::json tomlToJson(const toml::node &node) {
+    if (node.is_boolean()) {
+        return node.as_boolean()->get();
+    }
+    if (node.is_integer()) {
+        return node.as_integer()->get();
+    }
+    if (node.is_floating_point()) {
+        return node.as_floating_point()->get();
+    }
+    if (node.is_string()) {
+        return std::string{node.as_string()->get()};
+    }
+    if (node.is_array()) {
+        auto j = nlohmann::json::array();
+        for (const auto &elem : *node.as_array()) {
+            j.push_back(tomlToJson(elem));
+        }
+        return j;
+    }
+    if (node.is_table()) {
+        auto j = nlohmann::json::object();
+        for (const auto &[key, val] : *node.as_table()) {
+            j[std::string{key.str()}] = tomlToJson(val);
+        }
+        return j;
+    }
+    return nullptr;
+}
+
+/// Parse an extras sub-table into an ExtrasMap (nlohmann::json object).
+ExtrasMap parseExtras(const toml::table &tbl) { return tomlToJson(tbl); }
+
+/// [[rules]] — unified rule with optional material, tessellation, and extras.
+void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
+    const auto *arr = root["rules"].as_array();
     if (arr == nullptr) {
         return;
     }
@@ -274,80 +307,76 @@ void parseMaterialRules(const toml::table &root, NHConfig &cfg, DiagnosticList &
             continue;
         }
 
-        warnUnknownKeys(*tbl, {"scope", "match", "material"}, "material_rules", diags);
-        auto material = (*tbl)["material"].value<std::string>();
-        if (!material) {
-            diags.error(codes::kErrConfigParse, "material_rule missing required 'material' field");
-            continue;
+        warnUnknownKeys(*tbl, {"scope", "match", "material", "tessellation", "extras"}, "rules",
+                        diags);
+
+        Rule rule;
+
+        // ── scope: string or array of strings ────────────────────────────────
+        // When scope is an array, we collect all scopes and flatten into
+        // multiple rules at the end.
+        std::vector<std::string> scopes;
+        if (const auto *scopeArr = (*tbl)["scope"].as_array()) {
+            for (const auto &se : *scopeArr) {
+                if (auto s = se.value<std::string>()) {
+                    scopes.push_back(std::move(*s));
+                }
+            }
+        } else if (auto scope = (*tbl)["scope"].value<std::string>()) {
+            scopes.push_back(std::move(*scope));
         }
 
-        MaterialRule rule;
-        rule.materialName = *material;
-
-        if (auto scope = (*tbl)["scope"].value<std::string>()) {
-            rule.scope = std::move(*scope);
-        }
+        // ── match predicate ──────────────────────────────────────────────────
         if (const auto *matchTbl = (*tbl)["match"].as_table()) {
-            auto pred = parsePredicate(*matchTbl, diags, "material_rules");
+            auto pred = parsePredicate(*matchTbl, diags, "rules");
             if (!pred) {
                 continue;
             }
             rule.match = std::move(*pred);
-        } else if ((*tbl)["match"].as_string() != nullptr) {
-            diags.error(codes::kErrConfigParse,
-                        "string expression DSL for 'match' is not yet supported; use a table",
-                        "material_rules");
-            continue;
-        }
-        cfg.materialRules.push_back(std::move(rule));
-    }
-}
-
-/// [[tessellation_rules]] — scope (optional), max_segments_circle, fallback.
-void parseTessellationRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
-    const auto *arr = root["tessellation_rules"].as_array();
-    if (arr == nullptr) {
-        return;
-    }
-    for (const auto &entry : *arr) {
-        const auto *tbl = entry.as_table();
-        if (tbl == nullptr) {
-            continue;
-        }
-        warnUnknownKeys(
-            *tbl, {"scope", "skip_geometry", "merge_children", "max_segments_circle", "fallback"},
-            "tessellation_rules", diags);
-        TessellationRule rule;
-        rule.skipGeometry = (*tbl)["skip_geometry"].value<bool>().value_or(false);
-        rule.mergeChildren = (*tbl)["merge_children"].value<bool>().value_or(false);
-        rule.maxSegmentsCircle = (*tbl)["max_segments_circle"].value<int>().value_or(64);
-
-        if (auto fallbackStr = (*tbl)["fallback"].value<std::string>()) {
-            auto parsed = parseFallback(*fallbackStr);
-            if (!parsed) {
-                diags.error(codes::kErrConfigParse,
-                            std::format("unknown fallback '{}'; expected skip, bbox, or fail",
-                                        *fallbackStr),
-                            "tessellation_rules");
-                continue;
-            }
-            rule.fallback = *parsed;
         }
 
-        // scope can be a string or an array of strings; flatten into one rule per scope.
-        if (const auto *scopeArr = (*tbl)["scope"].as_array()) {
-            for (const auto &scopeEntry : *scopeArr) {
-                if (auto s = scopeEntry.value<std::string>()) {
-                    TessellationRule copy = rule;
-                    copy.scope = std::move(*s);
-                    cfg.tessellationRules.push_back(std::move(copy));
+        // ── material ─────────────────────────────────────────────────────────
+        if (auto mat = (*tbl)["material"].value<std::string>()) {
+            rule.material = std::move(*mat);
+        }
+
+        // ── tessellation sub-table ───────────────────────────────────────────
+        if (const auto *tessTbl = (*tbl)["tessellation"].as_table()) {
+            warnUnknownKeys(*tessTbl,
+                            {"skip_geometry", "merge_children", "max_segments_circle", "fallback"},
+                            "rules.tessellation", diags);
+            Rule::Tessellation tess;
+            tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>().value_or(false);
+            tess.mergeChildren = (*tessTbl)["merge_children"].value<bool>().value_or(false);
+            tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>().value_or(64);
+            if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
+                auto parsed = parseFallback(*fallbackStr);
+                if (!parsed) {
+                    diags.error(codes::kErrConfigParse,
+                                std::format("unknown fallback '{}'; expected skip, bbox, or fail",
+                                            *fallbackStr),
+                                "rules.tessellation");
+                    continue;
                 }
+                tess.fallback = *parsed;
             }
-        } else if (auto scope = (*tbl)["scope"].value<std::string>()) {
-            rule.scope = std::move(*scope);
-            cfg.tessellationRules.push_back(std::move(rule));
+            rule.tessellation = tess;
+        }
+
+        // ── extras sub-table ─────────────────────────────────────────────────
+        if (const auto *extrasTbl = (*tbl)["extras"].as_table()) {
+            rule.extras = parseExtras(*extrasTbl);
+        }
+
+        // ── Flatten scope array into one Rule per scope ──────────────────────
+        if (scopes.empty()) {
+            cfg.rules.push_back(rule);
         } else {
-            cfg.tessellationRules.push_back(std::move(rule));
+            for (auto &s : scopes) {
+                Rule copy = rule;
+                copy.scope = std::move(s);
+                cfg.rules.push_back(std::move(copy));
+            }
         }
     }
 }
@@ -358,9 +387,7 @@ ConfigResult parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
-    warnUnknownKeys(tbl,
-                    {"hoist_orphans", "export", "materials", "selection_rules", "material_rules",
-                     "tessellation_rules"},
+    warnUnknownKeys(tbl, {"hoist_orphans", "export", "materials", "selection_rules", "rules"},
                     "<top-level>", diags);
     if (auto v = tbl["hoist_orphans"].value<bool>()) {
         cfg.hoistOrphans = *v;
@@ -464,8 +491,7 @@ ConfigResult parseTable(const toml::table &tbl) {
     }
     parseMaterials(tbl, cfg, diags);
     parseSelectionRules(tbl, cfg, diags);
-    parseMaterialRules(tbl, cfg, diags);
-    parseTessellationRules(tbl, cfg, diags);
+    parseRules(tbl, cfg, diags);
 
     return ConfigResult{std::move(cfg), std::move(diags)};
 }

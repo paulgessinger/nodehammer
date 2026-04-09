@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nlohmann/json.hpp>
+
 #include <map>
 #include <memory>
 #include <optional>
@@ -95,22 +97,28 @@ struct SelectionRule {
     ClosurePolicy closure{ClosurePolicy::None};
 };
 
-/// Assigns a named material to nodes in an optional scope, with an optional additional predicate.
-/// In TOML: material = "name"; scope and match are optional.
-/// Future: match may be a string expression (match = "tag.semantic == sensor") once a DSL parser
-/// is added; the structured table form will remain valid.
-struct MaterialRule {
+/// Free-form extras for export metadata (e.g. glTF extras).
+/// Uses nlohmann::json as a recursive value type — maps directly to tinygltf::Value.
+using ExtrasMap = nlohmann::json;
+
+/// Unified rule: optional material, tessellation, and/or extras on matched nodes.
+/// In TOML: [[rules]] with scope, optional match, and sub-tables.
+struct Rule {
     std::optional<std::string> scope;   ///< Optional path glob pre-filter
     std::optional<PredicateExpr> match; ///< Optional additional predicate within scope
-    std::string materialName;           ///< References a MaterialDef::name
-};
 
-struct TessellationRule {
-    std::optional<std::string> scope; ///< Optional path glob (matches all if absent)
-    bool skipGeometry{false};         ///< If true, node is kept in tree but produces no mesh
-    bool mergeChildren{false}; ///< If true, merge all descendant meshes into one on this node
-    int maxSegmentsCircle{64};
-    BooleanFallback fallback{BooleanFallback::Skip};
+    // ── Concerns (all optional; a rule may set any combination) ──────────
+    std::optional<std::string> material; ///< References a MaterialDef::name
+
+    struct Tessellation {
+        bool skipGeometry{false};
+        bool mergeChildren{false};
+        int maxSegmentsCircle{64};
+        BooleanFallback fallback{BooleanFallback::Skip};
+    };
+    std::optional<Tessellation> tessellation;
+
+    std::optional<ExtrasMap> extras; ///< Free-form metadata for export
 };
 
 // ── Per-format export overrides ───────────────────────────────────────────────
@@ -148,8 +156,7 @@ struct NHConfig {
     std::map<std::string, ExportFormatConfig> exportFormats; ///< keyed by "gltf", "glb", "obj"
     std::vector<MaterialDef> materials;
     std::vector<SelectionRule> selection;
-    std::vector<MaterialRule> materialRules;
-    std::vector<TessellationRule> tessellationRules;
+    std::vector<Rule> rules;
 };
 
 } // namespace nodehammer

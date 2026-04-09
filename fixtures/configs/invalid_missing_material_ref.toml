@@ -1,4 +1,4 @@
 # Parses successfully but fails ConfigValidator: material reference is undefined.
 
-[[material_rules]]
+[[rules]]
 material = "doesNotExist"

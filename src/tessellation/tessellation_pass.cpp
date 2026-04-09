@@ -13,38 +13,62 @@ namespace nodehammer {
 
 namespace {
 
-// Return the TessellationRule that applies to nodePath (first scope match, or
-// last rule if none match, or a default if the vector is empty).
-const TessellationRule &resolveRule(const std::vector<TessellationRule> &rules,
-                                    const std::string &nodePath) {
-    static const TessellationRule kDefault;
-    if (rules.empty()) {
-        return kDefault;
+// Does a rule's scope/match apply to the given node?
+bool ruleMatches(const Rule &r, const std::string &nodePath, const NodeView &view) {
+    if (r.scope.has_value() && !matchGlob(*r.scope, nodePath)) {
+        return false;
     }
-    for (const auto &r : rules) {
-        if (!r.scope.has_value() || matchGlob(*r.scope, nodePath)) {
-            return r;
+    if (r.match.has_value()) {
+        auto pred = compilePredicate(*r.match);
+        if (!pred(view)) {
+            return false;
         }
     }
-    return rules.back();
+    return true;
 }
 
-// Return the first MaterialRule that matches, or nullptr.
-const MaterialRule *resolveMaterial(const std::vector<MaterialRule> &matRules,
-                                    const std::string &nodePath, const NodeView &view) {
-    for (const auto &mr : matRules) {
-        if (mr.scope.has_value() && !matchGlob(*mr.scope, nodePath)) {
+// Return the tessellation settings from the first matching rule that has them,
+// or a default if none match.
+const Rule::Tessellation &resolveTessellation(const std::vector<Rule> &rules,
+                                              const std::string &nodePath, const NodeView &view) {
+    static const Rule::Tessellation kDefault;
+    for (const auto &r : rules) {
+        if (!r.tessellation.has_value()) {
             continue;
         }
-        if (mr.match.has_value()) {
-            auto pred = compilePredicate(*mr.match);
-            if (!pred(view)) {
-                continue;
-            }
+        if (ruleMatches(r, nodePath, view)) {
+            return *r.tessellation;
         }
-        return &mr;
+    }
+    return kDefault;
+}
+
+// Return the material name from the first matching rule that has one, or nullptr.
+const std::string *resolveMaterial(const std::vector<Rule> &rules, const std::string &nodePath,
+                                   const NodeView &view) {
+    for (const auto &r : rules) {
+        if (!r.material.has_value()) {
+            continue;
+        }
+        if (ruleMatches(r, nodePath, view)) {
+            return &*r.material;
+        }
     }
     return nullptr;
+}
+
+// Resolve extras from the first matching rule that has them.
+RenderExtrasMap resolveExtras(const std::vector<Rule> &rules, const std::string &nodePath,
+                              const NodeView &view) {
+    for (const auto &r : rules) {
+        if (!r.extras.has_value()) {
+            continue;
+        }
+        if (ruleMatches(r, nodePath, view)) {
+            return *r.extras;
+        }
+    }
+    return {};
 }
 
 // Build a default grey RenderMaterial from a SourceMaterial.
@@ -83,7 +107,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
     PrimitiveTessellator tess;
 
     // Cache: SemanticMaterialId → RenderMaterialId (avoid creating duplicate RenderMaterials
-    // for nodes that share a SourceMaterial and match no named MaterialRule).
+    // for nodes that share a SourceMaterial and match no named material rule).
     std::unordered_map<SemanticMaterialId, RenderMaterialId> defaultMatCache;
     // Cache: MaterialDef name → RenderMaterialId (avoid duplicating named config materials).
     std::unordered_map<std::string, RenderMaterialId> namedMatCache;
@@ -125,13 +149,20 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
             result.scene.nodes.at(parentRnId).children.push_back(rnId);
         }
 
+        // ── Resolve extras from unified rules ──────────────────────────────────
+        {
+            NodeView ev{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
+            rn.extras = resolveExtras(config_.rules, nodePath, ev);
+        }
+
         nodeMap[semId] = rnId;
         if (!semNode.parentId.has_value()) {
             result.scene.rootId = rnId;
         }
 
         // ── Resolve tessellation rule ──────────────────────────────────────────
-        const TessellationRule &rule = resolveRule(config_.tessellationRules, nodePath);
+        NodeView nv{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
+        const Rule::Tessellation &rule = resolveTessellation(config_.rules, nodePath, nv);
         TessellationParams params;
         params.maxSegmentsCircle = rule.maxSegmentsCircle;
 
@@ -263,14 +294,14 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     const auto &srcMat = scene.materials.at(*firstMatId);
                     const std::string &descPath = semNode.originalPath;
                     NodeView view{semNode.name, descPath, false, &semNode.tags};
-                    const MaterialRule *mr = resolveMaterial(config_.materialRules, descPath, view);
-                    if (mr != nullptr) {
-                        auto cit = namedMatCache.find(mr->materialName);
+                    const std::string *matName = resolveMaterial(config_.rules, descPath, view);
+                    if (matName != nullptr) {
+                        auto cit = namedMatCache.find(*matName);
                         if (cit != namedMatCache.end()) {
                             rmId = cit->second;
                         } else {
                             for (const auto &md : config_.materials) {
-                                if (md.name == mr->materialName) {
+                                if (md.name == *matName) {
                                     RenderMaterial rm;
                                     rm.id = result.scene.nextMaterialId();
                                     rm.name = md.name;
@@ -358,15 +389,15 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 // Resolve material and bind
                 const auto &srcMat = scene.materials.at(lv.materialId);
                 NodeView view{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
-                const MaterialRule *mr = resolveMaterial(config_.materialRules, nodePath, view);
+                const std::string *matName = resolveMaterial(config_.rules, nodePath, view);
                 RenderMaterialId rmId;
-                if (mr != nullptr) {
-                    auto cit = namedMatCache.find(mr->materialName);
+                if (matName != nullptr) {
+                    auto cit = namedMatCache.find(*matName);
                     if (cit != namedMatCache.end()) {
                         rmId = cit->second;
                     } else {
                         for (const auto &md : config_.materials) {
-                            if (md.name == mr->materialName) {
+                            if (md.name == *matName) {
                                 RenderMaterial rm;
                                 rm.id = result.scene.nextMaterialId();
                                 rm.name = md.name;
@@ -435,15 +466,15 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         // ── Resolve material ───────────────────────────────────────────────────
         const auto &srcMat = scene.materials.at(lv.materialId);
         NodeView view{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
-        const MaterialRule *mr = resolveMaterial(config_.materialRules, nodePath, view);
+        const std::string *matName = resolveMaterial(config_.rules, nodePath, view);
         RenderMaterialId rmId;
-        if (mr != nullptr) {
-            auto cit = namedMatCache.find(mr->materialName);
+        if (matName != nullptr) {
+            auto cit = namedMatCache.find(*matName);
             if (cit != namedMatCache.end()) {
                 rmId = cit->second;
             } else {
                 for (const auto &md : config_.materials) {
-                    if (md.name == mr->materialName) {
+                    if (md.name == *matName) {
                         RenderMaterial rm;
                         rm.id = result.scene.nextMaterialId();
                         rm.name = md.name;

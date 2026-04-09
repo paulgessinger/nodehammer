@@ -63,6 +63,11 @@ struct MeshBinding {
     RenderMaterialId materialId;
 };
 
+// ── Extras ────────────────────────────────────────────────────────────────────
+
+/// Free-form metadata for export, emitted as glTF extras or similar.
+using RenderExtrasMap = nlohmann::json;
+
 // ── Render node ───────────────────────────────────────────────────────────────
 
 struct RenderNode {
@@ -80,6 +85,9 @@ struct RenderNode {
 
     /// Back-reference to the semantic node that produced this render node
     SemanticNodeId semanticNodeId;
+
+    /// Free-form metadata for export (e.g. glTF scene extras)
+    RenderExtrasMap extras;
 };
 
 // ── Render scene ─────────────────────────────────────────────────────────────

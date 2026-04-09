@@ -31,23 +31,28 @@ operands = [
   {type = "is_leaf"},
 ]
 
-[[material_rules]]
+# Unified rules: material + tessellation + extras in one list.
+[[rules]]
 scope = "/World/Tracker/**"
 material = "aluminum"
-[material_rules.match]
+[rules.match]
 type = "tag"
 key = "semantic"
 value = "sensor"
 
-[[material_rules]]
+[[rules]]
 scope = "/World/Tracker/BeamPipe/**"
 material = "copper"
 
-[[tessellation_rules]]
+[[rules]]
 scope = "/World/Tracker/**"
+[rules.tessellation]
 max_segments_circle = 32
 fallback = "skip"
+[rules.extras]
+visible = true
 
-[[tessellation_rules]]
+[[rules]]
+[rules.tessellation]
 max_segments_circle = 64
 fallback = "skip"

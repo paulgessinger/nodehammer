@@ -108,9 +108,9 @@ TEST_CASE("GltfExporter: PBR material round-trip", "[export][gltf]") {
     md.metallic = 0.2f;
     md.roughness = 0.8f;
     cfg.materials.push_back(md);
-    nodehammer::MaterialRule mr;
-    mr.materialName = "red";
-    cfg.materialRules.push_back(mr);
+    nodehammer::Rule mr;
+    mr.material = "red";
+    cfg.rules.push_back(mr);
 
     nodehammer::TessellationPass pass{cfg};
     const auto renderScene = pass.lower(semScene).scene;

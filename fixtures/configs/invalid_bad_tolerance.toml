@@ -1,5 +1,6 @@
 # Parses successfully but fails ConfigValidator: max_segments_circle must be > 0.
 
-[[tessellation_rules]]
+[[rules]]
+[rules.tessellation]
 max_segments_circle = -1
 fallback = "skip"

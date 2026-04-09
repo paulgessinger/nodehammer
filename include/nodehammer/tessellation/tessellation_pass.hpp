@@ -16,9 +16,9 @@ struct TessellationPassResult {
 ///
 /// For each reachable SemanticNode (BFS from root):
 ///   1. Creates a corresponding RenderNode (preserving hierarchy and transforms).
-///   2. Tessellates the node's shape using the first TessellationRule whose scope matches
-///      the node's path (or the default rule if none match).
-///   3. Assigns material from the first MaterialRule that matches, falling back to a
+///   2. Tessellates the node's shape using the first matching Rule with tessellation settings
+///      (or defaults if none match).
+///   3. Assigns material from the first matching Rule with a material name, falling back to a
 ///      default grey material derived from SourceMaterial.color.
 ///
 /// BooleanShape nodes:

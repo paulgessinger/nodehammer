@@ -11,10 +11,8 @@
 #   /world/OpenDataTracker/LongStrips/LongStripBarrel/LongStripLayer0/...
 #   /world/OpenDataTracker/Pixels/PixelEndcapN/PixelEndcapN0/...
 #
-# Strategy: keep subdetector and layer nodes as structural groups, keep sensor
-# nodes underneath. Layer/endcap-ring nodes merge their children into a single
-# mesh per group. hoist_orphans re-parents sensors to their nearest kept
-# ancestor (the layer node) with rebased transforms.
+# Strategy: keep subdetector and barrel/endcap nodes as structural groups.
+# Barrel/endcap nodes merge all descendant sensors into a single mesh.
 
 hoist_orphans = true
 
@@ -26,10 +24,20 @@ multi_scene = true
 [export.obj]
 unit_scale = 1.0
 
-[materials.silicon]
-base_color = [0.2, 0.6, 0.9, 1.0]
-metallic = 0.1
-roughness = 0.4
+[materials.pixel]
+base_color = [0.8, 0.1, 0.1, 1.0]
+metallic = 0.9
+roughness = 0.3
+
+[materials.short_strip]
+base_color = [0.1, 0.8, 0.1, 1.0]
+metallic = 0.9
+roughness = 0.3
+
+[materials.long_strip]
+base_color = [0.1, 0.1, 0.8, 1.0]
+metallic = 0.9
+roughness = 0.3
 
 [materials.support]
 base_color = [0.5, 0.5, 0.5, 1.0]
@@ -54,17 +62,20 @@ operands = [
   { type = "path_glob", pattern = "**/LongStrips" },
 ]
 
-# Keep layer/endcap-ring nodes as structural groups (only within tracker).
+# Keep barrel/endcap nodes as structural groups.
 [[selection_rules]]
 [selection_rules.keep_if]
 type = "or"
 operands = [
-  { type = "path_glob", pattern = "**/Pixels/**/*Layer*" },
-  { type = "path_glob", pattern = "**/Pixels/*Endcap*/*Endcap*" },
-  { type = "path_glob", pattern = "**/ShortStrips/**/*Layer*" },
-  { type = "path_glob", pattern = "**/ShortStrips/*Endcap*/*Endcap*" },
-  { type = "path_glob", pattern = "**/LongStrips/**/*Layer*" },
-  { type = "path_glob", pattern = "**/LongStrips/*Endcap*/*Endcap*" },
+  { type = "path_glob", pattern = "**/Pixels/*Barrel" },
+  { type = "path_glob", pattern = "**/Pixels/*EndcapN" },
+  { type = "path_glob", pattern = "**/Pixels/*EndcapP" },
+  { type = "path_glob", pattern = "**/ShortStrips/*Barrel" },
+  { type = "path_glob", pattern = "**/ShortStrips/*EndcapN" },
+  { type = "path_glob", pattern = "**/ShortStrips/*EndcapP" },
+  { type = "path_glob", pattern = "**/LongStrips/*Barrel" },
+  { type = "path_glob", pattern = "**/LongStrips/*EndcapN" },
+  { type = "path_glob", pattern = "**/LongStrips/*EndcapP" },
 ]
 
 # Keep sensor nodes (sensitive + tracker subdetectors).
@@ -80,34 +91,44 @@ operands = [
   ] },
 ]
 
-# ── Material rules ───────────────────────────────────────────────────────────
+# ── Rules ────────────────────────────────────────────────────────────────────
 
-[[material_rules]]
-material = "silicon"
-[material_rules.match]
-type = "tag"
-key = "sensitive"
-value = "true"
+# Material assignment per subdetector.
+[[rules]]
+scope = "**/Pixels/**"
+material = "pixel"
 
-[[material_rules]]
+[[rules]]
+scope = "**/ShortStrips/**"
+material = "short_strip"
+
+[[rules]]
+scope = "**/LongStrips/**"
+material = "long_strip"
+
+# Fallback material.
+[[rules]]
 material = "support"
 
-# ── Tessellation ─────────────────────────────────────────────────────────────
-
 # World and subdetector nodes: structural only, no geometry.
-[[tessellation_rules]]
+[[rules]]
 scope = ["/world", "**/Pixels", "**/ShortStrips", "**/LongStrips"]
+[rules.tessellation]
 skip_geometry = true
 
-# Layer/endcap-ring nodes: merge all descendant sensor meshes into one.
-[[tessellation_rules]]
-scope = ["**/*Layer*", "**/*Endcap*/*Endcap*"]
+# Barrel/endcap nodes: merge all descendant sensor meshes into one.
+[[rules]]
+scope = ["**/*Barrel", "**/*EndcapN", "**/*EndcapP"]
+[rules.tessellation]
 merge_children = true
-# skip_geometry = true
 max_segments_circle = 48
 fallback = "skip"
+[rules.extras]
+visible = true
+opacity = 1.0
 
-# Fallback for anything else.
-[[tessellation_rules]]
+# Fallback tessellation.
+[[rules]]
+[rules.tessellation]
 max_segments_circle = 48
 fallback = "skip"

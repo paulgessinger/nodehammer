@@ -45,8 +45,7 @@ TEST_CASE("ConfigLoader: minimal.toml loads without diagnostics", "[config][load
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.config.materials.empty());
     REQUIRE(result.config.selection.empty());
-    REQUIRE(result.config.materialRules.empty());
-    REQUIRE(result.config.tessellationRules.empty());
+    REQUIRE(result.config.rules.empty());
     REQUIRE(result.diags.empty());
 }
 
@@ -85,20 +84,28 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
     REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::AndPredicate>>(
         cfg.selection.at(2).predicate.data));
 
-    // Material rules
-    REQUIRE(cfg.materialRules.size() == 2);
-    REQUIRE(cfg.materialRules.at(0).materialName == "aluminum");
-    REQUIRE(cfg.materialRules.at(0).scope == "/World/Tracker/**");
-    REQUIRE(cfg.materialRules.at(0).match.has_value());
-    REQUIRE(cfg.materialRules.at(1).materialName == "copper");
-    REQUIRE_FALSE(cfg.materialRules.at(1).match.has_value());
+    // Unified rules (populated from [[rules]])
+    REQUIRE(cfg.rules.size() == 4);
 
-    // Tessellation rules
-    REQUIRE(cfg.tessellationRules.size() == 2);
-    REQUIRE(cfg.tessellationRules.at(0).maxSegmentsCircle == 32);
-    REQUIRE(cfg.tessellationRules.at(0).scope == "/World/Tracker/**");
-    REQUIRE(cfg.tessellationRules.at(1).maxSegmentsCircle == 64);
-    REQUIRE_FALSE(cfg.tessellationRules.at(1).scope.has_value());
+    // Rule 0: material + match
+    REQUIRE(cfg.rules.at(0).material == "aluminum");
+    REQUIRE(cfg.rules.at(0).scope == "/World/Tracker/**");
+    REQUIRE(cfg.rules.at(0).match.has_value());
+
+    // Rule 1: material only
+    REQUIRE(cfg.rules.at(1).material == "copper");
+    REQUIRE_FALSE(cfg.rules.at(1).match.has_value());
+
+    // Rule 2: tessellation + extras
+    REQUIRE(cfg.rules.at(2).tessellation.has_value());
+    REQUIRE(cfg.rules.at(2).tessellation->maxSegmentsCircle == 32);
+    REQUIRE(cfg.rules.at(2).extras.has_value());
+    REQUIRE(cfg.rules.at(2).extras->at("visible").get<bool>() == true);
+
+    // Rule 3: fallback tessellation
+    REQUIRE(cfg.rules.at(3).tessellation.has_value());
+    REQUIRE(cfg.rules.at(3).tessellation->maxSegmentsCircle == 64);
+    REQUIRE_FALSE(cfg.rules.at(3).scope.has_value());
 }
 
 TEST_CASE("ConfigLoader: missing file → Error diagnostic", "[config][loader]") {
@@ -181,18 +188,10 @@ closure = "none"
     REQUIRE(result.diags.hasErrors());
 }
 
-TEST_CASE("ConfigLoader: material rule material is required → Error", "[config][loader]") {
-    constexpr std::string_view toml = R"(
-[[material_rules]]
-scope = "/World/**"
-)";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(result.diags.hasErrors());
-}
-
 TEST_CASE("ConfigLoader: unknown fallback → Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
-[[tessellation_rules]]
+[[rules]]
+[rules.tessellation]
 max_segments_circle = 32
 fallback = "explode"
 )";
@@ -239,9 +238,10 @@ roughness = 0.2
     REQUIRE(result.config.materials.at(0).metallic == 0.0f); // ignored, stays at default
 }
 
-TEST_CASE("ConfigLoader: unknown key in tessellation_rule → Warning", "[config][loader]") {
+TEST_CASE("ConfigLoader: unknown key in rules.tessellation → Warning", "[config][loader]") {
     constexpr std::string_view toml = R"(
-[[tessellation_rules]]
+[[rules]]
+[rules.tessellation]
 xmax_segments_circle = 32
 fallback = "skip"
 )";
@@ -255,7 +255,7 @@ fallback = "skip"
         }
     }
     REQUIRE(found);
-    REQUIRE(result.config.tessellationRules.at(0).maxSegmentsCircle == 64); // default
+    REQUIRE(result.config.rules.at(0).tessellation->maxSegmentsCircle == 64); // default
 }
 
 TEST_CASE("ConfigLoader: unknown key in selection_rule → Warning", "[config][loader]") {
@@ -347,7 +347,8 @@ TEST_CASE("ConfigLoader: clean config produces no warnings", "[config][loader]")
 metallic = 0.8
 roughness = 0.2
 
-[[tessellation_rules]]
+[[rules]]
+[rules.tessellation]
 max_segments_circle = 32
 fallback = "skip"
 )";

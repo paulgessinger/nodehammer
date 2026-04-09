@@ -31,24 +31,22 @@ TEST_CASE("ConfigValidator: empty config produces no diagnostics", "[config][val
 
 // ── Undefined material reference ──────────────────────────────────────────────
 
-TEST_CASE("ConfigValidator: material_rule referencing undefined material → Error",
-          "[config][validator]") {
+TEST_CASE("ConfigValidator: rule referencing undefined material → Error", "[config][validator]") {
     auto cfg = configWithAluminum();
-    nodehammer::MaterialRule rule;
-    rule.materialName = "doesNotExist";
-    cfg.materialRules.push_back(rule);
+    nodehammer::Rule rule;
+    rule.material = "doesNotExist";
+    cfg.rules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.hasErrors());
     REQUIRE(diags.items().size() == 1);
     REQUIRE(diags.items().front().code == nodehammer::codes::kErrUndefinedMaterialRef);
 }
 
-TEST_CASE("ConfigValidator: material_rule referencing defined material → no error",
-          "[config][validator]") {
+TEST_CASE("ConfigValidator: rule referencing defined material → no error", "[config][validator]") {
     auto cfg = configWithAluminum();
-    nodehammer::MaterialRule rule;
-    rule.materialName = "aluminum";
-    cfg.materialRules.push_back(rule);
+    nodehammer::Rule rule;
+    rule.material = "aluminum";
+    cfg.rules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE_FALSE(diags.hasErrors());
 }
@@ -57,10 +55,10 @@ TEST_CASE("ConfigValidator: material_rule referencing defined material → no er
 
 TEST_CASE("ConfigValidator: negative max_segments_circle → Error", "[config][validator]") {
     nodehammer::NHConfig cfg;
-    nodehammer::TessellationRule rule;
-    rule.maxSegmentsCircle = -1;
-    rule.fallback = nodehammer::BooleanFallback::Skip;
-    cfg.tessellationRules.push_back(rule);
+    nodehammer::Rule rule;
+    rule.tessellation = nodehammer::Rule::Tessellation{};
+    rule.tessellation->maxSegmentsCircle = -1;
+    cfg.rules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.hasErrors());
     REQUIRE(diags.items().front().code == nodehammer::codes::kErrNegativeTolerance);
@@ -68,18 +66,20 @@ TEST_CASE("ConfigValidator: negative max_segments_circle → Error", "[config][v
 
 TEST_CASE("ConfigValidator: zero max_segments_circle → Error", "[config][validator]") {
     nodehammer::NHConfig cfg;
-    nodehammer::TessellationRule rule;
-    rule.maxSegmentsCircle = 0;
-    cfg.tessellationRules.push_back(rule);
+    nodehammer::Rule rule;
+    rule.tessellation = nodehammer::Rule::Tessellation{};
+    rule.tessellation->maxSegmentsCircle = 0;
+    cfg.rules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.hasErrors());
 }
 
 TEST_CASE("ConfigValidator: positive max_segments_circle → no error", "[config][validator]") {
     nodehammer::NHConfig cfg;
-    nodehammer::TessellationRule rule;
-    rule.maxSegmentsCircle = 32;
-    cfg.tessellationRules.push_back(rule);
+    nodehammer::Rule rule;
+    rule.tessellation = nodehammer::Rule::Tessellation{};
+    rule.tessellation->maxSegmentsCircle = 32;
+    cfg.rules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE_FALSE(diags.hasErrors());
 }
@@ -88,12 +88,13 @@ TEST_CASE("ConfigValidator: positive max_segments_circle → no error", "[config
 
 TEST_CASE("ConfigValidator: multiple violations all reported", "[config][validator]") {
     nodehammer::NHConfig cfg;
-    nodehammer::MaterialRule matRule;
-    matRule.materialName = "ghost";
-    cfg.materialRules.push_back(matRule);
-    nodehammer::TessellationRule tessRule;
-    tessRule.maxSegmentsCircle = -5;
-    cfg.tessellationRules.push_back(tessRule);
+    nodehammer::Rule matRule;
+    matRule.material = "ghost";
+    cfg.rules.push_back(matRule);
+    nodehammer::Rule tessRule;
+    tessRule.tessellation = nodehammer::Rule::Tessellation{};
+    tessRule.tessellation->maxSegmentsCircle = -5;
+    cfg.rules.push_back(tessRule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.items().size() >= 2); // undefined material + bad segments
 }
@@ -103,7 +104,7 @@ TEST_CASE("ConfigValidator: multiple violations all reported", "[config][validat
 TEST_CASE("ConfigValidator: undefined material ref via TOML → validator catches it",
           "[config][validator]") {
     constexpr std::string_view toml = R"(
-[[material_rules]]
+[[rules]]
 material = "ghost"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
@@ -115,12 +116,13 @@ material = "ghost"
 TEST_CASE("ConfigValidator: negative max_segments_circle via TOML → validator catches it",
           "[config][validator]") {
     constexpr std::string_view toml = R"(
-[[tessellation_rules]]
+[[rules]]
+[rules.tessellation]
 max_segments_circle = -1
 fallback = "skip"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE_FALSE(loaded.diags.hasErrors()); // parses fine — semantic error caught by validator
+    REQUIRE_FALSE(loaded.diags.hasErrors());
     auto diags = nodehammer::ConfigValidator::validate(loaded.config);
     REQUIRE(diags.hasErrors());
 }
@@ -132,7 +134,7 @@ TEST_CASE("ConfigValidator: defined material ref via TOML → validator passes",
 metallic = 0.1
 roughness = 0.4
 
-[[material_rules]]
+[[rules]]
 material = "aluminum"
 )";
     auto loaded = nodehammer::ConfigLoader::loadFromString(toml);

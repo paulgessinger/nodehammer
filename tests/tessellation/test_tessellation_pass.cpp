@@ -133,9 +133,9 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
     md.baseColor = {1.0f, 0.8f, 0.0f, 1.0f};
     cfg.materials.push_back(md);
 
-    MaterialRule mr;
-    mr.materialName = "gold";
-    cfg.materialRules.push_back(mr); // matches all nodes
+    Rule mr;
+    mr.material = "gold";
+    cfg.rules.push_back(mr); // matches all nodes
 
     TessellationPass pass{cfg};
     auto result = pass.lower(makeSingleBoxScene());
@@ -151,9 +151,10 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
 TEST_CASE("TessellationPass: boolean fallback=Skip emits warning, no mesh binding",
           "[tessellation][pass]") {
     NHConfig cfg;
-    TessellationRule rule;
-    rule.fallback = BooleanFallback::Skip;
-    cfg.tessellationRules.push_back(rule);
+    Rule rule;
+    rule.tessellation = Rule::Tessellation{};
+    rule.tessellation->fallback = BooleanFallback::Skip;
+    cfg.rules.push_back(rule);
 
     TessellationPass pass{cfg};
     auto result = pass.lower(makeBooleanScene());
@@ -174,9 +175,10 @@ TEST_CASE("TessellationPass: boolean fallback=Skip emits warning, no mesh bindin
 TEST_CASE("TessellationPass: boolean fallback=BBox emits warning and produces a mesh",
           "[tessellation][pass]") {
     NHConfig cfg;
-    TessellationRule rule;
-    rule.fallback = BooleanFallback::BBox;
-    cfg.tessellationRules.push_back(rule);
+    Rule rule;
+    rule.tessellation = Rule::Tessellation{};
+    rule.tessellation->fallback = BooleanFallback::BBox;
+    cfg.rules.push_back(rule);
 
     TessellationPass pass{cfg};
     auto result = pass.lower(makeBooleanScene());
@@ -195,9 +197,10 @@ TEST_CASE("TessellationPass: boolean fallback=BBox emits warning and produces a 
 TEST_CASE("TessellationPass: boolean fallback=Fail returns error diagnostic",
           "[tessellation][pass]") {
     NHConfig cfg;
-    TessellationRule rule;
-    rule.fallback = BooleanFallback::Fail;
-    cfg.tessellationRules.push_back(rule);
+    Rule rule;
+    rule.tessellation = Rule::Tessellation{};
+    rule.tessellation->fallback = BooleanFallback::Fail;
+    cfg.rules.push_back(rule);
 
     TessellationPass pass{cfg};
     auto result = pass.lower(makeBooleanScene());

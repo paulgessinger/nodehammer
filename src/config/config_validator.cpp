@@ -15,21 +15,18 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
         definedMaterials.insert(mat.name);
     }
 
-    // material_rules: every referenced material must be defined.
-    for (const auto &rule : cfg.materialRules) {
-        if (!definedMaterials.contains(rule.materialName)) {
-            diags.error(
-                codes::kErrUndefinedMaterialRef,
-                std::format("material_rule references undefined material '{}'", rule.materialName));
+    for (const auto &rule : cfg.rules) {
+        // Every referenced material must be defined.
+        if (rule.material.has_value() && !definedMaterials.contains(*rule.material)) {
+            diags.error(codes::kErrUndefinedMaterialRef,
+                        std::format("rule references undefined material '{}'", *rule.material));
         }
-    }
 
-    // tessellation_rules: max_segments_circle must be positive.
-    for (const auto &rule : cfg.tessellationRules) {
-        if (rule.maxSegmentsCircle <= 0) {
+        // max_segments_circle must be positive.
+        if (rule.tessellation.has_value() && rule.tessellation->maxSegmentsCircle <= 0) {
             diags.error(codes::kErrNegativeTolerance,
-                        std::format("tessellation_rule max_segments_circle must be > 0, got {}",
-                                    rule.maxSegmentsCircle));
+                        std::format("rule max_segments_circle must be > 0, got {}",
+                                    rule.tessellation->maxSegmentsCircle));
         }
     }
 
