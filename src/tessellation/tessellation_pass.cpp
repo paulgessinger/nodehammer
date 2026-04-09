@@ -277,6 +277,14 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
             }
 
             // Create merged mesh asset
+            if (mergedVerts.empty()) {
+                result.diags.warn(
+                    codes::kWarnTessMergeEmpty,
+                    std::format("merge_children on '{}' produced no geometry — node has no "
+                                "tessellatable descendants (did selection remove them?)",
+                                semNode.name),
+                    semNode.name);
+            }
             if (!mergedVerts.empty()) {
                 MeshAssetId mid = result.scene.nextMeshId();
                 MeshAsset ma;
