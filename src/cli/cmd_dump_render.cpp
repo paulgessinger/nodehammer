@@ -1,9 +1,10 @@
+#include "cli_common.hpp"
+
 #include <CLI/CLI.hpp>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <nodehammer/config/config_ast.hpp>
 #include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/import/synthetic.hpp>
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
@@ -42,18 +43,7 @@ void register_cmd_dump_render(CLI::App &app) {
         if (syntheticBoxOpt->count()) {
             semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
         } else if (*inputOpt) {
-            std::string inputPath, fmt;
-            inputOpt->results(inputPath);
-            if (*formatOpt)
-                formatOpt->results(fmt);
-
-            const auto reg = nodehammer::makeDefaultRegistry();
-            const auto *imp = reg.resolve(inputPath, fmt);
-            if (!imp) {
-                std::println(stderr, "nodehammer dump-render: cannot determine input format");
-                return;
-            }
-            auto importResult = imp->import(inputPath);
+            auto [importResult, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
             for (const auto &d : importResult.diags.items()) {
                 std::println(stderr, "[{}] {}", d.code, d.message);
             }

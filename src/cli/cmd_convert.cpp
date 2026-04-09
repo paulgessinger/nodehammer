@@ -1,3 +1,5 @@
+#include "cli_common.hpp"
+
 #include <CLI/CLI.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
@@ -38,13 +40,9 @@ void register_cmd_convert(CLI::App &app) {
     auto *strictOpt = sub->add_flag("--strict", "Treat warnings as errors");
 
     sub->callback([=] {
-        std::string inputPath, inputFmt, outputFmt;
+        std::string outputFmt;
         std::vector<std::string> outputPaths;
-        inputOpt->results(inputPath);
         outputOpt->results(outputPaths);
-        if (*fmtInOpt) {
-            fmtInOpt->results(inputFmt);
-        }
         if (*fmtOutOpt) {
             fmtOutOpt->results(outputFmt);
         }
@@ -72,15 +70,7 @@ void register_cmd_convert(CLI::App &app) {
         }
 
         // ── Import ─────────────────────────────────────────────────────────────
-        const auto impRegistry = nodehammer::makeDefaultRegistry();
-        const auto *imp = impRegistry.resolve(inputPath, inputFmt);
-        if (!imp) {
-            std::println(stderr, "[error] {} cannot determine input format for '{}'",
-                         nodehammer::codes::kErrImportFormatUnknown, inputPath);
-            std::exit(1);
-        }
-
-        auto importResult = imp->import(inputPath);
+        auto [importResult, importFmt] = nodehammer::cli::importOrExit(inputOpt, fmtInOpt);
         printDiags(importResult.diags);
         if (importResult.diags.hasErrors() ||
             (strict && !importResult.diags.empty() && !importResult.diags.hasErrors())) {
