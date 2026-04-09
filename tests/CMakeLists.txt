@@ -13,6 +13,7 @@ add_executable(nodehammer_tests
     tessellation/test_primitive_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
     export/test_gltf_exporter.cpp
+    test_markup.cpp
 )
 
 target_compile_definitions(nodehammer_tests PRIVATE

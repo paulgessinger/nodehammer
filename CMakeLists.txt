@@ -36,6 +36,7 @@ add_library(nodehammer_lib STATIC
     src/export/gltf_exporter.cpp
     src/export/obj_exporter.cpp
     src/export/exporter_registry.cpp
+    src/markup.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
     src/cli/cmd_validate_config.cpp
