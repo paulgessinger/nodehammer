@@ -179,6 +179,20 @@ TEST_CASE("PredicateParser: any() with single argument", "[config][parser]") {
     REQUIRE(ops.size() == 1);
 }
 
+TEST_CASE("PredicateParser: trailing comma in any()", "[config][parser]") {
+    auto expr = mustParse(R"(any(path ~= "**/A/**", path ~= "**/B/**",))");
+    REQUIRE(std::holds_alternative<std::shared_ptr<OrPredicate>>(expr.data));
+    const auto &ops = std::get<std::shared_ptr<OrPredicate>>(expr.data)->operands;
+    REQUIRE(ops.size() == 2);
+}
+
+TEST_CASE("PredicateParser: trailing comma in all()", "[config][parser]") {
+    auto expr = mustParse("all(true, false,)");
+    REQUIRE(std::holds_alternative<std::shared_ptr<AndPredicate>>(expr.data));
+    const auto &ops = std::get<std::shared_ptr<AndPredicate>>(expr.data)->operands;
+    REQUIRE(ops.size() == 2);
+}
+
 TEST_CASE("PredicateParser: nested function calls", "[config][parser]") {
     auto expr =
         mustParse(R"(all(tag.sensitive == "true", any(path ~= "**/A/**", path ~= "**/B/**")))");

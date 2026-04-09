@@ -17,7 +17,7 @@ namespace nodehammer {
 /// unary_expr ← '!' unary_expr / primary
 /// primary    ← func_call / atom / '(' expr ')'
 ///
-/// func_call  ← ('any' / 'all') '(' expr (',' expr)* ')'
+/// func_call  ← ('any' / 'all') '(' expr (',' expr)* ','? ')'
 ///
 /// atom       ← 'true' / 'false' / 'is_leaf' / tag_expr / path_expr / name_expr
 /// tag_expr   ← 'tag.' IDENT ('==' STRING)?

@@ -316,6 +316,10 @@ class Parser {
             args.push_back(std::move(*arg));
             while (peek().type == TokenType::Comma) {
                 advance(); // consume ,
+                // Allow trailing comma: if next token is ')', stop.
+                if (peek().type == TokenType::RParen) {
+                    break;
+                }
                 auto nextArg = parseOrExpr();
                 if (!nextArg) {
                     return nextArg;
