@@ -3,6 +3,7 @@
 #include <CLI/CLI.hpp>
 #include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/markup.hpp>
 
 #include <print>
 #include <string>

@@ -1,9 +1,11 @@
 #include "cli_common.hpp"
+#include "pager.hpp"
 
 #include <CLI/CLI.hpp>
 #include <map>
 #include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/markup.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <print>
 #include <set>
@@ -11,7 +13,17 @@
 
 namespace {
 
-// ── Summary ──────────────────────────────────────────────────────────────────
+nodehammer::ColorMode parseColorMode(const std::string &s) {
+    if (s == "always") {
+        return nodehammer::ColorMode::Always;
+    }
+    if (s == "never") {
+        return nodehammer::ColorMode::Never;
+    }
+    return nodehammer::ColorMode::Auto;
+}
+
+// ── Summary ─��─────────────────────────────────���──────────────────────────────
 
 void printSummary(const nodehammer::ImportResult &result, std::string_view formatName) {
     std::map<std::string, int> shapeCounts;
@@ -76,9 +88,10 @@ void printSummary(const nodehammer::ImportResult &result, std::string_view forma
     std::println("Warnings: {}  Errors: {}", warnings, errors);
 }
 
-// ── Tree ─────────────────────────────────────────────────────────────────────
+// ── Tree ───────────────────────────���───────────────────────────���─────────────
 
-void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter) {
+void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
+               const nodehammer::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
@@ -121,32 +134,42 @@ void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::
             // Draw tree lines.
             std::string line;
             if (depth > 0) {
-                line = prefix + (isLast ? "\\-- " : "|-- ");
+                line = std::format("[dim]{}[/]", isLast ? "\\-- " : "|-- ");
             }
-            line += node.name;
+            bool isLeaf = node.children.empty();
+            line += std::format("[bold]{}[/]", node.name);
 
             // Annotations.
             std::string ann;
             if (!node.tags.empty()) {
                 for (const auto &[k, v] : node.tags) {
                     if (!ann.empty()) {
-                        ann += ", ";
+                        ann += "[dim],[/] ";
                     }
-                    ann += std::format("{}={}", k, v);
+                    ann += std::format("[cyan]{}[/][dim]=[/][yellow]{}[/]", k, v);
                 }
             }
             int nChildren = static_cast<int>(node.children.size());
             if (nChildren > 0 && maxDepth >= 0 && depth == maxDepth) {
                 if (!ann.empty()) {
-                    ann += ", ";
+                    ann += "[dim],[/] ";
                 }
-                ann += std::format("{} children", nChildren);
+                ann += std::format("[dim]{} children[/]", nChildren);
+            }
+            if (isLeaf) {
+                if (!ann.empty()) {
+                    ann += "[dim],[/] ";
+                }
+                ann += "[dim]leaf[/]";
             }
 
+            // Colorize the prefix (tree lines).
+            std::string colorPrefix = std::format("[dim]{}[/]", prefix);
+
             if (!ann.empty()) {
-                std::println("{}  [{}]", line, ann);
+                con.println("{}{}  [dim]\\[[/]{}[dim]][/]", colorPrefix, line, ann);
             } else {
-                std::println("{}", line);
+                con.println("{}{}", colorPrefix, line);
             }
             ++printed;
         } else {
@@ -163,13 +186,13 @@ void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::
     }
 
     if (!filter.empty()) {
-        std::println("({} shown, {} filtered)", printed, filtered);
+        con.println("[dim]({} shown, {} filtered)[/]", printed, filtered);
     }
 }
 
-// ── Tags ─────────────────────────────────────────────────────────────────────
+// ── Tags ──────────��───────────────────────────────���──────────────────────────
 
-void printTags(const nodehammer::SemanticScene &scene) {
+void printTags(const nodehammer::SemanticScene &scene, const nodehammer::Console &con) {
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
     int nodesWithTags = 0;
@@ -182,20 +205,20 @@ void printTags(const nodehammer::SemanticScene &scene) {
         }
     }
 
-    std::println("Nodes with tags: {} / {}", nodesWithTags, scene.nodes.size());
-    std::println("Unique tag keys: {}", tagValues.size());
-    std::println("");
+    con.println("Nodes with tags: [bold]{}[/] / {}", nodesWithTags, scene.nodes.size());
+    con.println("Unique tag keys: [bold]{}[/]", tagValues.size());
+    con.println("");
 
     for (const auto &[key, values] : tagValues) {
         if (values.size() <= 10) {
             std::string valStr;
             for (const auto &v : values) {
                 if (!valStr.empty()) {
-                    valStr += ", ";
+                    valStr += "[dim],[/] ";
                 }
-                valStr += std::format("\"{}\"", v);
+                valStr += std::format("[yellow]\"{}\"[/]", v);
             }
-            std::println("  tag.{} ({} values): {}", key, values.size(), valStr);
+            con.println("  [cyan]tag.{}[/] [dim]({} values):[/] {}", key, values.size(), valStr);
         } else {
             std::string sample;
             int n = 0;
@@ -204,12 +227,13 @@ void printTags(const nodehammer::SemanticScene &scene) {
                     break;
                 }
                 if (!sample.empty()) {
-                    sample += ", ";
+                    sample += "[dim],[/] ";
                 }
-                sample += std::format("\"{}\"", v);
+                sample += std::format("[yellow]\"{}\"[/]", v);
                 ++n;
             }
-            std::println("  tag.{} ({} values): {}, ...", key, values.size(), sample);
+            con.println("  [cyan]tag.{}[/] [dim]({} values):[/] {}[dim], ...[/]", key,
+                        values.size(), sample);
         }
     }
 }
@@ -223,15 +247,19 @@ void register_cmd_inspect(CLI::App &app) {
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");
     auto *formatOpt =
         sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
+    auto *colorOpt = sub->add_option("--color", "Color output: auto, always, never")
+                         ->default_val("auto")
+                         ->check(CLI::IsMember({"auto", "always", "never"}));
 
     // ── summary ──────────────────────────────────────────────────────────────
     auto *sumSub = sub->add_subcommand("summary", "Print a high-level summary");
     sumSub->callback([=] {
         auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
+        nodehammer::cli::Pager pager;
         printSummary(result, fmt);
     });
 
-    // ── tree ─────────────────────────────────────────────────────────────────
+    // ── tree ───��───────────────���─────────────────────────────────────────────
     auto *treeSub = sub->add_subcommand("tree", "Print the node hierarchy");
     auto *depthOpt = treeSub->add_option("--depth,-d", "Maximum depth to display (-1 = unlimited)")
                          ->default_val(-1);
@@ -248,13 +276,24 @@ void register_cmd_inspect(CLI::App &app) {
             filterOpt->results(filter);
         }
 
-        printTree(result.scene, maxDepth, filter);
+        std::string colorStr;
+        colorOpt->results(colorStr);
+
+        nodehammer::cli::Pager pager;
+        nodehammer::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+        printTree(result.scene, maxDepth, filter, con);
     });
 
-    // ── tags ─────────────────────────────────────────────────────────────────
+    // ── tags ────────────────────────────────────���───────────────────────────���
     auto *tagsSub = sub->add_subcommand("tags", "List all unique tags and their values");
     tagsSub->callback([=] {
         auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
-        printTags(result.scene);
+
+        std::string colorStr;
+        colorOpt->results(colorStr);
+
+        nodehammer::cli::Pager pager;
+        nodehammer::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+        printTags(result.scene, con);
     });
 }

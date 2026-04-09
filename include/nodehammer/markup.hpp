@@ -5,7 +5,12 @@
 #include <print>
 #include <string>
 #include <string_view>
+
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
 
 namespace nodehammer {
 
@@ -70,6 +75,15 @@ class Console {
         }
     }
 
+    /// Check whether a FILE* is connected to a terminal.
+    static bool isTTY(FILE *f = stdout) {
+#ifdef _WIN32
+        return _isatty(_fileno(f)) != 0;
+#else
+        return isatty(fileno(f)) != 0;
+#endif
+    }
+
   private:
     bool shouldColorize(int fd) const {
         switch (m_mode) {
@@ -79,7 +93,7 @@ class Console {
             return false;
         case ColorMode::Auto:
         default:
-            return isatty(fd);
+            return isatty(fd) != 0;
         }
     }
 
