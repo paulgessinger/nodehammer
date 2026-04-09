@@ -29,19 +29,25 @@ void register_cmd_convert(CLI::App &app) {
     auto *fmtInOpt =
         sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
-    auto *outputOpt = sub->add_option("-o,--output", "Output file")->required();
-    auto *fmtOutOpt = sub->add_option("--output-format",
-                                      "Output format (auto-detected from extension if omitted)");
+    auto *outputOpt = sub->add_option("-o,--output", "Output file(s) — one per format")
+                          ->required()
+                          ->expected(1, -1);
+    auto *fmtOutOpt = sub->add_option(
+        "--output-format",
+        "Output format (auto-detected from extension if omitted; applies to all outputs)");
     auto *strictOpt = sub->add_flag("--strict", "Treat warnings as errors");
 
     sub->callback([=] {
-        std::string inputPath, inputFmt, outputPath, outputFmt;
+        std::string inputPath, inputFmt, outputFmt;
+        std::vector<std::string> outputPaths;
         inputOpt->results(inputPath);
-        outputOpt->results(outputPath);
-        if (*fmtInOpt)
+        outputOpt->results(outputPaths);
+        if (*fmtInOpt) {
             fmtInOpt->results(inputFmt);
-        if (*fmtOutOpt)
+        }
+        if (*fmtOutOpt) {
             fmtOutOpt->results(outputFmt);
+        }
         const bool strict = strictOpt->count() > 0;
 
         // ── Load config ────────────────────────────────────────────────────────
@@ -102,76 +108,84 @@ void register_cmd_convert(CLI::App &app) {
             std::exit(1);
         }
 
-        // ── Export ─────────────────────────────────────────────────────────────
+        // ── Export (one pass per output path) ─────────────────────────────────
         const auto expRegistry = nodehammer::makeDefaultExporterRegistry();
-        const auto *exp = expRegistry.resolve(outputPath, outputFmt);
-        if (!exp) {
-            std::println(stderr, "[error] {} cannot determine output format for '{}'",
-                         nodehammer::codes::kErrExportWriteFailed, outputPath);
-            std::exit(1);
-        }
 
-        nodehammer::ExportConfig ecfg;
-        const std::string outExt = std::filesystem::path{outputPath}.extension().string();
-        if (outputFmt == "glb" || outExt == ".glb")
-            ecfg.format = nodehammer::ExportConfig::Format::GLB;
-        else if (outputFmt == "gltf" || outExt == ".gltf")
-            ecfg.format = nodehammer::ExportConfig::Format::GLTF;
-        else if (outputFmt == "obj" || outExt == ".obj")
-            ecfg.format = nodehammer::ExportConfig::Format::OBJ;
-
-        // Start from the format's built-in default, then apply config overrides.
-        ecfg.unitScale = nodehammer::ExportConfig::defaultUnitScale(ecfg.format);
-        // OBJ always bakes (no scene graph for root scaling).
-        if (ecfg.format == nodehammer::ExportConfig::Format::OBJ) {
-            ecfg.bakeUnitScale = true;
-        }
         // Look up per-format config; GLB falls back to "gltf" if "glb" isn't set.
-        const auto applyFmtCfg = [&](const std::string &key) {
+        const auto applyFmtCfg = [&](nodehammer::ExportConfig &ecfg, const std::string &key) {
             if (!cfg.exportFormats.contains(key)) {
                 return false;
             }
             const auto &variant = cfg.exportFormats.at(key);
             const auto &common = nodehammer::commonConfig(variant);
-            if (auto v = common.unitScale)
+            if (auto v = common.unitScale) {
                 ecfg.unitScale = *v;
-            if (auto v = common.bakeUnitScale)
+            }
+            if (auto v = common.bakeUnitScale) {
                 ecfg.bakeUnitScale = *v;
+            }
             if (const auto *gltfCfg = std::get_if<nodehammer::GltfExportFormatConfig>(&variant)) {
-                if (auto v = gltfCfg->multiScene)
+                if (auto v = gltfCfg->multiScene) {
                     ecfg.gltf.multiScene = *v;
-                if (auto v = gltfCfg->sceneNameSeparator)
+                }
+                if (auto v = gltfCfg->sceneNameSeparator) {
                     ecfg.gltf.sceneNameSeparator = *v;
+                }
             }
             return true;
         };
-        const std::string fmtKey = (ecfg.format == nodehammer::ExportConfig::Format::GLB) ? "glb"
-                                   : (ecfg.format == nodehammer::ExportConfig::Format::GLTF)
-                                       ? "gltf"
-                                       : "obj";
-        if (!applyFmtCfg(fmtKey) && fmtKey == "glb") {
-            applyFmtCfg("gltf");
-        }
 
-        auto expResult = exp->write(tessResult.scene, outputPath, ecfg);
-        printDiags(expResult.diags);
-        if (expResult.diags.hasErrors()) {
-            std::println(stderr, "convert: export failed");
-            std::exit(1);
-        }
-
-        // ── Summary ────────────────────────────────────────────────────────────
-        int warnings = 0, errors = 0;
-        for (const auto *dl : {&importResult.diags, &tessResult.diags, &expResult.diags}) {
-            for (const auto &d : dl->items()) {
-                if (d.severity >= nodehammer::DiagnosticSeverity::Error)
-                    ++errors;
-                else if (d.severity == nodehammer::DiagnosticSeverity::Warning)
-                    ++warnings;
+        for (const auto &outputPath : outputPaths) {
+            const auto *exp = expRegistry.resolve(outputPath, outputFmt);
+            if (!exp) {
+                std::println(stderr, "[error] {} cannot determine output format for '{}'",
+                             nodehammer::codes::kErrExportWriteFailed, outputPath);
+                std::exit(1);
             }
+
+            nodehammer::ExportConfig ecfg;
+            const std::string outExt = std::filesystem::path{outputPath}.extension().string();
+            if (outputFmt == "glb" || outExt == ".glb") {
+                ecfg.format = nodehammer::ExportConfig::Format::GLB;
+            } else if (outputFmt == "gltf" || outExt == ".gltf") {
+                ecfg.format = nodehammer::ExportConfig::Format::GLTF;
+            } else if (outputFmt == "obj" || outExt == ".obj") {
+                ecfg.format = nodehammer::ExportConfig::Format::OBJ;
+            }
+
+            ecfg.unitScale = nodehammer::ExportConfig::defaultUnitScale(ecfg.format);
+            if (ecfg.format == nodehammer::ExportConfig::Format::OBJ) {
+                ecfg.bakeUnitScale = true;
+            }
+            const std::string fmtKey =
+                (ecfg.format == nodehammer::ExportConfig::Format::GLB)    ? "glb"
+                : (ecfg.format == nodehammer::ExportConfig::Format::GLTF) ? "gltf"
+                                                                          : "obj";
+            if (!applyFmtCfg(ecfg, fmtKey) && fmtKey == "glb") {
+                applyFmtCfg(ecfg, "gltf");
+            }
+
+            std::println("Writing {} ...", outputPath);
+            auto expResult = exp->write(tessResult.scene, outputPath, ecfg);
+            printDiags(expResult.diags);
+            if (expResult.diags.hasErrors()) {
+                std::println(stderr, "convert: export to '{}' failed", outputPath);
+                std::exit(1);
+            }
+
+            int warnings = 0, errors = 0;
+            for (const auto *dl : {&importResult.diags, &tessResult.diags, &expResult.diags}) {
+                for (const auto &d : dl->items()) {
+                    if (d.severity >= nodehammer::DiagnosticSeverity::Error) {
+                        ++errors;
+                    } else if (d.severity == nodehammer::DiagnosticSeverity::Warning) {
+                        ++warnings;
+                    }
+                }
+            }
+            std::println("  Nodes: {}  Meshes: {}  Materials: {}  Warnings: {}  Errors: {}",
+                         tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(),
+                         tessResult.scene.materials.size(), warnings, errors);
         }
-        std::println("Nodes: {}  Meshes: {}  Materials: {}  Warnings: {}  Errors: {}",
-                     tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(),
-                     tessResult.scene.materials.size(), warnings, errors);
     });
 }
