@@ -41,12 +41,17 @@ struct TagPredicate {
 /// True only for nodes that have no children in the scene.
 struct IsLeafPredicate {};
 
+/// Always true / always false.
+struct BoolPredicate {
+    bool value;
+};
+
 struct AndPredicate;
 struct OrPredicate;
 struct NotPredicate;
 
 using PredicateVariant = std::variant<NameGlobPredicate, PathGlobPredicate, TagPredicate,
-                                      IsLeafPredicate, std::shared_ptr<AndPredicate>,
+                                      IsLeafPredicate, BoolPredicate, std::shared_ptr<AndPredicate>,
                                       std::shared_ptr<OrPredicate>, std::shared_ptr<NotPredicate>>;
 
 struct PredicateExpr {

@@ -158,6 +158,77 @@ type = "is_leaf"
         result.config.selection.at(0).predicate.data));
 }
 
+// ── String expression predicates ─────────────────────────────────────────────
+
+TEST_CASE("ConfigLoader: keep_if as string expression", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[selection_rules]]
+keep_if = 'path ~= "/world/Tracker/**"'
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.selection.size() == 1);
+    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::KeepIf);
+    const auto &pred = result.config.selection.at(0).predicate;
+    REQUIRE(std::holds_alternative<nodehammer::PathGlobPredicate>(pred.data));
+    REQUIRE(std::get<nodehammer::PathGlobPredicate>(pred.data).pattern == "/world/Tracker/**");
+}
+
+TEST_CASE("ConfigLoader: drop_if as string expression", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[selection_rules]]
+drop_if = 'name ~= "*"'
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::DropIf);
+    REQUIRE(std::holds_alternative<nodehammer::NameGlobPredicate>(
+        result.config.selection.at(0).predicate.data));
+}
+
+TEST_CASE("ConfigLoader: keep_if compound expression", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[selection_rules]]
+keep_if = 'tag.sensitive == "true" && any(path ~= "**/A/**", path ~= "**/B/**")'
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    const auto &pred = result.config.selection.at(0).predicate;
+    REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::AndPredicate>>(pred.data));
+}
+
+TEST_CASE("ConfigLoader: keep_if invalid expression → Error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[selection_rules]]
+keep_if = 'unknown_keyword'
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(result.diags.hasErrors());
+}
+
+TEST_CASE("ConfigLoader: rules match as string expression", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[rules]]
+material = "steel"
+match = 'tag.sensitive == "true"'
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.rules.at(0).match.has_value());
+    REQUIRE(
+        std::holds_alternative<nodehammer::TagPredicate>(result.config.rules.at(0).match->data));
+}
+
+TEST_CASE("ConfigLoader: rules match invalid expression → Error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[[rules]]
+material = "steel"
+match = 'bad expression @@'
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(result.diags.hasErrors());
+}
+
 TEST_CASE("ConfigLoader: unknown predicate type → Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[selection_rules]]

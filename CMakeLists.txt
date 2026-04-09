@@ -25,6 +25,7 @@ add_library(nodehammer_lib STATIC
     src/ir/semantic.cpp
     src/config/config_loader.cpp
     src/config/config_validator.cpp
+    src/config/predicate_parser.cpp
     src/import/synthetic.cpp
     src/import/importer_registry.cpp
     src/selection/predicate.cpp

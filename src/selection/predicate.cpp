@@ -122,6 +122,9 @@ Predicate compilePredicate(const PredicateExpr &expr) {
             [](const PathGlobPredicate &node) { return makePathGlobPredicate(node.pattern); },
             [](const TagPredicate &node) { return makeTagPredicate(node.key, node.value); },
             [](const IsLeafPredicate &) { return makeIsLeafPredicate(); },
+            [](const BoolPredicate &node) -> Predicate {
+                return [v = node.value](const NodeView &) { return v; };
+            },
             [](const std::shared_ptr<AndPredicate> &node) -> Predicate {
                 std::vector<Predicate> ops;
                 ops.reserve(node->operands.size());

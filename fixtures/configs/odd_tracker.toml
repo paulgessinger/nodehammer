@@ -17,9 +17,10 @@
 hoist_orphans = true
 
 [export.gltf]
-unit_scale = 10.0
+# unit_scale = 10.0      # phoenix
+unit_scale = 1.0       # blender
 bake_unit_scale = true
-multi_scene = true
+# multi_scene = true # phoenix
 
 [export.obj]
 unit_scale = 1.0
@@ -48,48 +49,33 @@ roughness = 0.7
 
 # Drop everything by default.
 [[selection_rules]]
-[selection_rules.drop_if]
-type = "name_glob"
-pattern = "*"
+drop_if = 'name ~= "*"'
 
 # Keep subdetector nodes as top-level structural groups.
 [[selection_rules]]
-[selection_rules.keep_if]
-type = "or"
-operands = [
-  { type = "path_glob", pattern = "**/Pixels" },
-  { type = "path_glob", pattern = "**/ShortStrips" },
-  { type = "path_glob", pattern = "**/LongStrips" },
-]
+keep_if = 'any(path ~= "**/Pixels", path ~= "**/ShortStrips", path ~= "**/LongStrips")'
 
 # Keep barrel/endcap nodes as structural groups.
 [[selection_rules]]
-[selection_rules.keep_if]
-type = "or"
-operands = [
-  { type = "path_glob", pattern = "**/Pixels/*Barrel" },
-  { type = "path_glob", pattern = "**/Pixels/*EndcapN" },
-  { type = "path_glob", pattern = "**/Pixels/*EndcapP" },
-  { type = "path_glob", pattern = "**/ShortStrips/*Barrel" },
-  { type = "path_glob", pattern = "**/ShortStrips/*EndcapN" },
-  { type = "path_glob", pattern = "**/ShortStrips/*EndcapP" },
-  { type = "path_glob", pattern = "**/LongStrips/*Barrel" },
-  { type = "path_glob", pattern = "**/LongStrips/*EndcapN" },
-  { type = "path_glob", pattern = "**/LongStrips/*EndcapP" },
-]
+keep_if = '''
+any(
+  path ~= "**/Pixels/*Barrel",
+  path ~= "**/Pixels/*EndcapN",
+  path ~= "**/Pixels/*EndcapP",
+  path ~= "**/ShortStrips/*Barrel",
+  path ~= "**/ShortStrips/*EndcapN",
+  path ~= "**/ShortStrips/*EndcapP",
+  path ~= "**/LongStrips/*Barrel",
+  path ~= "**/LongStrips/*EndcapN",
+  path ~= "**/LongStrips/*EndcapP"
+)
+'''
 
 # Keep sensor nodes (sensitive + tracker subdetectors).
 [[selection_rules]]
-[selection_rules.keep_if]
-type = "and"
-operands = [
-  { type = "tag", key = "sensitive", value = "true" },
-  { type = "or", operands = [
-    { type = "path_glob", pattern = "**/Pixels/**" },
-    { type = "path_glob", pattern = "**/ShortStrips/**" },
-    { type = "path_glob", pattern = "**/LongStrips/**" },
-  ] },
-]
+keep_if = '''
+tag.sensitive == "true" && any(path ~= "**/Pixels/**", path ~= "**/ShortStrips/**", path ~= "**/LongStrips/**")
+'''
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 

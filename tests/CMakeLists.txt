@@ -5,6 +5,7 @@ add_executable(nodehammer_tests
     ir/test_shape_variant.cpp
     config/test_config_loader.cpp
     config/test_config_validator.cpp
+    config/test_predicate_parser.cpp
     import/test_synthetic_importer.cpp
     selection/test_predicate.cpp
     selection/test_closure.cpp

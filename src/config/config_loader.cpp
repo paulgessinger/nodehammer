@@ -1,4 +1,5 @@
 #include <nodehammer/config/config_loader.hpp>
+#include <nodehammer/config/predicate_parser.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 
 #include <toml++/toml.hpp>
@@ -218,22 +219,33 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
         warnUnknownKeys(*tbl, {"keep_if", "drop_if", "scope", "closure"}, "selection_rules", diags);
 
         SelectionAction action{};
-        const toml::table *predTbl = nullptr;
+        std::optional<PredicateExpr> pred;
 
-        if (const auto *kif = (*tbl)["keep_if"].as_table()) {
-            action = SelectionAction::KeepIf;
-            predTbl = kif;
-        } else if (const auto *dif = (*tbl)["drop_if"].as_table()) {
-            action = SelectionAction::DropIf;
-            predTbl = dif;
-        } else {
-            diags.error(codes::kErrConfigParse,
-                        "selection_rule must have either a 'keep_if' or 'drop_if' table");
-            continue;
+        // keep_if / drop_if can be a table (structured) or a string (expression).
+        for (const auto &[actKey, actVal] :
+             std::initializer_list<std::pair<std::string_view, SelectionAction>>{
+                 {"keep_if", SelectionAction::KeepIf}, {"drop_if", SelectionAction::DropIf}}) {
+            if (const auto *sub = (*tbl)[actKey].as_table()) {
+                action = actVal;
+                pred = parsePredicate(*sub, diags, "selection_rules");
+                break;
+            }
+            if (auto str = (*tbl)[actKey].value<std::string>()) {
+                action = actVal;
+                auto parsed = parsePredicateExpr(*str);
+                if (!parsed) {
+                    diags.error(
+                        codes::kErrConfigParse,
+                        std::format("failed to parse '{}' expression: {}", actKey, parsed.error()),
+                        "selection_rules");
+                }
+                pred = std::move(parsed).value_or(PredicateExpr{BoolPredicate{false}});
+                break;
+            }
         }
-
-        auto pred = parsePredicate(*predTbl, diags, "selection_rules");
         if (!pred) {
+            diags.error(codes::kErrConfigParse,
+                        "selection_rule must have either a 'keep_if' or 'drop_if' field");
             continue;
         }
 
@@ -326,13 +338,22 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             scopes.push_back(std::move(*scope));
         }
 
-        // ── match predicate ──────────────────────────────────────────────────
+        // ── match predicate (table or string expression) ─────────────────────
         if (const auto *matchTbl = (*tbl)["match"].as_table()) {
             auto pred = parsePredicate(*matchTbl, diags, "rules");
             if (!pred) {
                 continue;
             }
             rule.match = std::move(*pred);
+        } else if (auto matchStr = (*tbl)["match"].value<std::string>()) {
+            auto parsed = parsePredicateExpr(*matchStr);
+            if (!parsed) {
+                diags.error(codes::kErrConfigParse,
+                            std::format("failed to parse 'match' expression: {}", parsed.error()),
+                            "rules");
+                continue;
+            }
+            rule.match = std::move(*parsed);
         }
 
         // ── material ─────────────────────────────────────────────────────────
