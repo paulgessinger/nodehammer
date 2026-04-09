@@ -1,3 +1,8 @@
+#include <cstdio>
+#include <fstream>
+#include <sstream>
+#include <string>
+
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/markup.hpp>
 
@@ -72,4 +77,20 @@ TEST_CASE("markup_format: formats then applies markup", "[markup]") {
 TEST_CASE("markup_format: multiple arguments", "[markup]") {
     auto result = markup_format("[bold]{}/{} [green]passed[/green][/bold]", 10, 12);
     CHECK(result == "\033[1m10/12 \033[32mpassed\033[39m\033[22m");
+}
+
+TEST_CASE("markup_println: strips ANSI when writing to a non-TTY file", "[markup]") {
+    auto *tmp = std::tmpfile();
+    REQUIRE(tmp != nullptr);
+
+    nodehammer::markup_println(tmp, "[red]hello[/red] {}", "world");
+
+    std::rewind(tmp);
+    char buf[256] = {};
+    auto *ret = std::fgets(buf, sizeof(buf), tmp);
+    REQUIRE(ret != nullptr);
+    std::fclose(tmp);
+
+    // tmpfile() is never a TTY, so tags should be stripped
+    CHECK(std::string(buf) == "hello world\n");
 }

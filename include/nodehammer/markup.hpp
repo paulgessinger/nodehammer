@@ -5,6 +5,7 @@
 #include <print>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 
 namespace nodehammer {
 
@@ -28,14 +29,26 @@ std::string markup_format(std::format_string<Args...> fmt, Args &&...args) {
 }
 
 /// Format with markup, print to stdout with newline.
+/// Strips ANSI codes when stdout is not a TTY.
 template <typename... Args> void markup_println(std::format_string<Args...> fmt, Args &&...args) {
-    std::println("{}", markup(std::format(fmt, std::forward<Args>(args)...)));
+    auto text = std::format(fmt, std::forward<Args>(args)...);
+    if (isatty(STDOUT_FILENO)) {
+        std::println("{}", markup(text));
+    } else {
+        std::println("{}", strip_markup(text));
+    }
 }
 
 /// Format with markup, print to a FILE* with newline.
+/// Strips ANSI codes when the file is not a TTY.
 template <typename... Args>
 void markup_println(FILE *f, std::format_string<Args...> fmt, Args &&...args) {
-    std::println(f, "{}", markup(std::format(fmt, std::forward<Args>(args)...)));
+    auto text = std::format(fmt, std::forward<Args>(args)...);
+    if (isatty(fileno(f))) {
+        std::println(f, "{}", markup(text));
+    } else {
+        std::println(f, "{}", strip_markup(text));
+    }
 }
 
 } // namespace nodehammer
