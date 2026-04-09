@@ -16,5 +16,7 @@ config_file=$SCRIPT_DIR/fixtures/configs/odd_tracker.toml
 
 pushd $SCRIPT_DIR/build
 
+$SCRIPT_DIR/build/nodehammer dump-semantic -i $odd_xml -c $config_file -o odd.json
 $SCRIPT_DIR/build/nodehammer convert -i $odd_xml -c $config_file -o odd.obj
 $SCRIPT_DIR/build/nodehammer convert -i $odd_xml -c $config_file -o odd.gltf
+$SCRIPT_DIR/build/nodehammer convert -i $odd_xml -c $config_file -o odd.glb
