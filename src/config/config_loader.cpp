@@ -334,6 +334,13 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
                     scopes.push_back(std::move(*s));
                 }
             }
+            if (scopes.empty()) {
+                diags.warn(codes::kWarnConfigEmptyScope,
+                           "scope is an empty array (all entries commented out?) "
+                           "— rule will be skipped; remove 'scope' entirely to match all nodes",
+                           "rules");
+                continue;
+            }
         } else if (auto scope = (*tbl)["scope"].value<std::string>()) {
             scopes.push_back(std::move(*scope));
         }
