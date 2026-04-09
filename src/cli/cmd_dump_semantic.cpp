@@ -208,18 +208,14 @@ void register_cmd_dump_semantic(CLI::App &app) {
             std::string cfgPath;
             configOpt->results(cfgPath);
             auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
-            for (const auto &d : loaded.diags.items())
-                std::println(stderr, "[{}] {} {}", nodehammer::severityName(d.severity), d.code,
-                             d.message);
+            nodehammer::cli::printDiags(loaded.diags);
             if (loaded.diags.hasErrors()) {
                 std::println(stderr, "dump-semantic: config load failed");
                 return;
             }
             cfg = std::move(loaded.config);
             auto validDiags = nodehammer::ConfigValidator::validate(cfg);
-            for (const auto &d : validDiags.items())
-                std::println(stderr, "[{}] {} {}", nodehammer::severityName(d.severity), d.code,
-                             d.message);
+            nodehammer::cli::printDiags(validDiags);
             if (validDiags.hasErrors()) {
                 std::println(stderr, "dump-semantic: config validation failed");
                 return;
@@ -228,17 +224,13 @@ void register_cmd_dump_semantic(CLI::App &app) {
 
         // ── Import ─────────────────────────────────────────────────────────────
         auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
-        for (const auto &d : result.diags.items())
-            std::println(stderr, "[{}] {} {}", nodehammer::severityName(d.severity), d.code,
-                         d.message);
+        nodehammer::cli::printDiags(result.diags);
 
         // ── Select ─────────────────────────────────────────────────────────────
         if (!cfg.selection.empty()) {
             nodehammer::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
             auto selDiags = sel.prune(result.scene);
-            for (const auto &d : selDiags.items())
-                std::println(stderr, "[{}] {} {}", nodehammer::severityName(d.severity), d.code,
-                             d.message);
+            nodehammer::cli::printDiags(selDiags);
         }
 
         // ── Output ─────────────────────────────────────────────────────────────

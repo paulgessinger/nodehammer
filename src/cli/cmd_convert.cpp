@@ -11,18 +11,7 @@
 #include <print>
 #include <string>
 
-namespace {
-
-void printDiags(const nodehammer::DiagnosticList &diags) {
-    for (const auto &d : diags.items()) {
-        const char *sev = (d.severity >= nodehammer::DiagnosticSeverity::Error)     ? "error"
-                          : (d.severity == nodehammer::DiagnosticSeverity::Warning) ? "warn"
-                                                                                    : "info";
-        std::println(stderr, "[{}] {} {}", sev, d.code, d.message);
-    }
-}
-
-} // namespace
+using nodehammer::cli::printDiags;
 
 void register_cmd_convert(CLI::App &app) {
     auto *sub = app.add_subcommand("convert", "Convert a geometry file to a render format");

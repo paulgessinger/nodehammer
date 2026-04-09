@@ -5,10 +5,32 @@
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/markup.hpp>
 
+#include <nodehammer/ir/diagnostics.hpp>
+
 #include <print>
 #include <string>
 
 namespace nodehammer::cli {
+
+/// Print diagnostics to stderr with colored severity.
+inline void printDiags(const DiagnosticList &diags) {
+    static Console errCon{ColorMode::Auto};
+    for (const auto &d : diags.items()) {
+        std::string_view color;
+        std::string_view label;
+        if (d.severity >= DiagnosticSeverity::Error) {
+            color = "red";
+            label = "error";
+        } else if (d.severity == DiagnosticSeverity::Warning) {
+            color = "yellow";
+            label = "warn";
+        } else {
+            color = "dim";
+            label = "info";
+        }
+        errCon.println(stderr, "[{}][bold]{} {}[/]  {}", color, label, d.code, d.message);
+    }
+}
 
 /// Result of importOrExit: the import result plus the format name.
 struct ImportWithFormat {

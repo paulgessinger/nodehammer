@@ -29,10 +29,8 @@ void register_cmd_dump_render(CLI::App &app) {
             std::string cfgPath;
             configOpt->results(cfgPath);
             auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
+            nodehammer::cli::printDiags(loaded.diags);
             if (loaded.diags.hasErrors()) {
-                for (const auto &d : loaded.diags.items()) {
-                    std::println(stderr, "[{}] {}", d.code, d.message);
-                }
                 return;
             }
             cfg = std::move(loaded.config);
@@ -44,9 +42,7 @@ void register_cmd_dump_render(CLI::App &app) {
             semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
         } else if (*inputOpt) {
             auto [importResult, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
-            for (const auto &d : importResult.diags.items()) {
-                std::println(stderr, "[{}] {}", d.code, d.message);
-            }
+            nodehammer::cli::printDiags(importResult.diags);
             if (importResult.diags.hasErrors())
                 return;
             semScene = std::move(importResult.scene);
@@ -59,9 +55,7 @@ void register_cmd_dump_render(CLI::App &app) {
         // ── Tessellate ─────────────────────────────────────────────────────────
         nodehammer::TessellationPass pass{cfg};
         auto passResult = pass.lower(semScene);
-        for (const auto &d : passResult.diags.items()) {
-            std::println(stderr, "[{}] {}", d.code, d.message);
-        }
+        nodehammer::cli::printDiags(passResult.diags);
 
         // ── Serialize ──────────────────────────────────────────────────────────
         nlohmann::json j = passResult.scene;
