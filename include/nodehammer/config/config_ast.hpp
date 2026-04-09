@@ -88,7 +88,7 @@ struct MaterialDef {
     float metallic{0.0f};
     float roughness{0.5f};
     Color emissive{0.0f, 0.0f, 0.0f, 1.0f};
-    bool doubleSided{false};
+    bool doubleSided{true};
 };
 
 // ── Rules ─────────────────────────────────────────────────────────────────────

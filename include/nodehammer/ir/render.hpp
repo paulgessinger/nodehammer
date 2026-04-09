@@ -53,7 +53,7 @@ struct RenderMaterial {
     glm::vec3 emissiveFactor{0.f};
 
     // Extras
-    bool doubleSided{false};
+    bool doubleSided{true};
 };
 
 // ── Mesh binding: material assigned to a mesh instance ───────────────────────
