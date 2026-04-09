@@ -162,9 +162,14 @@ void register_cmd_convert(CLI::App &app) {
                     }
                 }
             }
-            std::println("  Nodes: {}  Meshes: {}  Materials: {}  Warnings: {}  Errors: {}",
+            std::size_t totalTris = 0;
+            for (const auto &[id, ma] : tessResult.scene.meshAssets) {
+                totalTris += ma.indices.size() / 3;
+            }
+            std::println("  Nodes: {}  Meshes: {}  Triangles: {}  Materials: {}  "
+                         "Warnings: {}  Errors: {}",
                          tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(),
-                         tessResult.scene.materials.size(), warnings, errors);
+                         totalTris, tessResult.scene.materials.size(), warnings, errors);
         }
     });
 }
