@@ -18,7 +18,7 @@ hoist_orphans = true
 
 [export.gltf]
 # unit_scale = 10.0      # phoenix
-unit_scale = 1.0       # blender
+unit_scale = 0.1       # blender
 bake_unit_scale = true
 # multi_scene = true # phoenix
 
@@ -40,6 +40,21 @@ base_color = [0.1, 0.1, 0.8, 1.0]
 metallic = 0.9
 roughness = 0.3
 
+[materials.ecal]
+base_color = [0.9, 0.7, 0.1, 1.0]
+metallic = 0.2
+roughness = 0.6
+
+[materials.hcal]
+base_color = [0.2, 0.7, 0.7, 1.0]
+metallic = 0.2
+roughness = 0.6
+
+[materials.muon]
+base_color = [0.7, 0.4, 0.9, 1.0]
+metallic = 0.3
+roughness = 0.5
+
 [materials.support]
 base_color = [0.5, 0.5, 0.5, 1.0]
 metallic = 0.0
@@ -52,13 +67,15 @@ roughness = 0.7
 drop_if = 'name ~= "*"'
 
 # Keep subdetector nodes as top-level structural groups.
-[[selection_rules]]
-keep_if = 'any(path ~= "**/Pixels", path ~= "**/ShortStrips", path ~= "**/LongStrips")'
+# [[selection_rules]]
+# keep_if = 'any(path ~= "**/Pixels", path ~= "**/ShortStrips", path ~= "**/LongStrips")'
+# keep_if = 'any(path ~= "**/Pixels")'
 
 # Keep barrel/endcap nodes as structural groups.
 [[selection_rules]]
 keep_if = '''
 any(
+  name == "BeamPipe",
   path ~= "**/Pixels/*Barrel",
   path ~= "**/Pixels/*EndcapN",
   path ~= "**/Pixels/*EndcapP",
@@ -67,7 +84,19 @@ any(
   path ~= "**/ShortStrips/*EndcapP",
   path ~= "**/LongStrips/*Barrel",
   path ~= "**/LongStrips/*EndcapN",
-  path ~= "**/LongStrips/*EndcapP"
+  path ~= "**/LongStrips/*EndcapP",
+  path ~= "**/ECalBarrel",
+  path ~= "**/ECalEndcap_A",
+  path ~= "**/ECalEndcap_B",
+  path ~= "**/HCalBarrel",
+  path ~= "**/HCalEndcap_A",
+  path ~= "**/HCalEndcap_B",
+  path ~= "**/MuonSpectrometerBarrel",
+  path ~= "**/MuonSpectrometerBarrel/chamber*",
+  path ~= "**/MuonSpectrometerEndCapN",
+  path ~= "**/MuonSpectrometerEndCapN/*/chamber*",
+  path ~= "**/MuonSpectrometerEndCapP",
+  path ~= "**/MuonSpectrometerEndCapP/*/chamber*",
 )
 '''
 
@@ -92,19 +121,53 @@ material = "short_strip"
 scope = "**/LongStrips/**"
 material = "long_strip"
 
+[[rules]]
+scope = "**/ECal/**"
+material = "ecal"
+
+[[rules]]
+scope = "**/HCal/**"
+material = "hcal"
+
+[[rules]]
+scope = "**/MuonSpectrometer*/**"
+material = "muon"
+
 # Fallback material.
 [[rules]]
 material = "support"
 
 # World and subdetector nodes: structural only, no geometry.
 [[rules]]
-scope = ["/world", "**/Pixels", "**/ShortStrips", "**/LongStrips"]
+scope = [
+  "/world",
+  "**/Pixels",
+  "**/ShortStrips",
+  "**/LongStrips",
+  "**/MuonSpectrometerBarrel",
+  "**/MuonSpectrometerEndCapN",
+  "**/MuonSpectrometerEndCapP",
+  # "**/ECalBarrel",
+  # "**/ECalBarrel/stave*",
+  # "**/ECalBarrel/stave*/layer*",
+]
 [rules.tessellation]
 skip_geometry = true
 
 # Barrel/endcap nodes: merge all descendant sensor meshes into one.
 [[rules]]
-scope = ["**/*Barrel", "**/*EndcapN", "**/*EndcapP"]
+# This needs to be limited to pixel/long/short strips only.
+scope = [
+  "**/Pixels/*Barrel",
+  "**/Pixels/*EndcapN",
+  "**/Pixels/*EndcapP",
+  "**/ShortStrips/*Barrel",
+  "**/ShortStrips/*EndcapN",
+  "**/ShortStrips/*EndcapP",
+  "**/LongStrips/*Barrel",
+  "**/LongStrips/*EndcapN",
+  "**/LongStrips/*EndcapP",
+]
 [rules.tessellation]
 merge_children = true
 max_segments_circle = 48
@@ -113,8 +176,17 @@ fallback = "skip"
 visible = true
 opacity = 1.0
 
+# [[rules]]
+# scope = "**/MuonSpectrometerBarrel/chamber*/tube*"
+# [rules.tessellation]
+# max_segments_circle = 5
+# fallback = "skip"
+
 # Fallback tessellation.
 [[rules]]
 [rules.tessellation]
 max_segments_circle = 48
 fallback = "skip"
+[rules.extras]
+visible = true
+opacity = 1.0
