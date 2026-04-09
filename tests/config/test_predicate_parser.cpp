@@ -70,6 +70,42 @@ TEST_CASE("PredicateParser: tag with underscore key", "[config][parser]") {
     REQUIRE(tag.value == "barrel");
 }
 
+// ── Equality operators ───────────────────────────────────────────────────────
+
+TEST_CASE("PredicateParser: name == exact match", "[config][parser]") {
+    auto expr = mustParse(R"(name == "BeamPipe")");
+    REQUIRE(std::holds_alternative<NameGlobPredicate>(expr.data));
+    REQUIRE(std::get<NameGlobPredicate>(expr.data).pattern == "BeamPipe");
+}
+
+TEST_CASE("PredicateParser: path == exact match", "[config][parser]") {
+    auto expr = mustParse(R"(path == "/world/ECal")");
+    REQUIRE(std::holds_alternative<PathGlobPredicate>(expr.data));
+    REQUIRE(std::get<PathGlobPredicate>(expr.data).pattern == "/world/ECal");
+}
+
+TEST_CASE("PredicateParser: name != produces NOT", "[config][parser]") {
+    auto expr = mustParse(R"(name != "world")");
+    REQUIRE(std::holds_alternative<std::shared_ptr<NotPredicate>>(expr.data));
+    const auto &inner = std::get<std::shared_ptr<NotPredicate>>(expr.data)->operand;
+    REQUIRE(std::holds_alternative<NameGlobPredicate>(inner.data));
+    REQUIRE(std::get<NameGlobPredicate>(inner.data).pattern == "world");
+}
+
+TEST_CASE("PredicateParser: path != produces NOT", "[config][parser]") {
+    auto expr = mustParse(R"(path != "/world")");
+    REQUIRE(std::holds_alternative<std::shared_ptr<NotPredicate>>(expr.data));
+}
+
+TEST_CASE("PredicateParser: tag != produces NOT", "[config][parser]") {
+    auto expr = mustParse(R"(tag.subdetector != "compound")");
+    REQUIRE(std::holds_alternative<std::shared_ptr<NotPredicate>>(expr.data));
+    const auto &inner = std::get<std::shared_ptr<NotPredicate>>(expr.data)->operand;
+    REQUIRE(std::holds_alternative<TagPredicate>(inner.data));
+    REQUIRE(std::get<TagPredicate>(inner.data).key == "subdetector");
+    REQUIRE(std::get<TagPredicate>(inner.data).value == "compound");
+}
+
 // ── Logical operators ────────────────────────────────────────────────────────
 
 TEST_CASE("PredicateParser: NOT", "[config][parser]") {

@@ -20,6 +20,7 @@ enum class TokenType {
     Not,     // !
     TildeEq, // ~=
     EqEq,    // ==
+    BangEq,  // !=
     Dot,     // .
     // Delimiters
     LParen, // (
@@ -74,8 +75,13 @@ class Lexer {
                         std::format("unexpected '|' at position {}; did you mean '||'?", pos_));
                 }
             } else if (c == '!') {
-                tokens.push_back({TokenType::Not, input_.substr(pos_, 1), pos_});
-                pos_ += 1;
+                if (pos_ + 1 < input_.size() && input_[pos_ + 1] == '=') {
+                    tokens.push_back({TokenType::BangEq, input_.substr(pos_, 2), pos_});
+                    pos_ += 2;
+                } else {
+                    tokens.push_back({TokenType::Not, input_.substr(pos_, 1), pos_});
+                    pos_ += 1;
+                }
             } else if (c == '~') {
                 if (pos_ + 1 < input_.size() && input_[pos_ + 1] == '=') {
                     tokens.push_back({TokenType::TildeEq, input_.substr(pos_, 2), pos_});
@@ -355,34 +361,50 @@ class Parser {
         advance(); // consume key
 
         std::optional<std::string> value;
-        if (peek().type == TokenType::EqEq) {
-            advance(); // consume ==
+        bool negate = false;
+        if (peek().type == TokenType::EqEq || peek().type == TokenType::BangEq) {
+            negate = (peek().type == TokenType::BangEq);
+            advance(); // consume == or !=
             if (peek().type != TokenType::String) {
                 return std::unexpected(
-                    std::format("expected string after '==' at position {}", peek().pos));
+                    std::format("expected string after operator at position {}", peek().pos));
             }
             value = stripQuotes(peek().text);
             advance(); // consume string
         }
-        return PredicateExpr{TagPredicate{std::move(key), std::move(value)}};
+        PredicateExpr expr{TagPredicate{std::move(key), std::move(value)}};
+        if (negate) {
+            return PredicateExpr{std::make_shared<NotPredicate>(NotPredicate{std::move(expr)})};
+        }
+        return expr;
     }
 
-    // glob_expr ← ('path' / 'name') '~=' STRING
+    // glob_expr ← ('path' / 'name') ('~=' / '==' / '!=') STRING
     template <typename GlobType>
     std::expected<PredicateExpr, std::string> parseGlobExpr(std::string_view keyword) {
         advance(); // consume keyword
-        if (peek().type != TokenType::TildeEq) {
-            return std::unexpected(
-                std::format("expected '~=' after '{}' at position {}", keyword, peek().pos));
+        bool negate = false;
+        if (peek().type == TokenType::TildeEq || peek().type == TokenType::EqEq) {
+            negate = false;
+        } else if (peek().type == TokenType::BangEq) {
+            negate = true;
+        } else {
+            return std::unexpected(std::format("expected '~=', '==', or '!=' after '{}' at "
+                                               "position {}",
+                                               keyword, peek().pos));
         }
-        advance(); // consume ~=
+        advance(); // consume operator
         if (peek().type != TokenType::String) {
             return std::unexpected(
-                std::format("expected string pattern after '~=' at position {}", peek().pos));
+                std::format("expected string after operator at position {}", peek().pos));
         }
         std::string pattern{stripQuotes(peek().text)};
         advance(); // consume string
-        return PredicateExpr{GlobType{std::move(pattern)}};
+        PredicateExpr expr{GlobType{std::move(pattern)}};
+        if (negate) {
+            return PredicateExpr{std::make_shared<NotPredicate>(NotPredicate{std::move(expr)})};
+        }
+        return expr;
     }
 
     static std::string stripQuotes(std::string_view s) {
