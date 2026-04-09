@@ -1,14 +1,14 @@
 #include <cstdio>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/markup.hpp>
 
+using nodehammer::ColorMode;
+using nodehammer::Console;
 using nodehammer::markup;
-using nodehammer::markup_format;
-using nodehammer::strip_markup;
+using nodehammer::markupFormat;
+using nodehammer::stripMarkup;
 
 TEST_CASE("markup: plain text passes through unchanged", "[markup]") {
     CHECK(markup("hello world") == "hello world");
@@ -58,32 +58,35 @@ TEST_CASE("markup: unclosed bracket is literal", "[markup]") {
     CHECK(markup("text [with no close") == "text [with no close");
 }
 
-TEST_CASE("strip_markup: removes tags", "[markup]") {
-    CHECK(strip_markup("[bold][red]error[/red][/bold]") == "error");
-    CHECK(strip_markup("[bright_green]ok[/]") == "ok");
-    CHECK(strip_markup("plain text") == "plain text");
-    CHECK(strip_markup("[unknown]kept[/unknown]") == "[unknown]kept[/unknown]");
+TEST_CASE("stripMarkup: removes tags", "[markup]") {
+    CHECK(stripMarkup("[bold][red]error[/red][/bold]") == "error");
+    CHECK(stripMarkup("[bright_green]ok[/]") == "ok");
+    CHECK(stripMarkup("plain text") == "plain text");
+    CHECK(stripMarkup("[unknown]kept[/unknown]") == "[unknown]kept[/unknown]");
 }
 
-TEST_CASE("strip_markup: escaped brackets preserved", "[markup]") {
-    CHECK(strip_markup("\\[red]literal") == "[red]literal");
+TEST_CASE("stripMarkup: escaped brackets preserved", "[markup]") {
+    CHECK(stripMarkup("\\[red]literal") == "[red]literal");
 }
 
-TEST_CASE("markup_format: formats then applies markup", "[markup]") {
-    auto result = markup_format("[red]{} errors[/red]", 3);
+TEST_CASE("markupFormat: formats then applies markup", "[markup]") {
+    auto result = markupFormat("[red]{} errors[/red]", 3);
     CHECK(result == "\033[31m3 errors\033[39m");
 }
 
-TEST_CASE("markup_format: multiple arguments", "[markup]") {
-    auto result = markup_format("[bold]{}/{} [green]passed[/green][/bold]", 10, 12);
+TEST_CASE("markupFormat: multiple arguments", "[markup]") {
+    auto result = markupFormat("[bold]{}/{} [green]passed[/green][/bold]", 10, 12);
     CHECK(result == "\033[1m10/12 \033[32mpassed\033[39m\033[22m");
 }
 
-TEST_CASE("markup_println: strips ANSI when writing to a non-TTY file", "[markup]") {
+// --- Console tests ---
+
+TEST_CASE("Console::println strips ANSI on non-TTY with Auto mode", "[markup]") {
+    Console console;
     auto *tmp = std::tmpfile();
     REQUIRE(tmp != nullptr);
 
-    nodehammer::markup_println(tmp, "[red]hello[/red] {}", "world");
+    console.println(tmp, "[red]hello[/red] {}", "world");
 
     std::rewind(tmp);
     char buf[256] = {};
@@ -91,6 +94,63 @@ TEST_CASE("markup_println: strips ANSI when writing to a non-TTY file", "[markup
     REQUIRE(ret != nullptr);
     std::fclose(tmp);
 
-    // tmpfile() is never a TTY, so tags should be stripped
     CHECK(std::string(buf) == "hello world\n");
+}
+
+TEST_CASE("Console::println forces ANSI with Always mode", "[markup]") {
+    Console console{ColorMode::Always};
+    auto *tmp = std::tmpfile();
+    REQUIRE(tmp != nullptr);
+
+    console.println(tmp, "[red]hi[/red]");
+
+    std::rewind(tmp);
+    char buf[256] = {};
+    auto *ret = std::fgets(buf, sizeof(buf), tmp);
+    REQUIRE(ret != nullptr);
+    std::fclose(tmp);
+
+    CHECK(std::string(buf) == "\033[31mhi\033[39m\n");
+}
+
+TEST_CASE("Console::println strips with Never mode", "[markup]") {
+    Console console{ColorMode::Never};
+    auto *tmp = std::tmpfile();
+    REQUIRE(tmp != nullptr);
+
+    console.println(tmp, "[bold]text[/bold]");
+
+    std::rewind(tmp);
+    char buf[256] = {};
+    auto *ret = std::fgets(buf, sizeof(buf), tmp);
+    REQUIRE(ret != nullptr);
+    std::fclose(tmp);
+
+    CHECK(std::string(buf) == "text\n");
+}
+
+TEST_CASE("Console::setColorMode changes behavior", "[markup]") {
+    Console console;
+    console.setColorMode(ColorMode::Always);
+
+    auto *tmp = std::tmpfile();
+    REQUIRE(tmp != nullptr);
+
+    console.println(tmp, "[green]ok[/green]");
+
+    std::rewind(tmp);
+    char buf[256] = {};
+    auto *ret = std::fgets(buf, sizeof(buf), tmp);
+    REQUIRE(ret != nullptr);
+    std::fclose(tmp);
+
+    CHECK(std::string(buf) == "\033[32mok\033[39m\n");
+}
+
+TEST_CASE("Console::format respects color mode", "[markup]") {
+    Console always{ColorMode::Always};
+    Console never{ColorMode::Never};
+
+    CHECK(always.format("[red]x[/red]") == "\033[31mx\033[39m");
+    CHECK(never.format("[red]x[/red]") == "x");
 }

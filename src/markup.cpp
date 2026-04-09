@@ -157,6 +157,6 @@ std::string process(std::string_view input, bool strip) {
 
 std::string markup(std::string_view input) { return process(input, false); }
 
-std::string strip_markup(std::string_view input) { return process(input, true); }
+std::string stripMarkup(std::string_view input) { return process(input, true); }
 
 } // namespace nodehammer

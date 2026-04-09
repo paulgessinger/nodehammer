@@ -9,6 +9,13 @@
 
 namespace nodehammer {
 
+/// Controls when Console emits ANSI escape codes.
+enum class ColorMode {
+    Auto,   ///< Emit ANSI only when the output is a TTY (default)
+    Always, ///< Always emit ANSI codes
+    Never,  ///< Never emit ANSI codes, always strip tags
+};
+
 /// Parse BB-style markup tags and produce ANSI-colored output.
 ///
 /// Supported tags:
@@ -20,35 +27,80 @@ namespace nodehammer {
 std::string markup(std::string_view input);
 
 /// Strip all markup tags, returning plain text.
-std::string strip_markup(std::string_view input);
+std::string stripMarkup(std::string_view input);
+
+/// A console that applies BB-style markup with configurable color mode.
+class Console {
+  public:
+    explicit Console(ColorMode mode = ColorMode::Auto) : m_mode(mode) {}
+
+    void setColorMode(ColorMode mode) { m_mode = mode; }
+    ColorMode colorMode() const { return m_mode; }
+
+    /// Format with std::format, then apply markup (always produces ANSI
+    /// when color mode is Always/Auto, strips when Never).
+    template <typename... Args>
+    std::string format(std::format_string<Args...> fmt, Args &&...args) const {
+        auto text = std::format(fmt, std::forward<Args>(args)...);
+        if (m_mode == ColorMode::Never) {
+            return stripMarkup(text);
+        }
+        return markup(text);
+    }
+
+    /// Format with markup, print to stdout with newline.
+    template <typename... Args>
+    void println(std::format_string<Args...> fmt, Args &&...args) const {
+        auto text = std::format(fmt, std::forward<Args>(args)...);
+        if (shouldColorize(STDOUT_FILENO)) {
+            std::println("{}", markup(text));
+        } else {
+            std::println("{}", stripMarkup(text));
+        }
+    }
+
+    /// Format with markup, print to a FILE* with newline.
+    template <typename... Args>
+    void println(FILE *f, std::format_string<Args...> fmt, Args &&...args) const {
+        auto text = std::format(fmt, std::forward<Args>(args)...);
+        if (shouldColorize(fileno(f))) {
+            std::println(f, "{}", markup(text));
+        } else {
+            std::println(f, "{}", stripMarkup(text));
+        }
+    }
+
+  private:
+    bool shouldColorize(int fd) const {
+        switch (m_mode) {
+        case ColorMode::Always:
+            return true;
+        case ColorMode::Never:
+            return false;
+        case ColorMode::Auto:
+        default:
+            return isatty(fd);
+        }
+    }
+
+    ColorMode m_mode;
+};
 
 /// Format with std::format, then apply markup.
 template <typename... Args>
-std::string markup_format(std::format_string<Args...> fmt, Args &&...args) {
+std::string markupFormat(std::format_string<Args...> fmt, Args &&...args) {
     return markup(std::format(fmt, std::forward<Args>(args)...));
 }
 
-/// Format with markup, print to stdout with newline.
-/// Strips ANSI codes when stdout is not a TTY.
-template <typename... Args> void markup_println(std::format_string<Args...> fmt, Args &&...args) {
-    auto text = std::format(fmt, std::forward<Args>(args)...);
-    if (isatty(STDOUT_FILENO)) {
-        std::println("{}", markup(text));
-    } else {
-        std::println("{}", strip_markup(text));
-    }
+/// Format with markup, print to stdout with newline (Auto color mode).
+template <typename... Args> void markupPrintln(std::format_string<Args...> fmt, Args &&...args) {
+    Console{}.println(fmt, std::forward<Args>(args)...);
 }
 
-/// Format with markup, print to a FILE* with newline.
-/// Strips ANSI codes when the file is not a TTY.
+/// Format with markup, print to a FILE* with newline (Auto color mode).
 template <typename... Args>
-void markup_println(FILE *f, std::format_string<Args...> fmt, Args &&...args) {
-    auto text = std::format(fmt, std::forward<Args>(args)...);
-    if (isatty(fileno(f))) {
-        std::println(f, "{}", markup(text));
-    } else {
-        std::println(f, "{}", strip_markup(text));
-    }
+void markupPrintln(FILE *f, std::format_string<Args...> fmt, Args &&...args) {
+    Console{}.println(f, fmt, std::forward<Args>(args)...);
 }
 
 } // namespace nodehammer
