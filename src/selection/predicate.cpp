@@ -5,56 +5,127 @@ namespace nodehammer {
 
 // ── matchGlob ─────────────────────────────────────────────────────────────────
 //
-// Recursive backtracking matcher. Patterns are typically short (< 50 chars)
-// so the recursion depth is bounded and exponential blowup is not a concern.
+// Iterative two-pointer matcher with fast-reject.
 //
 //   '**' — matches zero or more characters INCLUDING '/'.
 //          A '/' immediately following '**' is consumed so that "**/foo"
 //          matches both "foo" (zero-prefix) and "a/b/foo".
 //   '*'  — matches zero or more characters that are NOT '/'.
 //   all other characters — must match literally.
+//
+// The algorithm tracks the most recent '**' position as a restart point.
+// When a mismatch occurs after a '*' or '**', it backtracks to the restart
+// point and advances by one text character. This avoids recursion and runs
+// in O(n*m) worst case with minimal overhead.
+
+namespace {
+
+// Extract contiguous literal segments from a pattern (substrings between wildcards).
+// Used for fast rejection: if any literal segment is not found in the text,
+// the pattern cannot match.
+bool fastReject(std::string_view pattern, std::string_view text) {
+    std::size_t i = 0;
+    while (i < pattern.size()) {
+        // Skip wildcards and the optional '/' after '**'.
+        if (pattern[i] == '*') {
+            if (i + 1 < pattern.size() && pattern[i + 1] == '*') {
+                i += 2;
+                if (i < pattern.size() && pattern[i] == '/') {
+                    ++i;
+                }
+            } else {
+                ++i;
+            }
+            continue;
+        }
+        // Collect literal segment
+        std::size_t start = i;
+        while (i < pattern.size() && pattern[i] != '*') {
+            ++i;
+        }
+        std::string_view segment = pattern.substr(start, i - start);
+        // A literal segment must appear somewhere in the text.
+        if (segment.size() > 1 && text.find(segment) == std::string_view::npos) {
+            return true; // reject
+        }
+    }
+    return false;
+}
+
+} // namespace
 
 bool matchGlob(std::string_view pattern, std::string_view text) {
-    if (pattern.empty()) {
-        return text.empty();
-    }
-
-    // "**" — greedy match over any characters (including '/').
-    if (pattern.size() >= 2 && pattern[0] == '*' && pattern[1] == '*') {
-        std::string_view rest = pattern.substr(2);
-        // Consume an optional '/' separator that follows '**'.
-        if (!rest.empty() && rest[0] == '/') {
-            rest = rest.substr(1);
-        }
-        // Try matching rest against every suffix of text (skip == 0 → ** matches empty).
-        for (std::size_t skip = 0; skip <= text.size(); ++skip) {
-            if (matchGlob(rest, text.substr(skip))) {
-                return true;
-            }
-        }
+    // Fast reject: check that all literal segments exist in the text.
+    if (fastReject(pattern, text)) {
         return false;
     }
 
-    // '*' — greedy match over characters that are NOT '/'.
-    if (pattern[0] == '*') {
-        std::string_view rest = pattern.substr(1);
-        for (std::size_t skip = 0; skip <= text.size(); ++skip) {
-            // If we just stepped over a '/', stop — '*' must not cross '/'.
-            if (skip > 0 && text[skip - 1] == '/') {
-                break;
+    std::size_t pi = 0; // pattern index
+    std::size_t ti = 0; // text index
+
+    // Restart point for the most recent '**'.
+    std::size_t dstarPat = std::string_view::npos; // pattern index after '**[/]'
+    std::size_t dstarTxt = 0;                      // text index to retry from
+
+    // Restart point for the most recent '*'.
+    std::size_t starPat = std::string_view::npos;
+    std::size_t starTxt = 0;
+
+    while (ti < text.size() || pi < pattern.size()) {
+        if (pi < pattern.size()) {
+            // '**' — match any characters including '/'.
+            if (pi + 1 < pattern.size() && pattern[pi] == '*' && pattern[pi + 1] == '*') {
+                pi += 2;
+                // Consume optional '/' after '**'.
+                if (pi < pattern.size() && pattern[pi] == '/') {
+                    ++pi;
+                }
+                dstarPat = pi;
+                dstarTxt = ti;
+                // Reset single-star state since '**' subsumes it.
+                starPat = std::string_view::npos;
+                continue;
             }
-            if (matchGlob(rest, text.substr(skip))) {
-                return true;
+
+            // '*' — match any characters except '/'.
+            if (pattern[pi] == '*') {
+                ++pi;
+                starPat = pi;
+                starTxt = ti;
+                continue;
+            }
+
+            // Literal match.
+            if (ti < text.size() && pattern[pi] == text[ti]) {
+                ++pi;
+                ++ti;
+                continue;
             }
         }
+
+        // Mismatch — try backtracking to the most recent '*' first.
+        if (starPat != std::string_view::npos && starTxt < text.size() && text[starTxt] != '/') {
+            ++starTxt;
+            ti = starTxt;
+            pi = starPat;
+            continue;
+        }
+
+        // Backtrack to the most recent '**'.
+        if (dstarPat != std::string_view::npos && dstarTxt < text.size()) {
+            ++dstarTxt;
+            ti = dstarTxt;
+            pi = dstarPat;
+            // Reset single-star state.
+            starPat = std::string_view::npos;
+            continue;
+        }
+
+        // No wildcards to backtrack to — pattern does not match.
         return false;
     }
 
-    // Literal character — must match exactly.
-    if (text.empty() || pattern[0] != text[0]) {
-        return false;
-    }
-    return matchGlob(pattern.substr(1), text.substr(1));
+    return true;
 }
 
 // ── Factory functions ─────────────────────────────────────────────────────────
