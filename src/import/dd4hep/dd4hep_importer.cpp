@@ -20,7 +20,6 @@
 
 #include <format>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace nodehammer {
 
@@ -44,7 +43,8 @@ struct ImportState {
     dd4hep::Detector &det;
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
     std::unordered_map<const TGeoMaterial *, SemanticMaterialId> matCache;
-    std::unordered_set<const TGeoNode *> visitedNodes;
+    /// TGeoNode* → SemanticNodeId for nodes claimed by DetElements in Pass 1.
+    std::unordered_map<const TGeoNode *, SemanticNodeId> visitedNodes;
 };
 
 SemanticMaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
@@ -92,7 +92,7 @@ SemanticNodeId importDetElement(const dd4hep::DetElement &elem,
     dd4hep::PlacedVolume pv = elem.placement();
     const TGeoNode *geoNode = pv.ptr();
 
-    st.visitedNodes.insert(geoNode);
+    st.visitedNodes[geoNode] = id;
 
     SemanticNode sn;
     sn.id = id;
@@ -119,15 +119,12 @@ SemanticNodeId importDetElement(const dd4hep::DetElement &elem,
     return id;
 }
 
-// Pass 2: walk the TGeo tree and import structural nodes not covered by Pass 1.
-void importStructural(const TGeoNode *node, std::optional<SemanticNodeId> parentId,
-                      ImportState &st) {
-    if (st.visitedNodes.count(node) != 0u) {
-        return;
-    }
-    st.visitedNodes.insert(node);
+// Pass 2 helpers: import TGeo volumes not claimed by DetElements.
 
+// Recursively import a TGeo subtree that has no DetElement association.
+void importTGeoSubtree(const TGeoNode *node, SemanticNodeId parentId, ImportState &st) {
     const SemanticNodeId id = st.scene.nextNodeId();
+    st.visitedNodes[node] = id;
 
     SemanticNode sn;
     sn.id = id;
@@ -135,16 +132,26 @@ void importStructural(const TGeoNode *node, std::optional<SemanticNodeId> parent
     sn.logVolId = importLogVol(node->GetVolume(), st);
     sn.localTransform = tgeoMatrixToGlm(node->GetMatrix());
     sn.parentId = parentId;
-    sn.provenance = {"dd4hep", node->GetName(), st.sourceFile, {}};
+    sn.provenance = {"dd4hep/tgeo", node->GetName(), st.sourceFile, {}};
 
     st.scene.nodes[id] = sn;
-
-    if (parentId) {
-        st.scene.nodes[*parentId].children.push_back(id);
-    }
+    st.scene.nodes[parentId].children.push_back(id);
 
     for (int i = 0; i < node->GetNdaughters(); ++i) {
-        importStructural(node->GetDaughter(i), id, st);
+        importTGeoSubtree(node->GetDaughter(i), id, st);
+    }
+}
+
+// For each TGeoNode visited in Pass 1, import its TGeo daughters that are
+// NOT claimed by a child DetElement. This picks up passive volumes (kapton,
+// cables, support structures, etc.).
+void importTGeoDaughters(const TGeoNode *node, SemanticNodeId parentId, ImportState &st) {
+    for (int i = 0; i < node->GetNdaughters(); ++i) {
+        const TGeoNode *daughter = node->GetDaughter(i);
+        if (st.visitedNodes.contains(daughter)) {
+            continue; // already claimed by a DetElement
+        }
+        importTGeoSubtree(daughter, parentId, st);
     }
 }
 
@@ -182,35 +189,15 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     const SemanticNodeId rootId = importDetElement(world, std::nullopt, st);
     result.scene.rootId = rootId;
 
-    // Pass 2: structural TGeo nodes not reached by DetElement tree.
-    //
-    // NOTE: in practice this pass is currently a no-op for well-formed DD4hep
-    // geometries.  Pass 1 inserts det.world().placement().ptr() — the top
-    // TGeoNode — into visitedNodes, so importStructural immediately returns
-    // when called with GetTopNode() and never recurses into its children.
-    //
-    // Consequence: the SemanticScene contains exactly one node per DetElement
-    // (the logical detector hierarchy), but NOT the TGeoNode sub-volumes that
-    // live inside each DetElement's volume (e.g. individual sensor wafers,
-    // readout ASICs, glue layers).  For ODD this gives ~64k nodes vs ~186k
-    // in the raw TGeo tree.
-    //
-    // Whether this is a bug or a feature depends on the use case:
-    //   - For visualisation and high-level geometry validation the DetElement
-    //     granularity is usually the right semantic cut, and sub-volumes are
-    //     internal implementation detail.
-    //   - For full-geometry export (parity with TGeoImporter) Pass 2 should
-    //     recurse into the TGeoNode daughters of each DetElement node that
-    //     Pass 1 visited.  This requires storing the SemanticNodeId alongside
-    //     each TGeoNode* in visitedNodes so that structural children can be
-    //     parented correctly.
-    //
-    // Suggested follow-up: add a dd4hep_depth config option
-    // ("detector_element" | "full") and only activate the corrected Pass 2
-    // when "full" is requested.  Validate visually by comparing the DD4hep
-    // and TGeo import paths on the same geometry once glTF export is available
-    // (Checkpoint 7).
-    importStructural(detOwner->manager().GetTopNode(), std::nullopt, st);
+    // Pass 2: for each DetElement node from Pass 1, import its TGeo daughter
+    // volumes that are not claimed by a child DetElement. This captures passive
+    // components (kapton, cables, support structures, etc.) that exist in the
+    // TGeo tree but have no DetElement.
+    // Take a snapshot of the visited nodes map since Pass 2 will mutate it.
+    const auto pass1Nodes = st.visitedNodes;
+    for (const auto &[geoNode, semId] : pass1Nodes) {
+        importTGeoDaughters(geoNode, semId, st);
+    }
 
     result.scene.computeWorldTransforms();
     result.scene.computeOriginalPaths();
