@@ -1,0 +1,6 @@
+include = ["includes/materials.toml", "includes/rules.toml"]
+
+hoist_orphans = true
+
+[[rules]]
+material = "copper"

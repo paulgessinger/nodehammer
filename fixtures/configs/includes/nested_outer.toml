@@ -1,0 +1,5 @@
+include = "nested_inner.toml"
+
+[materials.copper]
+metallic = 0.9
+roughness = 0.1

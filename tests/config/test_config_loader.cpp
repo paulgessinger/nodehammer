@@ -427,3 +427,96 @@ fallback = "skip"
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.diags.empty());
 }
+
+// ── Include mechanism ────────────────────────────────────────────────────────
+
+TEST_CASE("ConfigLoader: basic include merges materials and rules", "[config][loader][include]") {
+    auto result =
+        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
+    REQUIRE_FALSE(result.diags.hasErrors());
+    const auto &cfg = result.config;
+
+    // Materials from included file
+    bool hasSteel = false, hasCopper = false;
+    for (const auto &m : cfg.materials) {
+        if (m.name == "steel") {
+            hasSteel = true;
+        }
+        if (m.name == "copper") {
+            hasCopper = true;
+        }
+    }
+    REQUIRE(hasSteel);
+    REQUIRE(hasCopper);
+
+    // hoist_orphans from main file
+    REQUIRE(cfg.hoistOrphans);
+
+    // Rules from both included and main file:
+    // includes/rules.toml has 2 rules, main file has 1 → 3 total.
+    REQUIRE(cfg.rules.size() == 3);
+}
+
+TEST_CASE("ConfigLoader: nested includes", "[config][loader][include]") {
+    auto result =
+        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_nested.toml");
+    REQUIRE_FALSE(result.diags.hasErrors());
+    const auto &cfg = result.config;
+
+    // nested_outer includes nested_inner (aluminum), plus its own copper.
+    // Main file adds steel. → 3 materials.
+    bool hasAluminum = false, hasCopper = false, hasSteel = false;
+    for (const auto &m : cfg.materials) {
+        if (m.name == "aluminum") {
+            hasAluminum = true;
+        }
+        if (m.name == "copper") {
+            hasCopper = true;
+        }
+        if (m.name == "steel") {
+            hasSteel = true;
+        }
+    }
+    REQUIRE(hasAluminum);
+    REQUIRE(hasCopper);
+    REQUIRE(hasSteel);
+}
+
+TEST_CASE("ConfigLoader: circular include → Error", "[config][loader][include]") {
+    auto result =
+        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_cycle.toml");
+    REQUIRE(result.diags.hasErrors());
+    bool foundCycle = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("circular") != std::string::npos) {
+            foundCycle = true;
+        }
+    }
+    REQUIRE(foundCycle);
+}
+
+TEST_CASE("ConfigLoader: include non-existent file → Error", "[config][loader][include]") {
+    auto result =
+        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_bad_path.toml");
+    REQUIRE(result.diags.hasErrors());
+}
+
+TEST_CASE("ConfigLoader: parent overrides included scalar", "[config][loader][include]") {
+    auto result =
+        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
+    REQUIRE_FALSE(result.diags.hasErrors());
+    // hoist_orphans = true in main file; not set in includes → true
+    REQUIRE(result.config.hoistOrphans);
+}
+
+TEST_CASE("ConfigLoader: included rules come before parent rules", "[config][loader][include]") {
+    auto result =
+        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
+    REQUIRE_FALSE(result.diags.hasErrors());
+    const auto &rules = result.config.rules;
+    // includes/rules.toml rules come first (scope="**/Tracker/**", then fallback tess),
+    // then main file rule (material="copper").
+    REQUIRE(rules.size() == 3);
+    REQUIRE(rules[0].scope == "**/Tracker/**");
+    REQUIRE(rules[2].material == "copper");
+}

@@ -1,0 +1,4 @@
+# ODD base: drop-all rule that goes before any subsystem keep rules.
+
+[[selection_rules]]
+drop_if = 'name ~= "*"'

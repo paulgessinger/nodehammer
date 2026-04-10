@@ -5,11 +5,121 @@
 #include <toml++/toml.hpp>
 
 #include <format>
+#include <set>
 #include <utility>
 
 namespace nodehammer {
 
 namespace {
+
+// ── Include resolution ───────────────────────────────────────────────────────
+//
+// Recursively processes `include = "file"` or `include = ["file1", "file2"]`.
+// Included files are parsed, their own includes resolved, and then merged
+// into the parent table. Arrays are concatenated, tables are deep-merged,
+// scalars use last-wins (parent overrides included values).
+
+/// Deep-merge `src` into `dst`.
+///   - Tables are merged recursively.
+///   - Arrays are concatenated: dst entries first, then src entries appended.
+///   - Scalars: dst wins if already present (first-wins).
+void mergeToml(toml::table &dst, const toml::table &src) {
+    for (const auto &[key, val] : src) {
+        const std::string k{key.str()};
+        if (k == "include") {
+            continue;
+        }
+
+        if (!dst.contains(k)) {
+            dst.insert(k, val);
+            continue;
+        }
+
+        auto &existing = *dst.get(k);
+
+        if (existing.is_table() && val.is_table()) {
+            mergeToml(*existing.as_table(), *val.as_table());
+            continue;
+        }
+
+        if (existing.is_array() && val.is_array()) {
+            for (const auto &e : *val.as_array()) {
+                existing.as_array()->push_back(e);
+            }
+            continue;
+        }
+    }
+}
+
+/// Recursively resolve includes in a parsed TOML table.
+/// `basePath` is the directory of the file being processed.
+/// `visited` tracks canonical paths for cycle detection.
+void resolveIncludes(toml::table &tbl, const std::filesystem::path &basePath,
+                     std::set<std::filesystem::path> &visited, DiagnosticList &diags) {
+    const auto *includeNode = tbl.get("include");
+    if (includeNode == nullptr) {
+        return;
+    }
+
+    std::vector<std::string> paths;
+    if (includeNode->is_string()) {
+        paths.push_back(std::string{includeNode->as_string()->get()});
+    } else if (includeNode->is_array()) {
+        for (const auto &e : *includeNode->as_array()) {
+            if (auto s = e.value<std::string>()) {
+                paths.push_back(std::move(*s));
+            }
+        }
+    } else {
+        diags.warn(codes::kWarnConfigUnknownKey, "'include' must be a string or array of strings",
+                   "<include>");
+        return;
+    }
+
+    tbl.erase("include");
+
+    // Parse and resolve all included files first, preserving order.
+    std::vector<toml::table> includedTables;
+    for (const auto &relPath : paths) {
+        auto fullPath = std::filesystem::canonical(basePath / relPath);
+
+        if (visited.contains(fullPath)) {
+            diags.error(codes::kErrConfigParse,
+                        std::format("circular include detected: '{}'", fullPath.string()),
+                        "<include>");
+            continue;
+        }
+        visited.insert(fullPath);
+
+        toml::table included;
+        try {
+            included = toml::parse_file(fullPath.string());
+        } catch (const toml::parse_error &e) {
+            diags.error(codes::kErrConfigParse, e.description(),
+                        std::format("{}:{}:{}", fullPath.string(), e.source().begin.line,
+                                    e.source().begin.column));
+            continue;
+        } catch (const std::exception &e) {
+            diags.error(codes::kErrImportFileNotFound,
+                        std::format("could not read included file: {}", e.what()),
+                        fullPath.string());
+            continue;
+        }
+
+        resolveIncludes(included, fullPath.parent_path(), visited, diags);
+        includedTables.push_back(std::move(included));
+    }
+
+    // Build a combined table from all includes in order, then merge the
+    // parent's own entries on top. This gives: include1, include2, ..., parent.
+    toml::table combined;
+    for (auto &inc : includedTables) {
+        mergeToml(combined, inc);
+    }
+    // Parent entries come last (fallbacks in first-match-wins).
+    mergeToml(combined, tbl);
+    tbl = std::move(combined);
+}
 
 // ── Unknown-key helper ────────────────────────────────────────────────────────
 
@@ -572,7 +682,20 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
     DiagnosticList diags;
     try {
         auto tbl = toml::parse_file(path.string());
-        return parseTable(tbl);
+
+        // Resolve includes before parsing config keys.
+        auto canonical = std::filesystem::canonical(path);
+        std::set<std::filesystem::path> visited{canonical};
+        resolveIncludes(tbl, canonical.parent_path(), visited, diags);
+        if (diags.hasErrors()) {
+            return ConfigResult{{}, std::move(diags)};
+        }
+
+        auto result = parseTable(tbl);
+        // Include diagnostics come before parse diagnostics.
+        diags.append(result.diags);
+        result.diags = std::move(diags);
+        return result;
     } catch (const toml::parse_error &e) {
         diags.error(
             codes::kErrConfigParse, e.description(),

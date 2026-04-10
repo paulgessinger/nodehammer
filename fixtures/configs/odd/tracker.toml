@@ -1,0 +1,66 @@
+# ODD tracker: pixels, short strips, long strips
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/Pixels/*Barrel"',
+  'path ~= "**/Pixels/*EndcapN"',
+  'path ~= "**/Pixels/*EndcapP"',
+  'path ~= "**/ShortStrips/*Barrel"',
+  'path ~= "**/ShortStrips/*EndcapN"',
+  'path ~= "**/ShortStrips/*EndcapP"',
+  'path ~= "**/LongStrips/*Barrel"',
+  'path ~= "**/LongStrips/*EndcapN"',
+  'path ~= "**/LongStrips/*EndcapP"',
+]
+
+# Keep sensor nodes.
+# [[selection_rules]]
+# keep_if = '''
+# tag.sensitive == "true" && any(path ~= "**/Pixels/**", path ~= "**/ShortStrips/**", path ~= "**/LongStrips/**")
+# '''
+
+[[selection_rules]]
+keep_if = 'path ~= "**/LongStripBarrelStaveModules_0/**"'
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+[[rules]]
+scope = "**/Pixels/**"
+material = "pixel"
+
+[[rules]]
+scope = "**/ShortStrips/**"
+material = "short_strip"
+
+[[rules]]
+scope = "**/LongStrips/**"
+material = "long_strip"
+
+# Structural nodes: no geometry.
+[[rules]]
+scope = ["**/Pixels", "**/ShortStrips", "**/LongStrips"]
+[rules.tessellation]
+skip_geometry = true
+
+# Barrel/endcap nodes: merge children.
+[[rules]]
+scope = [
+  "**/Pixels/*Barrel",
+  "**/Pixels/*EndcapN",
+  "**/Pixels/*EndcapP",
+  "**/ShortStrips/*Barrel",
+  "**/ShortStrips/*EndcapN",
+  "**/ShortStrips/*EndcapP",
+  "**/LongStrips/*Barrel",
+  "**/LongStrips/*EndcapN",
+  "**/LongStrips/*EndcapP",
+]
+[rules.tessellation]
+merge_children = true
+max_segments_circle = 48
+fallback = "skip"
+[rules.extras]
+visible = true
+opacity = 1.0

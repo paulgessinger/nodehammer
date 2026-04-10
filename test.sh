@@ -12,7 +12,7 @@ source $odd_root/install/bin/this_odd.sh
 
 odd_xml=$odd_root/xml/OpenDataDetector.xml
 
-config_file=$SCRIPT_DIR/fixtures/configs/odd_tracker.toml
+config_file=$SCRIPT_DIR/fixtures/configs/odd.toml
 
 pushd $SCRIPT_DIR/build
 

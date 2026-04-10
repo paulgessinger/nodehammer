@@ -1,0 +1,8 @@
+[[rules]]
+scope = "**/Tracker/**"
+material = "steel"
+
+[[rules]]
+[rules.tessellation]
+max_segments_circle = 32
+fallback = "skip"

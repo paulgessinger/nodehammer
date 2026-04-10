@@ -1,0 +1,55 @@
+# ODD full detector configuration
+#
+# Includes subsystem fragments for tracker, calorimeters, and muon spectrometer.
+# Each fragment defines its own selection rules, material assignments, and
+# tessellation settings.
+#
+# Include order matters: base.toml provides the drop-all rule, then subsystem
+# fragments add keep rules and specific settings. The main file's rules come
+# last and serve as fallbacks.
+
+include = [
+  "odd/base.toml",
+  "odd/materials.toml",
+  "odd/tracker.toml",
+  # "odd/calorimeters.toml",
+  # "odd/muon.toml",
+]
+
+hoist_orphans = true
+
+[export.gltf]
+# unit_scale = 10.0      # phoenix
+unit_scale = 0.1       # blender
+bake_unit_scale = true
+# multi_scene = true # phoenix
+
+[export.obj]
+unit_scale = 1.0
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+# Beam pipe (not in any subsystem fragment).
+[[selection_rules]]
+keep_if = ['name == "BeamPipe"']
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+# World node: no geometry.
+[[rules]]
+scope = "/world"
+[rules.tessellation]
+skip_geometry = true
+
+# Fallback material.
+[[rules]]
+material = "support"
+
+# Fallback tessellation.
+[[rules]]
+[rules.tessellation]
+max_segments_circle = 48
+fallback = "skip"
+[rules.extras]
+visible = true
+opacity = 1.0
