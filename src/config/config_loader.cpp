@@ -221,7 +221,10 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
         SelectionAction action{};
         std::optional<PredicateExpr> pred;
 
-        // keep_if / drop_if can be a table (structured) or a string (expression).
+        // keep_if / drop_if can be:
+        //   - a table (structured predicate)
+        //   - a string (expression)
+        //   - an array of strings (each parsed, combined with OR)
         for (const auto &[actKey, actVal] :
              std::initializer_list<std::pair<std::string_view, SelectionAction>>{
                  {"keep_if", SelectionAction::KeepIf}, {"drop_if", SelectionAction::DropIf}}) {
@@ -240,6 +243,43 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
                         "selection_rules");
                 }
                 pred = std::move(parsed).value_or(PredicateExpr{BoolPredicate{false}});
+                break;
+            }
+            if (const auto *predArr = (*tbl)[actKey].as_array()) {
+                action = actVal;
+                std::vector<PredicateExpr> operands;
+                bool ok = true;
+                for (const auto &elem : *predArr) {
+                    if (auto s = elem.value<std::string>()) {
+                        auto p = parsePredicateExpr(*s);
+                        if (!p) {
+                            diags.error(codes::kErrConfigParse,
+                                        std::format("failed to parse '{}' expression: {}", actKey,
+                                                    p.error()),
+                                        "selection_rules");
+                            ok = false;
+                            break;
+                        }
+                        operands.push_back(std::move(*p));
+                    }
+                }
+                if (!ok) {
+                    break;
+                }
+                if (operands.empty()) {
+                    diags.warn(codes::kWarnConfigEmptyScope,
+                               std::format("'{}' is an empty array (all entries commented out?) "
+                                           "— rule will be skipped",
+                                           actKey),
+                               "selection_rules");
+                    break;
+                }
+                if (operands.size() == 1) {
+                    pred = std::move(operands[0]);
+                } else if (!operands.empty()) {
+                    pred = PredicateExpr{
+                        std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
+                }
                 break;
             }
         }
