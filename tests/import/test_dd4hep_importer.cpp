@@ -23,8 +23,7 @@ TEST_CASE("DD4hepImporter: formatName and supportedExtensions", "[import][dd4hep
     REQUIRE(imp.supportedExtensions().empty());
 }
 
-TEST_CASE("DD4hepImporter: simple_box.xml -> no errors, provenance sourceSystem dd4hep",
-          "[import][dd4hep]") {
+TEST_CASE("DD4hepImporter: simple_box.xml -> no errors, sourceSystem dd4hep", "[import][dd4hep]") {
     nodehammer::DD4hepImporter imp;
     auto result = imp.import(kSimpleBox);
 
@@ -32,7 +31,7 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> no errors, provenance sourceSystem 
     REQUIRE_FALSE(result.scene.nodes.empty());
 
     const auto &root = result.scene.nodes.at(result.scene.rootId);
-    REQUIRE(root.provenance.sourceSystem == "dd4hep");
+    REQUIRE(root.sourceSystem == "dd4hep");
 }
 
 TEST_CASE("DD4hepImporter: simple_box.xml -> scene contains a BoxShape", "[import][dd4hep]") {

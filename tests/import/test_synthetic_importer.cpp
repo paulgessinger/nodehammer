@@ -19,7 +19,7 @@ TEST_CASE("SyntheticSceneBuilder: buildSingleBox — geometry correct", "[import
 
     const auto &rootNode = scene.nodes.at(scene.rootId);
     REQUIRE(rootNode.name == "world");
-    REQUIRE(rootNode.provenance.sourceSystem == "synthetic");
+    REQUIRE(rootNode.sourceSystem == "synthetic");
 
     const auto &lv = scene.logVols.at(rootNode.logVolId);
     const auto &shape = scene.shapes.at(lv.shapeId);
@@ -71,7 +71,7 @@ TEST_CASE("SyntheticSceneBuilder: buildWithDiagnostics — UnknownShape degradat
     REQUIRE(found);
 
     const auto &root = result.scene.nodes.at(result.scene.rootId);
-    REQUIRE(root.provenance.degradation.has(nodehammer::DegradationBit::UnknownShape));
+    REQUIRE(root.degradation.has(nodehammer::DegradationBit::UnknownShape));
 }
 
 // ── SyntheticSceneBuilder: buildBooleanSubtraction ───────────────────────────
@@ -106,11 +106,11 @@ TEST_CASE("SyntheticImporter: import produces no errors", "[import][synthetic]")
     REQUIRE_FALSE(result.diags.hasErrors());
 }
 
-TEST_CASE("SyntheticImporter: provenance.sourceSystem is synthetic", "[import][synthetic]") {
+TEST_CASE("SyntheticImporter: sourceSystem is synthetic", "[import][synthetic]") {
     nodehammer::SyntheticImporter imp;
     auto result = imp.import({});
     const auto &root = result.scene.nodes.at(result.scene.rootId);
-    REQUIRE(root.provenance.sourceSystem == "synthetic");
+    REQUIRE(root.sourceSystem == "synthetic");
 }
 
 // ── worldTransform accumulation ───────────────────────────────────────────────

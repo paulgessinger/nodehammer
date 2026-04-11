@@ -37,15 +37,26 @@ template <> struct adl_serializer<glm::vec4> {
 
 template <> struct adl_serializer<glm::dmat4> {
     static void to_json(json &j, const glm::dmat4 &m) {
+        // Store as 4×3 (column-major, dropping the implicit [0,0,0,1] last row).
         j = json::array();
         for (int col = 0; col < 4; ++col)
-            for (int row = 0; row < 4; ++row)
+            for (int row = 0; row < 3; ++row)
                 j.push_back(m[col][row]);
     }
     static void from_json(const json &j, glm::dmat4 &m) {
-        for (int col = 0; col < 4; ++col)
-            for (int row = 0; row < 4; ++row)
-                m[col][row] = j.at(static_cast<std::size_t>(col * 4 + row)).get<double>();
+        if (j.size() == 12) {
+            // 4×3 compact format
+            for (int col = 0; col < 4; ++col) {
+                for (int row = 0; row < 3; ++row)
+                    m[col][row] = j.at(static_cast<std::size_t>(col * 3 + row)).get<double>();
+                m[col][3] = (col == 3) ? 1.0 : 0.0;
+            }
+        } else {
+            // 4×4 legacy format
+            for (int col = 0; col < 4; ++col)
+                for (int row = 0; row < 4; ++row)
+                    m[col][row] = j.at(static_cast<std::size_t>(col * 4 + row)).get<double>();
+        }
     }
 };
 

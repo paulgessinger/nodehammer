@@ -40,8 +40,7 @@ SemanticNodeId addNode(SemanticScene &scene, std::string_view name, SemanticLogV
     node.logVolId = lvId;
     node.localTransform = localTransform;
     node.parentId = parentId;
-    node.provenance.sourceSystem = "synthetic";
-    node.provenance.sourceName = std::string{name};
+    node.sourceSystem = "synthetic";
     scene.nodes[nodeId] = node;
 
     if (parentId.has_value()) {
@@ -159,9 +158,8 @@ ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     node.id = nodeId;
     node.name = "world";
     node.logVolId = lvId;
-    node.provenance.sourceSystem = "synthetic";
-    node.provenance.sourceName = "world";
-    node.provenance.degradation.set(DegradationBit::UnknownShape);
+    node.sourceSystem = "synthetic";
+    node.degradation.set(DegradationBit::UnknownShape);
     scene.nodes[nodeId] = node;
     scene.rootId = nodeId;
     scene.computeWorldTransforms();

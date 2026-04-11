@@ -40,7 +40,6 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 struct ImportState {
     SemanticScene &scene;
     DiagnosticList &diags;
-    std::string sourceFile;
     dd4hep::Detector &det;
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
     std::unordered_map<const TGeoShape *, SemanticShapeId> shapeCache;
@@ -106,7 +105,7 @@ SemanticNodeId importTGeoNode(const TGeoNode *node, std::optional<SemanticNodeId
     sn.logVolId = importLogVol(node->GetVolume(), st);
     sn.localTransform = tgeoMatrixToGlm(node->GetMatrix());
     sn.parentId = parentId;
-    sn.provenance = {"dd4hep/tgeo", node->GetName(), st.sourceFile, {}};
+    sn.sourceSystem = "dd4hep/tgeo";
 
     // Check sensitivity via DD4hep during the TGeo walk — sensitive volumes
     // may not correspond to any DetElement (e.g. composites inside assemblies).
@@ -138,9 +137,9 @@ void annotateDetElement(const dd4hep::DetElement &elem, ImportState &st) {
 
     SemanticNode &sn = st.scene.nodes[it->second];
 
-    // Override name and provenance with the richer DD4hep information.
+    // Override name and sourceSystem with the richer DD4hep information.
     sn.name = elem.name();
-    sn.provenance = {"dd4hep", elem.name(), st.sourceFile, {}};
+    sn.sourceSystem = "dd4hep";
 
     if (!std::string{elem.type()}.empty()) {
         sn.tags["subdetector"] = elem.type();
@@ -184,7 +183,8 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
         return result;
     }
 
-    ImportState st{result.scene, result.diags, path.string(), *detOwner, {}, {}, {}, {}};
+    result.scene.sourceFile = path.string();
+    ImportState st{result.scene, result.diags, *detOwner, {}, {}, {}, {}};
 
     // Pass 1: walk the full TGeo tree — every node gets a SemanticNode.
     // This guarantees complete geometry (passives included) with no duplicates.

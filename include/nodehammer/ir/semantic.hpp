@@ -202,7 +202,8 @@ struct SemanticNode {
     /// Free-form metadata tags (e.g. "subdetector"="tracker", "sensitive"="true")
     std::map<std::string, std::string> tags;
 
-    Provenance provenance;
+    std::string sourceSystem; ///< e.g. "dd4hep", "dd4hep/tgeo", "tgeo"
+    DegradationFlags degradation;
 };
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
@@ -210,6 +211,7 @@ struct SemanticNode {
 class SemanticScene {
   public:
     SemanticNodeId rootId;
+    std::string sourceFile; ///< Input file path (set by importer)
 
     // Flat maps indexed by ID
     std::unordered_map<SemanticNodeId, SemanticNode> nodes;
@@ -374,11 +376,10 @@ inline void to_json(nlohmann::json &j, const SemanticNode &n) {
         {"name", n.name},
         {"logVolId", n.logVolId},
         {"localTransform", n.localTransform},
-        {"worldTransform", n.worldTransform},
         {"children", n.children},
-        {"originalPath", n.originalPath},
         {"tags", n.tags},
-        {"provenance", n.provenance},
+        {"sourceSystem", n.sourceSystem},
+        {"degradation", n.degradation},
     };
     if (n.parentId) {
         j["parentId"] = *n.parentId;
@@ -519,31 +520,39 @@ inline void from_json(const nlohmann::json &j, SemanticNode &n) {
     j.at("name").get_to(n.name);
     j.at("logVolId").get_to(n.logVolId);
     j.at("localTransform").get_to(n.localTransform);
-    j.at("worldTransform").get_to(n.worldTransform);
     j.at("children").get_to(n.children);
-    j.at("originalPath").get_to(n.originalPath);
     j.at("tags").get_to(n.tags);
-    j.at("provenance").get_to(n.provenance);
+    if (j.contains("sourceSystem")) {
+        j.at("sourceSystem").get_to(n.sourceSystem);
+    }
+    if (j.contains("degradation")) {
+        j.at("degradation").get_to(n.degradation);
+    }
     if (j.contains("parentId")) {
         n.parentId = j.at("parentId").get<SemanticNodeId>();
     }
+    // worldTransform and originalPath are recomputed after loading.
 }
 
 inline void from_json(const nlohmann::json &j, SemanticScene &sc) {
-    j.at("rootId").get_to(sc.rootId);
-    for (const auto &jn : j.at("nodes")) {
+    const auto &c = j.at("content");
+    c.at("rootId").get_to(sc.rootId);
+    if (c.contains("sourceFile")) {
+        c.at("sourceFile").get_to(sc.sourceFile);
+    }
+    for (const auto &jn : c.at("nodes")) {
         SemanticNode n = jn.get<SemanticNode>();
         sc.nodes[n.id] = std::move(n);
     }
-    for (const auto &jlv : j.at("logVols")) {
+    for (const auto &jlv : c.at("logVols")) {
         SemanticLogicalVolume lv = jlv.get<SemanticLogicalVolume>();
         sc.logVols[lv.id] = std::move(lv);
     }
-    for (const auto &js : j.at("shapes")) {
+    for (const auto &js : c.at("shapes")) {
         SemanticShape s = js.get<SemanticShape>();
         sc.shapes[s.id] = std::move(s);
     }
-    for (const auto &jm : j.at("materials")) {
+    for (const auto &jm : c.at("materials")) {
         SourceMaterial m = jm.get<SourceMaterial>();
         sc.materials[m.id] = std::move(m);
     }
@@ -573,8 +582,16 @@ inline void to_json(nlohmann::json &j, const SemanticScene &sc) {
     }
 
     j = {
-        {"rootId", sc.rootId}, {"nodes", nodes},    {"logVols", logVols},
-        {"shapes", shapes},    {"materials", mats},
+        {"header", {{"version", 1}, {"type", "semantic"}}},
+        {"content",
+         {
+             {"rootId", sc.rootId},
+             {"sourceFile", sc.sourceFile},
+             {"nodes", nodes},
+             {"logVols", logVols},
+             {"shapes", shapes},
+             {"materials", mats},
+         }},
     };
 }
 

@@ -25,6 +25,8 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
     try {
         auto j = nlohmann::json::parse(f);
         result.scene = j.get<SemanticScene>();
+        result.scene.computeWorldTransforms();
+        result.scene.computeOriginalPaths();
     } catch (const nlohmann::json::exception &ex) {
         result.diags.error(codes::kErrTgeoOpenFailed,
                            std::format("failed to parse JSON '{}': {}", path.string(), ex.what()));

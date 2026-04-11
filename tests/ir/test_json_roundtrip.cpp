@@ -19,14 +19,14 @@ TEST_CASE("to_json: SemanticNode serialization", "[ir][json]") {
     node.name = "testNode";
     node.logVolId = nodehammer::SemanticLogVolId{7};
     node.tags["subdetector"] = "tracker";
-    node.provenance.sourceSystem = "tgeo";
+    node.sourceSystem = "tgeo";
 
     nlohmann::json j = node;
     REQUIRE(j["id"] == 42);
     REQUIRE(j["name"] == "testNode");
     REQUIRE(j["logVolId"] == 7);
     REQUIRE(j["tags"]["subdetector"] == "tracker");
-    REQUIRE(j["provenance"]["sourceSystem"] == "tgeo");
+    REQUIRE(j["sourceSystem"] == "tgeo");
 }
 
 TEST_CASE("to_json: RenderMaterial serialization", "[ir][json]") {

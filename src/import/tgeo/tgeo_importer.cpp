@@ -33,7 +33,6 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 struct ImportState {
     SemanticScene &scene;
     DiagnosticList &diags;
-    std::string sourceFile;
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
     std::unordered_map<const TGeoShape *, SemanticShapeId> shapeCache;
     std::unordered_map<const TGeoMaterial *, SemanticMaterialId> matCache;
@@ -109,7 +108,7 @@ SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> pa
     sn.logVolId = importLogVol(node->GetVolume(), st);
     sn.localTransform = tgeoMatrixToGlm(node->GetMatrix());
     sn.parentId = parentId;
-    sn.provenance = {"tgeo", node->GetName(), st.sourceFile, {}};
+    sn.sourceSystem = "tgeo";
 
     st.scene.nodes[id] = sn;
 
@@ -124,7 +123,8 @@ SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> pa
 
 ImportResult traverseManager(TGeoManager *mgr, std::string sourceFile) {
     ImportResult result;
-    ImportState st{result.scene, result.diags, std::move(sourceFile), {}, {}, {}};
+    result.scene.sourceFile = std::move(sourceFile);
+    ImportState st{result.scene, result.diags, {}, {}, {}};
 
     TGeoNode *topNode = mgr->GetTopNode();
     const SemanticNodeId rootId = importNode(topNode, std::nullopt, st);
