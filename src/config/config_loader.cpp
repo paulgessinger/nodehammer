@@ -566,7 +566,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
 
         Rule rule;
 
-        // ── match predicate (table or string expression) ─────────────────────
+        // ── match predicate (table, string, or array of strings) ────────────
         if (const auto *matchTbl = (*tbl)["match"].as_table()) {
             auto pred = parsePredicate(*matchTbl, diags, "rules");
             if (!pred) {
@@ -582,6 +582,42 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
                 continue;
             }
             rule.match = std::move(*parsed);
+        } else if (const auto *matchArr = (*tbl)["match"].as_array()) {
+            // Array of string expressions → OR'd together.
+            if (matchArr->empty()) {
+                diags.warn(codes::kWarnConfigEmptyScope,
+                           "match is an empty array — rule will match nothing; "
+                           "remove 'match' entirely to match all nodes",
+                           "rules");
+                continue;
+            }
+            std::vector<PredicateExpr> operands;
+            bool ok = true;
+            for (const auto &elem : *matchArr) {
+                auto s = elem.value<std::string>();
+                if (!s) {
+                    continue;
+                }
+                auto parsed = parsePredicateExpr(*s);
+                if (!parsed) {
+                    diags.error(
+                        codes::kErrConfigParse,
+                        std::format("failed to parse 'match' expression: {}", parsed.error()),
+                        "rules");
+                    ok = false;
+                    break;
+                }
+                operands.push_back(std::move(*parsed));
+            }
+            if (!ok) {
+                continue;
+            }
+            if (operands.size() == 1) {
+                rule.match = std::move(operands[0]);
+            } else {
+                rule.match =
+                    PredicateExpr{std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
+            }
         }
 
         // ── material ─────────────────────────────────────────────────────────
