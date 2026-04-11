@@ -293,11 +293,54 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
         def.name = key.str();
 
         if (const auto *colorArr = (*tbl)["base_color"].as_array()) {
-            if (colorArr->size() >= 4) {
+            if (colorArr->size() >= 3) {
                 def.baseColor.r = colorArr->at(0).value<float>().value_or(def.baseColor.r);
                 def.baseColor.g = colorArr->at(1).value<float>().value_or(def.baseColor.g);
                 def.baseColor.b = colorArr->at(2).value<float>().value_or(def.baseColor.b);
-                def.baseColor.a = colorArr->at(3).value<float>().value_or(def.baseColor.a);
+                if (colorArr->size() >= 4) {
+                    def.baseColor.a = colorArr->at(3).value<float>().value_or(def.baseColor.a);
+                }
+            }
+        } else if (auto colorStr = (*tbl)["base_color"].value<std::string>()) {
+            // Parse hex color: "#RRGGBB" or "#RRGGBBAA"
+            std::string_view hex = *colorStr;
+            if (!hex.empty() && hex[0] == '#') {
+                hex.remove_prefix(1);
+            }
+            // sRGB → linear conversion (hex colors are assumed sRGB).
+            auto srgbToLinear = [](float c) -> float {
+                return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+            };
+            auto parseHexByte = [&](std::string_view s, std::size_t offset,
+                                    bool linearize = true) -> float {
+                unsigned val = 0;
+                for (int i = 0; i < 2; ++i) {
+                    char c = s[offset + static_cast<std::size_t>(i)];
+                    val <<= 4;
+                    if (c >= '0' && c <= '9') {
+                        val += static_cast<unsigned>(c - '0');
+                    } else if (c >= 'a' && c <= 'f') {
+                        val += static_cast<unsigned>(c - 'a' + 10);
+                    } else if (c >= 'A' && c <= 'F') {
+                        val += static_cast<unsigned>(c - 'A' + 10);
+                    }
+                }
+                float f = static_cast<float>(val) / 255.0f;
+                return linearize ? srgbToLinear(f) : f;
+            };
+            if (hex.size() >= 6) {
+                def.baseColor.r = parseHexByte(hex, 0, true);
+                def.baseColor.g = parseHexByte(hex, 2, true);
+                def.baseColor.b = parseHexByte(hex, 4, true);
+                if (hex.size() >= 8) {
+                    def.baseColor.a = parseHexByte(hex, 6, false); // alpha is linear
+                }
+            } else {
+                diags.warn(codes::kWarnConfigUnknownKey,
+                           std::format("materials.{}: invalid hex color '{}'; "
+                                       "expected #RRGGBB or #RRGGBBAA",
+                                       key.str(), *colorStr),
+                           std::format("materials.{}", key.str()));
             }
         }
         def.metallic = (*tbl)["metallic"].value<float>().value_or(def.metallic);
@@ -469,31 +512,9 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             continue;
         }
 
-        warnUnknownKeys(*tbl, {"scope", "match", "material", "tessellation", "extras"}, "rules",
-                        diags);
+        warnUnknownKeys(*tbl, {"match", "material", "tessellation", "extras"}, "rules", diags);
 
         Rule rule;
-
-        // ── scope: string or array of strings ────────────────────────────────
-        // When scope is an array, we collect all scopes and flatten into
-        // multiple rules at the end.
-        std::vector<std::string> scopes;
-        if (const auto *scopeArr = (*tbl)["scope"].as_array()) {
-            for (const auto &se : *scopeArr) {
-                if (auto s = se.value<std::string>()) {
-                    scopes.push_back(std::move(*s));
-                }
-            }
-            if (scopes.empty()) {
-                diags.warn(codes::kWarnConfigEmptyScope,
-                           "scope is an empty array (all entries commented out?) "
-                           "— rule will be skipped; remove 'scope' entirely to match all nodes",
-                           "rules");
-                continue;
-            }
-        } else if (auto scope = (*tbl)["scope"].value<std::string>()) {
-            scopes.push_back(std::move(*scope));
-        }
 
         // ── match predicate (table or string expression) ─────────────────────
         if (const auto *matchTbl = (*tbl)["match"].as_table()) {
@@ -520,12 +541,12 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
 
         // ── tessellation sub-table ───────────────────────────────────────────
         if (const auto *tessTbl = (*tbl)["tessellation"].as_table()) {
-            warnUnknownKeys(*tessTbl,
-                            {"skip_geometry", "merge_children", "max_segments_circle", "fallback"},
-                            "rules.tessellation", diags);
+            warnUnknownKeys(
+                *tessTbl, {"skip_geometry", "merge_descendants", "max_segments_circle", "fallback"},
+                "rules.tessellation", diags);
             Rule::Tessellation tess;
             tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>().value_or(false);
-            tess.mergeChildren = (*tessTbl)["merge_children"].value<bool>().value_or(false);
+            tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>().value_or(false);
             tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>().value_or(64);
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseFallback(*fallbackStr);
@@ -546,16 +567,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             rule.extras = parseExtras(*extrasTbl);
         }
 
-        // ── Flatten scope array into one Rule per scope ──────────────────────
-        if (scopes.empty()) {
-            cfg.rules.push_back(rule);
-        } else {
-            for (auto &s : scopes) {
-                Rule copy = rule;
-                copy.scope = std::move(s);
-                cfg.rules.push_back(std::move(copy));
-            }
-        }
+        cfg.rules.push_back(std::move(rule));
     }
 }
 

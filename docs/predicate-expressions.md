@@ -33,6 +33,7 @@ Both forms produce the same predicate AST. The table form remains valid and can 
 | `is_leaf` | Matches nodes with no children |
 | `name ~= "pattern"` | Glob match against the node's name |
 | `path ~= "pattern"` | Glob match against the node's original path |
+| `material ~= "pattern"` | Glob match against the source material name |
 | `tag.KEY` | Matches if the tag `KEY` exists (any value) |
 | `tag.KEY == "value"` | Matches if tag `KEY` equals `"value"` |
 
@@ -48,6 +49,8 @@ Examples:
 - `name ~= "sensor*"` matches `sensor0`, `sensor_barrel`, etc.
 - `path ~= "**/Pixels/**"` matches any node under a `Pixels` ancestor
 - `path ~= "**/Pixels"` matches a node named `Pixels` at any depth
+- `material ~= "Silicon"` matches nodes whose source material is `Silicon`
+- `material ~= "Carbon*"` matches `CarbonFiber`, `CarbonFiber_50D`, etc.
 
 ### Tag predicates
 
@@ -129,9 +132,13 @@ any(
 
 ```toml
 [[rules]]
-scope = "**/Tracker/**"
+match = 'path ~= "**/Tracker/**" && material ~= "Silicon"'
 material = "silicon"
-match = 'tag.sensitive == "true"'
+
+[[rules]]
+match = 'path ~= "**/Tracker/**"'
+[rules.tessellation]
+merge_descendants = true
 ```
 
 ## Grammar
@@ -147,10 +154,12 @@ primary    <- func_call / atom / '(' expr ')'
 
 func_call  <- ('any' / 'all') '(' expr (',' expr)* ','? ')'
 
-atom       <- 'true' / 'false' / 'is_leaf' / tag_expr / path_expr / name_expr
-tag_expr   <- 'tag.' IDENT ('==' STRING)?
-path_expr  <- 'path' '~=' STRING
-name_expr  <- 'name' '~=' STRING
+atom       <- 'true' / 'false' / 'is_leaf'
+            / tag_expr / path_expr / name_expr / material_expr
+tag_expr   <- 'tag.' IDENT (('==' / '!=') STRING)?
+path_expr  <- 'path' ('~=' / '==' / '!=') STRING
+name_expr  <- 'name' ('~=' / '==' / '!=') STRING
+material_expr <- 'material' ('~=' / '==' / '!=') STRING
 
 STRING     <- '"' [^"]* '"'
 IDENT      <- [a-zA-Z_][a-zA-Z0-9_]*

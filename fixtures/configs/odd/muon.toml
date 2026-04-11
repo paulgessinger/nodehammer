@@ -15,14 +15,14 @@ keep_if = [
 # ── Rules ────────────────────────────────────────────────────────────────────
 
 [[rules]]
-scope = "**/MuonSpectrometer*/**"
+match = 'path ~= "**/MuonSpectrometer*/**"'
 material = "muon"
 
 [[rules]]
-scope = [
-  "**/MuonSpectrometerBarrel",
-  "**/MuonSpectrometerEndCapN",
-  "**/MuonSpectrometerEndCapP",
-]
+match = '''any(
+  path ~= "**/MuonSpectrometerBarrel",
+  path ~= "**/MuonSpectrometerEndCapN",
+  path ~= "**/MuonSpectrometerEndCapP",
+)'''
 [rules.tessellation]
 skip_geometry = true

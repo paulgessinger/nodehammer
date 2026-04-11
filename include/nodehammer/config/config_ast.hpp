@@ -31,6 +31,10 @@ struct PathGlobPredicate {
     std::string pattern;
 };
 
+struct MaterialGlobPredicate {
+    std::string pattern;
+};
+
 /// True when a node carries the given tag key, and optionally a specific value.
 /// value = nullopt means "key exists"; value = "x" means "key == 'x'".
 struct TagPredicate {
@@ -50,9 +54,10 @@ struct AndPredicate;
 struct OrPredicate;
 struct NotPredicate;
 
-using PredicateVariant = std::variant<NameGlobPredicate, PathGlobPredicate, TagPredicate,
-                                      IsLeafPredicate, BoolPredicate, std::shared_ptr<AndPredicate>,
-                                      std::shared_ptr<OrPredicate>, std::shared_ptr<NotPredicate>>;
+using PredicateVariant =
+    std::variant<NameGlobPredicate, PathGlobPredicate, MaterialGlobPredicate, TagPredicate,
+                 IsLeafPredicate, BoolPredicate, std::shared_ptr<AndPredicate>,
+                 std::shared_ptr<OrPredicate>, std::shared_ptr<NotPredicate>>;
 
 struct PredicateExpr {
     PredicateVariant data;
@@ -107,17 +112,16 @@ struct SelectionRule {
 using ExtrasMap = nlohmann::json;
 
 /// Unified rule: optional material, tessellation, and/or extras on matched nodes.
-/// In TOML: [[rules]] with scope, optional match, and sub-tables.
+/// In TOML: [[rules]] with match predicate and sub-tables.
 struct Rule {
-    std::optional<std::string> scope;   ///< Optional path glob pre-filter
-    std::optional<PredicateExpr> match; ///< Optional additional predicate within scope
+    std::optional<PredicateExpr> match; ///< Optional predicate — omit to match all nodes
 
     // ── Concerns (all optional; a rule may set any combination) ──────────
     std::optional<std::string> material; ///< References a MaterialDef::name
 
     struct Tessellation {
         bool skipGeometry{false};
-        bool mergeChildren{false};
+        bool mergeDescendants{false};
         int maxSegmentsCircle{64};
         BooleanFallback fallback{BooleanFallback::Skip};
     };

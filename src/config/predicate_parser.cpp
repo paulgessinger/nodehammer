@@ -291,6 +291,11 @@ class Parser {
                 return parseGlobExpr<NameGlobPredicate>("name");
             }
 
+            // material ~= "pattern"
+            if (tok.text == "material") {
+                return parseGlobExpr<MaterialGlobPredicate>("material");
+            }
+
             return std::unexpected(
                 std::format("unknown identifier '{}' at position {}", tok.text, tok.pos));
         }

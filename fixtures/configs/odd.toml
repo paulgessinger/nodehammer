@@ -37,7 +37,7 @@ unit_scale = 1.0
 
 # World node: no geometry.
 [[rules]]
-scope = "/world"
+match = 'path ~= "/world"'
 [rules.tessellation]
 skip_geometry = true
 

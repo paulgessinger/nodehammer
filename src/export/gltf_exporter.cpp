@@ -311,12 +311,35 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
             }
         }
 
-        // First mesh binding → glTF node mesh. (Multiple bindings are rare in practice;
-        // subsequent bindings would need separate child nodes — not implemented here.)
-        if (!rn.meshBindings.empty()) {
+        // Map mesh bindings to a glTF mesh. A single binding uses the shared
+        // mesh cache; multiple bindings (from merge_descendants with mixed
+        // materials) produce a multi-primitive glTF mesh.
+        if (rn.meshBindings.size() == 1) {
             const int mi = getOrCreateGltfMesh(rn.meshBindings.front());
             if (mi >= 0) {
                 gn.mesh = mi;
+            }
+        } else if (rn.meshBindings.size() > 1) {
+            tinygltf::Mesh gm;
+            gm.name = rn.name;
+            for (const auto &binding : rn.meshBindings) {
+                if (!meshAccs.contains(binding.meshId)) {
+                    continue;
+                }
+                const auto &accs = meshAccs.at(binding.meshId);
+                const int matI =
+                    matIdx.contains(binding.materialId) ? matIdx.at(binding.materialId) : -1;
+                tinygltf::Primitive prim;
+                prim.attributes["POSITION"] = accs.pos;
+                prim.attributes["NORMAL"] = accs.norm;
+                prim.indices = accs.idx;
+                prim.mode = TINYGLTF_MODE_TRIANGLES;
+                prim.material = matI;
+                gm.primitives.push_back(std::move(prim));
+            }
+            if (!gm.primitives.empty()) {
+                gn.mesh = static_cast<int>(model.meshes.size());
+                model.meshes.push_back(std::move(gm));
             }
         }
 
@@ -391,9 +414,33 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
                 static_cast<double>(wm[3][2]), static_cast<double>(wm[3][3]),
             };
 
-            const int mi = getOrCreateGltfMesh(rn.meshBindings.front());
-            if (mi >= 0) {
-                sn.mesh = mi;
+            if (rn.meshBindings.size() == 1) {
+                const int mi = getOrCreateGltfMesh(rn.meshBindings.front());
+                if (mi >= 0) {
+                    sn.mesh = mi;
+                }
+            } else if (rn.meshBindings.size() > 1) {
+                tinygltf::Mesh gm;
+                gm.name = rn.name;
+                for (const auto &binding : rn.meshBindings) {
+                    if (!meshAccs.contains(binding.meshId)) {
+                        continue;
+                    }
+                    const auto &accs = meshAccs.at(binding.meshId);
+                    const int matI =
+                        matIdx.contains(binding.materialId) ? matIdx.at(binding.materialId) : -1;
+                    tinygltf::Primitive prim;
+                    prim.attributes["POSITION"] = accs.pos;
+                    prim.attributes["NORMAL"] = accs.norm;
+                    prim.indices = accs.idx;
+                    prim.mode = TINYGLTF_MODE_TRIANGLES;
+                    prim.material = matI;
+                    gm.primitives.push_back(std::move(prim));
+                }
+                if (!gm.primitives.empty()) {
+                    sn.mesh = static_cast<int>(model.meshes.size());
+                    model.meshes.push_back(std::move(gm));
+                }
             }
 
             const int snIdx = static_cast<int>(model.nodes.size());

@@ -19,29 +19,24 @@ namespace nodehammer {
 namespace {
 
 // Does a rule's scope/match apply to the given node?
-bool ruleMatches(const Rule &r, const std::string &nodePath, const NodeView &view) {
-    if (r.scope.has_value() && !matchGlob(*r.scope, nodePath)) {
-        return false;
-    }
+bool ruleMatches(const Rule &r, const NodeView &view) {
     if (r.match.has_value()) {
         auto pred = compilePredicate(*r.match);
-        if (!pred(view)) {
-            return false;
-        }
+        return pred(view);
     }
-    return true;
+    return true; // no predicate → matches everything
 }
 
 // Return the tessellation settings from the first matching rule that has them,
 // or a default if none match.
 const Rule::Tessellation &resolveTessellation(const std::vector<Rule> &rules,
-                                              const std::string &nodePath, const NodeView &view) {
+                                              const NodeView &view) {
     static const Rule::Tessellation kDefault;
     for (const auto &r : rules) {
         if (!r.tessellation.has_value()) {
             continue;
         }
-        if (ruleMatches(r, nodePath, view)) {
+        if (ruleMatches(r, view)) {
             return *r.tessellation;
         }
     }
@@ -49,13 +44,12 @@ const Rule::Tessellation &resolveTessellation(const std::vector<Rule> &rules,
 }
 
 // Return the material name from the first matching rule that has one, or nullptr.
-const std::string *resolveMaterial(const std::vector<Rule> &rules, const std::string &nodePath,
-                                   const NodeView &view) {
+const std::string *resolveMaterial(const std::vector<Rule> &rules, const NodeView &view) {
     for (const auto &r : rules) {
         if (!r.material.has_value()) {
             continue;
         }
-        if (ruleMatches(r, nodePath, view)) {
+        if (ruleMatches(r, view)) {
             return &*r.material;
         }
     }
@@ -63,13 +57,12 @@ const std::string *resolveMaterial(const std::vector<Rule> &rules, const std::st
 }
 
 // Resolve extras from the first matching rule that has them.
-RenderExtrasMap resolveExtras(const std::vector<Rule> &rules, const std::string &nodePath,
-                              const NodeView &view) {
+RenderExtrasMap resolveExtras(const std::vector<Rule> &rules, const NodeView &view) {
     for (const auto &r : rules) {
         if (!r.extras.has_value()) {
             continue;
         }
-        if (ruleMatches(r, nodePath, view)) {
+        if (ruleMatches(r, view)) {
             return *r.extras;
         }
     }
@@ -111,6 +104,18 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
     PrimitiveTessellator tess;
 
+    // Helper: build a NodeView for a semantic node, resolving its source material name.
+    auto makeNodeView = [&](const SemanticNode &node) -> NodeView {
+        std::string_view matName;
+        if (scene.logVols.contains(node.logVolId)) {
+            const auto &lv = scene.logVols.at(node.logVolId);
+            if (scene.materials.contains(lv.materialId)) {
+                matName = scene.materials.at(lv.materialId).name;
+            }
+        }
+        return {node.name, node.originalPath, matName, node.children.empty(), &node.tags};
+    };
+
     // Cache: SemanticMaterialId → RenderMaterialId (avoid creating duplicate RenderMaterials
     // for nodes that share a SourceMaterial and match no named material rule).
     std::unordered_map<SemanticMaterialId, RenderMaterialId> defaultMatCache;
@@ -118,6 +123,52 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
     std::unordered_map<std::string, RenderMaterialId> namedMatCache;
     // Cache: (shapeId, maxSegmentsCircle) → MeshAssetId (LV deduplication).
     std::unordered_map<SemanticShapeId, std::unordered_map<int, MeshAssetId>> meshCache;
+
+    // Resolve a SourceMaterial to a RenderMaterialId using the rule system + caches.
+    auto resolveRenderMaterial = [&](SemanticMaterialId srcMatId,
+                                     const SemanticNode &node) -> RenderMaterialId {
+        const auto &srcMat = scene.materials.at(srcMatId);
+        NodeView view = makeNodeView(node);
+        const std::string *matName = resolveMaterial(config_.rules, view);
+        RenderMaterialId rmId;
+        if (matName != nullptr) {
+            auto cit = namedMatCache.find(*matName);
+            if (cit != namedMatCache.end()) {
+                rmId = cit->second;
+            } else {
+                for (const auto &md : config_.materials) {
+                    if (md.name == *matName) {
+                        RenderMaterial rm;
+                        rm.id = result.scene.nextMaterialId();
+                        rm.name = md.name;
+                        rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
+                                                       md.baseColor.b, md.baseColor.a};
+                        rm.metallicFactor = md.metallic;
+                        rm.roughnessFactor = md.roughness;
+                        rm.emissiveFactor = glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
+                        rm.doubleSided = md.doubleSided;
+                        rmId = rm.id;
+                        result.scene.materials[rmId] = std::move(rm);
+                        namedMatCache[md.name] = rmId;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!result.scene.materials.contains(rmId)) {
+            if (!defaultMatCache.contains(srcMatId)) {
+                auto dm = makeDefaultMaterial(result.scene, srcMat);
+                defaultMatCache[srcMatId] = dm.id;
+                result.scene.materials[dm.id] = std::move(dm);
+            }
+            rmId = defaultMatCache.at(srcMatId);
+        }
+        return rmId;
+    };
+
+    // Cache: logVolId → vector<MeshBinding> for merge_descendants reuse.
+    // Identical subtrees (same TGeoVolume) produce identical merged meshes.
+    std::unordered_map<SemanticLogVolId, std::vector<MeshBinding>> mergeCache;
 
     // Map SemanticNodeId → RenderNodeId for parent-linking after creation.
     std::unordered_map<SemanticNodeId, RenderNodeId> nodeMap;
@@ -137,7 +188,6 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         }
 
         const SemanticNode &semNode = scene.nodes.at(semId);
-        const std::string &nodePath = semNode.originalPath;
 
         // ── Create RenderNode ──────────────────────────────────────────────────
         const RenderNodeId rnId = result.scene.nextNodeId();
@@ -156,8 +206,8 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
         // ── Resolve extras from unified rules ──────────────────────────────────
         {
-            NodeView ev{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
-            rn.extras = resolveExtras(config_.rules, nodePath, ev);
+            NodeView ev = makeNodeView(semNode);
+            rn.extras = resolveExtras(config_.rules, ev);
         }
 
         nodeMap[semId] = rnId;
@@ -166,8 +216,8 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         }
 
         // ── Resolve tessellation rule ──────────────────────────────────────────
-        NodeView nv{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
-        const Rule::Tessellation &rule = resolveTessellation(config_.rules, nodePath, nv);
+        NodeView nv = makeNodeView(semNode);
+        const Rule::Tessellation &rule = resolveTessellation(config_.rules, nv);
         TessellationParams params;
         params.maxSegmentsCircle = rule.maxSegmentsCircle;
 
@@ -180,15 +230,26 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
             continue;
         }
 
-        // merge_children: tessellate all descendants and combine into a single mesh
-        // on this node. Children are not added to the render tree.
-        if (rule.mergeChildren) {
+        // merge_descendants: tessellate all descendants, group by material, and
+        // combine into per-material meshes on this node. Children are not added
+        // to the render tree.
+        if (rule.mergeDescendants) {
+            // Check the merge cache — identical logVols produce identical merges.
+            auto mcIt = mergeCache.find(semNode.logVolId);
+            if (mcIt != mergeCache.end()) {
+                rn.meshBindings = mcIt->second;
+                result.scene.nodes[rnId] = std::move(rn);
+                continue;
+            }
+
             const glm::dmat4 invWorld = glm::affineInverse(semNode.worldTransform);
 
-            std::vector<Vertex> mergedVerts;
-            std::vector<uint32_t> mergedIdx;
-            std::optional<SemanticMaterialId> firstMatId;
-            bool mixedMaterials = false;
+            // Per-material accumulation buffers.
+            struct MatGroup {
+                std::vector<Vertex> verts;
+                std::vector<uint32_t> indices;
+            };
+            std::map<RenderMaterialId, MatGroup> groups;
 
             // BFS descendants
             std::queue<SemanticNodeId> descQ;
@@ -203,7 +264,6 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 }
                 const SemanticNode &descNode = scene.nodes.at(descId);
 
-                // Enqueue grandchildren for recursive merge
                 for (const auto gcId : descNode.children) {
                     descQ.push(gcId);
                 }
@@ -214,13 +274,6 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 const SemanticLogicalVolume &descLv = scene.logVols.at(descNode.logVolId);
                 if (!scene.shapes.contains(descLv.shapeId)) {
                     continue;
-                }
-
-                // Track material consistency
-                if (!firstMatId.has_value()) {
-                    firstMatId = descLv.materialId;
-                } else if (*firstMatId != descLv.materialId) {
-                    mixedMaterials = true;
                 }
 
                 // Tessellate (using cache)
@@ -241,7 +294,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     }
 #else
                     if (descIsBoolean) {
-                        continue; // skip booleans without manifold
+                        continue;
                     }
                     tessOut = tess.tessellate(descShape.data, params);
 #endif
@@ -271,95 +324,51 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     continue;
                 }
 
+                // Resolve material for this descendant
+                RenderMaterialId rmId = resolveRenderMaterial(descLv.materialId, descNode);
+
                 // Transform vertices into merge node's local frame
                 const glm::mat4 toLocal = glm::mat4(invWorld * descNode.worldTransform);
                 const glm::mat3 normalMat =
                     glm::mat3(glm::transpose(glm::inverse(glm::mat3(toLocal))));
 
-                const auto idxBase = static_cast<uint32_t>(mergedVerts.size());
+                auto &grp = groups[rmId];
+                const auto idxBase = static_cast<uint32_t>(grp.verts.size());
                 for (const auto &v : srcMesh.vertices) {
                     Vertex tv;
                     tv.position = glm::vec3(toLocal * glm::vec4(v.position, 1.0f));
                     tv.normal = glm::normalize(normalMat * v.normal);
-                    mergedVerts.push_back(tv);
+                    grp.verts.push_back(tv);
                 }
                 for (const auto idx : srcMesh.indices) {
-                    mergedIdx.push_back(idx + idxBase);
+                    grp.indices.push_back(idx + idxBase);
                 }
             }
 
-            if (mixedMaterials) {
-                result.diags.warn(
-                    codes::kWarnTessMergeMixedMaterials,
-                    std::format("merge_children on '{}': descendants have mixed materials; "
-                                "using first material encountered",
-                                semNode.name),
-                    semNode.name);
-            }
-
-            // Create merged mesh asset
-            if (mergedVerts.empty()) {
+            if (groups.empty()) {
                 result.diags.warn(
                     codes::kWarnTessMergeEmpty,
-                    std::format("merge_children on '{}' produced no geometry — node has no "
+                    std::format("merge_descendants on '{}' produced no geometry — node has no "
                                 "tessellatable descendants (did selection remove them?)",
                                 semNode.name),
                     semNode.name);
             }
-            if (!mergedVerts.empty()) {
+
+            // Create one MeshAsset per material group → one MeshBinding each.
+            for (auto &[rmId, grp] : groups) {
                 MeshAssetId mid = result.scene.nextMeshId();
                 MeshAsset ma;
                 ma.id = mid;
                 ma.name = semNode.name + "_merged";
-                ma.vertices = std::move(mergedVerts);
-                ma.indices = std::move(mergedIdx);
+                ma.vertices = std::move(grp.verts);
+                ma.indices = std::move(grp.indices);
                 ma.provenance.sourceSystem = "tessellation_pass";
                 ma.provenance.sourceName = semNode.name;
                 result.scene.meshAssets[mid] = std::move(ma);
-
-                // Resolve material from the first descendant
-                RenderMaterialId rmId;
-                if (firstMatId.has_value()) {
-                    const auto &srcMat = scene.materials.at(*firstMatId);
-                    const std::string &descPath = semNode.originalPath;
-                    NodeView view{semNode.name, descPath, false, &semNode.tags};
-                    const std::string *matName = resolveMaterial(config_.rules, descPath, view);
-                    if (matName != nullptr) {
-                        auto cit = namedMatCache.find(*matName);
-                        if (cit != namedMatCache.end()) {
-                            rmId = cit->second;
-                        } else {
-                            for (const auto &md : config_.materials) {
-                                if (md.name == *matName) {
-                                    RenderMaterial rm;
-                                    rm.id = result.scene.nextMaterialId();
-                                    rm.name = md.name;
-                                    rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
-                                                                   md.baseColor.b, md.baseColor.a};
-                                    rm.metallicFactor = md.metallic;
-                                    rm.roughnessFactor = md.roughness;
-                                    rm.emissiveFactor =
-                                        glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
-                                    rm.doubleSided = md.doubleSided;
-                                    rmId = rm.id;
-                                    result.scene.materials[rmId] = std::move(rm);
-                                    namedMatCache[md.name] = rmId;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if (!result.scene.materials.contains(rmId)) {
-                        if (!defaultMatCache.contains(*firstMatId)) {
-                            auto dm = makeDefaultMaterial(result.scene, srcMat);
-                            defaultMatCache[*firstMatId] = dm.id;
-                            result.scene.materials[dm.id] = std::move(dm);
-                        }
-                        rmId = defaultMatCache.at(*firstMatId);
-                    }
-                }
                 rn.meshBindings.push_back({mid, rmId});
             }
+
+            mergeCache[semNode.logVolId] = rn.meshBindings;
 
             // Don't enqueue children — they've been consumed by the merge.
             result.scene.nodes[rnId] = std::move(rn);
@@ -416,8 +425,8 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
             if (boolCacheHit) {
                 // Resolve material (same as primitive path).
                 const auto &srcMat = scene.materials.at(lv.materialId);
-                NodeView boolView{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
-                const std::string *matName = resolveMaterial(config_.rules, nodePath, boolView);
+                NodeView boolView = makeNodeView(semNode);
+                const std::string *matName = resolveMaterial(config_.rules, boolView);
                 RenderMaterialId rmId;
                 if (matName != nullptr) {
                     auto cit = namedMatCache.find(*matName);
@@ -490,8 +499,8 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
                 // Resolve material and bind
                 const auto &srcMat = scene.materials.at(lv.materialId);
-                NodeView view{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
-                const std::string *matName = resolveMaterial(config_.rules, nodePath, view);
+                NodeView view = makeNodeView(semNode);
+                const std::string *matName = resolveMaterial(config_.rules, view);
                 RenderMaterialId rmId;
                 if (matName != nullptr) {
                     auto cit = namedMatCache.find(*matName);
@@ -567,8 +576,8 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
         // ── Resolve material ───────────────────────────────────────────────────
         const auto &srcMat = scene.materials.at(lv.materialId);
-        NodeView view{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
-        const std::string *matName = resolveMaterial(config_.rules, nodePath, view);
+        NodeView view = makeNodeView(semNode);
+        const std::string *matName = resolveMaterial(config_.rules, view);
         RenderMaterialId rmId;
         if (matName != nullptr) {
             auto cit = namedMatCache.find(*matName);

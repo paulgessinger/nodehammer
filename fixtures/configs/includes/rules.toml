@@ -1,5 +1,5 @@
 [[rules]]
-scope = "**/Tracker/**"
+match = 'path ~= "**/Tracker/**"'
 material = "steel"
 
 [[rules]]

@@ -21,50 +21,51 @@
 # tag.sensitive == "true" && any(path ~= "**/Pixels/**", path ~= "**/ShortStrips/**", path ~= "**/LongStrips/**")
 # '''
 
+# Keep stave nodes and all their leaf descendants.
 [[selection_rules]]
-keep_if = 'path ~= "**/LongStripBarrelStaveModules_*"'
+keep_if = 'path ~= "**/LongStripLayer*/stave*"'
 
 [[selection_rules]]
-keep_if = 'path ~= "**/LongStripBarrelStaveModules_*/*/**" && is_leaf'
+keep_if = 'path ~= "**/LongStripLayer*/stave*/**" && is_leaf'
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 
 [[rules]]
-scope = "**/Pixels/**"
+match = 'path ~= "**/Pixels/**"'
 material = "pixel"
 
 [[rules]]
-scope = "**/ShortStrips/**"
+match = 'path ~= "**/ShortStrips/**"'
 material = "short_strip"
 
+# Fallback for LongStrips nodes not matched by source-material rules.
 [[rules]]
-scope = "**/LongStrips/**"
-material = "long_strip"
+match = 'path ~= "**/LongStrips/**"'
+material = "support"
 
 # Structural nodes: no geometry.
 [[rules]]
-scope = ["**/Pixels", "**/ShortStrips", "**/LongStrips"]
+match = 'any(path ~= "**/Pixels", path ~= "**/ShortStrips", path ~= "**/LongStrips")'
 [rules.tessellation]
 skip_geometry = true
 
-# Barrel/endcap nodes: merge children.
+# Barrel/endcap/stave nodes: merge descendants.
 [[rules]]
-scope = [
-  "**/Pixels/*Barrel",
-  "**/Pixels/*EndcapN",
-  "**/Pixels/*EndcapP",
-  "**/ShortStrips/*Barrel",
-  "**/ShortStrips/*EndcapN",
-  "**/ShortStrips/*EndcapP",
-  "**/LongStrips/*Barrel",
-  "**/LongStrips/*EndcapN",
-  "**/LongStrips/*EndcapP",
-  "**/LongStripBarrelStaveModules_*",
-]
+match = '''any(
+  path ~= "**/Pixels/*Barrel",
+  path ~= "**/Pixels/*EndcapN",
+  path ~= "**/Pixels/*EndcapP",
+  path ~= "**/ShortStrips/*Barrel",
+  path ~= "**/ShortStrips/*EndcapN",
+  path ~= "**/ShortStrips/*EndcapP",
+  path ~= "**/LongStrips/*Barrel",
+  path ~= "**/LongStrips/*EndcapN",
+  path ~= "**/LongStrips/*EndcapP",
+  path ~= "**/LongStripLayer*/stave*",
+)'''
 [rules.tessellation]
-# merge_children = true
-# max_segments_circle = 48
-skip_geometry = true
+merge_descendants = true
+max_segments_circle = 48
 fallback = "skip"
 
 [rules.extras]

@@ -1,0 +1,51 @@
+# ODD single long-strip module — useful for visual inspection of per-material merging.
+
+include = ["odd/base.toml", "odd/materials.toml"]
+
+hoist_orphans = true
+
+[export.gltf]
+unit_scale = 0.1
+bake_unit_scale = true
+
+[export.obj]
+unit_scale = 1.0
+
+# ── Selection: one module and its leaf components ────────────────────────────
+
+[[selection_rules]]
+keep_if = 'path ~= "**/LongStripLayer0/stave0/LongStripBarrelStaveModules_0/module_0"'
+
+[[selection_rules]]
+keep_if = 'path ~= "**/LongStripLayer0/stave0/LongStripBarrelStaveModules_0/module_0/**" && is_leaf'
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+# World node: no geometry.
+[[rules]]
+match = 'path ~= "/world"'
+[rules.tessellation]
+skip_geometry = true
+
+# Fallback material.
+[[rules]]
+material = "support"
+
+# Merge the module into a single multi-material mesh.
+[[rules]]
+match = 'path ~= "**/module_0"'
+[rules.tessellation]
+# merge_descendants = true
+skip_geometry = true
+max_segments_circle = 48
+fallback = "skip"
+
+[rules.extras]
+visible = true
+opacity = 1.0
+
+# Fallback tessellation.
+[[rules]]
+[rules.tessellation]
+max_segments_circle = 48
+fallback = "skip"

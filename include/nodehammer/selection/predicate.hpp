@@ -18,8 +18,9 @@ namespace nodehammer {
 
 struct NodeView {
     std::string_view name;
-    std::string_view path; ///< Absolute path from root, e.g. "/world/tracker/module0"
-    bool isLeaf{false};    ///< true iff the node has no children
+    std::string_view path;         ///< Absolute path from root, e.g. "/world/tracker/module0"
+    std::string_view materialName; ///< Source material name, e.g. "Silicon"
+    bool isLeaf{false};            ///< true iff the node has no children
     const std::map<std::string, std::string> *tags{nullptr};
 };
 
@@ -38,6 +39,9 @@ using Predicate = std::function<bool(const NodeView &)>;
 /// '*' matches any sequence of non-'/' characters; '**' matches any sequence including '/'.
 /// @TODO: add `[abc]` syntax for character class matching.
 [[nodiscard]] Predicate makePathGlobPredicate(std::string pattern);
+
+/// Matches source material name against a glob pattern (same semantics as name glob).
+[[nodiscard]] Predicate makeMaterialGlobPredicate(std::string pattern);
 
 /// True when the node has the given tag key; if value is set, also matches the value.
 [[nodiscard]] Predicate makeTagPredicate(std::string key, std::optional<std::string> value);

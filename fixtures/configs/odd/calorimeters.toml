@@ -17,14 +17,14 @@ keep_if = [
 # ── Rules ────────────────────────────────────────────────────────────────────
 
 [[rules]]
-scope = "**/ECal/**"
+match = 'path ~= "**/ECal/**"'
 material = "ecal"
 
 [[rules]]
-scope = "**/HCal/**"
+match = 'path ~= "**/HCal/**"'
 material = "hcal"
 
 [[rules]]
-scope = ["**/ECal", "**/HCal"]
+match = 'any(path ~= "**/ECal", path ~= "**/HCal")'
 [rules.tessellation]
 skip_geometry = true

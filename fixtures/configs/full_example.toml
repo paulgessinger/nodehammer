@@ -33,19 +33,15 @@ operands = [
 
 # Unified rules: material + tessellation + extras in one list.
 [[rules]]
-scope = "/World/Tracker/**"
+match = 'path ~= "/World/Tracker/**" && tag.semantic == "sensor"'
 material = "aluminum"
-[rules.match]
-type = "tag"
-key = "semantic"
-value = "sensor"
 
 [[rules]]
-scope = "/World/Tracker/BeamPipe/**"
+match = 'path ~= "/World/Tracker/BeamPipe/**"'
 material = "copper"
 
 [[rules]]
-scope = "/World/Tracker/**"
+match = 'path ~= "/World/Tracker/**"'
 [rules.tessellation]
 max_segments_circle = 32
 fallback = "skip"

@@ -138,6 +138,12 @@ Predicate makePathGlobPredicate(std::string pattern) {
     return [p = std::move(pattern)](const NodeView &v) -> bool { return matchGlob(p, v.path); };
 }
 
+Predicate makeMaterialGlobPredicate(std::string pattern) {
+    return [p = std::move(pattern)](const NodeView &v) -> bool {
+        return matchGlob(p, v.materialName);
+    };
+}
+
 Predicate makeTagPredicate(std::string key, std::optional<std::string> value) {
     return [k = std::move(key), val = std::move(value)](const NodeView &v) -> bool {
         if (v.tags == nullptr) {
@@ -191,6 +197,9 @@ Predicate compilePredicate(const PredicateExpr &expr) {
         detail::overloaded{
             [](const NameGlobPredicate &node) { return makeNameGlobPredicate(node.pattern); },
             [](const PathGlobPredicate &node) { return makePathGlobPredicate(node.pattern); },
+            [](const MaterialGlobPredicate &node) {
+                return makeMaterialGlobPredicate(node.pattern);
+            },
             [](const TagPredicate &node) { return makeTagPredicate(node.key, node.value); },
             [](const IsLeafPredicate &) { return makeIsLeafPredicate(); },
             [](const BoolPredicate &node) -> Predicate {

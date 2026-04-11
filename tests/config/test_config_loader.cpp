@@ -89,12 +89,11 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
 
     // Rule 0: material + match
     REQUIRE(cfg.rules.at(0).material == "aluminum");
-    REQUIRE(cfg.rules.at(0).scope == "/World/Tracker/**");
     REQUIRE(cfg.rules.at(0).match.has_value());
 
-    // Rule 1: material only
+    // Rule 1: material + match (path only)
     REQUIRE(cfg.rules.at(1).material == "copper");
-    REQUIRE_FALSE(cfg.rules.at(1).match.has_value());
+    REQUIRE(cfg.rules.at(1).match.has_value());
 
     // Rule 2: tessellation + extras
     REQUIRE(cfg.rules.at(2).tessellation.has_value());
@@ -102,10 +101,10 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
     REQUIRE(cfg.rules.at(2).extras.has_value());
     REQUIRE(cfg.rules.at(2).extras->at("visible").get<bool>() == true);
 
-    // Rule 3: fallback tessellation
+    // Rule 3: fallback tessellation (no match → matches everything)
     REQUIRE(cfg.rules.at(3).tessellation.has_value());
     REQUIRE(cfg.rules.at(3).tessellation->maxSegmentsCircle == 64);
-    REQUIRE_FALSE(cfg.rules.at(3).scope.has_value());
+    REQUIRE_FALSE(cfg.rules.at(3).match.has_value());
 }
 
 TEST_CASE("ConfigLoader: missing file → Error diagnostic", "[config][loader]") {
@@ -514,9 +513,10 @@ TEST_CASE("ConfigLoader: included rules come before parent rules", "[config][loa
         nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
     const auto &rules = result.config.rules;
-    // includes/rules.toml rules come first (scope="**/Tracker/**", then fallback tess),
+    // includes/rules.toml rules come first (match path ~= "**/Tracker/**", then fallback tess),
     // then main file rule (material="copper").
     REQUIRE(rules.size() == 3);
-    REQUIRE(rules[0].scope == "**/Tracker/**");
+    REQUIRE(rules[0].match.has_value());
+    REQUIRE(rules[0].material == "steel");
     REQUIRE(rules[2].material == "copper");
 }
