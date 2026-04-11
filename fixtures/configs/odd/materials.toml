@@ -56,15 +56,28 @@ metallic = 1.0
 roughness = 0.12
 
 [materials.carbon_fiber]
-base_color = [0.08, 0.08, 0.08]
+base_color = "#1A1A1A"
 metallic = 0.0
-roughness = 0.92
-double_sided = false
+roughness = 0.32
+specular = 0.60
+anisotropy = 0.35
+clearcoat = 0.20
+clearcoat_roughness = 0.08
 
 [materials.titanium]
 base_color = "#9A9DA3"
 metallic = 1.0
 roughness = 0.28
+
+[materials.carbon_foam]
+base_color = [0.08, 0.08, 0.08]
+metallic = 0.0
+roughness = 0.92
+
+[materials.copper]
+base_color = "#B87333"
+metallic = 1.0
+roughness = 0.25
 
 # ── Source-material → render-material mapping rules ──────────────────────────
 
@@ -87,3 +100,11 @@ material = "carbon_fiber"
 [[rules]]
 match = 'material ~= "Titanium"'
 material = "titanium"
+
+[[rules]]
+match = 'material ~= "CarbonFoam"'
+material = "carbon_foam"
+
+[[rules]]
+match = 'material ~= "Copper"'
+material = "copper"
