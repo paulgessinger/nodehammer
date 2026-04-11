@@ -1,13 +1,12 @@
 <lccdd>
-  <info name="sensitive_detector" title="Sensitive detector test geometry"
+  <info name="sensitive_detector" title="Minimal sensitive tracker for testing"
         author="nodehammer" status="test" version="1"/>
 
   <define>
-    <constant name="world_side"   value="1000*mm"/>
-    <constant name="world_x"      value="world_side"/>
-    <constant name="world_y"      value="world_side"/>
-    <constant name="world_z"      value="world_side"/>
-    <constant name="tracker_half" value="100*mm"/>
+    <constant name="world_side" value="1000*mm"/>
+    <constant name="world_x"    value="world_side"/>
+    <constant name="world_y"    value="world_side"/>
+    <constant name="world_z"    value="world_side"/>
   </define>
 
   <includes>
@@ -28,41 +27,33 @@
 
   <readouts>
     <readout name="TrackerHits">
-      <id>system:8,layer:4,module:14,strip:24</id>
+      <id>system:8,layer:4,module:14,sensor:8</id>
     </readout>
   </readouts>
 
-  <display>
-    <vis name="TrackerVis" alpha="0.5" r="0.1" g="0.9" b="0.1"
-         showDaughters="true" visible="true"/>
-  </display>
-
   <solids>
-    <box name="WorldSolid"   x="world_side"     y="world_side"     z="world_side"/>
-    <box name="TrackerSolid" x="tracker_half*2" y="tracker_half*2" z="tracker_half*2"/>
+    <box name="WorldSolid" x="world_side" y="world_side" z="world_side"/>
   </solids>
 
   <structure>
-    <volume name="Tracker_vol">
-      <materialref ref="Silicon"/>
-      <solidref    ref="TrackerSolid"/>
-      <visref      ref="TrackerVis"/>
-      <sensitive type="tracker"/>
-    </volume>
     <volume name="world_volume">
       <materialref ref="Air"/>
       <solidref    ref="WorldSolid"/>
-      <physvol>
-        <volumeref ref="Tracker_vol"/>
-        <position  name="center" x="0" y="0" z="0"/>
-      </physvol>
     </volume>
   </structure>
 
   <detectors>
-    <detector id="1" name="Tracker" type="DD4hep_SubdetectorAssembly" vis="TrackerVis"
-              readout="TrackerHits">
-      <composite name="Tracker_vol"/>
+    <detector id="1" name="Tracker" type="DD4hep_SiTrackerBarrel" readout="TrackerHits">
+      <module name="TestModule">
+        <module_envelope width="50*mm" length="50*mm" thickness="1*mm"/>
+        <module_component width="50*mm" length="50*mm" thickness="0.3*mm"
+                          material="Silicon" sensitive="true"/>
+      </module>
+      <layer module="TestModule" id="1">
+        <barrel_envelope inner_r="100*mm" outer_r="110*mm" z_length="200*mm"/>
+        <rphi_layout phi_tilt="0" nphi="1" phi0="0" rc="105*mm" dr="0"/>
+        <z_layout dr="0" z0="0" nz="1"/>
+      </layer>
     </detector>
   </detectors>
 

@@ -43,8 +43,8 @@ struct ImportState {
     dd4hep::Detector &det;
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
     std::unordered_map<const TGeoMaterial *, SemanticMaterialId> matCache;
-    /// TGeoNode* → SemanticNodeId for nodes claimed by DetElements in Pass 1.
-    std::unordered_map<const TGeoNode *, SemanticNodeId> visitedNodes;
+    /// TGeoNode* → SemanticNodeId built during the TGeo pass.
+    std::unordered_map<const TGeoNode *, SemanticNodeId> nodeMap;
 };
 
 SemanticMaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
@@ -84,47 +84,11 @@ SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
     return id;
 }
 
-// Pass 1: walk the DD4hep DetElement tree, building SemanticNodes with metadata tags.
-SemanticNodeId importDetElement(const dd4hep::DetElement &elem,
-                                std::optional<SemanticNodeId> parentId, ImportState &st) {
+// Pass 1: walk the full TGeo tree, creating a SemanticNode for every TGeoNode.
+SemanticNodeId importTGeoNode(const TGeoNode *node, std::optional<SemanticNodeId> parentId,
+                              ImportState &st) {
     const SemanticNodeId id = st.scene.nextNodeId();
-
-    dd4hep::PlacedVolume pv = elem.placement();
-    const TGeoNode *geoNode = pv.ptr();
-
-    st.visitedNodes[geoNode] = id;
-
-    SemanticNode sn;
-    sn.id = id;
-    sn.name = elem.name();
-    sn.logVolId = importLogVol(pv.volume().ptr(), st);
-    sn.localTransform = tgeoMatrixToGlm(geoNode->GetMatrix());
-    sn.parentId = parentId;
-    sn.provenance = {"dd4hep", elem.name(), st.sourceFile, {}};
-
-    if (!std::string{elem.type()}.empty()) {
-        sn.tags["subdetector"] = elem.type();
-    }
-    if (elem.volume().isSensitive()) {
-        sn.tags["sensitive"] = "true";
-    }
-
-    st.scene.nodes[id] = sn;
-
-    for (const auto &[childName, childElem] : elem.children()) {
-        const SemanticNodeId childId = importDetElement(childElem, id, st);
-        st.scene.nodes[id].children.push_back(childId);
-    }
-
-    return id;
-}
-
-// Pass 2 helpers: import TGeo volumes not claimed by DetElements.
-
-// Recursively import a TGeo subtree that has no DetElement association.
-void importTGeoSubtree(const TGeoNode *node, SemanticNodeId parentId, ImportState &st) {
-    const SemanticNodeId id = st.scene.nextNodeId();
-    st.visitedNodes[node] = id;
+    st.nodeMap[node] = id;
 
     SemanticNode sn;
     sn.id = id;
@@ -134,24 +98,52 @@ void importTGeoSubtree(const TGeoNode *node, SemanticNodeId parentId, ImportStat
     sn.parentId = parentId;
     sn.provenance = {"dd4hep/tgeo", node->GetName(), st.sourceFile, {}};
 
+    // Check sensitivity via DD4hep during the TGeo walk — sensitive volumes
+    // may not correspond to any DetElement (e.g. composites inside assemblies).
+    dd4hep::Volume ddVol{const_cast<TGeoVolume *>(node->GetVolume())};
+    if (ddVol.isSensitive()) {
+        sn.tags["sensitive"] = "true";
+    }
+
     st.scene.nodes[id] = sn;
-    st.scene.nodes[parentId].children.push_back(id);
 
     for (int i = 0; i < node->GetNdaughters(); ++i) {
-        importTGeoSubtree(node->GetDaughter(i), id, st);
+        const SemanticNodeId childId = importTGeoNode(node->GetDaughter(i), id, st);
+        st.scene.nodes[id].children.push_back(childId);
     }
+
+    return id;
 }
 
-// For each TGeoNode visited in Pass 1, import its TGeo daughters that are
-// NOT claimed by a child DetElement. This picks up passive volumes (kapton,
-// cables, support structures, etc.).
-void importTGeoDaughters(const TGeoNode *node, SemanticNodeId parentId, ImportState &st) {
-    for (int i = 0; i < node->GetNdaughters(); ++i) {
-        const TGeoNode *daughter = node->GetDaughter(i);
-        if (st.visitedNodes.contains(daughter)) {
-            continue; // already claimed by a DetElement
-        }
-        importTGeoSubtree(daughter, parentId, st);
+// Pass 2: walk the DD4hep DetElement tree and annotate the SemanticNodes
+// that were already created in Pass 1.
+void annotateDetElement(const dd4hep::DetElement &elem, ImportState &st) {
+    const TGeoNode *geoNode = elem.placement().ptr();
+    auto it = st.nodeMap.find(geoNode);
+    if (it == st.nodeMap.end()) {
+        st.diags.warn(codes::kWarnImportNoMaterial,
+                      std::format("DetElement '{}' placement not found in TGeo tree", elem.name()));
+        return;
+    }
+
+    SemanticNode &sn = st.scene.nodes[it->second];
+
+    // Override name and provenance with the richer DD4hep information.
+    sn.name = elem.name();
+    sn.provenance = {"dd4hep", elem.name(), st.sourceFile, {}};
+
+    if (!std::string{elem.type()}.empty()) {
+        sn.tags["subdetector"] = elem.type();
+    }
+
+    // Sensitivity is primarily tagged during the TGeo walk (Pass 1) via
+    // ddVol.isSensitive(), but a DetElement may also carry it on its own volume.
+    if (elem.volume().isSensitive()) {
+        sn.tags["sensitive"] = "true";
+    }
+
+    for (const auto &[childName, childElem] : elem.children()) {
+        annotateDetElement(childElem, st);
     }
 }
 
@@ -184,20 +176,17 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
 
     ImportState st{result.scene, result.diags, path.string(), *detOwner, {}, {}, {}};
 
-    // Pass 1: DetElement tree
-    const dd4hep::DetElement world = detOwner->world();
-    const SemanticNodeId rootId = importDetElement(world, std::nullopt, st);
+    // Pass 1: walk the full TGeo tree — every node gets a SemanticNode.
+    // This guarantees complete geometry (passives included) with no duplicates.
+    const TGeoNode *topNode = detOwner->manager().GetTopNode();
+    const SemanticNodeId rootId = importTGeoNode(topNode, std::nullopt, st);
     result.scene.rootId = rootId;
 
-    // Pass 2: for each DetElement node from Pass 1, import its TGeo daughter
-    // volumes that are not claimed by a child DetElement. This captures passive
-    // components (kapton, cables, support structures, etc.) that exist in the
-    // TGeo tree but have no DetElement.
-    // Take a snapshot of the visited nodes map since Pass 2 will mutate it.
-    const auto pass1Nodes = st.visitedNodes;
-    for (const auto &[geoNode, semId] : pass1Nodes) {
-        importTGeoDaughters(geoNode, semId, st);
-    }
+    // Pass 2: walk the DD4hep DetElement tree and annotate the corresponding
+    // SemanticNodes with richer names, provenance, and metadata tags
+    // (sensitivity, subdetector type, etc.).
+    const dd4hep::DetElement world = detOwner->world();
+    annotateDetElement(world, st);
 
     result.scene.computeWorldTransforms();
     result.scene.computeOriginalPaths();
