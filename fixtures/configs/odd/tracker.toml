@@ -2,18 +2,18 @@
 
 # ── Selection ────────────────────────────────────────────────────────────────
 
-[[selection_rules]]
-keep_if = [
-  'path ~= "**/Pixels/*Barrel"',
-  'path ~= "**/Pixels/*EndcapN"',
-  'path ~= "**/Pixels/*EndcapP"',
-  'path ~= "**/ShortStrips/*Barrel"',
-  'path ~= "**/ShortStrips/*EndcapN"',
-  'path ~= "**/ShortStrips/*EndcapP"',
-  'path ~= "**/LongStrips/*Barrel"',
-  'path ~= "**/LongStrips/*EndcapN"',
-  'path ~= "**/LongStrips/*EndcapP"',
-]
+# [[selection_rules]]
+# keep_if = [
+#   'path ~= "**/Pixels/*Barrel"',
+#   'path ~= "**/Pixels/*EndcapN"',
+#   'path ~= "**/Pixels/*EndcapP"',
+#   'path ~= "**/ShortStrips/*Barrel"',
+#   'path ~= "**/ShortStrips/*EndcapN"',
+#   'path ~= "**/ShortStrips/*EndcapP"',
+#   'path ~= "**/LongStrips/*Barrel"',
+#   'path ~= "**/LongStrips/*EndcapN"',
+#   'path ~= "**/LongStrips/*EndcapP"',
+# ]
 
 # Keep sensor nodes.
 # [[selection_rules]]
@@ -22,7 +22,10 @@ keep_if = [
 # '''
 
 [[selection_rules]]
-keep_if = 'path ~= "**/LongStripBarrelStaveModules_0/**"'
+keep_if = 'path ~= "**/LongStripBarrelStaveModules_*"'
+
+[[selection_rules]]
+keep_if = 'path ~= "**/LongStripBarrelStaveModules_*/*/**" && is_leaf'
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 
@@ -56,11 +59,14 @@ scope = [
   "**/LongStrips/*Barrel",
   "**/LongStrips/*EndcapN",
   "**/LongStrips/*EndcapP",
+  "**/LongStripBarrelStaveModules_*",
 ]
 [rules.tessellation]
-merge_children = true
-max_segments_circle = 48
+# merge_children = true
+# max_segments_circle = 48
+skip_geometry = true
 fallback = "skip"
+
 [rules.extras]
 visible = true
 opacity = 1.0

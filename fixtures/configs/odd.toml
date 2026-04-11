@@ -30,8 +30,8 @@ unit_scale = 1.0
 # ── Selection ────────────────────────────────────────────────────────────────
 
 # Beam pipe (not in any subsystem fragment).
-[[selection_rules]]
-keep_if = ['name == "BeamPipe"']
+# [[selection_rules]]
+# keep_if = ['name == "BeamPipe"']
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 
