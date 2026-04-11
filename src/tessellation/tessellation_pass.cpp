@@ -390,20 +390,30 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         // ── Boolean handling ───────────────────────────────────────────────────
         if (isBoolean) {
 #ifdef NH_WITH_BOOLEAN_MESH
-            // Attempt actual boolean tessellation via Manifold.
-            auto boolOut = tessellateBooleanShape(shape.data, scene, tess, params);
-            result.diags.append(boolOut.diags);
-            if (!boolOut.vertices.empty()) {
-                MeshAssetId mid = result.scene.nextMeshId();
-                MeshAsset ma;
-                ma.id = mid;
-                ma.name = lv.name + "_boolean";
-                ma.vertices = std::move(boolOut.vertices);
-                ma.indices = std::move(boolOut.indices);
-                ma.provenance.sourceSystem = "tessellation_pass/manifold";
-                ma.provenance.sourceName = lv.name;
-                result.scene.meshAssets[mid] = std::move(ma);
-
+            // Check the mesh cache first — same shapeId + segments → same mesh.
+            auto &boolSegMap = meshCache[lv.shapeId];
+            MeshAssetId boolMid;
+            bool boolCacheHit = boolSegMap.contains(params.maxSegmentsCircle);
+            if (boolCacheHit) {
+                boolMid = boolSegMap.at(params.maxSegmentsCircle);
+            } else {
+                auto boolOut = tessellateBooleanShape(shape.data, scene, tess, params);
+                result.diags.append(boolOut.diags);
+                if (!boolOut.vertices.empty()) {
+                    boolMid = result.scene.nextMeshId();
+                    MeshAsset ma;
+                    ma.id = boolMid;
+                    ma.name = lv.name + "_boolean";
+                    ma.vertices = std::move(boolOut.vertices);
+                    ma.indices = std::move(boolOut.indices);
+                    ma.provenance.sourceSystem = "tessellation_pass/manifold";
+                    ma.provenance.sourceName = lv.name;
+                    result.scene.meshAssets[boolMid] = std::move(ma);
+                    boolSegMap[params.maxSegmentsCircle] = boolMid;
+                    boolCacheHit = true; // mark as valid for the binding below
+                }
+            }
+            if (boolCacheHit) {
                 // Resolve material (same as primitive path).
                 const auto &srcMat = scene.materials.at(lv.materialId);
                 NodeView boolView{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
@@ -443,7 +453,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     rmId = defaultMatCache.at(lv.materialId);
                 }
 
-                rn.meshBindings.push_back({mid, rmId});
+                rn.meshBindings.push_back({boolMid, rmId});
                 result.scene.nodes[rnId] = std::move(rn);
                 for (const auto childId : semNode.children) {
                     q.push(childId);

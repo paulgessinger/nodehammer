@@ -52,6 +52,11 @@ void register_cmd_dump_render(CLI::App &app) {
             return;
         }
 
+        // ── Deduplicate shapes ─────────────────────────────────────────────────
+        if (cfg.deduplicateShapes) {
+            semScene.deduplicateShapes();
+        }
+
         // ── Tessellate ─────────────────────────────────────────────────────────
         nodehammer::TessellationPass pass{cfg};
         auto passResult = pass.lower(semScene);

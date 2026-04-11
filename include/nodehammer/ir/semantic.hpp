@@ -223,6 +223,11 @@ class SemanticScene {
     /// BFS pass: build originalPath from root for every reachable node.
     void computeOriginalPaths();
 
+    /// Deduplicate shapes by value: shapes with identical parameters are merged
+    /// into a single canonical entry, and all referencing logical volumes are
+    /// updated.  Returns the number of shapes removed.
+    std::size_t deduplicateShapes();
+
     /// BFS traversal from root; calls fn(const SemanticNode &) for every reachable node.
     template <typename Fn> void visitBFS(Fn &&fn) const {
         if (nodes.empty()) {

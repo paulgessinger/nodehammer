@@ -565,10 +565,15 @@ ConfigResult parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
-    warnUnknownKeys(tbl, {"hoist_orphans", "export", "materials", "selection_rules", "rules"},
-                    "<top-level>", diags);
+    warnUnknownKeys(
+        tbl,
+        {"hoist_orphans", "deduplicate_shapes", "export", "materials", "selection_rules", "rules"},
+        "<top-level>", diags);
     if (auto v = tbl["hoist_orphans"].value<bool>()) {
         cfg.hoistOrphans = *v;
+    }
+    if (auto v = tbl["deduplicate_shapes"].value<bool>()) {
+        cfg.deduplicateShapes = *v;
     }
     if (const auto *exportTbl = tbl["export"].as_table()) {
         // ── Table-driven export config ───────────────────────────────────────

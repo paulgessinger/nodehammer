@@ -78,6 +78,15 @@ void register_cmd_convert(CLI::App &app) {
             }
         }
 
+        // ── Deduplicate shapes ─────────────────────────────────────────────────
+        if (cfg.deduplicateShapes) {
+            const auto removed = importResult.scene.deduplicateShapes();
+            if (removed > 0) {
+                std::println(stderr, "Shape dedup: {} shapes merged ({} unique)", removed,
+                             importResult.scene.shapes.size());
+            }
+        }
+
         // ── Tessellate ─────────────────────────────────────────────────────────
         nodehammer::TessellationPass pass{cfg};
         auto tessResult = pass.lower(importResult.scene);

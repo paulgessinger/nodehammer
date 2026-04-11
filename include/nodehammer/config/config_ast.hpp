@@ -158,6 +158,7 @@ inline const CommonExportConfig &commonConfig(const ExportFormatConfig &cfg) {
 
 struct NHConfig {
     bool hoistOrphans{false};
+    bool deduplicateShapes{true}; ///< Merge shapes with identical parameters
     std::map<std::string, ExportFormatConfig> exportFormats; ///< keyed by "gltf", "glb", "obj"
     std::vector<MaterialDef> materials;
     std::vector<SelectionRule> selection;
