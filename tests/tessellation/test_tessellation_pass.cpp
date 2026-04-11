@@ -1,7 +1,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/import/synthetic.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/tessellation/primitive_tessellator.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
+
+#include <map>
+#include <set>
+
+#ifdef NH_WITH_BOOLEAN_MESH
+#include <nodehammer/tessellation/boolean_tessellator.hpp>
+#endif
 
 using namespace nodehammer;
 
@@ -148,6 +156,91 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
 
 // ── Boolean fallback ──────────────────────────────────────────────────────────
 
+#ifdef NH_WITH_BOOLEAN_MESH
+TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mesh",
+          "[tessellation][boolean]") {
+    // Reproduces the ODD CarbonFiber support shape: a solid partial-phi tube
+    // used as a boolean operand.
+    SemanticScene scene;
+    auto shapeId = scene.nextShapeId();
+    TubeShape tube;
+    tube.rMin = 0.0;
+    tube.rMax = 0.2;
+    tube.dz = 12.8;
+    tube.phiStart = 6.183185307179587;
+    tube.phiDelta = 0.414159265358979;
+    scene.shapes[shapeId] = {shapeId, tube};
+
+    // Create a boolean subtraction: tube - smaller tube (arbitrary, just to exercise the path)
+    auto rightId = scene.nextShapeId();
+    TubeShape smallTube;
+    smallTube.rMin = 0.0;
+    smallTube.rMax = 0.05;
+    smallTube.dz = 5.0;
+    smallTube.phiStart = 6.183185307179587;
+    smallTube.phiDelta = 0.414159265358979;
+    scene.shapes[rightId] = {rightId, smallTube};
+
+    auto boolId = scene.nextShapeId();
+    scene.shapes[boolId] = {boolId, BooleanSubtraction{shapeId, rightId}};
+
+    PrimitiveTessellator tess;
+    TessellationParams params;
+    params.maxSegmentsCircle = 16; // low for speed
+
+    auto result = tessellateBooleanShape(scene.shapes.at(boolId).data, scene, tess, params);
+
+    // Print diagnostics for debugging.
+    for (const auto &d : result.diags.items()) {
+        UNSCOPED_INFO(std::format("[{}] {}", d.code, d.message));
+    }
+
+    // Check that we get actual geometry, not an empty fallback.
+    REQUIRE_FALSE(result.vertices.empty());
+    REQUIRE_FALSE(result.indices.empty());
+    // Should have no errors (warnings are acceptable for now).
+    REQUIRE_FALSE(result.diags.hasErrors());
+}
+
+TEST_CASE("BooleanTessellator: full-phi tube subtraction produces geometry",
+          "[tessellation][boolean]") {
+    SemanticScene scene;
+
+    auto outerId = scene.nextShapeId();
+    scene.shapes[outerId] = {outerId, TubeShape{3.9, 4.0, 94.16, 0.0, 2.0 * std::numbers::pi}};
+
+    auto innerId = scene.nextShapeId();
+    scene.shapes[innerId] = {innerId, TubeShape{3.9, 4.0, 91.52, 0.0, 2.0 * std::numbers::pi}};
+
+    auto boolId = scene.nextShapeId();
+    scene.shapes[boolId] = {boolId, BooleanSubtraction{outerId, innerId}};
+
+    PrimitiveTessellator tess;
+    TessellationParams params;
+    params.maxSegmentsCircle = 16;
+
+    auto result = tessellateBooleanShape(scene.shapes.at(boolId).data, scene, tess, params);
+
+    REQUIRE_FALSE(result.vertices.empty());
+    REQUIRE_FALSE(result.indices.empty());
+    REQUIRE_FALSE(result.diags.hasErrors());
+}
+
+TEST_CASE("TessellationPass: boolean subtraction produces geometry via Manifold",
+          "[tessellation][pass][boolean]") {
+    NHConfig cfg;
+    TessellationPass pass{cfg};
+    auto result = pass.lower(makeBooleanScene());
+
+    REQUIRE_FALSE(result.diags.hasErrors());
+    // Manifold should produce actual geometry, not fall through to fallback.
+    const auto &rootNode = result.scene.nodes.at(result.scene.rootId);
+    REQUIRE_FALSE(rootNode.meshBindings.empty());
+    const auto &mesh = result.scene.meshAssets.at(rootNode.meshBindings.front().meshId);
+    REQUIRE_FALSE(mesh.vertices.empty());
+    REQUIRE_FALSE(mesh.indices.empty());
+}
+#else
 TEST_CASE("TessellationPass: boolean fallback=Skip emits warning, no mesh binding",
           "[tessellation][pass]") {
     NHConfig cfg;
@@ -213,6 +306,7 @@ TEST_CASE("TessellationPass: boolean fallback=Fail returns error diagnostic",
     }
     REQUIRE(hasErr);
 }
+#endif // NH_WITH_BOOLEAN_MESH
 
 // ── UnknownShape ──────────────────────────────────────────────────────────────
 

@@ -3,6 +3,10 @@
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 
+#ifdef NH_WITH_BOOLEAN_MESH
+#include <nodehammer/tessellation/boolean_tessellator.hpp>
+#endif
+
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <format>
@@ -220,10 +224,26 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
                 // Tessellate (using cache)
                 const SemanticShape &descShape = scene.shapes.at(descLv.shapeId);
+                const bool descIsBoolean =
+                    std::holds_alternative<BooleanUnion>(descShape.data) ||
+                    std::holds_alternative<BooleanIntersection>(descShape.data) ||
+                    std::holds_alternative<BooleanSubtraction>(descShape.data);
                 auto &descSegMap = meshCache[descLv.shapeId];
                 MeshAssetId descMid;
                 if (!descSegMap.contains(params.maxSegmentsCircle)) {
-                    auto tessOut = tess.tessellate(descShape.data, params);
+                    TessellationOutput tessOut;
+#ifdef NH_WITH_BOOLEAN_MESH
+                    if (descIsBoolean) {
+                        tessOut = tessellateBooleanShape(descShape.data, scene, tess, params);
+                    } else {
+                        tessOut = tess.tessellate(descShape.data, params);
+                    }
+#else
+                    if (descIsBoolean) {
+                        continue; // skip booleans without manifold
+                    }
+                    tessOut = tess.tessellate(descShape.data, params);
+#endif
                     result.diags.append(tessOut.diags);
                     if (tessOut.vertices.empty()) {
                         continue;
@@ -366,8 +386,71 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                                std::holds_alternative<BooleanIntersection>(shape.data) ||
                                std::holds_alternative<BooleanSubtraction>(shape.data);
 
-        // ── Boolean fallback handling ──────────────────────────────────────────
+        // ── Boolean handling ───────────────────────────────────────────────────
         if (isBoolean) {
+#ifdef NH_WITH_BOOLEAN_MESH
+            // Attempt actual boolean tessellation via Manifold.
+            auto boolOut = tessellateBooleanShape(shape.data, scene, tess, params);
+            result.diags.append(boolOut.diags);
+            if (!boolOut.vertices.empty()) {
+                MeshAssetId mid = result.scene.nextMeshId();
+                MeshAsset ma;
+                ma.id = mid;
+                ma.name = lv.name + "_boolean";
+                ma.vertices = std::move(boolOut.vertices);
+                ma.indices = std::move(boolOut.indices);
+                ma.provenance.sourceSystem = "tessellation_pass/manifold";
+                ma.provenance.sourceName = lv.name;
+                result.scene.meshAssets[mid] = std::move(ma);
+
+                // Resolve material (same as primitive path).
+                const auto &srcMat = scene.materials.at(lv.materialId);
+                NodeView boolView{semNode.name, nodePath, semNode.children.empty(), &semNode.tags};
+                const std::string *matName = resolveMaterial(config_.rules, nodePath, boolView);
+                RenderMaterialId rmId;
+                if (matName != nullptr) {
+                    auto cit = namedMatCache.find(*matName);
+                    if (cit != namedMatCache.end()) {
+                        rmId = cit->second;
+                    } else {
+                        for (const auto &md : config_.materials) {
+                            if (md.name == *matName) {
+                                RenderMaterial rm;
+                                rm.id = result.scene.nextMaterialId();
+                                rm.name = md.name;
+                                rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
+                                                               md.baseColor.b, md.baseColor.a};
+                                rm.metallicFactor = md.metallic;
+                                rm.roughnessFactor = md.roughness;
+                                rm.emissiveFactor =
+                                    glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
+                                rm.doubleSided = md.doubleSided;
+                                rmId = rm.id;
+                                result.scene.materials[rmId] = std::move(rm);
+                                namedMatCache[md.name] = rmId;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if (!result.scene.materials.contains(rmId)) {
+                    if (!defaultMatCache.contains(lv.materialId)) {
+                        auto dm = makeDefaultMaterial(result.scene, srcMat);
+                        defaultMatCache[lv.materialId] = dm.id;
+                        result.scene.materials[dm.id] = std::move(dm);
+                    }
+                    rmId = defaultMatCache.at(lv.materialId);
+                }
+
+                rn.meshBindings.push_back({mid, rmId});
+                result.scene.nodes[rnId] = std::move(rn);
+                for (const auto childId : semNode.children) {
+                    q.push(childId);
+                }
+                continue;
+            }
+            // Manifold failed or produced empty output — fall through to fallback.
+#endif
             switch (rule.fallback) {
             case BooleanFallback::Fail:
                 result.diags.error(

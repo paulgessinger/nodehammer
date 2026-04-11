@@ -54,3 +54,18 @@ set(TINYGLTF_INSTALL               OFF CACHE BOOL "" FORCE)
 set(TINYGLTF_HEADER_ONLY           ON  CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(tinygltf)
+
+# ── Manifold (optional: boolean mesh operations) ─────────────────────────────
+if(NODEHAMMER_WITH_BOOLEAN_MESH)
+    FetchContent_Declare(manifold
+        GIT_REPOSITORY https://github.com/elalish/manifold.git
+        GIT_TAG        v3.0.1
+        FIND_PACKAGE_ARGS 3.0
+    )
+    set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)
+    set(MANIFOLD_PYBIND OFF CACHE BOOL "" FORCE)
+    set(MANIFOLD_CBIND OFF CACHE BOOL "" FORCE)
+    set(MANIFOLD_JSBIND OFF CACHE BOOL "" FORCE)
+    set(MANIFOLD_EXPORT OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(manifold)
+endif()

@@ -47,6 +47,7 @@ inline constexpr std::string_view kWarnTessBooleanBbox = "NH0502";
 inline constexpr std::string_view kErrTessBooleanFail = "NH0503";
 inline constexpr std::string_view kWarnTessMergeMixedMaterials = "NH0504";
 inline constexpr std::string_view kWarnTessMergeEmpty = "NH0505";
+inline constexpr std::string_view kWarnTessBooleanManifoldFail = "NH0506";
 
 // ── Export ────────────────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrExportWriteFailed = "NH0600";

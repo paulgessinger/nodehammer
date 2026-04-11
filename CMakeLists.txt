@@ -87,6 +87,12 @@ if(NODEHAMMER_WITH_GEANT4)
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_GEANT4=1)
 endif()
 
+if(NODEHAMMER_WITH_BOOLEAN_MESH)
+    target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
+    target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
+    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_BOOLEAN_MESH=1)
+endif()
+
 # ── CLI executable ─────────────────────────────────────────────────────────────
 add_executable(nodehammer src/cli/main.cpp)
 target_link_libraries(nodehammer PRIVATE nodehammer_lib)
