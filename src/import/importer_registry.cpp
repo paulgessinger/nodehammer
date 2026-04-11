@@ -1,4 +1,5 @@
 #include <nodehammer/import/importer_registry.hpp>
+#include <nodehammer/import/json_importer.hpp>
 #include <nodehammer/import/synthetic.hpp>
 
 #ifdef NH_WITH_TGEO
@@ -97,6 +98,7 @@ const std::vector<std::unique_ptr<IImporter>> &ImporterRegistry::importers() con
 ImporterRegistry makeDefaultRegistry() {
     ImporterRegistry reg;
     reg.registerImporter(std::make_unique<SyntheticImporter>());
+    reg.registerImporter(std::make_unique<JsonImporter>());
 #ifdef NH_WITH_TGEO
     reg.registerImporter(std::make_unique<TGeoImporter>());
 #endif

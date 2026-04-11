@@ -233,6 +233,12 @@ void register_cmd_dump_semantic(CLI::App &app) {
             nodehammer::cli::printDiags(selDiags);
         }
 
+        // ── Deduplicate shapes ─────────────────────────────────────────────────
+        if (cfg.deduplicateShapes) {
+            result.scene.deduplicateShapes();
+            result.scene.deduplicateLogVols();
+        }
+
         // ── Output ─────────────────────────────────────────────────────────────
         if (richOpt->count() > 0) {
             int maxDepth = -1;

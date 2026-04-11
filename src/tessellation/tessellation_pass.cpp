@@ -155,6 +155,13 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                         rm.transmissionFactor = md.transmission;
                         rm.clearcoatFactor = md.clearcoat;
                         rm.clearcoatRoughnessFactor = md.clearcoatRoughness;
+                        rm.anisotropyStrength = md.anisotropy;
+                        rm.anisotropyRotation = md.anisotropyRotation;
+                        rm.specularFactor = md.specularFactor;
+                        if (md.specularColor.has_value()) {
+                            rm.specularColorFactor = glm::vec3{
+                                md.specularColor->r, md.specularColor->g, md.specularColor->b};
+                        }
                         rmId = rm.id;
                         result.scene.materials[rmId] = std::move(rm);
                         namedMatCache[md.name] = rmId;

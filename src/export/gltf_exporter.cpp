@@ -92,6 +92,12 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
             if (mat.clearcoatFactor.has_value()) {
                 usedExts.insert("KHR_materials_clearcoat");
             }
+            if (mat.anisotropyStrength.has_value()) {
+                usedExts.insert("KHR_materials_anisotropy");
+            }
+            if (mat.specularFactor.has_value() || mat.specularColorFactor.has_value()) {
+                usedExts.insert("KHR_materials_specular");
+            }
         }
         for (auto &ext : usedExts) {
             model.extensionsUsed.push_back(ext);
@@ -157,6 +163,33 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
                     tinygltf::Value(static_cast<double>(*mat.clearcoatRoughnessFactor));
             }
             gm.extensions["KHR_materials_clearcoat"] = tinygltf::Value(ccExt);
+        }
+
+        if (mat.anisotropyStrength.has_value()) {
+            tinygltf::Value::Object anisExt;
+            anisExt["anisotropyStrength"] =
+                tinygltf::Value(static_cast<double>(*mat.anisotropyStrength));
+            if (mat.anisotropyRotation.has_value()) {
+                anisExt["anisotropyRotation"] =
+                    tinygltf::Value(static_cast<double>(*mat.anisotropyRotation));
+            }
+            gm.extensions["KHR_materials_anisotropy"] = tinygltf::Value(anisExt);
+        }
+        if (mat.specularFactor.has_value() || mat.specularColorFactor.has_value()) {
+            tinygltf::Value::Object specExt;
+            if (mat.specularFactor.has_value()) {
+                specExt["specularFactor"] =
+                    tinygltf::Value(static_cast<double>(*mat.specularFactor));
+            }
+            if (mat.specularColorFactor.has_value()) {
+                const auto &c = *mat.specularColorFactor;
+                tinygltf::Value::Array arr;
+                arr.push_back(tinygltf::Value(static_cast<double>(c.r)));
+                arr.push_back(tinygltf::Value(static_cast<double>(c.g)));
+                arr.push_back(tinygltf::Value(static_cast<double>(c.b)));
+                specExt["specularColorFactor"] = tinygltf::Value(arr);
+            }
+            gm.extensions["KHR_materials_specular"] = tinygltf::Value(specExt);
         }
 
         matIdx[id] = static_cast<int>(model.materials.size());

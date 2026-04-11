@@ -102,6 +102,10 @@ struct MaterialDef {
     std::optional<float> transmission; ///< KHR_materials_transmission
     std::optional<float> clearcoat;    ///< KHR_materials_clearcoat
     std::optional<float> clearcoatRoughness;
+    std::optional<float> anisotropy;         ///< KHR_materials_anisotropy
+    std::optional<float> anisotropyRotation; ///< radians
+    std::optional<float> specularFactor;     ///< KHR_materials_specular
+    std::optional<Color> specularColor;
 };
 
 // ── Rules ─────────────────────────────────────────────────────────────────────

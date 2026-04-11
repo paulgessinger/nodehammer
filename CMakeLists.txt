@@ -28,6 +28,7 @@ add_library(nodehammer_lib STATIC
     src/config/predicate_parser.cpp
     src/import/synthetic.cpp
     src/import/importer_registry.cpp
+    src/import/json_importer.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
     src/selection/closure.cpp

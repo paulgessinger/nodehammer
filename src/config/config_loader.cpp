@@ -290,7 +290,8 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
         warnUnknownKeys(*tbl,
                         {"base_color", "metallic", "roughness", "double_sided", "emissive",
                          "alpha_mode", "alpha_cutoff", "ior", "transmission", "clearcoat",
-                         "clearcoat_roughness"},
+                         "clearcoat_roughness", "anisotropy", "anisotropy_rotation", "specular",
+                         "specular_color"},
                         std::format("materials.{}", key.str()), diags);
         MaterialDef def;
         def.name = key.str();
@@ -383,6 +384,24 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
         }
         if (auto v = (*tbl)["clearcoat_roughness"].value<float>()) {
             def.clearcoatRoughness = *v;
+        }
+        if (auto v = (*tbl)["anisotropy"].value<float>()) {
+            def.anisotropy = *v;
+        }
+        if (auto v = (*tbl)["anisotropy_rotation"].value<float>()) {
+            def.anisotropyRotation = *v;
+        }
+        if (auto v = (*tbl)["specular"].value<float>()) {
+            def.specularFactor = *v;
+        }
+        if (const auto *specColorArr = (*tbl)["specular_color"].as_array()) {
+            if (specColorArr->size() >= 3) {
+                Color c;
+                c.r = specColorArr->at(0).value<float>().value_or(1.0f);
+                c.g = specColorArr->at(1).value<float>().value_or(1.0f);
+                c.b = specColorArr->at(2).value<float>().value_or(1.0f);
+                def.specularColor = c;
+            }
         }
         cfg.materials.push_back(std::move(def));
     }

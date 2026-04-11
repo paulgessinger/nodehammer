@@ -62,6 +62,10 @@ struct RenderMaterial {
     std::optional<float> transmissionFactor;
     std::optional<float> clearcoatFactor;
     std::optional<float> clearcoatRoughnessFactor;
+    std::optional<float> anisotropyStrength;
+    std::optional<float> anisotropyRotation;
+    std::optional<float> specularFactor;
+    std::optional<glm::vec3> specularColorFactor;
 };
 
 // ── Mesh binding: material assigned to a mesh instance ───────────────────────

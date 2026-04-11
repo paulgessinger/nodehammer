@@ -228,6 +228,11 @@ class SemanticScene {
     /// updated.  Returns the number of shapes removed.
     std::size_t deduplicateShapes();
 
+    /// Deduplicate logical volumes: logVols with identical (shapeId, materialId)
+    /// are merged, and all referencing nodes are updated.
+    /// Returns the number of logical volumes removed.
+    std::size_t deduplicateLogVols();
+
     /// BFS traversal from root; calls fn(const SemanticNode &) for every reachable node.
     template <typename Fn> void visitBFS(Fn &&fn) const {
         if (nodes.empty()) {
@@ -317,19 +322,34 @@ inline void to_json(nlohmann::json &j, const TorusShape &s) {
          {"rTor", s.rTor},  {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}};
 }
 inline void to_json(nlohmann::json &j, const TessellatedShape &s) {
-    j = {{"type", "tessellated"}, {"triangleCount", s.triangles.size()}};
+    auto tris = nlohmann::json::array();
+    for (const auto &tri : s.triangles) {
+        tris.push_back({{tri.vertices[0].x, tri.vertices[0].y, tri.vertices[0].z},
+                        {tri.vertices[1].x, tri.vertices[1].y, tri.vertices[1].z},
+                        {tri.vertices[2].x, tri.vertices[2].y, tri.vertices[2].z}});
+    }
+    j = {{"type", "tessellated"}, {"triangles", tris}};
 }
 inline void to_json(nlohmann::json &j, const UnknownShape &s) {
     j = {{"type", "unknown"}, {"originalType", s.originalType}};
 }
 inline void to_json(nlohmann::json &j, const BooleanUnion &s) {
-    j = {{"type", "union"}, {"left", s.left}, {"right", s.right}};
+    j = {{"type", "union"},
+         {"left", s.left},
+         {"right", s.right},
+         {"rightTransform", s.rightTransform}};
 }
 inline void to_json(nlohmann::json &j, const BooleanIntersection &s) {
-    j = {{"type", "intersection"}, {"left", s.left}, {"right", s.right}};
+    j = {{"type", "intersection"},
+         {"left", s.left},
+         {"right", s.right},
+         {"rightTransform", s.rightTransform}};
 }
 inline void to_json(nlohmann::json &j, const BooleanSubtraction &s) {
-    j = {{"type", "subtraction"}, {"left", s.left}, {"right", s.right}};
+    j = {{"type", "subtraction"},
+         {"left", s.left},
+         {"right", s.right},
+         {"rightTransform", s.rightTransform}};
 }
 
 inline void to_json(nlohmann::json &j, const SemanticShape &s) {
@@ -364,6 +384,172 @@ inline void to_json(nlohmann::json &j, const SemanticNode &n) {
         j["parentId"] = *n.parentId;
     }
 }
+
+// ── JSON deserialization ──────────────────────────────────────────────────────
+
+template <typename Tag> void from_json(const nlohmann::json &j, StrongId<Tag> &id) {
+    id.value = j.get<uint64_t>();
+}
+
+inline void from_json(const nlohmann::json &j, DegradationFlags &f) {
+    f.bits = decltype(f.bits)(j.get<unsigned long>());
+}
+
+inline void from_json(const nlohmann::json &j, Provenance &p) {
+    j.at("sourceSystem").get_to(p.sourceSystem);
+    j.at("sourceName").get_to(p.sourceName);
+    if (j.contains("sourceFile")) {
+        j.at("sourceFile").get_to(p.sourceFile);
+    }
+    j.at("degradation").get_to(p.degradation);
+}
+
+inline SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
+    const auto type = j.at("type").get<std::string>();
+    if (type == "box") {
+        return BoxShape{j.at("dx"), j.at("dy"), j.at("dz")};
+    }
+    if (type == "tube") {
+        return TubeShape{j.at("rMin"), j.at("rMax"), j.at("dz"), j.at("phiStart"),
+                         j.at("phiDelta")};
+    }
+    if (type == "cone") {
+        return ConeShape{j.at("rMin1"), j.at("rMax1"),    j.at("rMin2"),   j.at("rMax2"),
+                         j.at("dz"),    j.at("phiStart"), j.at("phiDelta")};
+    }
+    if (type == "trd") {
+        return TrdShape{j.at("dx1"), j.at("dx2"), j.at("dy1"), j.at("dy2"), j.at("dz")};
+    }
+    if (type == "para") {
+        return ParaShape{j.at("dx"),    j.at("dy"),    j.at("dz"),
+                         j.at("alpha"), j.at("theta"), j.at("phi")};
+    }
+    if (type == "pcon") {
+        PconShape s;
+        s.phiStart = j.at("phiStart");
+        s.phiDelta = j.at("phiDelta");
+        for (const auto &sec : j.at("sections")) {
+            s.sections.push_back({sec.at("z"), sec.at("rMin"), sec.at("rMax")});
+        }
+        return s;
+    }
+    if (type == "pgon") {
+        PgonShape s;
+        s.phiStart = j.at("phiStart");
+        s.phiDelta = j.at("phiDelta");
+        s.nSides = j.at("nSides");
+        for (const auto &sec : j.at("sections")) {
+            s.sections.push_back({sec.at("z"), sec.at("rMin"), sec.at("rMax")});
+        }
+        return s;
+    }
+    if (type == "torus") {
+        return TorusShape{j.at("rMin"), j.at("rMax"), j.at("rTor"), j.at("phiStart"),
+                          j.at("phiDelta")};
+    }
+    if (type == "tessellated") {
+        TessellatedShape s;
+        if (j.contains("triangles")) {
+            for (const auto &tri : j.at("triangles")) {
+                TessellatedShape::Triangle t;
+                for (int v = 0; v < 3; ++v) {
+                    t.vertices[static_cast<std::size_t>(v)] = {
+                        tri.at(static_cast<std::size_t>(v)).at(0).get<double>(),
+                        tri.at(static_cast<std::size_t>(v)).at(1).get<double>(),
+                        tri.at(static_cast<std::size_t>(v)).at(2).get<double>()};
+                }
+                s.triangles.push_back(t);
+            }
+        }
+        return s;
+    }
+    if (type == "union") {
+        BooleanUnion s;
+        j.at("left").get_to(s.left);
+        j.at("right").get_to(s.right);
+        if (j.contains("rightTransform")) {
+            j.at("rightTransform").get_to(s.rightTransform);
+        }
+        return s;
+    }
+    if (type == "intersection") {
+        BooleanIntersection s;
+        j.at("left").get_to(s.left);
+        j.at("right").get_to(s.right);
+        if (j.contains("rightTransform")) {
+            j.at("rightTransform").get_to(s.rightTransform);
+        }
+        return s;
+    }
+    if (type == "subtraction") {
+        BooleanSubtraction s;
+        j.at("left").get_to(s.left);
+        j.at("right").get_to(s.right);
+        if (j.contains("rightTransform")) {
+            j.at("rightTransform").get_to(s.rightTransform);
+        }
+        return s;
+    }
+    return UnknownShape{type};
+}
+
+inline void from_json(const nlohmann::json &j, SemanticShape &s) {
+    j.at("id").get_to(s.id);
+    s.data = shapeVariantFromJson(j);
+}
+
+inline void from_json(const nlohmann::json &j, SourceMaterial &m) {
+    j.at("id").get_to(m.id);
+    j.at("name").get_to(m.name);
+    j.at("density").get_to(m.density);
+    if (j.contains("color")) {
+        m.color = j.at("color").get<glm::vec3>();
+    }
+}
+
+inline void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv) {
+    j.at("id").get_to(lv.id);
+    j.at("name").get_to(lv.name);
+    j.at("shapeId").get_to(lv.shapeId);
+    j.at("materialId").get_to(lv.materialId);
+}
+
+inline void from_json(const nlohmann::json &j, SemanticNode &n) {
+    j.at("id").get_to(n.id);
+    j.at("name").get_to(n.name);
+    j.at("logVolId").get_to(n.logVolId);
+    j.at("localTransform").get_to(n.localTransform);
+    j.at("worldTransform").get_to(n.worldTransform);
+    j.at("children").get_to(n.children);
+    j.at("originalPath").get_to(n.originalPath);
+    j.at("tags").get_to(n.tags);
+    j.at("provenance").get_to(n.provenance);
+    if (j.contains("parentId")) {
+        n.parentId = j.at("parentId").get<SemanticNodeId>();
+    }
+}
+
+inline void from_json(const nlohmann::json &j, SemanticScene &sc) {
+    j.at("rootId").get_to(sc.rootId);
+    for (const auto &jn : j.at("nodes")) {
+        SemanticNode n = jn.get<SemanticNode>();
+        sc.nodes[n.id] = std::move(n);
+    }
+    for (const auto &jlv : j.at("logVols")) {
+        SemanticLogicalVolume lv = jlv.get<SemanticLogicalVolume>();
+        sc.logVols[lv.id] = std::move(lv);
+    }
+    for (const auto &js : j.at("shapes")) {
+        SemanticShape s = js.get<SemanticShape>();
+        sc.shapes[s.id] = std::move(s);
+    }
+    for (const auto &jm : j.at("materials")) {
+        SourceMaterial m = jm.get<SourceMaterial>();
+        sc.materials[m.id] = std::move(m);
+    }
+}
+
+// ── Scene → JSON ─────────────────────────────────────────────────────────────
 
 inline void to_json(nlohmann::json &j, const SemanticScene &sc) {
     auto nodes = nlohmann::json::array();

@@ -80,10 +80,13 @@ void register_cmd_convert(CLI::App &app) {
 
         // ── Deduplicate shapes ─────────────────────────────────────────────────
         if (cfg.deduplicateShapes) {
-            const auto removed = importResult.scene.deduplicateShapes();
-            if (removed > 0) {
-                std::println(stderr, "Shape dedup: {} shapes merged ({} unique)", removed,
-                             importResult.scene.shapes.size());
+            const auto shapesRemoved = importResult.scene.deduplicateShapes();
+            const auto logVolsRemoved = importResult.scene.deduplicateLogVols();
+            if (shapesRemoved > 0 || logVolsRemoved > 0) {
+                std::println(stderr,
+                             "Dedup: {} shapes, {} logVols merged ({} shapes, {} logVols unique)",
+                             shapesRemoved, logVolsRemoved, importResult.scene.shapes.size(),
+                             importResult.scene.logVols.size());
             }
         }
 

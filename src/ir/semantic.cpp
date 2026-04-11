@@ -316,4 +316,53 @@ std::size_t SemanticScene::deduplicateShapes() {
     return before - shapes.size();
 }
 
+std::size_t SemanticScene::deduplicateLogVols() {
+    const std::size_t before = logVols.size();
+    if (before <= 1) {
+        return 0;
+    }
+
+    // Key: (shapeId, materialId) → canonical logVolId.
+    struct Key {
+        uint64_t shape;
+        uint64_t material;
+        bool operator==(const Key &o) const { return shape == o.shape && material == o.material; }
+    };
+    struct KeyHash {
+        std::size_t operator()(const Key &k) const {
+            return std::hash<uint64_t>{}(k.shape) ^
+                   (std::hash<uint64_t>{}(k.material) * 2654435761);
+        }
+    };
+
+    std::unordered_map<Key, SemanticLogVolId, KeyHash> canonical;
+    std::unordered_map<SemanticLogVolId, SemanticLogVolId> remap;
+
+    for (const auto &[id, lv] : logVols) {
+        Key key{lv.shapeId.value, lv.materialId.value};
+        auto [it, inserted] = canonical.try_emplace(key, id);
+        if (!inserted) {
+            remap[id] = it->second;
+        }
+    }
+
+    if (remap.empty()) {
+        return 0;
+    }
+
+    // Update all nodes to use canonical logVolIds.
+    for (auto &[_, node] : nodes) {
+        if (auto it = remap.find(node.logVolId); it != remap.end()) {
+            node.logVolId = it->second;
+        }
+    }
+
+    // Remove duplicates.
+    for (const auto &[dupId, _] : remap) {
+        logVols.erase(dupId);
+    }
+
+    return before - logVols.size();
+}
+
 } // namespace nodehammer
