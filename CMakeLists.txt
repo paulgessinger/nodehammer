@@ -96,6 +96,7 @@ endif()
 # ── CLI executable ─────────────────────────────────────────────────────────────
 add_executable(nodehammer src/cli/main.cpp)
 target_link_libraries(nodehammer PRIVATE nodehammer_lib)
+nodehammer_set_compiler_options(nodehammer)
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 enable_testing()

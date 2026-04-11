@@ -2,8 +2,9 @@
 # Call nodehammer_set_compiler_options(target) for each target.
 
 function(nodehammer_set_compiler_options target)
+    # Warnings are PRIVATE: do not propagate to dependents (and not to FetchContent subprojects).
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(${target} PUBLIC
+        target_compile_options(${target} PRIVATE
             -Wall
             -Wextra
             -Wpedantic
@@ -14,7 +15,7 @@ function(nodehammer_set_compiler_options target)
             -Woverloaded-virtual
         )
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        target_compile_options(${target} PUBLIC
+        target_compile_options(${target} PRIVATE
             /W4
             /permissive-
         )
@@ -22,6 +23,7 @@ function(nodehammer_set_compiler_options target)
 
     if(NODEHAMMER_ENABLE_ASAN)
         if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            # ASan must propagate to consumers linking this target (static lib + exe).
             target_compile_options(${target} PUBLIC -fsanitize=address -fno-omit-frame-pointer)
             target_link_options(${target} PUBLIC -fsanitize=address)
         else()
