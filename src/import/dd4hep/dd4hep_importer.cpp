@@ -19,6 +19,7 @@
 #include <unistd.h>
 
 #include <format>
+#include <print>
 #include <unordered_map>
 
 namespace nodehammer {
@@ -42,6 +43,7 @@ struct ImportState {
     std::string sourceFile;
     dd4hep::Detector &det;
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
+    std::unordered_map<const TGeoShape *, SemanticShapeId> shapeCache;
     std::unordered_map<const TGeoMaterial *, SemanticMaterialId> matCache;
     /// TGeoNode* → SemanticNodeId built during the TGeo pass.
     std::unordered_map<const TGeoNode *, SemanticNodeId> nodeMap;
@@ -75,7 +77,15 @@ SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
         return it->second;
     }
 
-    const SemanticShapeId shapeId = dispatchTGeoShape(vol->GetShape(), st.scene, st.diags);
+    const TGeoShape *geoShape = vol->GetShape();
+    auto sit = st.shapeCache.find(geoShape);
+    SemanticShapeId shapeId;
+    if (sit != st.shapeCache.end()) {
+        shapeId = sit->second;
+    } else {
+        shapeId = dispatchTGeoShape(geoShape, st.scene, st.diags);
+        st.shapeCache[geoShape] = shapeId;
+    }
     const SemanticMaterialId matId = importMaterial(vol, st);
 
     const SemanticLogVolId id = st.scene.nextLogVolId();
@@ -174,7 +184,7 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
         return result;
     }
 
-    ImportState st{result.scene, result.diags, path.string(), *detOwner, {}, {}, {}};
+    ImportState st{result.scene, result.diags, path.string(), *detOwner, {}, {}, {}, {}};
 
     // Pass 1: walk the full TGeo tree — every node gets a SemanticNode.
     // This guarantees complete geometry (passives included) with no duplicates.
@@ -190,6 +200,13 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
 
     result.scene.computeWorldTransforms();
     result.scene.computeOriginalPaths();
+
+    std::println(stderr, "DD4hep import stats:");
+    std::println(stderr, "  TGeo nodes (semantic nodes): {}", result.scene.nodes.size());
+    std::println(stderr, "  Unique TGeoVolume* (logvols): {}", st.lvCache.size());
+    std::println(stderr, "  Unique TGeoShape* (shapes):   {}", st.shapeCache.size());
+    std::println(stderr, "  Unique TGeoMaterial* (mats):  {}", st.matCache.size());
+    std::println(stderr, "  Semantic shapes created:      {}", result.scene.shapes.size());
 
     gErrorIgnoreLevel = savedRootLevel;
     dd4hep::setPrintLevel(savedDd4hepLevel);

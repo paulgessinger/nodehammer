@@ -35,6 +35,7 @@ struct ImportState {
     DiagnosticList &diags;
     std::string sourceFile;
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
+    std::unordered_map<const TGeoShape *, SemanticShapeId> shapeCache;
     std::unordered_map<const TGeoMaterial *, SemanticMaterialId> matCache;
 };
 
@@ -77,7 +78,15 @@ SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
         return it->second;
     }
 
-    const SemanticShapeId shapeId = dispatchTGeoShape(vol->GetShape(), st.scene, st.diags);
+    const TGeoShape *geoShape = vol->GetShape();
+    auto sit = st.shapeCache.find(geoShape);
+    SemanticShapeId shapeId;
+    if (sit != st.shapeCache.end()) {
+        shapeId = sit->second;
+    } else {
+        shapeId = dispatchTGeoShape(geoShape, st.scene, st.diags);
+        st.shapeCache[geoShape] = shapeId;
+    }
     const SemanticMaterialId matId = importMaterial(vol, st);
 
     const SemanticLogVolId id = st.scene.nextLogVolId();
@@ -115,7 +124,7 @@ SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> pa
 
 ImportResult traverseManager(TGeoManager *mgr, std::string sourceFile) {
     ImportResult result;
-    ImportState st{result.scene, result.diags, std::move(sourceFile), {}, {}};
+    ImportState st{result.scene, result.diags, std::move(sourceFile), {}, {}, {}};
 
     TGeoNode *topNode = mgr->GetTopNode();
     const SemanticNodeId rootId = importNode(topNode, std::nullopt, st);

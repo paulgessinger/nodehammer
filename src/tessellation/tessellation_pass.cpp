@@ -10,6 +10,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 
 #include <format>
+#include <print>
 #include <queue>
 #include <unordered_map>
 
@@ -604,6 +605,11 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         }
     }
 
+    std::println(stderr, "Tessellation stats:");
+    std::println(stderr, "  Render nodes:     {}", result.scene.nodes.size());
+    std::println(stderr, "  Unique meshes:    {}", result.scene.meshAssets.size());
+    std::println(stderr, "  Unique materials: {}", result.scene.materials.size());
+    std::println(stderr, "  Mesh cache entries (shapes with tessellation): {}", meshCache.size());
     return result;
 }
 
