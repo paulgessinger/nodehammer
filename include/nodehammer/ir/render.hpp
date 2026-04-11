@@ -52,8 +52,16 @@ struct RenderMaterial {
     // Emission
     glm::vec3 emissiveFactor{0.f};
 
-    // Extras
+    // Alpha
+    std::string alphaMode{"OPAQUE"};
+    float alphaCutoff{0.5f};
     bool doubleSided{true};
+
+    // KHR extensions (nullopt = not set, omitted from glTF)
+    std::optional<float> ior;
+    std::optional<float> transmissionFactor;
+    std::optional<float> clearcoatFactor;
+    std::optional<float> clearcoatRoughnessFactor;
 };
 
 // ── Mesh binding: material assigned to a mesh instance ───────────────────────

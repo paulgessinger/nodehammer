@@ -17,4 +17,6 @@ config_file=$SCRIPT_DIR/fixtures/configs/odd.toml
 pushd $SCRIPT_DIR/build
 
 $SCRIPT_DIR/build/nodehammer dump-semantic -i $odd_xml -c $config_file -o odd.json
-$SCRIPT_DIR/build/nodehammer convert -i $odd_xml -c $config_file -o odd.glb
+$SCRIPT_DIR/build/nodehammer convert -i $odd_xml -c $config_file -o odd.glb -o odd.gltf
+
+$SCRIPT_DIR/build/nodehammer convert -i $odd_xml -c $SCRIPT_DIR/fixtures/configs/odd_single_module.toml -o odd_single_module.glb

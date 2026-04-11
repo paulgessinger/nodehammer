@@ -13,7 +13,9 @@
 #pragma GCC diagnostic pop
 
 #include <nodehammer/export/gltf_exporter.hpp>
+
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <set>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -77,6 +79,25 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
     model.asset.version = "2.0";
     model.asset.generator = "nodehammer";
 
+    // Collect KHR extensions used by any material.
+    {
+        std::set<std::string> usedExts;
+        for (const auto &[_, mat] : scene.materials) {
+            if (mat.ior.has_value()) {
+                usedExts.insert("KHR_materials_ior");
+            }
+            if (mat.transmissionFactor.has_value()) {
+                usedExts.insert("KHR_materials_transmission");
+            }
+            if (mat.clearcoatFactor.has_value()) {
+                usedExts.insert("KHR_materials_clearcoat");
+            }
+        }
+        for (auto &ext : usedExts) {
+            model.extensionsUsed.push_back(ext);
+        }
+    }
+
     tinygltf::Buffer buf;
 
     // Append raw bytes to the buffer; return starting byte offset.
@@ -113,7 +134,31 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
             static_cast<double>(mat.emissiveFactor.g),
             static_cast<double>(mat.emissiveFactor.b),
         };
+        gm.alphaMode = mat.alphaMode;
+        gm.alphaCutoff = static_cast<double>(mat.alphaCutoff);
         gm.doubleSided = mat.doubleSided;
+
+        if (mat.ior.has_value()) {
+            tinygltf::Value::Object iorExt;
+            iorExt["ior"] = tinygltf::Value(static_cast<double>(*mat.ior));
+            gm.extensions["KHR_materials_ior"] = tinygltf::Value(iorExt);
+        }
+        if (mat.transmissionFactor.has_value()) {
+            tinygltf::Value::Object transExt;
+            transExt["transmissionFactor"] =
+                tinygltf::Value(static_cast<double>(*mat.transmissionFactor));
+            gm.extensions["KHR_materials_transmission"] = tinygltf::Value(transExt);
+        }
+        if (mat.clearcoatFactor.has_value()) {
+            tinygltf::Value::Object ccExt;
+            ccExt["clearcoatFactor"] = tinygltf::Value(static_cast<double>(*mat.clearcoatFactor));
+            if (mat.clearcoatRoughnessFactor.has_value()) {
+                ccExt["clearcoatRoughnessFactor"] =
+                    tinygltf::Value(static_cast<double>(*mat.clearcoatRoughnessFactor));
+            }
+            gm.extensions["KHR_materials_clearcoat"] = tinygltf::Value(ccExt);
+        }
+
         matIdx[id] = static_cast<int>(model.materials.size());
         model.materials.push_back(std::move(gm));
     }

@@ -147,6 +147,14 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                         rm.roughnessFactor = md.roughness;
                         rm.emissiveFactor = glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
                         rm.doubleSided = md.doubleSided;
+                        rm.alphaMode = md.alphaMode == AlphaMode::Blend  ? "BLEND"
+                                       : md.alphaMode == AlphaMode::Mask ? "MASK"
+                                                                         : "OPAQUE";
+                        rm.alphaCutoff = md.alphaCutoff;
+                        rm.ior = md.ior;
+                        rm.transmissionFactor = md.transmission;
+                        rm.clearcoatFactor = md.clearcoat;
+                        rm.clearcoatRoughnessFactor = md.clearcoatRoughness;
                         rmId = rm.id;
                         result.scene.materials[rmId] = std::move(rm);
                         namedMatCache[md.name] = rmId;
@@ -423,45 +431,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 }
             }
             if (boolCacheHit) {
-                // Resolve material (same as primitive path).
-                const auto &srcMat = scene.materials.at(lv.materialId);
-                NodeView boolView = makeNodeView(semNode);
-                const std::string *matName = resolveMaterial(config_.rules, boolView);
-                RenderMaterialId rmId;
-                if (matName != nullptr) {
-                    auto cit = namedMatCache.find(*matName);
-                    if (cit != namedMatCache.end()) {
-                        rmId = cit->second;
-                    } else {
-                        for (const auto &md : config_.materials) {
-                            if (md.name == *matName) {
-                                RenderMaterial rm;
-                                rm.id = result.scene.nextMaterialId();
-                                rm.name = md.name;
-                                rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
-                                                               md.baseColor.b, md.baseColor.a};
-                                rm.metallicFactor = md.metallic;
-                                rm.roughnessFactor = md.roughness;
-                                rm.emissiveFactor =
-                                    glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
-                                rm.doubleSided = md.doubleSided;
-                                rmId = rm.id;
-                                result.scene.materials[rmId] = std::move(rm);
-                                namedMatCache[md.name] = rmId;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (!result.scene.materials.contains(rmId)) {
-                    if (!defaultMatCache.contains(lv.materialId)) {
-                        auto dm = makeDefaultMaterial(result.scene, srcMat);
-                        defaultMatCache[lv.materialId] = dm.id;
-                        result.scene.materials[dm.id] = std::move(dm);
-                    }
-                    rmId = defaultMatCache.at(lv.materialId);
-                }
-
+                RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
                 rn.meshBindings.push_back({boolMid, rmId});
                 result.scene.nodes[rnId] = std::move(rn);
                 for (const auto childId : semNode.children) {
@@ -497,45 +467,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 ma.provenance.sourceName = semNode.name;
                 result.scene.meshAssets[mid] = std::move(ma);
 
-                // Resolve material and bind
-                const auto &srcMat = scene.materials.at(lv.materialId);
-                NodeView view = makeNodeView(semNode);
-                const std::string *matName = resolveMaterial(config_.rules, view);
-                RenderMaterialId rmId;
-                if (matName != nullptr) {
-                    auto cit = namedMatCache.find(*matName);
-                    if (cit != namedMatCache.end()) {
-                        rmId = cit->second;
-                    } else {
-                        for (const auto &md : config_.materials) {
-                            if (md.name == *matName) {
-                                RenderMaterial rm;
-                                rm.id = result.scene.nextMaterialId();
-                                rm.name = md.name;
-                                rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
-                                                               md.baseColor.b, md.baseColor.a};
-                                rm.metallicFactor = md.metallic;
-                                rm.roughnessFactor = md.roughness;
-                                rm.emissiveFactor =
-                                    glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
-                                rm.doubleSided = md.doubleSided;
-                                rmId = rm.id;
-                                result.scene.materials[rmId] = std::move(rm);
-                                namedMatCache[md.name] = rmId;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if (!result.scene.materials.contains(rmId)) {
-                    // Fall back to default
-                    if (!defaultMatCache.contains(lv.materialId)) {
-                        auto dm = makeDefaultMaterial(result.scene, srcMat);
-                        defaultMatCache[lv.materialId] = dm.id;
-                        result.scene.materials[dm.id] = std::move(dm);
-                    }
-                    rmId = defaultMatCache.at(lv.materialId);
-                }
+                RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
                 rn.meshBindings.push_back({mid, rmId});
                 break;
             }
@@ -575,42 +507,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         }
 
         // ── Resolve material ───────────────────────────────────────────────────
-        const auto &srcMat = scene.materials.at(lv.materialId);
-        NodeView view = makeNodeView(semNode);
-        const std::string *matName = resolveMaterial(config_.rules, view);
-        RenderMaterialId rmId;
-        if (matName != nullptr) {
-            auto cit = namedMatCache.find(*matName);
-            if (cit != namedMatCache.end()) {
-                rmId = cit->second;
-            } else {
-                for (const auto &md : config_.materials) {
-                    if (md.name == *matName) {
-                        RenderMaterial rm;
-                        rm.id = result.scene.nextMaterialId();
-                        rm.name = md.name;
-                        rm.baseColorFactor = glm::vec4{md.baseColor.r, md.baseColor.g,
-                                                       md.baseColor.b, md.baseColor.a};
-                        rm.metallicFactor = md.metallic;
-                        rm.roughnessFactor = md.roughness;
-                        rm.emissiveFactor = glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
-                        rm.doubleSided = md.doubleSided;
-                        rmId = rm.id;
-                        result.scene.materials[rmId] = std::move(rm);
-                        namedMatCache[md.name] = rmId;
-                        break;
-                    }
-                }
-            }
-        }
-        if (!result.scene.materials.contains(rmId)) {
-            if (!defaultMatCache.contains(lv.materialId)) {
-                auto dm = makeDefaultMaterial(result.scene, srcMat);
-                defaultMatCache[lv.materialId] = dm.id;
-                result.scene.materials[dm.id] = std::move(dm);
-            }
-            rmId = defaultMatCache.at(lv.materialId);
-        }
+        RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
 
         // Only bind mesh if tessellation produced geometry (UnknownShape may be empty)
         if (result.scene.meshAssets.contains(mid) &&

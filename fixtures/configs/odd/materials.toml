@@ -38,30 +38,33 @@ metallic = 0.0
 roughness = 0.7
 
 [materials.silicon]
-base_color = [0.2, 0.4, 0.9, 1.0]
-metallic = 0.8
-roughness = 0.2
+base_color = "#60666E"
+metallic = 1.0
+roughness = 0.05
 
 [materials.kapton]
-base_color = [0.9, 0.6, 0.1, 1.0]
+base_color = "#9A5516"
 metallic = 0.0
-roughness = 0.6
+roughness = 0.16
+ior = 1.70
+transmission = 0.85
+clearcoat = 0.1
 
 [materials.aluminum]
-base_color = [0.85, 0.85, 0.9, 1.0]
+base_color = "#C8C8C8"
 metallic = 1.0
-roughness = 0.3
+roughness = 0.12
 
 [materials.carbon_fiber]
-# base_color = "#ff0000"
-base_color = "#BA7B31FF"
-metallic = 0.3
-roughness = 0.4
+base_color = [0.08, 0.08, 0.08]
+metallic = 0.0
+roughness = 0.92
+double_sided = false
 
 [materials.titanium]
-base_color = [0.6, 0.55, 0.5, 1.0]
-metallic = 0.9
-roughness = 0.35
+base_color = "#9A9DA3"
+metallic = 1.0
+roughness = 0.28
 
 # ── Source-material → render-material mapping rules ──────────────────────────
 

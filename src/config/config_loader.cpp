@@ -287,7 +287,10 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
                         std::format("materials.{} must be a table, not a scalar", key.str()));
             continue;
         }
-        warnUnknownKeys(*tbl, {"base_color", "metallic", "roughness", "double_sided", "emissive"},
+        warnUnknownKeys(*tbl,
+                        {"base_color", "metallic", "roughness", "double_sided", "emissive",
+                         "alpha_mode", "alpha_cutoff", "ior", "transmission", "clearcoat",
+                         "clearcoat_roughness"},
                         std::format("materials.{}", key.str()), diags);
         MaterialDef def;
         def.name = key.str();
@@ -352,6 +355,34 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
                 def.emissive.g = emissArr->at(1).value<float>().value_or(def.emissive.g);
                 def.emissive.b = emissArr->at(2).value<float>().value_or(def.emissive.b);
             }
+        }
+        if (auto am = (*tbl)["alpha_mode"].value<std::string>()) {
+            if (*am == "opaque") {
+                def.alphaMode = AlphaMode::Opaque;
+            } else if (*am == "mask") {
+                def.alphaMode = AlphaMode::Mask;
+            } else if (*am == "blend") {
+                def.alphaMode = AlphaMode::Blend;
+            } else {
+                diags.warn(codes::kWarnConfigUnknownKey,
+                           std::format("materials.{}: unknown alpha_mode '{}'; "
+                                       "expected opaque, mask, or blend",
+                                       key.str(), *am),
+                           std::format("materials.{}", key.str()));
+            }
+        }
+        def.alphaCutoff = (*tbl)["alpha_cutoff"].value<float>().value_or(def.alphaCutoff);
+        if (auto v = (*tbl)["ior"].value<float>()) {
+            def.ior = *v;
+        }
+        if (auto v = (*tbl)["transmission"].value<float>()) {
+            def.transmission = *v;
+        }
+        if (auto v = (*tbl)["clearcoat"].value<float>()) {
+            def.clearcoat = *v;
+        }
+        if (auto v = (*tbl)["clearcoat_roughness"].value<float>()) {
+            def.clearcoatRoughness = *v;
         }
         cfg.materials.push_back(std::move(def));
     }

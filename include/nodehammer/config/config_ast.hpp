@@ -87,6 +87,8 @@ struct Color {
 // ── Material definition ───────────────────────────────────────────────────────
 // In TOML: [materials.<name>] — the key becomes MaterialDef::name.
 
+enum class AlphaMode { Opaque, Mask, Blend };
+
 struct MaterialDef {
     std::string name; ///< Populated from the TOML table key
     Color baseColor{0.8f, 0.8f, 0.8f, 1.0f};
@@ -94,6 +96,12 @@ struct MaterialDef {
     float roughness{0.5f};
     Color emissive{0.0f, 0.0f, 0.0f, 1.0f};
     bool doubleSided{true};
+    AlphaMode alphaMode{AlphaMode::Opaque};
+    float alphaCutoff{0.5f};
+    std::optional<float> ior;          ///< KHR_materials_ior
+    std::optional<float> transmission; ///< KHR_materials_transmission
+    std::optional<float> clearcoat;    ///< KHR_materials_clearcoat
+    std::optional<float> clearcoatRoughness;
 };
 
 // ── Rules ─────────────────────────────────────────────────────────────────────
