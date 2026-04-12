@@ -100,11 +100,11 @@ merge_descendants = true
 max_segments_circle = 10
 fallback = "fail"
 
-[[rules]]
-match = ['path ~= "**/PixelEndcap*/**/DiskSupport_*"']
-[rules.tessellation]
-max_segments_circle = 48
-
-[rules.extras]
-visible = true
-opacity = 1.0
+# [[rules]]
+# match = ['path ~= "**/PixelEndcap*/**/DiskSupport_*"']
+# [rules.tessellation]
+# max_segments_circle = 48
+#
+# [rules.extras]
+# visible = true
+# opacity = 1.0

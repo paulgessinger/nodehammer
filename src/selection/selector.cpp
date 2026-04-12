@@ -264,10 +264,28 @@ DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
                       [&](SemanticNodeId childId) { return selResult.dropped.contains(childId); });
     }
 
-    // 3. Garbage-collect unreferenced logVols.
+    // 3. Garbage-collect unreferenced logVols. Logical volumes can carry source-level
+    // daughter prototypes even when the corresponding placement nodes were pruned/hoisted,
+    // so keep the transitive daughter logVol closure for every surviving node logVol.
     std::unordered_set<SemanticLogVolId> referencedLogVols;
     for (const auto &[id, node] : scene.nodes) {
-        referencedLogVols.insert(node.logVolId);
+        if (!referencedLogVols.insert(node.logVolId).second) {
+            continue;
+        }
+        std::queue<SemanticLogVolId> q;
+        q.push(node.logVolId);
+        while (!q.empty()) {
+            const auto lvId = q.front();
+            q.pop();
+            if (!scene.logVols.contains(lvId)) {
+                continue;
+            }
+            for (const auto &daughter : scene.logVols.at(lvId).daughters) {
+                if (referencedLogVols.insert(daughter.logVolId).second) {
+                    q.push(daughter.logVolId);
+                }
+            }
+        }
     }
     std::erase_if(scene.logVols,
                   [&](const auto &kv) { return !referencedLogVols.contains(kv.first); });

@@ -8,9 +8,12 @@
 
 #include <glm/gtc/matrix_inverse.hpp>
 
+#include <algorithm>
 #include <bit>
+#include <cstdint>
 #include <cstring>
 #include <format>
+#include <map>
 #include <print>
 #include <queue>
 #include <unordered_map>
@@ -37,6 +40,19 @@ std::size_t hashMatrix(const glm::dmat4 &m) {
 
 bool matrixEqual(const glm::dmat4 &a, const glm::dmat4 &b) {
     return std::memcmp(&a, &b, sizeof(glm::dmat4)) == 0;
+}
+
+bool matrixLess(const glm::dmat4 &a, const glm::dmat4 &b) {
+    for (int c = 0; c < 4; ++c) {
+        for (int r = 0; r < 4; ++r) {
+            const auto av = std::bit_cast<uint64_t>(a[c][r]);
+            const auto bv = std::bit_cast<uint64_t>(b[c][r]);
+            if (av != bv) {
+                return av < bv;
+            }
+        }
+    }
+    return false;
 }
 
 // Does a rule's scope/match apply to the given node?
@@ -95,6 +111,134 @@ struct MergeDescendant {
     SemanticNodeId nodeId;
     glm::dmat4 toMergeLocal{1.0};
 };
+
+struct PrototypeDescendantSignature {
+    SemanticShapeId shapeId;
+    SemanticMaterialId sourceMaterialId;
+    glm::dmat4 toMergeLocal{1.0};
+};
+
+bool collectPrototypeLeafDescendants(const SemanticScene &scene, SemanticLogVolId rootLv,
+                                     std::vector<PrototypeDescendantSignature> &out) {
+    if (!scene.logVols.contains(rootLv)) {
+        return false;
+    }
+    const auto &root = scene.logVols.at(rootLv);
+    if (root.daughters.empty()) {
+        return false;
+    }
+
+    std::queue<std::pair<SemanticLogVolId, glm::dmat4>> q;
+    for (const auto &daughter : root.daughters) {
+        q.push({daughter.logVolId, daughter.localTransform});
+    }
+
+    while (!q.empty()) {
+        const auto [lvId, toRootLocal] = q.front();
+        q.pop();
+        if (!scene.logVols.contains(lvId)) {
+            return false;
+        }
+        const auto &lv = scene.logVols.at(lvId);
+        if (lv.daughters.empty()) {
+            out.push_back({lv.shapeId, lv.materialId, toRootLocal});
+        } else {
+            for (const auto &daughter : lv.daughters) {
+                q.push({daughter.logVolId, toRootLocal * daughter.localTransform});
+            }
+        }
+    }
+
+    return true;
+}
+
+bool prototypeDescendantLess(const PrototypeDescendantSignature &a,
+                             const PrototypeDescendantSignature &b) {
+    if (a.shapeId.value != b.shapeId.value) {
+        return a.shapeId.value < b.shapeId.value;
+    }
+    if (a.sourceMaterialId.value != b.sourceMaterialId.value) {
+        return a.sourceMaterialId.value < b.sourceMaterialId.value;
+    }
+    return matrixLess(a.toMergeLocal, b.toMergeLocal);
+}
+
+bool mergeDescendantLess(const MergeDescendantSignature &a, const MergeDescendantSignature &b) {
+    if (a.shapeId.value != b.shapeId.value) {
+        return a.shapeId.value < b.shapeId.value;
+    }
+    if (a.sourceMaterialId.value != b.sourceMaterialId.value) {
+        return a.sourceMaterialId.value < b.sourceMaterialId.value;
+    }
+    if (a.materialKey != b.materialKey) {
+        return a.materialKey < b.materialKey;
+    }
+    return matrixLess(a.toMergeLocal, b.toMergeLocal);
+}
+
+void sortMergeDescendants(std::vector<MergeDescendantSignature> &descendants) {
+    std::sort(descendants.begin(), descendants.end(), mergeDescendantLess);
+}
+
+using ShapeMaterialKey = std::pair<uint64_t, uint64_t>;
+
+bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv,
+                             MergeCacheKey &mergeKey) {
+    std::vector<PrototypeDescendantSignature> prototypeDescendants;
+    if (!collectPrototypeLeafDescendants(scene, rootLv, prototypeDescendants) ||
+        prototypeDescendants.size() != mergeKey.descendants.size()) {
+        return false;
+    }
+
+    struct SelectedMaterialUse {
+        std::size_t count{0};
+        std::string materialKey;
+        bool hasMaterialKey{false};
+        bool ambiguous{false};
+    };
+
+    std::map<ShapeMaterialKey, SelectedMaterialUse> selectedUses;
+    for (const auto &selected : mergeKey.descendants) {
+        auto &use = selectedUses[{selected.shapeId.value, selected.sourceMaterialId.value}];
+        ++use.count;
+        if (!use.hasMaterialKey) {
+            use.materialKey = selected.materialKey;
+            use.hasMaterialKey = true;
+        } else if (use.materialKey != selected.materialKey) {
+            use.ambiguous = true;
+        }
+    }
+
+    for (const auto &[_, use] : selectedUses) {
+        if (use.ambiguous) {
+            return false;
+        }
+    }
+
+    std::sort(prototypeDescendants.begin(), prototypeDescendants.end(), prototypeDescendantLess);
+
+    std::vector<MergeDescendantSignature> prototypeKey;
+    prototypeKey.reserve(prototypeDescendants.size());
+    for (const auto &proto : prototypeDescendants) {
+        auto it = selectedUses.find({proto.shapeId.value, proto.sourceMaterialId.value});
+        if (it == selectedUses.end() || it->second.count == 0) {
+            return false;
+        }
+        --it->second.count;
+        prototypeKey.push_back(
+            {proto.shapeId, proto.sourceMaterialId, it->second.materialKey, proto.toMergeLocal});
+    }
+
+    for (const auto &[_, use] : selectedUses) {
+        if (use.count != 0) {
+            return false;
+        }
+    }
+
+    sortMergeDescendants(prototypeKey);
+    mergeKey.descendants = std::move(prototypeKey);
+    return true;
+}
 
 // Merge tessellation settings from all matching rules (last match wins per
 // field), then apply defaults for anything still unset.
@@ -402,30 +546,35 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         // combine into per-material meshes on this node. Children are not added
         // to the render tree.
         if (rule.mergeDescendants) {
-            const glm::dmat4 invWorld = glm::affineInverse(semNode.worldTransform);
-
             MergeCacheKey mergeKey;
             mergeKey.maxSegmentsCircle = params.maxSegmentsCircle;
             mergeKey.fallback = rule.fallback;
 
             std::vector<MergeDescendant> mergeDescendants;
 
-            // BFS descendants. Build the cache key from the exact inputs that make a merged mesh:
-            // descendant shape, effective material binding, and transform into this node's frame.
-            std::queue<SemanticNodeId> collectQ;
+            // BFS descendants. Accumulate transforms down the selected local hierarchy instead
+            // of recomputing inverse(parentWorld) * childWorld; the latter introduces tiny
+            // roundoff differences that defeat exact cache reuse for repeated source volumes.
+            std::queue<MergeDescendant> collectQ;
             for (const auto childId : semNode.children) {
-                collectQ.push(childId);
+                if (scene.nodes.contains(childId)) {
+                    collectQ.push({childId, scene.nodes.at(childId).localTransform});
+                }
             }
             while (!collectQ.empty()) {
-                const auto descId = collectQ.front();
+                const auto mergeDesc = collectQ.front();
                 collectQ.pop();
+                const auto descId = mergeDesc.nodeId;
                 if (!scene.nodes.contains(descId)) {
                     continue;
                 }
                 const SemanticNode &descNode = scene.nodes.at(descId);
 
                 for (const auto gcId : descNode.children) {
-                    collectQ.push(gcId);
+                    if (scene.nodes.contains(gcId)) {
+                        collectQ.push(
+                            {gcId, mergeDesc.toMergeLocal * scene.nodes.at(gcId).localTransform});
+                    }
                 }
 
                 if (!scene.logVols.contains(descNode.logVolId)) {
@@ -436,7 +585,6 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     continue;
                 }
 
-                const glm::dmat4 toLocal = invWorld * descNode.worldTransform;
                 NodeView descView = makeNodeView(descNode);
                 const std::string *matName = resolveMaterial(config_.rules, descView);
                 const std::string materialKey =
@@ -444,8 +592,12 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                                        : std::format("source:{}", descLv.materialId.value);
 
                 mergeKey.descendants.push_back(
-                    {descLv.shapeId, descLv.materialId, materialKey, toLocal});
-                mergeDescendants.push_back({descId, toLocal});
+                    {descLv.shapeId, descLv.materialId, materialKey, mergeDesc.toMergeLocal});
+                mergeDescendants.push_back(mergeDesc);
+            }
+
+            if (!tryUsePrototypeMergeKey(scene, semNode.logVolId, mergeKey)) {
+                sortMergeDescendants(mergeKey.descendants);
             }
 
             // Check the merge cache only after the placement-aware key is known.

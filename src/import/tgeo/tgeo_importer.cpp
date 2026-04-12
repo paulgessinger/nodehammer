@@ -91,6 +91,18 @@ SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
     const SemanticLogVolId id = st.scene.nextLogVolId();
     st.scene.logVols[id] = {id, vol->GetName(), shapeId, matId};
     st.lvCache[vol] = id;
+
+    std::vector<SemanticDaughterPlacement> daughters;
+    for (int i = 0; i < vol->GetNdaughters(); ++i) {
+        const TGeoNode *daughter = vol->GetNode(i);
+        if (daughter == nullptr || daughter->GetVolume() == nullptr) {
+            continue;
+        }
+        daughters.push_back(SemanticDaughterPlacement{daughter->GetName(),
+                                                      importLogVol(daughter->GetVolume(), st),
+                                                      tgeoMatrixToGlm(daughter->GetMatrix())});
+    }
+    st.scene.logVols.at(id).daughters = std::move(daughters);
     return id;
 }
 

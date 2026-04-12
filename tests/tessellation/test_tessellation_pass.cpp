@@ -275,6 +275,192 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
     REQUIRE(localCenterZ(*renderDiskP, "kapton") > localCenterZ(*renderDiskP, "silicon"));
 }
 
+TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identity",
+          "[tessellation][pass]") {
+    SemanticScene scene;
+
+    const auto vacuumMat = scene.nextMaterialId();
+    scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
+    const auto siliconMat = scene.nextMaterialId();
+    scene.materials[siliconMat] = {siliconMat, "Silicon", std::nullopt, 0.0};
+    const auto kaptonMat = scene.nextMaterialId();
+    scene.materials[kaptonMat] = {kaptonMat, "Kapton", std::nullopt, 0.0};
+
+    const auto rootShape = scene.nextShapeId();
+    scene.shapes[rootShape] = {rootShape, BoxShape{10.0, 10.0, 10.0}};
+    const auto diskShape = scene.nextShapeId();
+    scene.shapes[diskShape] = {diskShape, BoxShape{1.0, 1.0, 0.01}};
+    const auto layerShape = scene.nextShapeId();
+    scene.shapes[layerShape] = {layerShape, BoxShape{0.5, 0.5, 0.01}};
+
+    const auto rootLv = scene.nextLogVolId();
+    scene.logVols[rootLv] = {rootLv, "root_lv", rootShape, vacuumMat};
+    const auto diskLv = scene.nextLogVolId();
+    scene.logVols[diskLv] = {diskLv, "shared_disk_lv", diskShape, vacuumMat};
+    const auto siliconLv = scene.nextLogVolId();
+    scene.logVols[siliconLv] = {siliconLv, "silicon_lv", layerShape, siliconMat};
+    const auto kaptonLv = scene.nextLogVolId();
+    scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
+
+    auto addNode = [&](std::string name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
+                       double z) {
+        const auto id = scene.nextNodeId();
+        SemanticNode node;
+        node.id = id;
+        node.name = std::move(name);
+        node.logVolId = lv;
+        node.parentId = parent;
+        node.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z});
+        scene.nodes[id] = node;
+        if (parent.has_value()) {
+            scene.nodes.at(*parent).children.push_back(id);
+        }
+        return id;
+    };
+
+    const auto root = addNode("world", rootLv, std::nullopt, 0.0);
+    scene.rootId = root;
+    const auto diskA = addNode("diskA", diskLv, root, -10.0);
+    const auto diskB = addNode("diskB", diskLv, root, 10.0);
+
+    addNode("siliconA", siliconLv, diskA, 0.1);
+    addNode("kaptonA", kaptonLv, diskA, -0.1);
+    addNode("siliconB", siliconLv, diskB, 0.1 + 1.0e-13);
+    addNode("kaptonB", kaptonLv, diskB, -0.1 - 1.0e-13);
+
+    scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
+
+    NHConfig cfg;
+    MaterialDef siliconDef;
+    siliconDef.name = "silicon";
+    cfg.materials.push_back(siliconDef);
+    MaterialDef kaptonDef;
+    kaptonDef.name = "kapton";
+    cfg.materials.push_back(kaptonDef);
+
+    Rule siliconRule;
+    siliconRule.match = PredicateExpr{MaterialGlobPredicate{"Silicon"}};
+    siliconRule.material = "silicon";
+    cfg.rules.push_back(siliconRule);
+
+    Rule kaptonRule;
+    kaptonRule.match = PredicateExpr{MaterialGlobPredicate{"Kapton"}};
+    kaptonRule.material = "kapton";
+    cfg.rules.push_back(kaptonRule);
+
+    Rule mergeRule;
+    mergeRule.match = PredicateExpr{NameGlobPredicate{"disk*"}};
+    mergeRule.tessellation = Rule::Tessellation{};
+    mergeRule.tessellation->mergeDescendants = true;
+    cfg.rules.push_back(mergeRule);
+
+    TessellationPass pass{cfg};
+    auto result = pass.lower(scene);
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    // Two primitive layer meshes plus four merged material meshes. The tiny local-transform
+    // differences above are intentionally not collapsed by approximate matching.
+    REQUIRE(result.scene.meshAssets.size() == 6);
+}
+
+TEST_CASE("TessellationPass: merge_descendants cache can use source daughter prototypes",
+          "[tessellation][pass]") {
+    SemanticScene scene;
+
+    const auto vacuumMat = scene.nextMaterialId();
+    scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
+    const auto siliconMat = scene.nextMaterialId();
+    scene.materials[siliconMat] = {siliconMat, "Silicon", std::nullopt, 0.0};
+    const auto kaptonMat = scene.nextMaterialId();
+    scene.materials[kaptonMat] = {kaptonMat, "Kapton", std::nullopt, 0.0};
+
+    const auto rootShape = scene.nextShapeId();
+    scene.shapes[rootShape] = {rootShape, BoxShape{10.0, 10.0, 10.0}};
+    const auto diskShape = scene.nextShapeId();
+    scene.shapes[diskShape] = {diskShape, BoxShape{1.0, 1.0, 0.01}};
+    const auto layerShape = scene.nextShapeId();
+    scene.shapes[layerShape] = {layerShape, BoxShape{0.5, 0.5, 0.01}};
+
+    const auto rootLv = scene.nextLogVolId();
+    scene.logVols[rootLv] = {rootLv, "root_lv", rootShape, vacuumMat};
+    const auto siliconLv = scene.nextLogVolId();
+    scene.logVols[siliconLv] = {siliconLv, "silicon_lv", layerShape, siliconMat};
+    const auto kaptonLv = scene.nextLogVolId();
+    scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
+
+    glm::dmat4 siliconPlacement = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, 0.1});
+    glm::dmat4 kaptonPlacement = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, -0.1});
+    const auto diskLv = scene.nextLogVolId();
+    scene.logVols[diskLv] = {
+        diskLv,
+        "shared_disk_lv",
+        diskShape,
+        vacuumMat,
+        {{"silicon", siliconLv, siliconPlacement}, {"kapton", kaptonLv, kaptonPlacement}}};
+
+    auto addNode = [&](std::string name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
+                       double z) {
+        const auto id = scene.nextNodeId();
+        SemanticNode node;
+        node.id = id;
+        node.name = std::move(name);
+        node.logVolId = lv;
+        node.parentId = parent;
+        node.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z});
+        scene.nodes[id] = node;
+        if (parent.has_value()) {
+            scene.nodes.at(*parent).children.push_back(id);
+        }
+        return id;
+    };
+
+    const auto root = addNode("world", rootLv, std::nullopt, 0.0);
+    scene.rootId = root;
+    const auto diskA = addNode("diskA", diskLv, root, -10.0);
+    const auto diskB = addNode("diskB", diskLv, root, 10.0);
+
+    addNode("siliconA", siliconLv, diskA, 0.1);
+    addNode("kaptonA", kaptonLv, diskA, -0.1);
+    addNode("siliconB", siliconLv, diskB, 0.1 + 1.0e-13);
+    addNode("kaptonB", kaptonLv, diskB, -0.1 - 1.0e-13);
+
+    scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
+
+    NHConfig cfg;
+    MaterialDef siliconDef;
+    siliconDef.name = "silicon";
+    cfg.materials.push_back(siliconDef);
+    MaterialDef kaptonDef;
+    kaptonDef.name = "kapton";
+    cfg.materials.push_back(kaptonDef);
+
+    Rule siliconRule;
+    siliconRule.match = PredicateExpr{MaterialGlobPredicate{"Silicon"}};
+    siliconRule.material = "silicon";
+    cfg.rules.push_back(siliconRule);
+
+    Rule kaptonRule;
+    kaptonRule.match = PredicateExpr{MaterialGlobPredicate{"Kapton"}};
+    kaptonRule.material = "kapton";
+    cfg.rules.push_back(kaptonRule);
+
+    Rule mergeRule;
+    mergeRule.match = PredicateExpr{NameGlobPredicate{"disk*"}};
+    mergeRule.tessellation = Rule::Tessellation{};
+    mergeRule.tessellation->mergeDescendants = true;
+    cfg.rules.push_back(mergeRule);
+
+    TessellationPass pass{cfg};
+    auto result = pass.lower(scene);
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    // Two primitive layer meshes plus two merged material meshes. The cache key uses the exact
+    // source daughter prototype transforms, not the noisy selected-node placement rebasing.
+    REQUIRE(result.scene.meshAssets.size() == 4);
+}
+
 // ── Boolean fallback ──────────────────────────────────────────────────────────
 
 TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mesh",
@@ -376,7 +562,8 @@ TEST_CASE("BooleanTessellator: ODD CarbonFoam Trd minus tube union reproducer",
                  "children": [], "tags": {}, "sourceSystem": "test"}
             ],
             "logVols": [
-                {"id": 1, "name": "CarbonFoam", "shapeId": 80, "materialId": 1}
+                {"id": 1, "name": "CarbonFoam", "shapeId": 80, "materialId": 1,
+                 "daughters": []}
             ],
             "shapes": [
                 {"id": 76, "type": "trd",

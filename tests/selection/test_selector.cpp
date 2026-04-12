@@ -246,6 +246,30 @@ TEST_CASE("SelectionEngine: prune garbage-collects unreferenced logVols and mate
     REQUIRE(scene.materials.size() == 1);
 }
 
+TEST_CASE("SelectionEngine: prune keeps source daughter logVol closure", "[selection][selector]") {
+    auto [scene, rootId, trackerId, sensorId] = makeThreeLevelScene();
+
+    const auto worldLv = scene.nodes.at(rootId).logVolId;
+    const auto trackerLv = scene.nodes.at(trackerId).logVolId;
+    const auto sensorLv = scene.nodes.at(sensorId).logVolId;
+
+    scene.logVols.at(worldLv).daughters.push_back({"tracker", trackerLv, glm::dmat4{1.0}});
+    scene.logVols.at(trackerLv).daughters.push_back({"sensor", sensorLv, glm::dmat4{1.0}});
+
+    SelectionRule dropTracker;
+    dropTracker.action = SelectionAction::DropIf;
+    dropTracker.predicate = PredicateExpr{NameGlobPredicate{"tracker"}};
+    dropTracker.closure = ClosurePolicy::Descendants;
+
+    SelectionEngine eng{{dropTracker}};
+    eng.prune(scene);
+
+    REQUIRE(scene.nodes.size() == 1);
+    REQUIRE(scene.logVols.contains(worldLv));
+    REQUIRE(scene.logVols.contains(trackerLv));
+    REQUIRE(scene.logVols.contains(sensorLv));
+}
+
 TEST_CASE("SelectionEngine: prune with root dropped is a no-op and emits NH0401",
           "[selection][selector]") {
     auto [scene, rootId, trackerId, sensorId] = makeThreeLevelScene();

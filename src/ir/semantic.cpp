@@ -2,7 +2,9 @@
 
 #include <nodehammer/detail/overloaded.hpp>
 
+#include <algorithm>
 #include <bit>
+#include <cstdint>
 #include <cstring>
 
 namespace nodehammer {
@@ -322,28 +324,88 @@ std::size_t SemanticScene::deduplicateLogVols() {
         return 0;
     }
 
-    // Key: (shapeId, materialId) → canonical logVolId.
+    // Key: own shape/material plus optional source-level daughter placements.
+    // Backends that do not populate daughters retain the old (shapeId, materialId)
+    // behavior. Backends that do populate daughters avoid collapsing containers with
+    // different prototype subtrees.
+    struct DaughterKey {
+        uint64_t logVol;
+        glm::dmat4 localTransform;
+
+        bool operator==(const DaughterKey &o) const {
+            return logVol == o.logVol && matEqual(localTransform, o.localTransform);
+        }
+    };
     struct Key {
         uint64_t shape;
         uint64_t material;
-        bool operator==(const Key &o) const { return shape == o.shape && material == o.material; }
+        std::vector<DaughterKey> daughters;
+
+        // Defaulted == delegates to DaughterKey::operator== which uses bitwise
+        // matEqual for transforms, matching the KeyHash behavior.
+        bool operator==(const Key &) const = default;
     };
     struct KeyHash {
         std::size_t operator()(const Key &k) const {
-            return std::hash<uint64_t>{}(k.shape) ^
-                   (std::hash<uint64_t>{}(k.material) * 2654435761);
+            std::size_t h =
+                hashCombine(std::hash<uint64_t>{}(k.shape), std::hash<uint64_t>{}(k.material));
+            h = hashCombine(h, std::hash<std::size_t>{}(k.daughters.size()));
+            for (const auto &d : k.daughters) {
+                h = hashCombine(h, std::hash<uint64_t>{}(d.logVol));
+                h = hashCombine(h, hashMat(d.localTransform));
+            }
+            return h;
         }
     };
 
     std::unordered_map<Key, SemanticLogVolId, KeyHash> canonical;
     std::unordered_map<SemanticLogVolId, SemanticLogVolId> remap;
 
-    for (const auto &[id, lv] : logVols) {
-        Key key{lv.shapeId.value, lv.materialId.value};
-        auto [it, inserted] = canonical.try_emplace(key, id);
+    enum class VisitState { Visiting, Done };
+    std::unordered_map<SemanticLogVolId, VisitState> states;
+
+    auto canonicalize = [&](auto &&self, SemanticLogVolId id) -> SemanticLogVolId {
+        if (auto it = remap.find(id); it != remap.end()) {
+            return it->second;
+        }
+        auto lvIt = logVols.find(id);
+        if (lvIt == logVols.end()) {
+            return id;
+        }
+        if (auto stateIt = states.find(id); stateIt != states.end()) {
+            // Logical-volume daughter graphs should be acyclic. If a backend ever
+            // provides a cycle, keep the back-edge as-is rather than recursing forever.
+            // Already-done nodes that were remapped are caught by the remap check above.
+            return id;
+        }
+
+        states[id] = VisitState::Visiting;
+
+        const auto &lv = lvIt->second;
+        Key key{lv.shapeId.value, lv.materialId.value, {}};
+        key.daughters.reserve(lv.daughters.size());
+        for (const auto &daughter : lv.daughters) {
+            const auto canonicalDaughter = self(self, daughter.logVolId);
+            key.daughters.push_back({canonicalDaughter.value, daughter.localTransform});
+        }
+
+        const auto [it, inserted] = canonical.try_emplace(std::move(key), id);
         if (!inserted) {
             remap[id] = it->second;
         }
+        states[id] = VisitState::Done;
+        return inserted ? id : it->second;
+    };
+
+    std::vector<SemanticLogVolId> ids;
+    ids.reserve(logVols.size());
+    for (const auto &[id, _] : logVols) {
+        ids.push_back(id);
+    }
+    std::sort(ids.begin(), ids.end());
+
+    for (const auto id : ids) {
+        canonicalize(canonicalize, id);
     }
 
     if (remap.empty()) {
@@ -354,6 +416,13 @@ std::size_t SemanticScene::deduplicateLogVols() {
     for (auto &[_, node] : nodes) {
         if (auto it = remap.find(node.logVolId); it != remap.end()) {
             node.logVolId = it->second;
+        }
+    }
+
+    // Update prototype daughter references as well.
+    for (auto &[_, lv] : logVols) {
+        for (auto &daughter : lv.daughters) {
+            daughter.logVolId = canonicalize(canonicalize, daughter.logVolId);
         }
     }
 

@@ -11,10 +11,10 @@ bake_unit_scale = true
 # ── Selection ────────────────────────────────────────────────────────────────
 
 [[selection_rules]]
-keep_if = 'path ~= "**/ShortStripBarrel/ShortStripLayer0/stave0"'
+keep_if = 'path ~= "**/ShortStripBarrel/ShortStripLayer0/stave25"'
 
 [[selection_rules]]
-keep_if = 'path ~= "**/ShortStripBarrel/ShortStripLayer0/stave0/**" && is_leaf'
+keep_if = 'path ~= "**/ShortStripBarrel/ShortStripLayer0/stave25/**" && is_leaf'
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 

@@ -91,3 +91,84 @@ TEST_CASE("SemanticScene: computeWorldTransforms BFS", "[ir][semantic]") {
     REQUIRE(childWorld[3].x == Catch::Approx(0.0));
     REQUIRE(childWorld[3].y == Catch::Approx(0.0));
 }
+
+TEST_CASE("SemanticScene: logical-volume dedup respects source daughter placements",
+          "[ir][semantic]") {
+    nodehammer::SemanticScene scene;
+
+    auto shapeId = scene.nextShapeId();
+    scene.shapes[shapeId] = {shapeId, nodehammer::BoxShape{1, 1, 1}};
+    auto matId = scene.nextMaterialId();
+    scene.materials[matId] = {matId, "mat", std::nullopt, 1.0};
+
+    auto childLv = scene.nextLogVolId();
+    scene.logVols[childLv] = {childLv, "child", shapeId, matId};
+
+    glm::dmat4 plus{1.0};
+    plus[3] = glm::dvec4{0.0, 0.0, 1.0, 1.0};
+    glm::dmat4 minus{1.0};
+    minus[3] = glm::dvec4{0.0, 0.0, -1.0, 1.0};
+
+    auto parentA = scene.nextLogVolId();
+    scene.logVols[parentA] = {parentA, "parentA", shapeId, matId, {{"child", childLv, plus}}};
+    auto parentB = scene.nextLogVolId();
+    scene.logVols[parentB] = {parentB, "parentB", shapeId, matId, {{"child", childLv, minus}}};
+
+    REQUIRE(scene.deduplicateLogVols() == 0);
+    REQUIRE(scene.logVols.size() == 3);
+}
+
+TEST_CASE("SemanticScene: logical-volume dedup canonicalizes daughter references",
+          "[ir][semantic]") {
+    nodehammer::SemanticScene scene;
+
+    auto shapeId = scene.nextShapeId();
+    scene.shapes[shapeId] = {shapeId, nodehammer::BoxShape{1, 1, 1}};
+    auto matId = scene.nextMaterialId();
+    scene.materials[matId] = {matId, "mat", std::nullopt, 1.0};
+
+    auto childA = scene.nextLogVolId();
+    scene.logVols[childA] = {childA, "childA", shapeId, matId};
+    auto childB = scene.nextLogVolId();
+    scene.logVols[childB] = {childB, "childB", shapeId, matId};
+
+    glm::dmat4 childPlacement{1.0};
+    childPlacement[3] = glm::dvec4{0.0, 0.0, 1.0, 1.0};
+
+    auto parentA = scene.nextLogVolId();
+    scene.logVols[parentA] = {
+        parentA, "parentA", shapeId, matId, {{"childA", childA, childPlacement}}};
+    auto parentB = scene.nextLogVolId();
+    scene.logVols[parentB] = {
+        parentB, "parentB", shapeId, matId, {{"childB", childB, childPlacement}}};
+
+    auto nodeB = scene.nextNodeId();
+    nodehammer::SemanticNode node;
+    node.id = nodeB;
+    node.name = "nodeB";
+    node.logVolId = parentB;
+    scene.nodes[nodeB] = node;
+
+    REQUIRE(scene.deduplicateLogVols() == 2);
+    REQUIRE(scene.logVols.size() == 2);
+    REQUIRE(scene.logVols.contains(childA));
+    REQUIRE_FALSE(scene.logVols.contains(childB));
+    REQUIRE(scene.logVols.contains(parentA));
+    REQUIRE_FALSE(scene.logVols.contains(parentB));
+    REQUIRE(scene.logVols.at(parentA).daughters.at(0).logVolId == childA);
+    REQUIRE(scene.nodes.at(nodeB).logVolId == parentA);
+}
+
+TEST_CASE("SemanticScene JSON: logical volumes require daughters field", "[ir][semantic]") {
+    nodehammer::SemanticLogicalVolume lv{nodehammer::SemanticLogVolId{1}, "lv",
+                                         nodehammer::SemanticShapeId{2},
+                                         nodehammer::SemanticMaterialId{3}};
+
+    nlohmann::json j = lv;
+    REQUIRE(j.contains("daughters"));
+    REQUIRE(j.at("daughters").is_array());
+    REQUIRE(j.at("daughters").empty());
+
+    j.erase("daughters");
+    REQUIRE_THROWS_AS(j.get<nodehammer::SemanticLogicalVolume>(), nlohmann::json::out_of_range);
+}

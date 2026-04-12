@@ -14,6 +14,7 @@
 #include <queue>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -175,11 +176,28 @@ struct SourceMaterial {
 
 // ── Logical Volume ────────────────────────────────────────────────────────────
 
+struct SemanticDaughterPlacement {
+    std::string name;
+    SemanticLogVolId logVolId;
+    glm::dmat4 localTransform{1.0};
+};
+
 struct SemanticLogicalVolume {
+    SemanticLogicalVolume() = default;
+
+    SemanticLogicalVolume(SemanticLogVolId id_, std::string name_, SemanticShapeId shapeId_,
+                          SemanticMaterialId materialId_,
+                          std::vector<SemanticDaughterPlacement> daughters_ = {})
+        : id(id_), name(std::move(name_)), shapeId(shapeId_), materialId(materialId_),
+          daughters(std::move(daughters_)) {}
+
     SemanticLogVolId id;
     std::string name;
     SemanticShapeId shapeId;
     SemanticMaterialId materialId;
+    /// Optional source-level daughter placements. Backends with prototype volume
+    /// structure (e.g. TGeo/DD4hep) populate this; flattened importers may leave it empty.
+    std::vector<SemanticDaughterPlacement> daughters;
 };
 
 // ── Node ──────────────────────────────────────────────────────────────────────
@@ -366,8 +384,16 @@ inline void to_json(nlohmann::json &j, const SourceMaterial &m) {
     }
 }
 
+inline void to_json(nlohmann::json &j, const SemanticDaughterPlacement &d) {
+    j = {{"name", d.name}, {"logVolId", d.logVolId}, {"localTransform", d.localTransform}};
+}
+
 inline void to_json(nlohmann::json &j, const SemanticLogicalVolume &lv) {
-    j = {{"id", lv.id}, {"name", lv.name}, {"shapeId", lv.shapeId}, {"materialId", lv.materialId}};
+    j = {{"id", lv.id},
+         {"name", lv.name},
+         {"shapeId", lv.shapeId},
+         {"materialId", lv.materialId},
+         {"daughters", lv.daughters}};
 }
 
 inline void to_json(nlohmann::json &j, const SemanticNode &n) {
@@ -508,11 +534,18 @@ inline void from_json(const nlohmann::json &j, SourceMaterial &m) {
     }
 }
 
+inline void from_json(const nlohmann::json &j, SemanticDaughterPlacement &d) {
+    j.at("name").get_to(d.name);
+    j.at("logVolId").get_to(d.logVolId);
+    j.at("localTransform").get_to(d.localTransform);
+}
+
 inline void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv) {
     j.at("id").get_to(lv.id);
     j.at("name").get_to(lv.name);
     j.at("shapeId").get_to(lv.shapeId);
     j.at("materialId").get_to(lv.materialId);
+    j.at("daughters").get_to(lv.daughters);
 }
 
 inline void from_json(const nlohmann::json &j, SemanticNode &n) {
