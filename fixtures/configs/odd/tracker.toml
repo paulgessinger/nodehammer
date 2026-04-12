@@ -25,6 +25,10 @@ keep_if = [
   'path ~= "**/PixelLayer*"',
   'path ~= "**/PixelLayer*/stave*"',
   'path ~= "**/PixelLayer*/stave*/**" && is_leaf',
+  'path ~= "**/PixelEndcapN*/disk*"',
+  'path ~= "**/PixelEndcapN*/disk*/**" && is_leaf',
+  'path ~= "**/PixelEndcapP*/disk*"',
+  'path ~= "**/PixelEndcapP*/disk*/**" && is_leaf',
 ]
 
 [[selection_rules]]
@@ -32,6 +36,10 @@ keep_if = [
   'path ~= "**/ShortStripLayer*"',
   'path ~= "**/ShortStripLayer*/stave*"',
   'path ~= "**/ShortStripLayer*/stave*/**" && is_leaf',
+  'path ~= "**/ShortStripEndcapN*/disk*"',
+  'path ~= "**/ShortStripEndcapN*/disk*/**" && is_leaf',
+  'path ~= "**/ShortStripEndcapP*/disk*"',
+  'path ~= "**/ShortStripEndcapP*/disk*/**" && is_leaf',
 ]
 
 [[selection_rules]]
@@ -39,6 +47,10 @@ keep_if = [
   'path ~= "**/LongStripLayer*"',
   'path ~= "**/LongStripLayer*/stave*"',
   'path ~= "**/LongStripLayer*/stave*/**" && is_leaf',
+  'path ~= "**/LongStripEndcapN*/disk*"',
+  'path ~= "**/LongStripEndcapN*/disk*/**" && is_leaf',
+  'path ~= "**/LongStripEndcapP*/disk*"',
+  'path ~= "**/LongStripEndcapP*/disk*/**" && is_leaf',
 ]
 
 
@@ -73,14 +85,25 @@ skip_geometry = true
 [[rules]]
 match = [
   'path ~= "**/PixelLayer*/stave*"',
+  'path ~= "**/PixelEndcapN*/disk*"',
+  'path ~= "**/PixelEndcapP*/disk*"',
   'path ~= "**/ShortStripLayer*/stave*"',
+  'path ~= "**/ShortStripEndcapN*/disk*"',
+  'path ~= "**/ShortStripEndcapP*/disk*"',
+  'path ~= "**/LongStripEndcapN*/disk*"',
+  'path ~= "**/LongStripEndcapP*/disk*"',
   'path ~= "**/LongStripLayer*/stave*"',
 ]
 
 [rules.tessellation]
 merge_descendants = true
 max_segments_circle = 10
-fallback = "skip"
+fallback = "fail"
+
+[[rules]]
+match = ['path ~= "**/PixelEndcap*/**/DiskSupport_*"']
+[rules.tessellation]
+max_segments_circle = 48
 
 [rules.extras]
 visible = true
