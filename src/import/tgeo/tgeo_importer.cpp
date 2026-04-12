@@ -36,6 +36,7 @@ struct ImportState {
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
     std::unordered_map<const TGeoShape *, SemanticShapeId> shapeCache;
     std::unordered_map<const TGeoMaterial *, SemanticMaterialId> matCache;
+    std::unordered_map<const TGeoNode *, SemanticNodeId> nodeMap;
 };
 
 SemanticMaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
@@ -106,13 +107,10 @@ SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
     return id;
 }
 
-// Forward declaration for recursion
-SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> parentId,
-                          ImportState &st);
-
 SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> parentId,
                           ImportState &st) {
     const SemanticNodeId id = st.scene.nextNodeId();
+    st.nodeMap[node] = id;
 
     SemanticNode sn;
     sn.id = id;
@@ -133,22 +131,23 @@ SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> pa
     return id;
 }
 
-ImportResult traverseManager(TGeoManager *mgr, std::string sourceFile) {
-    ImportResult result;
-    result.scene.sourceFile = std::move(sourceFile);
-    ImportState st{result.scene, result.diags, {}, {}, {}};
+} // namespace
+
+TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile) {
+    TGeoTraversalResult tr;
+    tr.result.scene.sourceFile = std::move(sourceFile);
+    ImportState st{tr.result.scene, tr.result.diags, {}, {}, {}, {}};
 
     TGeoNode *topNode = mgr->GetTopNode();
     const SemanticNodeId rootId = importNode(topNode, std::nullopt, st);
-    result.scene.rootId = rootId;
-    result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
+    tr.result.scene.rootId = rootId;
+    tr.result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
 
-    result.scene.computeWorldTransforms();
-    result.scene.computeOriginalPaths();
-    return result;
+    tr.result.scene.computeWorldTransforms();
+    tr.result.scene.computeOriginalPaths();
+    tr.nodeMap = std::move(st.nodeMap);
+    return tr;
 }
-
-} // namespace
 
 std::string_view TGeoImporter::formatName() const noexcept { return "tgeo"; }
 
@@ -167,7 +166,7 @@ ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
         return result;
     }
 
-    return traverseManager(mgr, path.string());
+    return traverseTGeoManager(mgr, path.string()).result;
 }
 
 ImportResult TGeoImporter::import(TGeoManager *mgr) const {
@@ -176,7 +175,7 @@ ImportResult TGeoImporter::import(TGeoManager *mgr) const {
         result.diags.error(codes::kErrTgeoOpenFailed, "null TGeoManager pointer");
         return result;
     }
-    return traverseManager(mgr, mgr->GetName());
+    return traverseTGeoManager(mgr, mgr->GetName()).result;
 }
 
 } // namespace nodehammer

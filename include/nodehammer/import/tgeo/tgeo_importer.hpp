@@ -3,11 +3,24 @@
 #include <nodehammer/import/importer.hpp>
 
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 class TGeoManager;
+class TGeoNode;
 
 namespace nodehammer {
+
+/// Extended import result that also carries the TGeoNode → SemanticNodeId mapping
+/// built during tree traversal. Used by DD4hep to annotate nodes in a second pass.
+struct TGeoTraversalResult {
+    ImportResult result;
+    std::unordered_map<const TGeoNode *, SemanticNodeId> nodeMap;
+};
+
+/// Walk a TGeoManager and produce a SemanticScene plus the node mapping.
+/// Does not modify gGeoManager.
+[[nodiscard]] TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile);
 
 /// IImporter for plain ROOT files containing a TGeoManager.
 /// Format name: "tgeo"   Extension: ".root"
