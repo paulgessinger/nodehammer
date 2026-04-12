@@ -235,6 +235,7 @@ void register_cmd_dump_semantic(CLI::App &app) {
 
         // ── Deduplicate shapes ─────────────────────────────────────────────────
         if (cfg.deduplicateShapes) {
+            result.scene.deduplicateMaterials();
             result.scene.deduplicateShapes();
             result.scene.deduplicateLogVols();
         }
@@ -259,9 +260,9 @@ void register_cmd_dump_semantic(CLI::App &app) {
             if (*outputOpt) {
                 outputOpt->results(outPath);
                 std::ofstream f{outPath};
-                f << j.dump(2) << '\n';
+                f << j.dump(-1) << '\n';
             } else {
-                std::println("{}", j.dump(2));
+                std::println("{}", j.dump(-1));
             }
         }
     });

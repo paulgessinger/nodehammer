@@ -434,4 +434,86 @@ std::size_t SemanticScene::deduplicateLogVols() {
     return before - logVols.size();
 }
 
+std::size_t SemanticScene::deduplicateMaterials() {
+    const std::size_t before = materials.size();
+    if (before <= 1) {
+        return 0;
+    }
+
+    struct MatKey {
+        std::string name;
+        uint64_t density{0};
+        bool hasColor{false};
+        uint32_t r{0}, g{0}, b{0};
+
+        bool operator==(const MatKey &) const = default;
+    };
+    struct MatKeyHash {
+        std::size_t operator()(const MatKey &k) const {
+            std::size_t h = std::hash<std::string>{}(k.name);
+            h = hashCombine(h, std::hash<uint64_t>{}(k.density));
+            h = hashCombine(h, std::hash<bool>{}(k.hasColor));
+            if (k.hasColor) {
+                h = hashCombine(h, std::hash<uint32_t>{}(k.r));
+                h = hashCombine(h, std::hash<uint32_t>{}(k.g));
+                h = hashCombine(h, std::hash<uint32_t>{}(k.b));
+            }
+            return h;
+        }
+    };
+
+    auto makeKey = [](const SourceMaterial &m) -> MatKey {
+        MatKey k;
+        k.name = m.name;
+        k.density = std::bit_cast<uint64_t>(m.density);
+        k.hasColor = m.color.has_value();
+        if (k.hasColor) {
+            k.r = std::bit_cast<uint32_t>(m.color->r);
+            k.g = std::bit_cast<uint32_t>(m.color->g);
+            k.b = std::bit_cast<uint32_t>(m.color->b);
+        } else {
+            k.r = k.g = k.b = 0;
+        }
+        return k;
+    };
+
+    std::unordered_map<MatKey, SemanticMaterialId, MatKeyHash> canonical;
+    std::unordered_map<SemanticMaterialId, SemanticMaterialId> remap;
+
+    // Process in ID order for determinism
+    std::vector<SemanticMaterialId> ids;
+    ids.reserve(materials.size());
+    for (const auto &[id, _] : materials) {
+        ids.push_back(id);
+    }
+    std::sort(ids.begin(), ids.end());
+
+    for (const auto id : ids) {
+        const auto &mat = materials.at(id);
+        auto key = makeKey(mat);
+        auto [it, inserted] = canonical.try_emplace(std::move(key), id);
+        if (!inserted) {
+            remap[id] = it->second;
+        }
+    }
+
+    if (remap.empty()) {
+        return 0;
+    }
+
+    // Update all logical volumes to use canonical material IDs
+    for (auto &[_, lv] : logVols) {
+        if (auto it = remap.find(lv.materialId); it != remap.end()) {
+            lv.materialId = it->second;
+        }
+    }
+
+    // Remove duplicates
+    for (const auto &[dupId, _] : remap) {
+        materials.erase(dupId);
+    }
+
+    return before - materials.size();
+}
+
 } // namespace nodehammer

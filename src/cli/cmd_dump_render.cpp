@@ -54,6 +54,7 @@ void register_cmd_dump_render(CLI::App &app) {
 
         // ── Deduplicate shapes ─────────────────────────────────────────────────
         if (cfg.deduplicateShapes) {
+            semScene.deduplicateMaterials();
             semScene.deduplicateShapes();
             semScene.deduplicateLogVols();
         }

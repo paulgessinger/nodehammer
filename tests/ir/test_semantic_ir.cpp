@@ -159,16 +159,16 @@ TEST_CASE("SemanticScene: logical-volume dedup canonicalizes daughter references
     REQUIRE(scene.nodes.at(nodeB).logVolId == parentA);
 }
 
-TEST_CASE("SemanticScene JSON: logical volumes require daughters field", "[ir][semantic]") {
+TEST_CASE("SemanticScene JSON: logical volumes omit empty daughters", "[ir][semantic]") {
     nodehammer::SemanticLogicalVolume lv{nodehammer::SemanticLogVolId{1}, "lv",
                                          nodehammer::SemanticShapeId{2},
                                          nodehammer::SemanticMaterialId{3}};
 
     nlohmann::json j = lv;
-    REQUIRE(j.contains("daughters"));
-    REQUIRE(j.at("daughters").is_array());
-    REQUIRE(j.at("daughters").empty());
+    // Empty daughters should be omitted from JSON output
+    REQUIRE_FALSE(j.contains("daughters"));
 
-    j.erase("daughters");
-    REQUIRE_THROWS_AS(j.get<nodehammer::SemanticLogicalVolume>(), nlohmann::json::out_of_range);
+    // Round-trip: missing daughters should deserialize to empty vector
+    auto lv2 = j.get<nodehammer::SemanticLogicalVolume>();
+    REQUIRE(lv2.daughters.empty());
 }

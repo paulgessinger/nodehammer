@@ -253,6 +253,11 @@ class SemanticScene {
     /// Returns the number of logical volumes removed.
     std::size_t deduplicateLogVols();
 
+    /// Deduplicate materials: materials with identical (name, density, color)
+    /// are merged, and all referencing logical volumes are updated.
+    /// Returns the number of materials removed.
+    std::size_t deduplicateMaterials();
+
     /// BFS traversal from root; calls fn(const SemanticNode &) for every reachable node.
     template <typename Fn> void visitBFS(Fn &&fn) const {
         if (nodes.empty()) {
@@ -304,13 +309,31 @@ inline void to_json(nlohmann::json &j, const BoxShape &s) {
     j = {{"type", "box"}, {"dx", s.dx}, {"dy", s.dy}, {"dz", s.dz}};
 }
 inline void to_json(nlohmann::json &j, const TubeShape &s) {
-    j = {{"type", "tube"}, {"rMin", s.rMin},         {"rMax", s.rMax},
-         {"dz", s.dz},     {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}};
+    j = {{"type", "tube"}, {"rMax", s.rMax}, {"dz", s.dz}};
+    if (s.rMin != 0.0) {
+        j["rMin"] = s.rMin;
+    }
+    if (s.phiStart != 0.0) {
+        j["phiStart"] = s.phiStart;
+    }
+    if (s.phiDelta != 2.0 * std::numbers::pi) {
+        j["phiDelta"] = s.phiDelta;
+    }
 }
 inline void to_json(nlohmann::json &j, const ConeShape &s) {
-    j = {{"type", "cone"},         {"rMin1", s.rMin1},      {"rMax1", s.rMax1},
-         {"rMin2", s.rMin2},       {"rMax2", s.rMax2},      {"dz", s.dz},
-         {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}};
+    j = {{"type", "cone"}, {"rMax1", s.rMax1}, {"rMax2", s.rMax2}, {"dz", s.dz}};
+    if (s.rMin1 != 0.0) {
+        j["rMin1"] = s.rMin1;
+    }
+    if (s.rMin2 != 0.0) {
+        j["rMin2"] = s.rMin2;
+    }
+    if (s.phiStart != 0.0) {
+        j["phiStart"] = s.phiStart;
+    }
+    if (s.phiDelta != 2.0 * std::numbers::pi) {
+        j["phiDelta"] = s.phiDelta;
+    }
 }
 inline void to_json(nlohmann::json &j, const TrdShape &s) {
     j = {{"type", "trd"}, {"dx1", s.dx1}, {"dx2", s.dx2},
@@ -321,7 +344,13 @@ inline void to_json(nlohmann::json &j, const ParaShape &s) {
          {"alpha", s.alpha}, {"theta", s.theta}, {"phi", s.phi}};
 }
 inline void to_json(nlohmann::json &j, const PconShape &s) {
-    j = {{"type", "pcon"}, {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}};
+    j = {{"type", "pcon"}};
+    if (s.phiStart != 0.0) {
+        j["phiStart"] = s.phiStart;
+    }
+    if (s.phiDelta != 2.0 * std::numbers::pi) {
+        j["phiDelta"] = s.phiDelta;
+    }
     auto secs = nlohmann::json::array();
     for (const auto &sec : s.sections) {
         secs.push_back({{"z", sec.z}, {"rMin", sec.rMin}, {"rMax", sec.rMax}});
@@ -329,8 +358,13 @@ inline void to_json(nlohmann::json &j, const PconShape &s) {
     j["sections"] = secs;
 }
 inline void to_json(nlohmann::json &j, const PgonShape &s) {
-    j = {
-        {"type", "pgon"}, {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}, {"nSides", s.nSides}};
+    j = {{"type", "pgon"}, {"nSides", s.nSides}};
+    if (s.phiStart != 0.0) {
+        j["phiStart"] = s.phiStart;
+    }
+    if (s.phiDelta != 2.0 * std::numbers::pi) {
+        j["phiDelta"] = s.phiDelta;
+    }
     auto secs = nlohmann::json::array();
     for (const auto &sec : s.sections) {
         secs.push_back({{"z", sec.z}, {"rMin", sec.rMin}, {"rMax", sec.rMax}});
@@ -338,8 +372,16 @@ inline void to_json(nlohmann::json &j, const PgonShape &s) {
     j["sections"] = secs;
 }
 inline void to_json(nlohmann::json &j, const TorusShape &s) {
-    j = {{"type", "torus"}, {"rMin", s.rMin},         {"rMax", s.rMax},
-         {"rTor", s.rTor},  {"phiStart", s.phiStart}, {"phiDelta", s.phiDelta}};
+    j = {{"type", "torus"}, {"rMax", s.rMax}, {"rTor", s.rTor}};
+    if (s.rMin != 0.0) {
+        j["rMin"] = s.rMin;
+    }
+    if (s.phiStart != 0.0) {
+        j["phiStart"] = s.phiStart;
+    }
+    if (s.phiDelta != 2.0 * std::numbers::pi) {
+        j["phiDelta"] = s.phiDelta;
+    }
 }
 inline void to_json(nlohmann::json &j, const TessellatedShape &s) {
     auto tris = nlohmann::json::array();
@@ -354,22 +396,16 @@ inline void to_json(nlohmann::json &j, const UnknownShape &s) {
     j = {{"type", "unknown"}, {"originalType", s.originalType}};
 }
 inline void to_json(nlohmann::json &j, const BooleanUnion &s) {
-    j = {{"type", "union"},
-         {"left", s.left},
-         {"right", s.right},
-         {"rightTransform", s.rightTransform}};
+    j = {{"type", "union"}, {"left", s.left}, {"right", s.right}};
+    dmat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
 }
 inline void to_json(nlohmann::json &j, const BooleanIntersection &s) {
-    j = {{"type", "intersection"},
-         {"left", s.left},
-         {"right", s.right},
-         {"rightTransform", s.rightTransform}};
+    j = {{"type", "intersection"}, {"left", s.left}, {"right", s.right}};
+    dmat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
 }
 inline void to_json(nlohmann::json &j, const BooleanSubtraction &s) {
-    j = {{"type", "subtraction"},
-         {"left", s.left},
-         {"right", s.right},
-         {"rightTransform", s.rightTransform}};
+    j = {{"type", "subtraction"}, {"left", s.left}, {"right", s.right}};
+    dmat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
 }
 
 inline void to_json(nlohmann::json &j, const SemanticShape &s) {
@@ -385,28 +421,32 @@ inline void to_json(nlohmann::json &j, const SourceMaterial &m) {
 }
 
 inline void to_json(nlohmann::json &j, const SemanticDaughterPlacement &d) {
-    j = {{"name", d.name}, {"logVolId", d.logVolId}, {"localTransform", d.localTransform}};
+    j = {{"name", d.name}, {"logVolId", d.logVolId}};
+    dmat4ToJson(j, "locRot", "locTrl", d.localTransform);
 }
 
 inline void to_json(nlohmann::json &j, const SemanticLogicalVolume &lv) {
-    j = {{"id", lv.id},
-         {"name", lv.name},
-         {"shapeId", lv.shapeId},
-         {"materialId", lv.materialId},
-         {"daughters", lv.daughters}};
+    j = {{"id", lv.id}, {"name", lv.name}, {"shapeId", lv.shapeId}, {"materialId", lv.materialId}};
+    if (!lv.daughters.empty()) {
+        j["daughters"] = lv.daughters;
+    }
 }
 
 inline void to_json(nlohmann::json &j, const SemanticNode &n) {
-    j = {
-        {"id", n.id},
-        {"name", n.name},
-        {"logVolId", n.logVolId},
-        {"localTransform", n.localTransform},
-        {"children", n.children},
-        {"tags", n.tags},
-        {"sourceSystem", n.sourceSystem},
-        {"degradation", n.degradation},
-    };
+    j = {{"id", n.id}, {"name", n.name}, {"logVolId", n.logVolId}};
+    dmat4ToJson(j, "locRot", "locTrl", n.localTransform);
+    if (!n.children.empty()) {
+        j["children"] = n.children;
+    }
+    if (!n.tags.empty()) {
+        j["tags"] = n.tags;
+    }
+    if (!n.sourceSystem.empty()) {
+        j["sourceSystem"] = n.sourceSystem;
+    }
+    if (n.degradation.bits.any()) {
+        j["degradation"] = n.degradation;
+    }
     if (n.parentId) {
         j["parentId"] = *n.parentId;
     }
@@ -437,12 +477,38 @@ inline SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
         return BoxShape{j.at("dx"), j.at("dy"), j.at("dz")};
     }
     if (type == "tube") {
-        return TubeShape{j.at("rMin"), j.at("rMax"), j.at("dz"), j.at("phiStart"),
-                         j.at("phiDelta")};
+        TubeShape s;
+        s.rMax = j.at("rMax");
+        s.dz = j.at("dz");
+        if (j.contains("rMin")) {
+            s.rMin = j.at("rMin");
+        }
+        if (j.contains("phiStart")) {
+            s.phiStart = j.at("phiStart");
+        }
+        if (j.contains("phiDelta")) {
+            s.phiDelta = j.at("phiDelta");
+        }
+        return s;
     }
     if (type == "cone") {
-        return ConeShape{j.at("rMin1"), j.at("rMax1"),    j.at("rMin2"),   j.at("rMax2"),
-                         j.at("dz"),    j.at("phiStart"), j.at("phiDelta")};
+        ConeShape s;
+        s.rMax1 = j.at("rMax1");
+        s.rMax2 = j.at("rMax2");
+        s.dz = j.at("dz");
+        if (j.contains("rMin1")) {
+            s.rMin1 = j.at("rMin1");
+        }
+        if (j.contains("rMin2")) {
+            s.rMin2 = j.at("rMin2");
+        }
+        if (j.contains("phiStart")) {
+            s.phiStart = j.at("phiStart");
+        }
+        if (j.contains("phiDelta")) {
+            s.phiDelta = j.at("phiDelta");
+        }
+        return s;
     }
     if (type == "trd") {
         return TrdShape{j.at("dx1"), j.at("dx2"), j.at("dy1"), j.at("dy2"), j.at("dz")};
@@ -453,8 +519,12 @@ inline SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
     }
     if (type == "pcon") {
         PconShape s;
-        s.phiStart = j.at("phiStart");
-        s.phiDelta = j.at("phiDelta");
+        if (j.contains("phiStart")) {
+            s.phiStart = j.at("phiStart");
+        }
+        if (j.contains("phiDelta")) {
+            s.phiDelta = j.at("phiDelta");
+        }
         for (const auto &sec : j.at("sections")) {
             s.sections.push_back({sec.at("z"), sec.at("rMin"), sec.at("rMax")});
         }
@@ -462,17 +532,32 @@ inline SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
     }
     if (type == "pgon") {
         PgonShape s;
-        s.phiStart = j.at("phiStart");
-        s.phiDelta = j.at("phiDelta");
         s.nSides = j.at("nSides");
+        if (j.contains("phiStart")) {
+            s.phiStart = j.at("phiStart");
+        }
+        if (j.contains("phiDelta")) {
+            s.phiDelta = j.at("phiDelta");
+        }
         for (const auto &sec : j.at("sections")) {
             s.sections.push_back({sec.at("z"), sec.at("rMin"), sec.at("rMax")});
         }
         return s;
     }
     if (type == "torus") {
-        return TorusShape{j.at("rMin"), j.at("rMax"), j.at("rTor"), j.at("phiStart"),
-                          j.at("phiDelta")};
+        TorusShape s;
+        s.rMax = j.at("rMax");
+        s.rTor = j.at("rTor");
+        if (j.contains("rMin")) {
+            s.rMin = j.at("rMin");
+        }
+        if (j.contains("phiStart")) {
+            s.phiStart = j.at("phiStart");
+        }
+        if (j.contains("phiDelta")) {
+            s.phiDelta = j.at("phiDelta");
+        }
+        return s;
     }
     if (type == "tessellated") {
         TessellatedShape s;
@@ -494,27 +579,21 @@ inline SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
         BooleanUnion s;
         j.at("left").get_to(s.left);
         j.at("right").get_to(s.right);
-        if (j.contains("rightTransform")) {
-            j.at("rightTransform").get_to(s.rightTransform);
-        }
+        dmat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
         return s;
     }
     if (type == "intersection") {
         BooleanIntersection s;
         j.at("left").get_to(s.left);
         j.at("right").get_to(s.right);
-        if (j.contains("rightTransform")) {
-            j.at("rightTransform").get_to(s.rightTransform);
-        }
+        dmat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
         return s;
     }
     if (type == "subtraction") {
         BooleanSubtraction s;
         j.at("left").get_to(s.left);
         j.at("right").get_to(s.right);
-        if (j.contains("rightTransform")) {
-            j.at("rightTransform").get_to(s.rightTransform);
-        }
+        dmat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
         return s;
     }
     return UnknownShape{type};
@@ -537,7 +616,7 @@ inline void from_json(const nlohmann::json &j, SourceMaterial &m) {
 inline void from_json(const nlohmann::json &j, SemanticDaughterPlacement &d) {
     j.at("name").get_to(d.name);
     j.at("logVolId").get_to(d.logVolId);
-    j.at("localTransform").get_to(d.localTransform);
+    dmat4FromJson(j, "locRot", "locTrl", d.localTransform);
 }
 
 inline void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv) {
@@ -545,16 +624,22 @@ inline void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv) {
     j.at("name").get_to(lv.name);
     j.at("shapeId").get_to(lv.shapeId);
     j.at("materialId").get_to(lv.materialId);
-    j.at("daughters").get_to(lv.daughters);
+    if (j.contains("daughters")) {
+        j.at("daughters").get_to(lv.daughters);
+    }
 }
 
 inline void from_json(const nlohmann::json &j, SemanticNode &n) {
     j.at("id").get_to(n.id);
     j.at("name").get_to(n.name);
     j.at("logVolId").get_to(n.logVolId);
-    j.at("localTransform").get_to(n.localTransform);
-    j.at("children").get_to(n.children);
-    j.at("tags").get_to(n.tags);
+    dmat4FromJson(j, "locRot", "locTrl", n.localTransform);
+    if (j.contains("children")) {
+        j.at("children").get_to(n.children);
+    }
+    if (j.contains("tags")) {
+        j.at("tags").get_to(n.tags);
+    }
     if (j.contains("sourceSystem")) {
         j.at("sourceSystem").get_to(n.sourceSystem);
     }
@@ -619,13 +704,15 @@ inline void to_json(nlohmann::json &j, const SemanticScene &sc) {
         {"content",
          {
              {"rootId", sc.rootId},
-             {"sourceFile", sc.sourceFile},
              {"nodes", nodes},
              {"logVols", logVols},
              {"shapes", shapes},
              {"materials", mats},
          }},
     };
+    if (!sc.sourceFile.empty()) {
+        j["content"]["sourceFile"] = sc.sourceFile;
+    }
 }
 
 } // namespace nodehammer

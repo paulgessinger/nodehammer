@@ -35,30 +35,53 @@ template <> struct adl_serializer<glm::vec4> {
     }
 };
 
-template <> struct adl_serializer<glm::dmat4> {
-    static void to_json(json &j, const glm::dmat4 &m) {
-        // Store as 4×3 (column-major, dropping the implicit [0,0,0,1] last row).
-        j = json::array();
-        for (int col = 0; col < 4; ++col)
-            for (int row = 0; row < 3; ++row)
-                j.push_back(m[col][row]);
-    }
-    static void from_json(const json &j, glm::dmat4 &m) {
-        if (j.size() == 12) {
-            // 4×3 compact format
-            for (int col = 0; col < 4; ++col) {
-                for (int row = 0; row < 3; ++row)
-                    m[col][row] = j.at(static_cast<std::size_t>(col * 3 + row)).get<double>();
-                m[col][3] = (col == 3) ? 1.0 : 0.0;
+} // namespace nlohmann
+
+// ── Helpers for flattened rotation/translation on parent JSON objects ─────────
+// Usage: dmat4ToJson(j, "locRot", "locTrl", m);  — writes keys directly on j
+//        dmat4FromJson(j, "locRot", "locTrl", m); — reads keys from j
+
+inline void dmat4ToJson(nlohmann::json &j, const char *rotKey, const char *trlKey,
+                        const glm::dmat4 &m) {
+    const bool identityRotation = m[0][0] == 1.0 && m[0][1] == 0.0 && m[0][2] == 0.0 &&
+                                  m[1][0] == 0.0 && m[1][1] == 1.0 && m[1][2] == 0.0 &&
+                                  m[2][0] == 0.0 && m[2][1] == 0.0 && m[2][2] == 1.0;
+    const bool zeroTranslation = m[3][0] == 0.0 && m[3][1] == 0.0 && m[3][2] == 0.0;
+
+    if (!identityRotation) {
+        auto r = nlohmann::json::array();
+        for (int col = 0; col < 3; ++col) {
+            for (int row = 0; row < 3; ++row) {
+                r.push_back(m[col][row]);
             }
-        } else {
-            // 4×4 legacy format
-            for (int col = 0; col < 4; ++col)
-                for (int row = 0; row < 4; ++row)
-                    m[col][row] = j.at(static_cast<std::size_t>(col * 4 + row)).get<double>();
+        }
+        j[rotKey] = std::move(r);
+    }
+    if (!zeroTranslation) {
+        j[trlKey] = {m[3][0], m[3][1], m[3][2]};
+    }
+}
+
+inline void dmat4FromJson(const nlohmann::json &j, const char *rotKey, const char *trlKey,
+                          glm::dmat4 &m) {
+    m = glm::dmat4{1.0};
+    if (j.contains(rotKey)) {
+        const auto &r = j.at(rotKey);
+        for (int col = 0; col < 3; ++col) {
+            for (int row = 0; row < 3; ++row) {
+                m[col][row] = r.at(static_cast<std::size_t>(col * 3 + row)).get<double>();
+            }
         }
     }
-};
+    if (j.contains(trlKey)) {
+        const auto &t = j.at(trlKey);
+        m[3][0] = t.at(0).get<double>();
+        m[3][1] = t.at(1).get<double>();
+        m[3][2] = t.at(2).get<double>();
+    }
+}
+
+namespace nlohmann {
 
 template <> struct adl_serializer<glm::mat4> {
     static void to_json(json &j, const glm::mat4 &m) {
