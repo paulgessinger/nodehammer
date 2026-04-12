@@ -1,3 +1,4 @@
+#include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
@@ -81,13 +82,63 @@ RenderMaterial makeDefaultMaterial(RenderScene &rs, const SourceMaterial &src) {
 }
 
 // Axis-aligned bounding box proxy for boolean fallback=BBox.
-TessellationOutput makeBBoxProxy() {
-    // A unit box placeholder; the actual bbox would require shape-specific
-    // computation beyond the scope of a primitive tessellator.
-    PrimitiveTessellator pt;
-    BoxShape unit{1.0, 1.0, 1.0};
-    TessellationParams p;
-    return pt.tessellate(unit, p);
+/// Collect all primitive leaf vertices from a (possibly nested) boolean shape,
+/// compute their AABB, and return a tessellated box of that size.
+TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData, const SemanticScene &scene,
+                                 PrimitiveTessellator &tess, const TessellationParams &params) {
+    glm::dvec3 bboxMin{std::numeric_limits<double>::max()};
+    glm::dvec3 bboxMax{-std::numeric_limits<double>::max()};
+
+    // BFS over the boolean tree, tessellating primitive leaves to find extents.
+    std::queue<std::pair<SemanticShapeId, glm::dmat4>> q;
+
+    auto enqueue = [&](const auto &s) {
+        using T = std::decay_t<decltype(s)>;
+        if constexpr (std::is_same_v<T, BooleanUnion> || std::is_same_v<T, BooleanIntersection> ||
+                      std::is_same_v<T, BooleanSubtraction>) {
+            q.push({s.left, glm::dmat4{1.0}});
+            q.push({s.right, s.rightTransform});
+        }
+    };
+    std::visit(enqueue, shapeData);
+
+    while (!q.empty()) {
+        auto [id, xform] = q.front();
+        q.pop();
+        if (!scene.shapes.contains(id)) {
+            continue;
+        }
+        const auto &child = scene.shapes.at(id).data;
+        bool isBool = std::visit(
+            [&](const auto &s) {
+                using T = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<T, BooleanUnion> ||
+                              std::is_same_v<T, BooleanIntersection> ||
+                              std::is_same_v<T, BooleanSubtraction>) {
+                    q.push({s.left, xform});
+                    q.push({s.right, xform * s.rightTransform});
+                    return true;
+                }
+                return false;
+            },
+            child);
+        if (!isBool) {
+            auto out = tess.tessellate(child, params);
+            for (const auto &v : out.vertices) {
+                glm::dvec3 p = glm::dvec3(xform * glm::dvec4(v.position, 1.0));
+                bboxMin = glm::min(bboxMin, p);
+                bboxMax = glm::max(bboxMax, p);
+            }
+        }
+    }
+
+    if (bboxMin.x > bboxMax.x) {
+        // No vertices found — unit box fallback.
+        return tess.tessellate(BoxShape{1.0, 1.0, 1.0}, params);
+    }
+
+    glm::dvec3 half = (bboxMax - bboxMin) * 0.5;
+    return tess.tessellate(BoxShape{half.x, half.y, half.z}, params);
 }
 
 } // namespace
@@ -114,6 +165,22 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
             }
         }
         return {node.name, node.originalPath, matName, node.children.empty(), &node.tags};
+    };
+
+    // Lazily-created red material for bbox proxy fallbacks.
+    std::optional<RenderMaterialId> bboxProxyMatId;
+    auto getBBoxProxyMaterial = [&]() -> RenderMaterialId {
+        if (!bboxProxyMatId) {
+            RenderMaterial rm;
+            rm.id = result.scene.nextMaterialId();
+            rm.name = "bbox_proxy";
+            rm.baseColorFactor = glm::vec4{0.9f, 0.1f, 0.1f, 1.0f};
+            rm.metallicFactor = 0.0f;
+            rm.roughnessFactor = 0.8f;
+            bboxProxyMatId = rm.id;
+            result.scene.materials[rm.id] = std::move(rm);
+        }
+        return *bboxProxyMatId;
     };
 
     // Cache: SemanticMaterialId → RenderMaterialId (avoid creating duplicate RenderMaterials
@@ -299,6 +366,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     std::holds_alternative<BooleanSubtraction>(descShape.data);
                 auto &descSegMap = meshCache[descLv.shapeId];
                 MeshAssetId descMid;
+                bool isBBoxProxy = false;
                 if (!descSegMap.contains(params.maxSegmentsCircle)) {
                     TessellationOutput tessOut;
 #ifdef NH_WITH_BOOLEAN_MESH
@@ -309,11 +377,33 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     }
 #else
                     if (descIsBoolean) {
-                        continue;
+                        tessOut = {}; // no manifold support
+                    } else {
+                        tessOut = tess.tessellate(descShape.data, params);
                     }
-                    tessOut = tess.tessellate(descShape.data, params);
 #endif
                     result.diags.append(tessOut.diags);
+                    if (descIsBoolean && tessOut.vertices.empty()) {
+                        // Boolean tessellation failed — apply fallback.
+                        switch (rule.fallback) {
+                        case BooleanFallback::Fail:
+                            result.diags.error(
+                                codes::kErrTessBooleanFail,
+                                std::format("boolean shape on node '{}' cannot be tessellated "
+                                            "(fallback=fail)",
+                                            descNode.name),
+                                descNode.name);
+                            return result;
+                        case BooleanFallback::BBox:
+                            tessOut = makeBBoxProxy(descShape.data, scene, tess, params);
+                            result.diags.append(tessOut.diags);
+                            isBBoxProxy = true;
+                            break;
+                        case BooleanFallback::Skip:
+                        default:
+                            continue;
+                        }
+                    }
                     if (tessOut.vertices.empty()) {
                         continue;
                     }
@@ -339,8 +429,10 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     continue;
                 }
 
-                // Resolve material for this descendant
-                RenderMaterialId rmId = resolveRenderMaterial(descLv.materialId, descNode);
+                // Resolve material — use red proxy for bbox fallbacks.
+                RenderMaterialId rmId = isBBoxProxy
+                                            ? getBBoxProxyMaterial()
+                                            : resolveRenderMaterial(descLv.materialId, descNode);
 
                 // Transform vertices into merge node's local frame
                 const glm::mat4 toLocal = glm::mat4(invWorld * descNode.worldTransform);
@@ -462,7 +554,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     std::format("boolean shape on node '{}' replaced with bounding-box proxy",
                                 semNode.name),
                     semNode.name);
-                auto bboxOut = makeBBoxProxy();
+                auto bboxOut = makeBBoxProxy(shape.data, scene, tess, params);
                 result.diags.append(bboxOut.diags);
                 MeshAssetId mid = result.scene.nextMeshId();
                 MeshAsset ma;
@@ -474,8 +566,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 ma.provenance.sourceName = semNode.name;
                 result.scene.meshAssets[mid] = std::move(ma);
 
-                RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
-                rn.meshBindings.push_back({mid, rmId});
+                rn.meshBindings.push_back({mid, getBBoxProxyMaterial()});
                 break;
             }
             case BooleanFallback::Skip:
