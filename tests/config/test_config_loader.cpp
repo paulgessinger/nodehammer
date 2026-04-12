@@ -97,13 +97,13 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
 
     // Rule 2: tessellation + extras
     REQUIRE(cfg.rules.at(2).tessellation.has_value());
-    REQUIRE(cfg.rules.at(2).tessellation->maxSegmentsCircle == 32);
+    REQUIRE(cfg.rules.at(2).tessellation->maxSegmentsCircle == std::optional{32});
     REQUIRE(cfg.rules.at(2).extras.has_value());
     REQUIRE(cfg.rules.at(2).extras->at("visible").get<bool>() == true);
 
     // Rule 3: fallback tessellation (no match → matches everything)
     REQUIRE(cfg.rules.at(3).tessellation.has_value());
-    REQUIRE(cfg.rules.at(3).tessellation->maxSegmentsCircle == 64);
+    REQUIRE(cfg.rules.at(3).tessellation->maxSegmentsCircle == std::optional{64});
     REQUIRE_FALSE(cfg.rules.at(3).match.has_value());
 }
 
@@ -325,7 +325,7 @@ fallback = "skip"
         }
     }
     REQUIRE(found);
-    REQUIRE(result.config.rules.at(0).tessellation->maxSegmentsCircle == 64); // default
+    REQUIRE_FALSE(result.config.rules.at(0).tessellation->maxSegmentsCircle.has_value()); // not set
 }
 
 TEST_CASE("ConfigLoader: unknown key in selection_rule → Warning", "[config][loader]") {

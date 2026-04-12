@@ -79,6 +79,7 @@ TEST_CASE("ConfigValidator: positive max_segments_circle → no error", "[config
     nodehammer::Rule rule;
     rule.tessellation = nodehammer::Rule::Tessellation{};
     rule.tessellation->maxSegmentsCircle = 32;
+
     cfg.rules.push_back(rule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE_FALSE(diags.hasErrors());
@@ -94,6 +95,7 @@ TEST_CASE("ConfigValidator: multiple violations all reported", "[config][validat
     nodehammer::Rule tessRule;
     tessRule.tessellation = nodehammer::Rule::Tessellation{};
     tessRule.tessellation->maxSegmentsCircle = -5;
+
     cfg.rules.push_back(tessRule);
     auto diags = nodehammer::ConfigValidator::validate(cfg);
     REQUIRE(diags.items().size() >= 2); // undefined material + bad segments

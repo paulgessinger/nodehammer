@@ -23,10 +23,11 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
         }
 
         // max_segments_circle must be positive.
-        if (rule.tessellation.has_value() && rule.tessellation->maxSegmentsCircle <= 0) {
+        if (rule.tessellation.has_value() && rule.tessellation->maxSegmentsCircle.has_value() &&
+            *rule.tessellation->maxSegmentsCircle <= 0) {
             diags.error(codes::kErrNegativeTolerance,
                         std::format("rule max_segments_circle must be > 0, got {}",
-                                    rule.tessellation->maxSegmentsCircle));
+                                    *rule.tessellation->maxSegmentsCircle));
         }
     }
 

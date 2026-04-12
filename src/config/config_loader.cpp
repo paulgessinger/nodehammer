@@ -631,9 +631,9 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
                 *tessTbl, {"skip_geometry", "merge_descendants", "max_segments_circle", "fallback"},
                 "rules.tessellation", diags);
             Rule::Tessellation tess;
-            tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>().value_or(false);
-            tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>().value_or(false);
-            tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>().value_or(64);
+            tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
+            tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
+            tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseFallback(*fallbackStr);
                 if (!parsed) {

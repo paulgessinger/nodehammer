@@ -132,10 +132,10 @@ struct Rule {
     std::optional<std::string> material; ///< References a MaterialDef::name
 
     struct Tessellation {
-        bool skipGeometry{false};
-        bool mergeDescendants{false};
-        int maxSegmentsCircle{64};
-        BooleanFallback fallback{BooleanFallback::Skip};
+        std::optional<bool> skipGeometry;
+        std::optional<bool> mergeDescendants;
+        std::optional<int> maxSegmentsCircle;
+        std::optional<BooleanFallback> fallback;
     };
     std::optional<Tessellation> tessellation;
 
