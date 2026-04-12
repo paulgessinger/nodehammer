@@ -74,8 +74,20 @@ const IImporter *ImporterRegistry::resolve(const std::filesystem::path &path,
     if (!formatName.empty()) {
         return findByFormat(formatName);
     }
+
+    // Try compound extension first (e.g. ".json.zst" → "json.zst")
+    const std::string stem = path.stem().string();
     const std::string ext = path.extension().string();
     if (ext.size() > 1) {
+        const auto stemExt = std::filesystem::path{stem}.extension().string();
+        if (!stemExt.empty()) {
+            // Compound: e.g. "foo.json.zst" → stemExt=".json", ext=".zst" → "json.zst"
+            const std::string compound = stemExt.substr(1) + ext;
+            if (const IImporter *imp = findByExtension(compound)) {
+                return imp;
+            }
+        }
+
         const std::string_view extSv{ext};
         if (const IImporter *imp = findByExtension(extSv.substr(1))) {
             return imp;

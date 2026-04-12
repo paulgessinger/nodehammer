@@ -3,11 +3,11 @@
 
 #include <CLI/CLI.hpp>
 #include <cmath>
-#include <fstream>
 #include <nlohmann/json.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
 #include <nodehammer/detail/overloaded.hpp>
+#include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/markup.hpp>
@@ -256,13 +256,13 @@ void register_cmd_dump_semantic(CLI::App &app) {
             printRichTree(result.scene, maxDepth, filter, con);
         } else {
             nlohmann::json j = result.scene;
+            std::string jsonStr = j.dump(-1);
             std::string outPath;
             if (*outputOpt) {
                 outputOpt->results(outPath);
-                std::ofstream f{outPath};
-                f << j.dump(-1) << '\n';
+                nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
             } else {
-                std::println("{}", j.dump(-1));
+                std::println("{}", jsonStr);
             }
         }
     });

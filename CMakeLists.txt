@@ -54,6 +54,7 @@ target_link_libraries(nodehammer_lib PUBLIC
     glm::glm
     tinygltf
     CLI11::CLI11
+    zstd::libzstd_static
 )
 
 nodehammer_set_compiler_options(nodehammer_lib)

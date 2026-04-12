@@ -1,10 +1,10 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
-#include <fstream>
 #include <nlohmann/json.hpp>
 #include <nodehammer/config/config_ast.hpp>
 #include <nodehammer/config/config_loader.hpp>
+#include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/import/synthetic.hpp>
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
@@ -66,13 +66,13 @@ void register_cmd_dump_render(CLI::App &app) {
 
         // ── Serialize ──────────────────────────────────────────────────────────
         nlohmann::json j = passResult.scene;
+        std::string jsonStr = j.dump(2);
         std::string outPath;
         if (*outputOpt) {
             outputOpt->results(outPath);
-            std::ofstream f{outPath};
-            f << j.dump(2) << '\n';
+            nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
         } else {
-            std::println("{}", j.dump(2));
+            std::println("{}", jsonStr);
         }
     });
 }

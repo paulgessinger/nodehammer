@@ -1,35 +1,29 @@
+#include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/import/json_importer.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <format>
-#include <fstream>
 
 namespace nodehammer {
 
 std::string_view JsonImporter::formatName() const noexcept { return "json"; }
 
-std::vector<std::string> JsonImporter::supportedExtensions() const { return {"json"}; }
+std::vector<std::string> JsonImporter::supportedExtensions() const { return {"json", "json.zst"}; }
 
 ImportResult JsonImporter::import(const std::filesystem::path &path) const {
     ImportResult result;
 
-    std::ifstream f{path};
-    if (!f) {
-        result.diags.error(codes::kErrTgeoOpenFailed,
-                           std::format("failed to open JSON file '{}'", path.string()));
-        return result;
-    }
-
     try {
-        auto j = nlohmann::json::parse(f);
+        auto jsonStr = zstd_io::readJsonFromFile(path);
+        auto j = nlohmann::json::parse(jsonStr);
         result.scene = j.get<SemanticScene>();
         result.scene.computeWorldTransforms();
         result.scene.computeOriginalPaths();
-    } catch (const nlohmann::json::exception &ex) {
+    } catch (const std::exception &ex) {
         result.diags.error(codes::kErrTgeoOpenFailed,
-                           std::format("failed to parse JSON '{}': {}", path.string(), ex.what()));
+                           std::format("failed to load JSON '{}': {}", path.string(), ex.what()));
     }
 
     return result;

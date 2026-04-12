@@ -1,5 +1,34 @@
 include(FetchContent)
 
+# ── zstd ──────────────────────────────────────────────────────────────────────
+FetchContent_Declare(zstd
+    SYSTEM
+    GIT_REPOSITORY https://github.com/facebook/zstd.git
+    GIT_TAG        v1.5.6
+    SOURCE_SUBDIR  build/cmake
+    FIND_PACKAGE_ARGS 1.5.6
+)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_STATIC ON  CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(zstd)
+
+# FetchContent creates libzstd_static; normalize to the namespaced target
+# that find_package provides.
+if(TARGET libzstd_static AND NOT TARGET zstd::libzstd_static)
+    add_library(zstd::libzstd_static ALIAS libzstd_static)
+endif()
+
+# Suppress warnings in third-party zstd build
+if(TARGET libzstd_static)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(libzstd_static PRIVATE -w)
+    elseif(MSVC)
+        target_compile_options(libzstd_static PRIVATE /W0)
+    endif()
+endif()
+
 # ── Catch2 v3 ─────────────────────────────────────────────────────────────────
 FetchContent_Declare(Catch2
     SYSTEM
