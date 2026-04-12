@@ -1,6 +1,8 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
+#include <filesystem>
+#include <format>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
 #include <nodehammer/export/exporter.hpp>
@@ -12,6 +14,60 @@
 #include <string>
 
 using nodehammer::cli::printDiags;
+
+namespace {
+
+[[nodiscard]] std::string formatHumanSize(std::uintmax_t bytes) {
+    if (bytes < 1024) {
+        return std::format("{} B", bytes);
+    }
+    static constexpr const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+    double v = static_cast<double>(bytes);
+    std::size_t u = 0;
+    while (v >= 1024.0 && u + 1 < std::size(units)) {
+        v /= 1024.0;
+        ++u;
+    }
+    return std::format("{:.2f} {}", v, units[u]);
+}
+
+/// Paths that `convert` may produce in addition to the primary `-o` path.
+[[nodiscard]] std::vector<std::filesystem::path>
+convertOutputArtifacts(const std::filesystem::path &primary, nodehammer::ExportConfig::Format fmt) {
+    std::vector<std::filesystem::path> paths;
+    paths.push_back(primary);
+    if (fmt == nodehammer::ExportConfig::Format::OBJ) {
+        paths.emplace_back(primary.parent_path() / (primary.stem().string() + ".mtl"));
+    } else if (fmt == nodehammer::ExportConfig::Format::GLTF) {
+        paths.emplace_back(primary.parent_path() / (primary.stem().string() + ".bin"));
+    }
+    return paths;
+}
+
+void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidates) {
+    std::string msg = "  Output:";
+    bool any = false;
+    for (const auto &p : candidates) {
+        std::error_code ec;
+        if (!std::filesystem::exists(p, ec) || !std::filesystem::is_regular_file(p, ec)) {
+            continue;
+        }
+        const auto sz = std::filesystem::file_size(p, ec);
+        if (ec) {
+            continue;
+        }
+        if (any) {
+            msg += ", ";
+        }
+        msg += std::format(" {} ({})", p.string(), formatHumanSize(sz));
+        any = true;
+    }
+    if (any) {
+        std::println("{}", msg);
+    }
+}
+
+} // namespace
 
 void register_cmd_convert(CLI::App &app) {
     auto *sub = app.add_subcommand("convert", "Convert a geometry file to a render format");
@@ -182,6 +238,7 @@ void register_cmd_convert(CLI::App &app) {
                          "Warnings: {}  Errors: {}",
                          tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(),
                          totalTris, tessResult.scene.materials.size(), warnings, errors);
+            printWrittenOutputSizes(convertOutputArtifacts(outputPath, ecfg.format));
         }
     });
 }
