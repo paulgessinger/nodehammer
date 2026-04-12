@@ -3,7 +3,14 @@
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/tessellation/tessellator.hpp>
 
+#include <manifold/manifold.h>
+
 namespace nodehammer {
+
+/// Convert a TessellationOutput mesh to a Manifold, welding duplicate vertices.
+/// Returns nullopt (with diagnostics) if the mesh is not manifold-compatible.
+[[nodiscard]] std::optional<manifold::Manifold>
+meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::string_view context);
 
 /// Recursively tessellate a boolean shape using the Manifold library.
 ///

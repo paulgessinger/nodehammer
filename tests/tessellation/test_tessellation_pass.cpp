@@ -309,6 +309,26 @@ TEST_CASE("BooleanTessellator: ODD CarbonFoam Trd minus tube union reproducer",
     REQUIRE_FALSE(result.indices.empty());
 }
 
+TEST_CASE("Trd tessellation produces manifold-compatible mesh", "[tessellation][boolean]") {
+    // Verify that the Trd tessellation produces a watertight mesh that Manifold
+    // accepts. This caught inconsistent face winding in the original Trd
+    // tessellator (the ODD CarbonFoam non-manifold bug).
+    PrimitiveTessellator tess;
+    TessellationParams params;
+    params.maxSegmentsCircle = 48;
+
+    TrdShape trd{0.6000000000000001, 0.1, 52.225, 52.225, 0.2};
+    auto out = tess.tessellate(trd, params);
+    REQUIRE_FALSE(out.vertices.empty());
+
+    DiagnosticList diags;
+    auto m = meshToManifold(out, diags, "test/trd");
+    for (const auto &d : diags.items()) {
+        UNSCOPED_INFO(std::format("[{}] {}", d.code, d.message));
+    }
+    REQUIRE(m.has_value());
+}
+
 // ── UnknownShape ──────────────────────────────────────────────────────────────
 
 TEST_CASE("TessellationPass: UnknownShape emits error diagnostic", "[tessellation][pass]") {

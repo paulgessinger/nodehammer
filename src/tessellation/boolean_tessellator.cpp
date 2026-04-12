@@ -15,16 +15,10 @@ namespace {
 
 constexpr int kMaxRecursionDepth = 32;
 
-// ── Mesh conversion helpers ─────────────────────────────────────────────────
+} // namespace
 
-/// Convert a TessellationOutput (our vertex format) to a Manifold.
-/// Only carries position (3 props); normals are recomputed after the boolean op.
-///
-/// Our tessellator produces separate vertices per face (for per-face normals),
-/// so every edge is a "boundary" edge from the mesh topology perspective.
-/// Manifold requires knowing which vertices are topologically the same.
-/// We generate mergeFromVert/mergeToVert pairs by welding vertices at identical
-/// positions.
+// ── Mesh conversion helpers (public) ─────────────────────────────────────────
+
 std::optional<manifold::Manifold> meshToManifold(const TessellationOutput &mesh,
                                                  DiagnosticList &diags, std::string_view context) {
     if (mesh.vertices.empty() || mesh.indices.empty()) {
@@ -87,6 +81,8 @@ std::optional<manifold::Manifold> meshToManifold(const TessellationOutput &mesh,
         return std::nullopt;
     }
 }
+
+namespace {
 
 /// Convert a Manifold result back to a TessellationOutput.
 /// Recomputes face normals (flat shading) since the boolean op invalidates input normals.
