@@ -4,70 +4,65 @@
 
 [[selection_rules]]
 keep_if = [
+  'path ~= "**/Pixels"',
   'path ~= "**/Pixels/*Barrel"',
   'path ~= "**/Pixels/*EndcapN"',
   'path ~= "**/Pixels/*EndcapP"',
+  'path ~= "**/ShortStrips"',
   'path ~= "**/ShortStrips/*Barrel"',
   'path ~= "**/ShortStrips/*EndcapN"',
   'path ~= "**/ShortStrips/*EndcapP"',
+  'path ~= "**/LongStrips"',
   'path ~= "**/LongStrips/*Barrel"',
   'path ~= "**/LongStrips/*EndcapN"',
   'path ~= "**/LongStrips/*EndcapP"',
 ]
 
-# Keep sensor nodes.
-# [[selection_rules]]
-# keep_if = '''
-# tag.sensitive == "true" && any(path ~= "**/Pixels/**", path ~= "**/ShortStrips/**", path ~= "**/LongStrips/**")
-# '''
 
 # Keep stave nodes and all their leaf descendants.
 [[selection_rules]]
-keep_if = 'path ~= "**/LongStripLayer*/stave*"'
+keep_if = [
+  'path ~= "**/PixelLayer*"',
+  'path ~= "**/PixelLayer*/stave*"',
+  'path ~= "**/PixelLayer*/stave*/**" && is_leaf',
+]
 
 [[selection_rules]]
-keep_if = 'path ~= "**/LongStripLayer*/stave*/**" && is_leaf'
+keep_if = [
+  'path ~= "**/ShortStripLayer*"',
+  'path ~= "**/ShortStripLayer*/stave*"',
+  'path ~= "**/ShortStripLayer*/stave*/**" && is_leaf',
+]
 
 [[selection_rules]]
-keep_if = 'path ~= "**/PixelLayer*/stave*"'
+keep_if = [
+  'path ~= "**/LongStripLayer*"',
+  'path ~= "**/LongStripLayer*/stave*"',
+  'path ~= "**/LongStripLayer*/stave*/**" && is_leaf',
+]
 
-[[selection_rules]]
-keep_if = 'path ~= "**/PixelLayer*/stave*/**" && is_leaf'
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 
-# [[rules]]
-# match = 'path ~= "**/Pixels/**"'
-# material = "pixel"
-
-# [[rules]]
-# match = 'path ~= "**/ShortStrips/**"'
-# material = "short_strip"
-
-# Fallback for LongStrips nodes not matched by source-material rules.
-# [[rules]]
-# match = 'path ~= "**/LongStrips/**"'
-# material = "support"
-
 # Structural nodes: no geometry.
+
 [[rules]]
 match = [
   'path ~= "**/Pixels"',
-  'path ~= "**/ShortStrips"',
-  'path ~= "**/LongStrips"',
-]
-[rules.tessellation]
-skip_geometry = true
-
-[[rules]]
-match = [
   'path ~= "**/Pixels/*Barrel"',
+  'path ~= "**/PixelLayer*"',
   'path ~= "**/Pixels/*EndcapN"',
   'path ~= "**/Pixels/*EndcapP"',
+
+  'path ~= "**/ShortStrips"',
   'path ~= "**/ShortStrips/*Barrel"',
+  'path ~= "**/ShortStripLayer*"',
   'path ~= "**/ShortStrips/*EndcapN"',
   'path ~= "**/ShortStrips/*EndcapP"',
+
+  'path ~= "**/LongStrips"',
   'path ~= "**/LongStrips/*Barrel"',
+  'path ~= "**/LongStripLayer*"',
   'path ~= "**/LongStrips/*EndcapN"',
   'path ~= "**/LongStrips/*EndcapP"',
 ]
@@ -78,6 +73,7 @@ skip_geometry = true
 [[rules]]
 match = [
   'path ~= "**/PixelLayer*/stave*"',
+  'path ~= "**/ShortStripLayer*/stave*"',
   'path ~= "**/LongStripLayer*/stave*"',
 ]
 
