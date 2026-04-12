@@ -4,9 +4,11 @@
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 
+#include <limits>
 #include <map>
 #include <set>
 
+#include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
 #include <nodehammer/tessellation/boolean_tessellator.hpp>
 
@@ -151,6 +153,126 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
     REQUIRE(result.scene.materials.size() == 1);
     const auto &[id, mat] = *result.scene.materials.begin();
     REQUIRE(mat.name == "gold");
+}
+
+TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendant layout",
+          "[tessellation][pass]") {
+    SemanticScene scene;
+
+    const auto vacuumMat = scene.nextMaterialId();
+    scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
+    const auto siliconMat = scene.nextMaterialId();
+    scene.materials[siliconMat] = {siliconMat, "Silicon", std::nullopt, 0.0};
+    const auto kaptonMat = scene.nextMaterialId();
+    scene.materials[kaptonMat] = {kaptonMat, "Kapton", std::nullopt, 0.0};
+
+    const auto rootShape = scene.nextShapeId();
+    scene.shapes[rootShape] = {rootShape, BoxShape{10.0, 10.0, 10.0}};
+    const auto diskShape = scene.nextShapeId();
+    scene.shapes[diskShape] = {diskShape, BoxShape{1.0, 1.0, 0.01}};
+    const auto layerShape = scene.nextShapeId();
+    scene.shapes[layerShape] = {layerShape, BoxShape{0.5, 0.5, 0.01}};
+
+    const auto rootLv = scene.nextLogVolId();
+    scene.logVols[rootLv] = {rootLv, "root_lv", rootShape, vacuumMat};
+    const auto diskLv = scene.nextLogVolId();
+    scene.logVols[diskLv] = {diskLv, "shared_disk_lv", diskShape, vacuumMat};
+    const auto siliconLv = scene.nextLogVolId();
+    scene.logVols[siliconLv] = {siliconLv, "silicon_lv", layerShape, siliconMat};
+    const auto kaptonLv = scene.nextLogVolId();
+    scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
+
+    auto addNode = [&](std::string name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
+                       double z) {
+        const auto id = scene.nextNodeId();
+        SemanticNode node;
+        node.id = id;
+        node.name = std::move(name);
+        node.logVolId = lv;
+        node.parentId = parent;
+        node.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z});
+        scene.nodes[id] = node;
+        if (parent.has_value()) {
+            scene.nodes.at(*parent).children.push_back(id);
+        }
+        return id;
+    };
+
+    const auto root = addNode("world", rootLv, std::nullopt, 0.0);
+    scene.rootId = root;
+    const auto diskN = addNode("diskN", diskLv, root, -10.0);
+    const auto diskP = addNode("diskP", diskLv, root, 10.0);
+
+    // Both disk placements intentionally share the same logVolId. Their descendant layers are
+    // mirrored in disk-local Z, which used to collide in the merge cache.
+    addNode("siliconN", siliconLv, diskN, 0.1);
+    addNode("kaptonN", kaptonLv, diskN, -0.1);
+    addNode("siliconP", siliconLv, diskP, -0.1);
+    addNode("kaptonP", kaptonLv, diskP, 0.1);
+
+    scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
+
+    NHConfig cfg;
+    MaterialDef siliconDef;
+    siliconDef.name = "silicon";
+    cfg.materials.push_back(siliconDef);
+    MaterialDef kaptonDef;
+    kaptonDef.name = "kapton";
+    cfg.materials.push_back(kaptonDef);
+
+    Rule siliconRule;
+    siliconRule.match = PredicateExpr{MaterialGlobPredicate{"Silicon"}};
+    siliconRule.material = "silicon";
+    cfg.rules.push_back(siliconRule);
+
+    Rule kaptonRule;
+    kaptonRule.match = PredicateExpr{MaterialGlobPredicate{"Kapton"}};
+    kaptonRule.material = "kapton";
+    cfg.rules.push_back(kaptonRule);
+
+    Rule mergeRule;
+    mergeRule.match = PredicateExpr{NameGlobPredicate{"disk*"}};
+    mergeRule.tessellation = Rule::Tessellation{};
+    mergeRule.tessellation->mergeDescendants = true;
+    cfg.rules.push_back(mergeRule);
+
+    TessellationPass pass{cfg};
+    auto result = pass.lower(scene);
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    auto findRenderNode = [&](std::string_view name) -> const RenderNode * {
+        for (const auto &[_, node] : result.scene.nodes) {
+            if (node.name == name) {
+                return &node;
+            }
+        }
+        return nullptr;
+    };
+
+    auto localCenterZ = [&](const RenderNode &node, std::string_view materialName) {
+        for (const auto &binding : node.meshBindings) {
+            const auto &mat = result.scene.materials.at(binding.materialId);
+            if (mat.name != materialName) {
+                continue;
+            }
+            const auto &mesh = result.scene.meshAssets.at(binding.meshId);
+            double sum = 0.0;
+            for (const auto &v : mesh.vertices) {
+                sum += v.position.z;
+            }
+            return sum / static_cast<double>(mesh.vertices.size());
+        }
+        return std::numeric_limits<double>::quiet_NaN();
+    };
+
+    const auto *renderDiskN = findRenderNode("diskN");
+    const auto *renderDiskP = findRenderNode("diskP");
+    REQUIRE(renderDiskN != nullptr);
+    REQUIRE(renderDiskP != nullptr);
+
+    REQUIRE(localCenterZ(*renderDiskN, "kapton") < localCenterZ(*renderDiskN, "silicon"));
+    REQUIRE(localCenterZ(*renderDiskP, "kapton") > localCenterZ(*renderDiskP, "silicon"));
 }
 
 // ── Boolean fallback ──────────────────────────────────────────────────────────
