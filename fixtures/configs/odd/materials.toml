@@ -75,9 +75,9 @@ metallic = 0.0
 roughness = 0.92
 
 [materials.copper]
-base_color = "#B87333"
+base_color = "#B66A3C"
 metallic = 1.0
-roughness = 0.25
+roughness = 0.18
 
 # ── Source-material → render-material mapping rules ──────────────────────────
 

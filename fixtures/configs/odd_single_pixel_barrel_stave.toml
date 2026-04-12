@@ -29,9 +29,9 @@ material = "support"
 [[rules]]
 match = 'path ~= "**/stave0"'
 [rules.tessellation]
-merge_descendants = true
+skip_geometry = true
 max_segments_circle = 48
-fallback = "skip"
+fallback = "fail"
 
 [rules.extras]
 visible = true
