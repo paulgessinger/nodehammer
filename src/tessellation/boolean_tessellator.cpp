@@ -3,6 +3,8 @@
 
 #include <manifold/manifold.h>
 
+#include <nodehammer/detail/overloaded.hpp>
+
 #include <cstring>
 #include <format>
 #include <map>
@@ -145,113 +147,110 @@ manifold::mat3x4 toManifoldTransform(const glm::dmat4 &m) {
 /// constructors. Returns nullopt for shapes Manifold doesn't natively support.
 std::optional<manifold::Manifold> shapeToManifoldBuiltin(const SemanticShapeVariant &shape,
                                                          const TessellationParams &params) {
+    using detail::overloaded;
+    using MaybeManifold = std::optional<manifold::Manifold>;
     const int segments = params.maxSegmentsCircle;
 
-    // Box → Cube
-    if (const auto *box = std::get_if<BoxShape>(&shape)) {
-        return manifold::Manifold::Cube({box->dx * 2, box->dy * 2, box->dz * 2}, true);
-    }
+    return std::visit(
+        overloaded{
+            // Box → Cube
+            [](const BoxShape &box) -> MaybeManifold {
+                return manifold::Manifold::Cube({box.dx * 2, box.dy * 2, box.dz * 2}, true);
+            },
 
-    // Tube (full phi, rMin=0) → Cylinder
-    if (const auto *tube = std::get_if<TubeShape>(&shape)) {
-        const bool fullPhi = std::abs(tube->phiDelta - 2.0 * std::numbers::pi) < 1e-6 &&
-                             std::abs(tube->phiStart) < 1e-6;
-        if (fullPhi && tube->rMin < 1e-9) {
-            return manifold::Manifold::Cylinder(tube->dz * 2, tube->rMax, tube->rMax, segments,
-                                                true);
-        }
-        // Full phi, rMin > 0 → hollow tube via subtraction
-        if (fullPhi && tube->rMin > 1e-9) {
-            auto outer =
-                manifold::Manifold::Cylinder(tube->dz * 2, tube->rMax, tube->rMax, segments, true);
-            auto inner =
-                manifold::Manifold::Cylinder(tube->dz * 2, tube->rMin, tube->rMin, segments, true);
-            return outer - inner;
-        }
-        // Partial phi: construct as (full cylinder ∩ wedge), optionally - inner.
-        {
-            const double r = std::max(tube->rMax, tube->rMin) * 2; // oversized for safe clipping
-            const double h = tube->dz * 2;
+            // Tube → Cylinder (with optional hollow / partial-phi clipping)
+            [&](const TubeShape &tube) -> MaybeManifold {
+                const bool fullPhi = std::abs(tube.phiDelta - 2.0 * std::numbers::pi) < 1e-6 &&
+                                     std::abs(tube.phiStart) < 1e-6;
+                if (fullPhi && tube.rMin < 1e-9) {
+                    return manifold::Manifold::Cylinder(tube.dz * 2, tube.rMax, tube.rMax, segments,
+                                                        true);
+                }
+                // Full phi, rMin > 0 → hollow tube via subtraction
+                if (fullPhi && tube.rMin > 1e-9) {
+                    auto outer = manifold::Manifold::Cylinder(tube.dz * 2, tube.rMax, tube.rMax,
+                                                              segments, true);
+                    auto inner = manifold::Manifold::Cylinder(tube.dz * 2, tube.rMin, tube.rMin,
+                                                              segments, true);
+                    return outer - inner;
+                }
+                // Partial phi: construct as (full cylinder ∩ wedge), optionally - inner.
+                const double r = std::max(tube.rMax, tube.rMin) * 2; // oversized for safe clipping
+                const double h = tube.dz * 2;
 
-            auto outer = manifold::Manifold::Cylinder(h, tube->rMax, tube->rMax, segments, true);
+                auto outer = manifold::Manifold::Cylinder(h, tube.rMax, tube.rMax, segments, true);
 
-            // Build a wedge by intersecting two half-space boxes.
-            // Half-space 1: rotated to phiStart, keeps everything on the "inside" of the start
-            // edge. Half-space 2: rotated to phiStart+phiDelta, keeps everything on the "inside" of
-            // the end edge.
-            auto bigBox = manifold::Manifold::Cube({r * 2, r * 2, h * 2}, true);
+                // Build a wedge by intersecting two half-space boxes.
+                auto bigBox = manifold::Manifold::Cube({r * 2, r * 2, h * 2}, true);
 
-            // Rotate the box so its +X face aligns with the phi boundaries.
-            // For phiStart: keep the half-space where the arc begins.
-            // Box1: centered, rotated so its -Y face is at angle phiStart
-            auto box1 = bigBox;
-            {
-                const double c = std::cos(tube->phiStart), s = std::sin(tube->phiStart);
-                // Translate in -Y to keep only the +Y half, then rotate
-                auto shift = manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
-                                              manifold::vec3{0, 0, 1}, manifold::vec3{0, -r, 0});
-                auto rot = manifold::mat3x4(manifold::vec3{c, s, 0}, manifold::vec3{-s, c, 0},
-                                            manifold::vec3{0, 0, 1}, manifold::vec3{0, 0, 0});
-                box1 = bigBox.Transform(shift).Transform(rot);
-            }
+                // Box1: centered, rotated so its -Y face is at angle phiStart
+                manifold::Manifold box1;
+                {
+                    const double c = std::cos(tube.phiStart), s = std::sin(tube.phiStart);
+                    auto shift =
+                        manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
+                                         manifold::vec3{0, 0, 1}, manifold::vec3{0, -r, 0});
+                    auto rot = manifold::mat3x4(manifold::vec3{c, s, 0}, manifold::vec3{-s, c, 0},
+                                                manifold::vec3{0, 0, 1}, manifold::vec3{0, 0, 0});
+                    box1 = bigBox.Transform(shift).Transform(rot);
+                }
 
-            // Box2: rotated so its +Y face is at angle phiStart+phiDelta
-            auto box2 = bigBox;
-            {
-                const double endPhi = tube->phiStart + tube->phiDelta;
-                const double c = std::cos(endPhi), s = std::sin(endPhi);
-                auto shift = manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
-                                              manifold::vec3{0, 0, 1}, manifold::vec3{0, r, 0});
-                auto rot = manifold::mat3x4(manifold::vec3{c, s, 0}, manifold::vec3{-s, c, 0},
-                                            manifold::vec3{0, 0, 1}, manifold::vec3{0, 0, 0});
-                box2 = bigBox.Transform(shift).Transform(rot);
-            }
+                // Box2: rotated so its +Y face is at angle phiStart+phiDelta
+                manifold::Manifold box2;
+                {
+                    const double endPhi = tube.phiStart + tube.phiDelta;
+                    const double c = std::cos(endPhi), s = std::sin(endPhi);
+                    auto shift = manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
+                                                  manifold::vec3{0, 0, 1}, manifold::vec3{0, r, 0});
+                    auto rot = manifold::mat3x4(manifold::vec3{c, s, 0}, manifold::vec3{-s, c, 0},
+                                                manifold::vec3{0, 0, 1}, manifold::vec3{0, 0, 0});
+                    box2 = bigBox.Transform(shift).Transform(rot);
+                }
 
-            manifold::Manifold wedge;
-            if (tube->phiDelta <= std::numbers::pi) {
-                // Narrow wedge: intersection of the two half-spaces
-                wedge = box1 ^ box2;
-            } else {
-                // Wide wedge (> 180°): union of the two half-spaces
-                wedge = box1 + box2;
-            }
+                manifold::Manifold wedge;
+                if (tube.phiDelta <= std::numbers::pi) {
+                    wedge = box1 ^ box2;
+                } else {
+                    wedge = box1 + box2;
+                }
 
-            auto result = outer ^ wedge;
+                auto result = outer ^ wedge;
 
-            if (tube->rMin > 1e-9) {
-                auto inner =
-                    manifold::Manifold::Cylinder(h, tube->rMin, tube->rMin, segments, true);
-                result = result - inner;
-            }
+                if (tube.rMin > 1e-9) {
+                    auto inner =
+                        manifold::Manifold::Cylinder(h, tube.rMin, tube.rMin, segments, true);
+                    result = result - inner;
+                }
 
-            return result;
-        }
-    }
+                return result;
+            },
 
-    // Cone (full phi, rMin1=0, rMin2=0) → Cylinder with different radii
-    if (const auto *cone = std::get_if<ConeShape>(&shape)) {
-        const bool fullPhi = std::abs(cone->phiDelta - 2.0 * std::numbers::pi) < 1e-6 &&
-                             std::abs(cone->phiStart) < 1e-6;
-        if (fullPhi && cone->rMin1 < 1e-9 && cone->rMin2 < 1e-9) {
-            return manifold::Manifold::Cylinder(cone->dz * 2, cone->rMax1, cone->rMax2, segments,
-                                                true);
-        }
-        return std::nullopt;
-    }
+            // Cone (full phi, rMin1=0, rMin2=0) → Cylinder with different radii
+            [&](const ConeShape &cone) -> MaybeManifold {
+                const bool fullPhi = std::abs(cone.phiDelta - 2.0 * std::numbers::pi) < 1e-6 &&
+                                     std::abs(cone.phiStart) < 1e-6;
+                if (fullPhi && cone.rMin1 < 1e-9 && cone.rMin2 < 1e-9) {
+                    return manifold::Manifold::Cylinder(cone.dz * 2, cone.rMax1, cone.rMax2,
+                                                        segments, true);
+                }
+                return std::nullopt;
+            },
 
-    // Trd → hull of 8 vertices (guaranteed watertight)
-    if (const auto *trd = std::get_if<TrdShape>(&shape)) {
-        std::vector<manifold::vec3> pts = {
-            {-trd->dx1, -trd->dy1, -trd->dz}, {trd->dx1, -trd->dy1, -trd->dz},
-            {trd->dx1, trd->dy1, -trd->dz},   {-trd->dx1, trd->dy1, -trd->dz},
-            {-trd->dx2, -trd->dy2, trd->dz},  {trd->dx2, -trd->dy2, trd->dz},
-            {trd->dx2, trd->dy2, trd->dz},    {-trd->dx2, trd->dy2, trd->dz},
-        };
-        return manifold::Manifold::Hull(pts);
-    }
+            // Trd → hull of 8 vertices (guaranteed watertight)
+            [](const TrdShape &trd) -> MaybeManifold {
+                std::vector<manifold::vec3> pts = {
+                    {-trd.dx1, -trd.dy1, -trd.dz}, {trd.dx1, -trd.dy1, -trd.dz},
+                    {trd.dx1, trd.dy1, -trd.dz},   {-trd.dx1, trd.dy1, -trd.dz},
+                    {-trd.dx2, -trd.dy2, trd.dz},  {trd.dx2, -trd.dy2, trd.dz},
+                    {trd.dx2, trd.dy2, trd.dz},    {-trd.dx2, trd.dy2, trd.dz},
+                };
+                return manifold::Manifold::Hull(pts);
+            },
 
-    // All other shapes: no built-in available
-    return std::nullopt;
+            // All other shapes: no built-in available
+            [](const auto &) -> MaybeManifold { return std::nullopt; },
+        },
+        shape);
 }
 
 // ── Recursive resolution ────────────────────────────────────────────────────
@@ -306,14 +305,19 @@ std::optional<manifold::Manifold> resolveAndTessellate(SemanticShapeId shapeId,
         }
     };
 
-    if (const auto *u = std::get_if<BooleanUnion>(&shapeData)) {
-        return handleBoolean(*u);
-    }
-    if (const auto *s = std::get_if<BooleanSubtraction>(&shapeData)) {
-        return handleBoolean(*s);
-    }
-    if (const auto *i = std::get_if<BooleanIntersection>(&shapeData)) {
-        return handleBoolean(*i);
+    {
+        using detail::overloaded;
+        auto boolResult = std::visit(
+            overloaded{
+                [&](const BooleanUnion &s) { return handleBoolean(s); },
+                [&](const BooleanSubtraction &s) { return handleBoolean(s); },
+                [&](const BooleanIntersection &s) { return handleBoolean(s); },
+                [](const auto &) -> std::optional<manifold::Manifold> { return std::nullopt; },
+            },
+            shapeData);
+        if (boolResult) {
+            return boolResult;
+        }
     }
 
     // Primitive shape: try Manifold built-in first
@@ -382,18 +386,14 @@ TessellationOutput tessellateBooleanShape(const SemanticShapeVariant &shape,
         }
     };
 
-    if (const auto *u = std::get_if<BooleanUnion>(&shape)) {
-        return processBoolean(*u);
-    }
-    if (const auto *s = std::get_if<BooleanSubtraction>(&shape)) {
-        return processBoolean(*s);
-    }
-    if (const auto *i = std::get_if<BooleanIntersection>(&shape)) {
-        return processBoolean(*i);
-    }
-
-    // Not a boolean shape — shouldn't be called, return empty.
-    return result;
+    using detail::overloaded;
+    return std::visit(overloaded{
+                          [&](const BooleanUnion &s) { return processBoolean(s); },
+                          [&](const BooleanSubtraction &s) { return processBoolean(s); },
+                          [&](const BooleanIntersection &s) { return processBoolean(s); },
+                          [&](const auto &) -> TessellationOutput { return result; },
+                      },
+                      shape);
 }
 
 } // namespace nodehammer
