@@ -8,6 +8,7 @@
 #include <set>
 
 #ifdef NH_WITH_BOOLEAN_MESH
+#include <nlohmann/json.hpp>
 #include <nodehammer/tessellation/boolean_tessellator.hpp>
 #endif
 
@@ -305,6 +306,75 @@ TEST_CASE("TessellationPass: boolean fallback=Fail returns error diagnostic",
             hasErr = true;
     }
     REQUIRE(hasErr);
+}
+TEST_CASE("BooleanTessellator: ODD CarbonFoam (Trd - (Tube ∪ Tube)) reproducer",
+          "[tessellation][boolean]") {
+    // Load the exact shapes from a JSON fragment extracted from the ODD scene.
+    // This ensures bit-identical shape parameters and IDs.
+    static constexpr std::string_view kSceneJson = R"({
+        "header": {"version": 1, "type": "semantic"},
+        "content": {
+            "rootId": 1,
+            "sourceFile": "",
+            "nodes": [
+                {"id": 1, "name": "CarbonFoam_14", "logVolId": 1,
+                 "localTransform": [1,0,0, 0,1,0, 0,0,1, 0,0,0],
+                 "children": [], "tags": {}, "sourceSystem": "test"}
+            ],
+            "logVols": [
+                {"id": 1, "name": "CarbonFoam", "shapeId": 80, "materialId": 1}
+            ],
+            "shapes": [
+                {"id": 76, "type": "trd",
+                 "dx1": 0.6000000000000001, "dx2": 0.1,
+                 "dy1": 52.225, "dy2": 52.225, "dz": 0.2},
+                {"id": 77, "type": "tube",
+                 "rMin": 0.0, "rMax": 0.12, "dz": 52.725,
+                 "phiStart": 6.183185307179587, "phiDelta": 0.414159265358979},
+                {"id": 78, "type": "tube",
+                 "rMin": 0.0, "rMax": 0.12, "dz": 52.725,
+                 "phiStart": 0.0, "phiDelta": 6.283185307179586},
+                {"id": 79, "type": "union", "left": 77, "right": 78,
+                 "rightTransform": [1,0,0, 0,1,0, 0,0,1, 0,0,0]},
+                {"id": 80, "type": "subtraction", "left": 76, "right": 79,
+                 "rightTransform": [1,0,0, 0,6.123233995736766e-17,1, 0,-1,6.123233995736766e-17, 0,0,0]}
+            ],
+            "materials": [
+                {"id": 1, "name": "CarbonFoam", "density": 0.0}
+            ]
+        }
+    })";
+
+    auto j = nlohmann::json::parse(kSceneJson);
+    SemanticScene scene = j.get<SemanticScene>();
+
+    // Verify shapes loaded correctly.
+    REQUIRE(scene.shapes.contains(SemanticShapeId{80}));
+    REQUIRE(std::holds_alternative<BooleanSubtraction>(scene.shapes.at(SemanticShapeId{80}).data));
+    REQUIRE(std::holds_alternative<TrdShape>(scene.shapes.at(SemanticShapeId{76}).data));
+
+    PrimitiveTessellator tess;
+    TessellationParams params;
+    params.maxSegmentsCircle = 48;
+
+    auto result =
+        tessellateBooleanShape(scene.shapes.at(SemanticShapeId{80}).data, scene, tess, params);
+
+    for (const auto &d : result.diags.items()) {
+        UNSCOPED_INFO(std::format("[{}] {}", d.code, d.message));
+    }
+
+    // Check: no non-manifold warnings should be emitted.
+    bool hasManifoldWarn = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.code == codes::kWarnTessBooleanManifoldFail) {
+            hasManifoldWarn = true;
+        }
+    }
+    REQUIRE_FALSE(hasManifoldWarn);
+
+    REQUIRE_FALSE(result.vertices.empty());
+    REQUIRE_FALSE(result.indices.empty());
 }
 #endif // NH_WITH_BOOLEAN_MESH
 

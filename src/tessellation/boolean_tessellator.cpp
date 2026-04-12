@@ -243,6 +243,17 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const SemanticShapeVari
         return std::nullopt;
     }
 
+    // Trd → hull of 8 vertices (guaranteed watertight)
+    if (const auto *trd = std::get_if<TrdShape>(&shape)) {
+        std::vector<manifold::vec3> pts = {
+            {-trd->dx1, -trd->dy1, -trd->dz}, {trd->dx1, -trd->dy1, -trd->dz},
+            {trd->dx1, trd->dy1, -trd->dz},   {-trd->dx1, trd->dy1, -trd->dz},
+            {-trd->dx2, -trd->dy2, trd->dz},  {trd->dx2, -trd->dy2, trd->dz},
+            {trd->dx2, trd->dy2, trd->dz},    {-trd->dx2, trd->dy2, trd->dz},
+        };
+        return manifold::Manifold::Hull(pts);
+    }
+
     // All other shapes: no built-in available
     return std::nullopt;
 }
