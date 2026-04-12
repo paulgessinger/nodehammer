@@ -437,21 +437,22 @@ TessellationOutput tessellateTrd(const TrdShape &s) {
     const glm::vec3 t2{x2, y2, z};
     const glm::vec3 t3{-x2, y2, z};
 
-    // fn: face normal from three CCW corners of the face.
+    // Face winding follows the same convention as tessellateBox:
+    // each face's vertices go CCW when viewed from outside (outward normal).
     auto fn = [](glm::vec3 a, glm::vec3 b, glm::vec3 c) {
         return glm::normalize(glm::cross(b - a, c - a));
     };
 
-    auto nxp = fn(b1, t1, t2);
-    appendQuad(out, {b1, nxp}, {t1, nxp}, {t2, nxp}, {b2, nxp}); // +X
-    auto nxn = fn(b3, t3, t0);
-    appendQuad(out, {b3, nxn}, {t3, nxn}, {t0, nxn}, {b0, nxn}); // -X
-    auto nyp = fn(b3, b2, t2);
-    appendQuad(out, {b3, nyp}, {b2, nyp}, {t2, nyp}, {t3, nyp}); // +Y
-    auto nyn = fn(b0, t0, t1);
-    appendQuad(out, {b0, nyn}, {t0, nyn}, {t1, nyn}, {b1, nyn});                             // -Y
+    auto nxp = fn(b1, b2, t2);
+    appendQuad(out, {b1, nxp}, {b2, nxp}, {t2, nxp}, {t1, nxp}); // +X
+    auto nxn = fn(b3, b0, t0);
+    appendQuad(out, {b3, nxn}, {b0, nxn}, {t0, nxn}, {t3, nxn}); // -X  (was: b3,t3,t0,b0)
+    auto nyp = fn(b2, b3, t3);
+    appendQuad(out, {b2, nyp}, {b3, nyp}, {t3, nyp}, {t2, nyp}); // +Y  (was: b3,b2,t2,t3)
+    auto nyn = fn(b0, b1, t1);
+    appendQuad(out, {b0, nyn}, {b1, nyn}, {t1, nyn}, {t0, nyn}); // -Y  (was: b0,t0,t1,b1)
     appendQuad(out, {t0, {0, 0, 1}}, {t1, {0, 0, 1}}, {t2, {0, 0, 1}}, {t3, {0, 0, 1}});     // +Z
-    appendQuad(out, {b3, {0, 0, -1}}, {b2, {0, 0, -1}}, {b1, {0, 0, -1}}, {b0, {0, 0, -1}}); // -Z
+    appendQuad(out, {b1, {0, 0, -1}}, {b0, {0, 0, -1}}, {b3, {0, 0, -1}}, {b2, {0, 0, -1}}); // -Z
     return out;
 }
 
