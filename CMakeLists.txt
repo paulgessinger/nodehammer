@@ -17,7 +17,6 @@ option(NODEHAMMER_WITH_TGEO    "Enable TGeo/ROOT importer"        OFF)
 option(NODEHAMMER_WITH_DD4HEP  "Enable DD4hep importer"           OFF)
 option(NODEHAMMER_WITH_GEANT4  "Enable GDML/Geant4 importer"      OFF)
 option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"        OFF)
-option(NODEHAMMER_WITH_BOOLEAN_MESH "Enable Manifold boolean mesh" OFF)
 option(NODEHAMMER_ENABLE_ASAN  "Enable AddressSanitizer"          OFF)
 
 # ── Library target ─────────────────────────────────────────────────────────────
@@ -88,11 +87,8 @@ if(NODEHAMMER_WITH_GEANT4)
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_GEANT4=1)
 endif()
 
-if(NODEHAMMER_WITH_BOOLEAN_MESH)
-    target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
-    target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
-    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_BOOLEAN_MESH=1)
-endif()
+target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
+target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 
 # ── CLI executable ─────────────────────────────────────────────────────────────
 add_executable(nodehammer src/cli/main.cpp)

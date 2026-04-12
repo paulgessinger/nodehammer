@@ -4,9 +4,7 @@
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 
-#ifdef NH_WITH_BOOLEAN_MESH
 #include <nodehammer/tessellation/boolean_tessellator.hpp>
-#endif
 
 #include <glm/gtc/matrix_inverse.hpp>
 
@@ -369,19 +367,11 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 bool isBBoxProxy = false;
                 if (!descSegMap.contains(params.maxSegmentsCircle)) {
                     TessellationOutput tessOut;
-#ifdef NH_WITH_BOOLEAN_MESH
                     if (descIsBoolean) {
                         tessOut = tessellateBooleanShape(descShape.data, scene, tess, params);
                     } else {
                         tessOut = tess.tessellate(descShape.data, params);
                     }
-#else
-                    if (descIsBoolean) {
-                        tessOut = {}; // no manifold support
-                    } else {
-                        tessOut = tess.tessellate(descShape.data, params);
-                    }
-#endif
                     result.diags.append(tessOut.diags);
                     if (descIsBoolean && tessOut.vertices.empty()) {
                         // Boolean tessellation failed — apply fallback.
@@ -505,7 +495,6 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
         // ── Boolean handling ───────────────────────────────────────────────────
         if (isBoolean) {
-#ifdef NH_WITH_BOOLEAN_MESH
             // Check the mesh cache first — same shapeId + segments → same mesh.
             auto &boolSegMap = meshCache[lv.shapeId];
             MeshAssetId boolMid;
@@ -526,7 +515,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     ma.provenance.sourceName = lv.name;
                     result.scene.meshAssets[boolMid] = std::move(ma);
                     boolSegMap[params.maxSegmentsCircle] = boolMid;
-                    boolCacheHit = true; // mark as valid for the binding below
+                    boolCacheHit = true;
                 }
             }
             if (boolCacheHit) {
@@ -539,7 +528,6 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 continue;
             }
             // Manifold failed or produced empty output — fall through to fallback.
-#endif
             switch (rule.fallback) {
             case BooleanFallback::Fail:
                 result.diags.error(

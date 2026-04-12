@@ -7,10 +7,8 @@
 #include <map>
 #include <set>
 
-#ifdef NH_WITH_BOOLEAN_MESH
 #include <nlohmann/json.hpp>
 #include <nodehammer/tessellation/boolean_tessellator.hpp>
-#endif
 
 using namespace nodehammer;
 
@@ -157,7 +155,6 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
 
 // ── Boolean fallback ──────────────────────────────────────────────────────────
 
-#ifdef NH_WITH_BOOLEAN_MESH
 TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mesh",
           "[tessellation][boolean]") {
     // Reproduces the ODD CarbonFiber support shape: a solid partial-phi tube
@@ -241,73 +238,8 @@ TEST_CASE("TessellationPass: boolean subtraction produces geometry via Manifold"
     REQUIRE_FALSE(mesh.vertices.empty());
     REQUIRE_FALSE(mesh.indices.empty());
 }
-#else
-TEST_CASE("TessellationPass: boolean fallback=Skip emits warning, no mesh binding",
-          "[tessellation][pass]") {
-    NHConfig cfg;
-    Rule rule;
-    rule.tessellation = Rule::Tessellation{};
-    rule.tessellation->fallback = BooleanFallback::Skip;
-    cfg.rules.push_back(rule);
 
-    TessellationPass pass{cfg};
-    auto result = pass.lower(makeBooleanScene());
-
-    REQUIRE_FALSE(result.diags.hasErrors());
-
-    bool hasWarn = false;
-    for (const auto &d : result.diags.items()) {
-        if (d.code == codes::kWarnTessBooleanSkipped)
-            hasWarn = true;
-    }
-    REQUIRE(hasWarn);
-
-    // No mesh bindings on the root node
-    REQUIRE(result.scene.nodes.at(result.scene.rootId).meshBindings.empty());
-}
-
-TEST_CASE("TessellationPass: boolean fallback=BBox emits warning and produces a mesh",
-          "[tessellation][pass]") {
-    NHConfig cfg;
-    Rule rule;
-    rule.tessellation = Rule::Tessellation{};
-    rule.tessellation->fallback = BooleanFallback::BBox;
-    cfg.rules.push_back(rule);
-
-    TessellationPass pass{cfg};
-    auto result = pass.lower(makeBooleanScene());
-
-    REQUIRE_FALSE(result.diags.hasErrors());
-
-    bool hasWarn = false;
-    for (const auto &d : result.diags.items()) {
-        if (d.code == codes::kWarnTessBooleanBbox)
-            hasWarn = true;
-    }
-    REQUIRE(hasWarn);
-    REQUIRE_FALSE(result.scene.nodes.at(result.scene.rootId).meshBindings.empty());
-}
-
-TEST_CASE("TessellationPass: boolean fallback=Fail returns error diagnostic",
-          "[tessellation][pass]") {
-    NHConfig cfg;
-    Rule rule;
-    rule.tessellation = Rule::Tessellation{};
-    rule.tessellation->fallback = BooleanFallback::Fail;
-    cfg.rules.push_back(rule);
-
-    TessellationPass pass{cfg};
-    auto result = pass.lower(makeBooleanScene());
-
-    REQUIRE(result.diags.hasErrors());
-    bool hasErr = false;
-    for (const auto &d : result.diags.items()) {
-        if (d.code == codes::kErrTessBooleanFail)
-            hasErr = true;
-    }
-    REQUIRE(hasErr);
-}
-TEST_CASE("BooleanTessellator: ODD CarbonFoam (Trd - (Tube ∪ Tube)) reproducer",
+TEST_CASE("BooleanTessellator: ODD CarbonFoam Trd minus tube union reproducer",
           "[tessellation][boolean]") {
     // Load the exact shapes from a JSON fragment extracted from the ODD scene.
     // This ensures bit-identical shape parameters and IDs.
@@ -376,7 +308,6 @@ TEST_CASE("BooleanTessellator: ODD CarbonFoam (Trd - (Tube ∪ Tube)) reproducer
     REQUIRE_FALSE(result.vertices.empty());
     REQUIRE_FALSE(result.indices.empty());
 }
-#endif // NH_WITH_BOOLEAN_MESH
 
 // ── UnknownShape ──────────────────────────────────────────────────────────────
 

@@ -31,8 +31,7 @@
         "NODEHAMMER_WITH_TGEO": "ON",
         "NODEHAMMER_WITH_DD4HEP": "ON",
         "NODEHAMMER_WITH_GEANT4": "ON",
-        "NODEHAMMER_WITH_GEOMODEL": "ON",
-        "NODEHAMMER_WITH_BOOLEAN_MESH": "OFF"
+        "NODEHAMMER_WITH_GEOMODEL": "ON"
       }
     },
     {
