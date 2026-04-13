@@ -489,24 +489,24 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<uint32_t> logVolIds(N);
     std::vector<uint32_t> transformIndices(N);
     std::vector<uint32_t> parentIds(N);
-    std::vector<uint32_t> childrenOffsets;
-    std::vector<uint32_t> childrenData;
-    std::vector<uint32_t> tagOffsets;
-    std::vector<uint16_t> tagKeyIndices;
-    std::vector<uint16_t> tagValueIndices;
+    std::vector<uint8_t> tagCounts(N);
+    std::vector<fbs::TagRef> tagRefs;
     std::vector<uint8_t> degradation(N);
 
-    childrenOffsets.reserve(N + 1);
-    tagOffsets.reserve(N + 1);
+    std::size_t totalTagCount = 0;
+    for (const auto *node : orderedNodes) {
+        totalTagCount += node->tags.size();
+    }
+    tagRefs.reserve(totalTagCount);
 
     // String tables
     std::unordered_map<std::string, uint32_t> nameMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> nameTableOffsets;
     std::vector<uint32_t> nameIndices(N);
 
-    std::unordered_map<std::string, uint16_t> tagKeyMap;
+    std::unordered_map<std::string, uint8_t> tagKeyMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> tagKeyTableOffsets;
-    std::unordered_map<std::string, uint16_t> tagValueMap;
+    std::unordered_map<std::string, uint8_t> tagValueMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> tagValueTableOffsets;
 
     std::unordered_map<std::string, uint8_t> srcSysMap;
@@ -522,22 +522,24 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         return it->second;
     };
 
-    auto internTagKey = [&](const std::string &s) -> uint16_t {
-        auto [it, inserted] =
-            tagKeyMap.try_emplace(s, static_cast<uint16_t>(tagKeyTableOffsets.size()));
-        if (inserted) {
-            tagKeyTableOffsets.push_back(builder.CreateSharedString(s));
+    auto internTagKey = [&](const std::string &s) -> uint8_t {
+        if (auto it = tagKeyMap.find(s); it != tagKeyMap.end()) {
+            return it->second;
         }
-        return it->second;
+        const auto idx = toU8Checked(tagKeyTableOffsets.size(), "tag-key table index");
+        tagKeyMap.emplace(s, idx);
+        tagKeyTableOffsets.push_back(builder.CreateSharedString(s));
+        return idx;
     };
 
-    auto internTagValue = [&](const std::string &s) -> uint16_t {
-        auto [it, inserted] =
-            tagValueMap.try_emplace(s, static_cast<uint16_t>(tagValueTableOffsets.size()));
-        if (inserted) {
-            tagValueTableOffsets.push_back(builder.CreateSharedString(s));
+    auto internTagValue = [&](const std::string &s) -> uint8_t {
+        if (auto it = tagValueMap.find(s); it != tagValueMap.end()) {
+            return it->second;
         }
-        return it->second;
+        const auto idx = toU8Checked(tagValueTableOffsets.size(), "tag-value table index");
+        tagValueMap.emplace(s, idx);
+        tagValueTableOffsets.push_back(builder.CreateSharedString(s));
+        return idx;
     };
 
     auto internSrcSys = [&](const std::string &s) -> uint8_t {
@@ -561,17 +563,11 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         // Parent
         parentIds[i] = node.parentId ? toU32Checked(node.parentId->value, "parent node id") : 0;
 
-        // Children CSR
-        childrenOffsets.push_back(static_cast<uint32_t>(childrenData.size()));
-        for (const auto &childId : node.children) {
-            childrenData.push_back(toU32Checked(childId.value, "child node id"));
-        }
-
-        // Tags CSR with string table indices
-        tagOffsets.push_back(static_cast<uint32_t>(tagKeyIndices.size()));
+        // Tags: per-node count + flat key/value ref pairs
+        const auto tagCount = node.tags.size();
+        tagCounts[i] = toU8Checked(tagCount, "per-node tag count");
         for (const auto &[k, v] : node.tags) {
-            tagKeyIndices.push_back(internTagKey(k));
-            tagValueIndices.push_back(internTagValue(v));
+            tagRefs.emplace_back(internTagKey(k), internTagValue(v));
         }
 
         srcSysIndices[i] = internSrcSys(node.sourceSystem);
@@ -583,10 +579,6 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         }
         degradation[i] = static_cast<uint8_t>(degr);
     }
-    // CSR sentinels
-    childrenOffsets.push_back(static_cast<uint32_t>(childrenData.size()));
-    tagOffsets.push_back(static_cast<uint32_t>(tagKeyIndices.size()));
-
     // Build NodeColumns
     auto ncIdsVec = builder.CreateVector(nodeIds);
     auto ncLogVolIdsVec = builder.CreateVector(logVolIds);
@@ -594,22 +586,18 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto ncNameIndicesVec = builder.CreateVector(nameIndices);
     auto ncTransformIndicesVec = builder.CreateVector(transformIndices);
     auto ncParentIdsVec = builder.CreateVector(parentIds);
-    auto ncChildrenOffsetsVec = builder.CreateVector(childrenOffsets);
-    auto ncChildrenDataVec = builder.CreateVector(childrenData);
-    auto ncTagOffsetsVec = builder.CreateVector(tagOffsets);
+    auto ncTagCountsVec = builder.CreateVector(tagCounts);
     auto ncTagKeyTableVec = builder.CreateVector(tagKeyTableOffsets);
-    auto ncTagKeyIndicesVec = builder.CreateVector(tagKeyIndices);
+    auto ncTagRefsVec = builder.CreateVectorOfStructs(tagRefs);
     auto ncTagValueTableVec = builder.CreateVector(tagValueTableOffsets);
-    auto ncTagValueIndicesVec = builder.CreateVector(tagValueIndices);
     auto ncSrcSysTableVec = builder.CreateVector(srcSysTableOffsets);
     auto ncSrcSysIndicesVec = builder.CreateVector(srcSysIndices);
     auto ncDegradationVec = builder.CreateVector(degradation);
 
     auto nodeColumns = fbs::CreateNodeColumns(
         builder, ncIdsVec, ncLogVolIdsVec, ncNameTableVec, ncNameIndicesVec, ncTransformIndicesVec,
-        ncParentIdsVec, ncChildrenOffsetsVec, ncChildrenDataVec, ncTagOffsetsVec, ncTagKeyTableVec,
-        ncTagKeyIndicesVec, ncTagValueTableVec, ncTagValueIndicesVec, ncSrcSysTableVec,
-        ncSrcSysIndicesVec, ncDegradationVec);
+        ncParentIdsVec, ncTagCountsVec, ncTagKeyTableVec, ncTagRefsVec, ncTagValueTableVec,
+        ncSrcSysTableVec, ncSrcSysIndicesVec, ncDegradationVec);
 
     auto tpRotationsVec = builder.CreateVector(transformPool.rotations);
     auto tpTranslationsVec = builder.CreateVector(transformPool.translations);
@@ -700,22 +688,23 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         const auto *nameIndices = nc->name_indices();
         const auto *transformIndices = nc->transform_indices();
         const auto *parentIdsVec = nc->parent_ids();
-        const auto *cOffsets = nc->children_offsets();
-        const auto *cData = nc->children_data();
-        const auto *tOffsets = nc->tag_offsets();
+        const auto *tagCounts = nc->tag_counts();
         const auto *tkTable = nc->tag_key_table();
-        const auto *tkIndices = nc->tag_key_indices();
+        const auto *tagRefs = nc->tag_refs();
         const auto *tvTable = nc->tag_value_table();
-        const auto *tvIndices = nc->tag_value_indices();
         const auto *ssTable = nc->source_system_table();
         const auto *ssIndices = nc->source_system_indices();
         const auto *degrad = nc->degradation();
+        std::vector<SemanticNodeId> nodeOrder;
 
         if (ids) {
             const auto N = ids->size();
+            nodeOrder.reserve(N);
+            flatbuffers::uoffset_t tagCursor = 0;
             for (flatbuffers::uoffset_t i = 0; i < N; ++i) {
                 SemanticNode node;
                 node.id = SemanticNodeId{ids->Get(i)};
+                nodeOrder.push_back(node.id);
 
                 // Name from string table
                 if (nameTable && nameIndices) {
@@ -744,23 +733,19 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                     }
                 }
 
-                // Children (CSR)
-                if (cOffsets && cData) {
-                    auto begin = cOffsets->Get(i);
-                    auto end = cOffsets->Get(i + 1);
-                    node.children.reserve(end - begin);
-                    for (auto j = begin; j < end; ++j) {
-                        node.children.push_back(SemanticNodeId{cData->Get(j)});
-                    }
-                }
-
-                // Tags (CSR with string tables)
-                if (tOffsets && tkTable && tkIndices && tvTable && tvIndices) {
-                    auto begin = tOffsets->Get(i);
-                    auto end = tOffsets->Get(i + 1);
-                    for (auto j = begin; j < end; ++j) {
-                        auto ki = tkIndices->Get(j);
-                        auto vi = tvIndices->Get(j);
+                // Tags (count + inline key/value ref pairs)
+                if (tagCounts && tkTable && tagRefs && tvTable) {
+                    const auto count = tagCounts->Get(i);
+                    for (flatbuffers::uoffset_t j = 0; j < count; ++j) {
+                        if (tagCursor >= tagRefs->size()) {
+                            break;
+                        }
+                        const auto *tr = tagRefs->Get(tagCursor++);
+                        if (!tr) {
+                            continue;
+                        }
+                        auto ki = tr->key();
+                        auto vi = tr->value();
                         if (ki < tkTable->size() && vi < tvTable->size()) {
                             auto *k = tkTable->Get(ki);
                             auto *v = tvTable->Get(vi);
@@ -791,6 +776,14 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                 scene.nodes[node.id] = std::move(node);
             }
         }
+
+        // Reconstruct children lists from parent links.
+        for (const auto id : nodeOrder) {
+            const auto &node = scene.nodes.at(id);
+            if (node.parentId && scene.nodes.contains(*node.parentId)) {
+                scene.nodes.at(*node.parentId).children.push_back(id);
+            }
+        }
     }
 
     return scene;
@@ -804,12 +797,10 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
     report.materialCount = scene.materials.size();
 
     TransformPoolBuild transformPool;
-    std::size_t childEdgeCount = 0;
     std::size_t tagCount = 0;
     for (const auto &[id, node] : scene.nodes) {
         (void)id;
         transformPool.internTransform(node.localTransform);
-        childEdgeCount += node.children.size();
         tagCount += node.tags.size();
     }
 
@@ -856,11 +847,8 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
     push("nodes.name_indices", report.nodeCount * sizeof(uint32_t));
     push("nodes.transform_indices", report.nodeCount * sizeof(uint32_t));
     push("nodes.parent_ids", report.nodeCount * sizeof(uint32_t));
-    push("nodes.children_offsets", (report.nodeCount + 1) * sizeof(uint32_t));
-    push("nodes.children_data", childEdgeCount * sizeof(uint32_t));
-    push("nodes.tag_offsets", (report.nodeCount + 1) * sizeof(uint32_t));
-    push("nodes.tag_key_indices", tagCount * sizeof(uint16_t));
-    push("nodes.tag_value_indices", tagCount * sizeof(uint16_t));
+    push("nodes.tag_counts", report.nodeCount * sizeof(uint8_t));
+    push("nodes.tag_refs", tagCount * 2 * sizeof(uint8_t));
     push("nodes.source_system_indices", report.nodeCount * sizeof(uint8_t));
     push("nodes.degradation", report.nodeCount * sizeof(uint8_t));
 
@@ -894,6 +882,7 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
     os << std::format("semantic flatbuffer size report\n"
                       "  nodes={} log_vols={} daughters={} shapes={} (boolean={}) materials={}\n"
                       "  unique transforms: {} rows (rotations={}, translations={})\n"
+                      "  topology storage: parent_ids only (children reconstructed on load)\n"
                       "  estimated vector payload: {} ({})\n",
                       report.nodeCount, report.logicalVolumeCount, report.daughterPlacementCount,
                       report.shapeCount, report.booleanShapeCount, report.materialCount,

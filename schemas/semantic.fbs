@@ -20,6 +20,11 @@ struct Section {
     r_max:double;
 }
 
+struct TagRef {
+    key:uint8;
+    value:uint8;
+}
+
 // --- Shape tables ---
 
 table BoxShape       { dx:double; dy:double; dz:double; }
@@ -114,20 +119,12 @@ table NodeColumns {
     // Parent: 0 = no parent (root node).
     parent_ids:   [uint32];
 
-    // Children as CSR (compressed sparse row):
-    //   children of node i are children_data[children_offsets[i] .. children_offsets[i+1])
-    //   children_offsets has length N+1 (sentinel at end).
-    children_offsets: [uint32];
-    children_data:    [uint32];
-
-    // Tags as CSR with string tables for keys and values:
-    //   tags for node i span [tag_offsets[i] .. tag_offsets[i+1])
-    //   tag_key_indices/tag_value_indices index into their respective tables.
-    tag_offsets:       [uint32];
+    // Tags per node: tag_counts[i] entries in tag_refs.
+    // Decoder walks nodes in order with a running cursor over tag_refs.
+    tag_counts:        [uint8];
     tag_key_table:     [string];
-    tag_key_indices:   [uint16];
+    tag_refs:          [TagRef];
     tag_value_table:   [string];
-    tag_value_indices: [uint16];
 
     // Source system: index into a small string table.
     source_system_table:   [string];
@@ -150,5 +147,5 @@ table SemanticScene {
 }
 
 root_type SemanticScene;
-file_identifier "NHS3";
+file_identifier "NHS5";
 file_extension "nhb";
