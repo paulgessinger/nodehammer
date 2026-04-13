@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace nodehammer {
 
@@ -403,12 +404,34 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
               [](const SemanticNode *a, const SemanticNode *b) { return a->id < b->id; });
     const auto N = orderedNodes.size();
 
+    // Remap logical volume IDs to a dense local range [1..M].
+    std::vector<SemanticLogVolId> orderedLogVolIds;
+    orderedLogVolIds.reserve(scene.logVols.size());
+    for (const auto &[id, lv] : scene.logVols) {
+        (void)lv;
+        orderedLogVolIds.push_back(id);
+    }
+    std::sort(orderedLogVolIds.begin(), orderedLogVolIds.end());
+
+    std::unordered_map<SemanticLogVolId, uint32_t> logVolIdRemap;
+    logVolIdRemap.reserve(orderedLogVolIds.size());
+    for (std::size_t i = 0; i < orderedLogVolIds.size(); ++i) {
+        logVolIdRemap.emplace(orderedLogVolIds[i], toU32Checked(i + 1, "logvol remap index"));
+    }
+
+    auto remapLogVolId = [&](SemanticLogVolId id, std::string_view what) -> uint32_t {
+        if (const auto it = logVolIdRemap.find(id); it != logVolIdRemap.end()) {
+            return it->second;
+        }
+        throw std::runtime_error(std::format("{} {} missing from logvol remap", what, id.value));
+    };
+
     // Pre-intern all transforms globally so indices are stable across sections.
     for (const auto *node : orderedNodes) {
         transformPool.internTransform(node->localTransform);
     }
-    for (const auto &[id, lv] : scene.logVols) {
-        (void)id;
+    for (const auto id : orderedLogVolIds) {
+        const auto &lv = scene.logVols.at(id);
         for (const auto &d : lv.daughters) {
             transformPool.internTransform(d.localTransform);
         }
@@ -457,7 +480,8 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     // ── Logical Volumes ─────────────────────────────────────────────────────
     std::vector<flatbuffers::Offset<fbs::LogicalVolume>> lvOffsets;
     lvOffsets.reserve(scene.logVols.size());
-    for (const auto &[id, lv] : scene.logVols) {
+    for (const auto id : orderedLogVolIds) {
+        const auto &lv = scene.logVols.at(id);
         auto nameOff = builder.CreateSharedString(lv.name);
 
         std::vector<flatbuffers::Offset<fbs::DaughterPlacement>> daughterOffsets;
@@ -466,7 +490,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
             auto dNameOff = builder.CreateSharedString(d.name);
             const auto dTf = transformPool.internTransform(d.localTransform);
             auto dOff = fbs::CreateDaughterPlacement(
-                builder, dNameOff, toU32Checked(d.logVolId.value, "logvol id"), dTf);
+                builder, dNameOff, remapLogVolId(d.logVolId, "daughter logvol"), dTf);
             daughterOffsets.push_back(dOff);
         }
 
@@ -476,8 +500,8 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                       flatbuffers::Vector<flatbuffers::Offset<fbs::DaughterPlacement>>>{}
                 : builder.CreateVector(daughterOffsets);
 
-        auto o = fbs::CreateLogicalVolume(builder, toU32Checked(lv.id.value, "logvol id"), nameOff,
-                                          toU32Checked(lv.shapeId.value, "shape id"),
+        auto o = fbs::CreateLogicalVolume(builder, remapLogVolId(lv.id, "logical volume id"),
+                                          nameOff, toU32Checked(lv.shapeId.value, "shape id"),
                                           toU32Checked(lv.materialId.value, "material id"),
                                           daughtersVec);
         lvOffsets.push_back(o);
@@ -485,7 +509,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
 
     // ── Nodes (column-oriented) ────────────────────────────────────────────
     // Parallel arrays
-    std::vector<uint32_t> logVolIds(N);
+    std::vector<uint32_t> logVolIds32(N);
     std::vector<uint32_t> transformIndices(N);
     std::vector<uint32_t> parentIds(N);
     std::vector<uint8_t> tagCounts(N);
@@ -513,6 +537,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<uint8_t> srcSysIndices(N);
     std::unordered_map<SemanticNodeId, uint32_t> nodeIdRemap;
     nodeIdRemap.reserve(N);
+    uint32_t maxNodeLogVolId = 0;
+    uint32_t maxNodeNameIndex = 0;
+    uint32_t maxNodeTransformIndex = 0;
     for (std::size_t i = 0; i < N; ++i) {
         nodeIdRemap.emplace(orderedNodes[i]->id, static_cast<uint32_t>(i + 1));
     }
@@ -560,8 +587,11 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         const auto &node = *orderedNodes[i];
 
         nameIndices[i] = internName(node.name);
-        logVolIds[i] = toU32Checked(node.logVolId.value, "logvol id");
+        maxNodeNameIndex = std::max(maxNodeNameIndex, nameIndices[i]);
+        logVolIds32[i] = remapLogVolId(node.logVolId, "node logvol");
+        maxNodeLogVolId = std::max(maxNodeLogVolId, logVolIds32[i]);
         transformIndices[i] = transformPool.internTransform(node.localTransform);
+        maxNodeTransformIndex = std::max(maxNodeTransformIndex, transformIndices[i]);
 
         // Parent
         if (node.parentId) {
@@ -592,10 +622,56 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         degradation[i] = static_cast<uint8_t>(degr);
     }
     // Build NodeColumns
-    auto ncLogVolIdsVec = builder.CreateVector(logVolIds);
+    const bool useU16LogVolIds = maxNodeLogVolId <= std::numeric_limits<uint16_t>::max();
+    fbs::LogVolIdWidth logVolIdWidth =
+        useU16LogVolIds ? fbs::LogVolIdWidth_U16 : fbs::LogVolIdWidth_U32;
+
+    flatbuffers::Offset<flatbuffers::Vector<uint16_t>> ncLogVolIdsU16Vec;
+    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> ncLogVolIdsU32Vec;
+    std::vector<uint16_t> logVolIds16;
+    if (useU16LogVolIds) {
+        logVolIds16.reserve(logVolIds32.size());
+        for (const auto id : logVolIds32) {
+            logVolIds16.push_back(static_cast<uint16_t>(id));
+        }
+        ncLogVolIdsU16Vec = builder.CreateVector(logVolIds16);
+    } else {
+        ncLogVolIdsU32Vec = builder.CreateVector(logVolIds32);
+    }
+
+    const bool useU16NameIndices = maxNodeNameIndex <= std::numeric_limits<uint16_t>::max();
+    fbs::IndexWidth nameIndexWidth = useU16NameIndices ? fbs::IndexWidth_U16 : fbs::IndexWidth_U32;
+    flatbuffers::Offset<flatbuffers::Vector<uint16_t>> ncNameIndicesU16Vec;
+    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> ncNameIndicesU32Vec;
+    std::vector<uint16_t> nameIndices16;
+    if (useU16NameIndices) {
+        nameIndices16.reserve(nameIndices.size());
+        for (const auto idx : nameIndices) {
+            nameIndices16.push_back(static_cast<uint16_t>(idx));
+        }
+        ncNameIndicesU16Vec = builder.CreateVector(nameIndices16);
+    } else {
+        ncNameIndicesU32Vec = builder.CreateVector(nameIndices);
+    }
+
+    const bool useU16TransformIndices =
+        maxNodeTransformIndex <= std::numeric_limits<uint16_t>::max();
+    fbs::IndexWidth transformIndexWidth =
+        useU16TransformIndices ? fbs::IndexWidth_U16 : fbs::IndexWidth_U32;
+    flatbuffers::Offset<flatbuffers::Vector<uint16_t>> ncTransformIndicesU16Vec;
+    flatbuffers::Offset<flatbuffers::Vector<uint32_t>> ncTransformIndicesU32Vec;
+    std::vector<uint16_t> transformIndices16;
+    if (useU16TransformIndices) {
+        transformIndices16.reserve(transformIndices.size());
+        for (const auto idx : transformIndices) {
+            transformIndices16.push_back(static_cast<uint16_t>(idx));
+        }
+        ncTransformIndicesU16Vec = builder.CreateVector(transformIndices16);
+    } else {
+        ncTransformIndicesU32Vec = builder.CreateVector(transformIndices);
+    }
+
     auto ncNameTableVec = builder.CreateVector(nameTableOffsets);
-    auto ncNameIndicesVec = builder.CreateVector(nameIndices);
-    auto ncTransformIndicesVec = builder.CreateVector(transformIndices);
     auto ncParentIdsVec = builder.CreateVector(parentIds);
     auto ncTagCountsVec = builder.CreateVector(tagCounts);
     auto ncTagKeyTableVec = builder.CreateVector(tagKeyTableOffsets);
@@ -606,9 +682,11 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto ncDegradationVec = builder.CreateVector(degradation);
 
     auto nodeColumns = fbs::CreateNodeColumns(
-        builder, ncLogVolIdsVec, ncNameTableVec, ncNameIndicesVec, ncTransformIndicesVec,
-        ncParentIdsVec, ncTagCountsVec, ncTagKeyTableVec, ncTagRefsVec, ncTagValueTableVec,
-        ncSrcSysTableVec, ncSrcSysIndicesVec, ncDegradationVec);
+        builder, logVolIdWidth, ncLogVolIdsU16Vec, ncLogVolIdsU32Vec, ncNameTableVec,
+        nameIndexWidth, ncNameIndicesU16Vec, ncNameIndicesU32Vec, transformIndexWidth,
+        ncTransformIndicesU16Vec, ncTransformIndicesU32Vec, ncParentIdsVec, ncTagCountsVec,
+        ncTagKeyTableVec, ncTagRefsVec, ncTagValueTableVec, ncSrcSysTableVec, ncSrcSysIndicesVec,
+        ncDegradationVec);
 
     auto tpRotationsVec = builder.CreateVector(transformPool.rotations);
     auto tpTranslationsVec = builder.CreateVector(transformPool.translations);
@@ -698,10 +776,16 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
 
     // ── Nodes (column-oriented) ────────────────────────────────────────────
     if (const auto *nc = fb.nodes()) {
-        const auto *logVolIds = nc->log_vol_ids();
+        const auto *logVolIdsU16 = nc->log_vol_ids_u16();
+        const auto *logVolIdsU32 = nc->log_vol_ids_u32();
+        const auto logVolIdWidth = nc->log_vol_id_width();
         const auto *nameTable = nc->name_table();
-        const auto *nameIndices = nc->name_indices();
-        const auto *transformIndices = nc->transform_indices();
+        const auto *nameIndicesU16 = nc->name_indices_u16();
+        const auto *nameIndicesU32 = nc->name_indices_u32();
+        const auto nameIndexWidth = nc->name_index_width();
+        const auto *transformIndicesU16 = nc->transform_indices_u16();
+        const auto *transformIndicesU32 = nc->transform_indices_u32();
+        const auto transformIndexWidth = nc->transform_index_width();
         const auto *parentIdsVec = nc->parent_ids();
         const auto *tagCounts = nc->tag_counts();
         const auto *tkTable = nc->tag_key_table();
@@ -715,12 +799,18 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         std::size_t N = 0;
         if (parentIdsVec) {
             N = parentIdsVec->size();
-        } else if (transformIndices) {
-            N = transformIndices->size();
-        } else if (nameIndices) {
-            N = nameIndices->size();
-        } else if (logVolIds) {
-            N = logVolIds->size();
+        } else if (transformIndicesU32) {
+            N = transformIndicesU32->size();
+        } else if (transformIndicesU16) {
+            N = transformIndicesU16->size();
+        } else if (nameIndicesU32) {
+            N = nameIndicesU32->size();
+        } else if (nameIndicesU16) {
+            N = nameIndicesU16->size();
+        } else if (logVolIdsU32) {
+            N = logVolIdsU32->size();
+        } else if (logVolIdsU16) {
+            N = logVolIdsU16->size();
         }
 
         if (N > 0) {
@@ -732,8 +822,17 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                 nodeOrder.push_back(node.id);
 
                 // Name from string table
-                if (nameTable && nameIndices) {
-                    auto idx = nameIndices->Get(i);
+                if (nameTable) {
+                    uint32_t idx = 0;
+                    if (nameIndexWidth == fbs::IndexWidth_U16) {
+                        if (nameIndicesU16 && i < nameIndicesU16->size()) {
+                            idx = nameIndicesU16->Get(i);
+                        }
+                    } else {
+                        if (nameIndicesU32 && i < nameIndicesU32->size()) {
+                            idx = nameIndicesU32->Get(i);
+                        }
+                    }
                     if (idx < nameTable->size()) {
                         auto *s = nameTable->Get(idx);
                         if (s) {
@@ -742,12 +841,32 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                     }
                 }
 
-                node.logVolId = SemanticLogVolId{logVolIds ? logVolIds->Get(i) : 0};
+                uint32_t logVolId = 0;
+                if (logVolIdWidth == fbs::LogVolIdWidth_U16) {
+                    if (logVolIdsU16 && i < logVolIdsU16->size()) {
+                        logVolId = logVolIdsU16->Get(i);
+                    }
+                } else {
+                    if (logVolIdsU32 && i < logVolIdsU32->size()) {
+                        logVolId = logVolIdsU32->Get(i);
+                    }
+                }
+                node.logVolId = SemanticLogVolId{logVolId};
 
                 node.localTransform = glm::dmat4{1.0};
-                if (transformIndices) {
+                uint32_t transformIndex = 0;
+                if (transformIndexWidth == fbs::IndexWidth_U16) {
+                    if (transformIndicesU16 && i < transformIndicesU16->size()) {
+                        transformIndex = transformIndicesU16->Get(i);
+                    }
+                } else {
+                    if (transformIndicesU32 && i < transformIndicesU32->size()) {
+                        transformIndex = transformIndicesU32->Get(i);
+                    }
+                }
+                if (transformIndicesU16 || transformIndicesU32) {
                     node.localTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx,
-                                                          poolTfTrlIdx, transformIndices->Get(i));
+                                                          poolTfTrlIdx, transformIndex);
                 }
 
                 // Parent
@@ -823,10 +942,39 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
 
     TransformPoolBuild transformPool;
     std::size_t tagCount = 0;
+    uint32_t maxNodeLogVolId = 0;
+    std::unordered_set<std::string> uniqueNodeNames;
+    uniqueNodeNames.reserve(scene.nodes.size());
+    std::size_t uniqueNodeNameBytes = 0;
+
+    // Mirror serialization: logical-volume IDs are remapped to dense [1..M].
+    std::vector<SemanticLogVolId> orderedLogVolIds;
+    orderedLogVolIds.reserve(scene.logVols.size());
+    for (const auto &[id, lv] : scene.logVols) {
+        (void)lv;
+        orderedLogVolIds.push_back(id);
+    }
+    std::sort(orderedLogVolIds.begin(), orderedLogVolIds.end());
+    std::unordered_map<SemanticLogVolId, uint32_t> logVolIdRemap;
+    logVolIdRemap.reserve(orderedLogVolIds.size());
+    for (std::size_t i = 0; i < orderedLogVolIds.size(); ++i) {
+        logVolIdRemap.emplace(orderedLogVolIds[i], toU32Checked(i + 1, "logvol remap index"));
+    }
+
     for (const auto &[id, node] : scene.nodes) {
         (void)id;
         transformPool.internTransform(node.localTransform);
         tagCount += node.tags.size();
+        if (uniqueNodeNames.emplace(node.name).second) {
+            // FlatBuffers strings are null-terminated UTF-8 payloads.
+            uniqueNodeNameBytes += node.name.size() + 1;
+        }
+        const auto it = logVolIdRemap.find(node.logVolId);
+        if (it == logVolIdRemap.end()) {
+            throw std::runtime_error(std::format("node logvol {} missing from logical volume table",
+                                                 node.logVolId.value));
+        }
+        maxNodeLogVolId = std::max(maxNodeLogVolId, it->second);
     }
 
     for (const auto &[id, lv] : scene.logVols) {
@@ -860,6 +1008,10 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
     report.uniqueRotationCount = transformPool.rotations.size() / 9;
     report.uniqueTranslationCount = transformPool.translations.size() / 3;
     report.uniqueTransformCount = transformPool.transformRotIndices.size();
+    report.nodeLogVolIdsUseU16 = maxNodeLogVolId <= std::numeric_limits<uint16_t>::max();
+    report.nodeNameIndicesUseU16 = uniqueNodeNames.size() <= std::numeric_limits<uint16_t>::max();
+    report.nodeTransformIndicesUseU16 =
+        report.uniqueTransformCount <= std::numeric_limits<uint16_t>::max();
 
     auto push = [&](std::string label, std::size_t bytes) {
         report.entries.push_back({std::move(label), bytes});
@@ -867,9 +1019,16 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
     };
 
     // NodeColumns vectors
-    push("nodes.log_vol_ids", report.nodeCount * sizeof(uint32_t));
-    push("nodes.name_indices", report.nodeCount * sizeof(uint32_t));
-    push("nodes.transform_indices", report.nodeCount * sizeof(uint32_t));
+    push(report.nodeLogVolIdsUseU16 ? "nodes.log_vol_ids_u16" : "nodes.log_vol_ids_u32",
+         report.nodeCount * (report.nodeLogVolIdsUseU16 ? sizeof(uint16_t) : sizeof(uint32_t)));
+    push("nodes.name_table_offsets", uniqueNodeNames.size() * sizeof(uint32_t));
+    push("nodes.name_table_strings", uniqueNodeNameBytes);
+    push(report.nodeNameIndicesUseU16 ? "nodes.name_indices_u16" : "nodes.name_indices_u32",
+         report.nodeCount * (report.nodeNameIndicesUseU16 ? sizeof(uint16_t) : sizeof(uint32_t)));
+    push(report.nodeTransformIndicesUseU16 ? "nodes.transform_indices_u16"
+                                           : "nodes.transform_indices_u32",
+         report.nodeCount *
+             (report.nodeTransformIndicesUseU16 ? sizeof(uint16_t) : sizeof(uint32_t)));
     push("nodes.parent_ids", report.nodeCount * sizeof(uint32_t));
     push("nodes.tag_counts", report.nodeCount * sizeof(uint8_t));
     push("nodes.tag_refs", tagCount * 2 * sizeof(uint8_t));
@@ -903,17 +1062,23 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
               [](const auto &a, const auto &b) { return a.bytes > b.bytes; });
 
     std::ostringstream os;
-    os << std::format("semantic flatbuffer size report\n"
-                      "  nodes={} log_vols={} daughters={} shapes={} (boolean={}) materials={}\n"
-                      "  unique transforms: {} rows (rotations={}, translations={})\n"
-                      "  node ids: remapped to row order (ids column omitted)\n"
-                      "  topology storage: parent_ids only (children reconstructed on load)\n"
-                      "  estimated vector payload: {} ({})\n",
-                      report.nodeCount, report.logicalVolumeCount, report.daughterPlacementCount,
-                      report.shapeCount, report.booleanShapeCount, report.materialCount,
-                      report.uniqueTransformCount, report.uniqueRotationCount,
-                      report.uniqueTranslationCount, report.estimatedVectorPayloadBytes,
-                      formatBytes(report.estimatedVectorPayloadBytes));
+    os << std::format(
+        "semantic flatbuffer size report\n"
+        "  nodes={} log_vols={} daughters={} shapes={} (boolean={}) materials={}\n"
+        "  unique transforms: {} rows (rotations={}, translations={})\n"
+        "  logical-volume ids: remapped to dense local ids\n"
+        "  node log_vol_ids width: {}\n"
+        "  node name_indices width: {}\n"
+        "  node transform_indices width: {}\n"
+        "  node ids: remapped to row order (ids column omitted)\n"
+        "  topology storage: parent_ids only (children reconstructed on load)\n"
+        "  estimated vector payload: {} ({})\n",
+        report.nodeCount, report.logicalVolumeCount, report.daughterPlacementCount,
+        report.shapeCount, report.booleanShapeCount, report.materialCount,
+        report.uniqueTransformCount, report.uniqueRotationCount, report.uniqueTranslationCount,
+        report.nodeLogVolIdsUseU16 ? "u16" : "u32", report.nodeNameIndicesUseU16 ? "u16" : "u32",
+        report.nodeTransformIndicesUseU16 ? "u16" : "u32", report.estimatedVectorPayloadBytes,
+        formatBytes(report.estimatedVectorPayloadBytes));
 
     for (const auto &e : entries) {
         os << std::format("    {:35} {:>12} ({})\n", e.label, e.bytes, formatBytes(e.bytes));

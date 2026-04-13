@@ -43,6 +43,9 @@ struct SemanticFlatbufferSizeReport {
     std::size_t uniqueRotationCount{0};
     std::size_t uniqueTranslationCount{0};
     std::size_t uniqueTransformCount{0};
+    bool nodeLogVolIdsUseU16{false};
+    bool nodeNameIndicesUseU16{false};
+    bool nodeTransformIndicesUseU16{false};
     std::size_t estimatedVectorPayloadBytes{0};
     std::vector<SemanticFlatbufferSizeEntry> entries;
 };
@@ -58,7 +61,7 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
 /// Serialize a SemanticScene to a standalone FlatBuffer byte buffer
-/// (with file identifier "NHS6").
+/// (with file identifier "NHS8").
 std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene);
 
 /// Deserialize a standalone FlatBuffer byte buffer to a SemanticScene.
