@@ -30,7 +30,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb);
 
 /// Serialize a SemanticScene to a standalone FlatBuffer byte buffer
 /// (with file identifier "NHSM").
-std::vector<uint8_t> semanticSceneToBytes(const SemanticScene &scene);
+std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene);
 
 /// Deserialize a standalone FlatBuffer byte buffer to a SemanticScene.
 /// Verifies the buffer and file identifier before parsing.

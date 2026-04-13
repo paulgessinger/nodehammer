@@ -263,21 +263,29 @@ void register_cmd_dump_semantic(CLI::App &app) {
             std::string outputFmt;
             outputFmtOpt->results(outputFmt);
 
+            // Auto-detect format from output extension if not explicitly set
+            std::string outPath;
+            if (*outputOpt) {
+                outputOpt->results(outPath);
+                if (!*outputFmtOpt) {
+                    std::filesystem::path p{outPath};
+                    if (p.extension() == ".nhb") {
+                        outputFmt = "nhb";
+                    }
+                }
+            }
+
             if (outputFmt == "nhb") {
-                std::string outPath;
-                if (!*outputOpt) {
-                    std::println(stderr, "dump-semantic: --output-format nhb requires -o/--output");
+                if (outPath.empty()) {
+                    std::println(stderr, "dump-semantic: nhb format requires -o/--output");
                     return;
                 }
-                outputOpt->results(outPath);
                 auto bytes = nodehammer::semanticSceneToBytes(result.scene);
                 nodehammer::file_io::writeFile(outPath, std::as_bytes(std::span{bytes}));
             } else {
                 nlohmann::json j = result.scene;
                 std::string jsonStr = j.dump(-1);
-                std::string outPath;
-                if (*outputOpt) {
-                    outputOpt->results(outPath);
+                if (!outPath.empty()) {
                     nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
                 } else {
                     std::println("{}", jsonStr);

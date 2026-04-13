@@ -162,7 +162,8 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                 return {fbs::ShapeData_BooleanSubtraction, o.Union()};
             },
             [&](const UnknownShape &s) -> ShapeOffsetResult {
-                auto o = fbs::CreateUnknownShape(builder, builder.CreateString(s.originalType));
+                auto o =
+                    fbs::CreateUnknownShape(builder, builder.CreateSharedString(s.originalType));
                 return {fbs::ShapeData_UnknownShape, o.Union()};
             },
         },
@@ -293,7 +294,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<flatbuffers::Offset<fbs::Material>> matOffsets;
     matOffsets.reserve(scene.materials.size());
     for (const auto &[id, mat] : scene.materials) {
-        auto nameOff = builder.CreateString(mat.name);
+        auto nameOff = builder.CreateSharedString(mat.name);
         fbs::Vec3f color{0.0f, 0.0f, 0.0f};
         bool hasColor = mat.color.has_value();
         if (hasColor) {
@@ -307,12 +308,12 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<flatbuffers::Offset<fbs::LogicalVolume>> lvOffsets;
     lvOffsets.reserve(scene.logVols.size());
     for (const auto &[id, lv] : scene.logVols) {
-        auto nameOff = builder.CreateString(lv.name);
+        auto nameOff = builder.CreateSharedString(lv.name);
 
         std::vector<flatbuffers::Offset<fbs::DaughterPlacement>> daughterOffsets;
         daughterOffsets.reserve(lv.daughters.size());
         for (const auto &d : lv.daughters) {
-            auto dNameOff = builder.CreateString(d.name);
+            auto dNameOff = builder.CreateSharedString(d.name);
             const fbs::Mat4x4 *matPtr = nullptr;
             fbs::Mat4x4 mat;
             if (!isIdentity(d.localTransform)) {
@@ -338,7 +339,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<flatbuffers::Offset<fbs::Node>> nodeOffsets;
     nodeOffsets.reserve(scene.nodes.size());
     for (const auto &[id, node] : scene.nodes) {
-        auto nameOff = builder.CreateString(node.name);
+        auto nameOff = builder.CreateSharedString(node.name);
 
         auto childrenVec =
             node.children.empty()
@@ -346,20 +347,24 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                 : builder.CreateVector(reinterpret_cast<const uint64_t *>(node.children.data()),
                                        node.children.size());
 
-        auto originalPathOff = builder.CreateString(node.originalPath);
+        // originalPath is NOT serialized — it is recomputed after loading
+        // (same as JSON and worldTransform).
 
         std::vector<flatbuffers::Offset<fbs::StringPair>> tagOffsets;
         tagOffsets.reserve(node.tags.size());
         for (const auto &[k, v] : node.tags) {
-            tagOffsets.push_back(
-                fbs::CreateStringPair(builder, builder.CreateString(k), builder.CreateString(v)));
+            tagOffsets.push_back(fbs::CreateStringPair(builder, builder.CreateSharedString(k),
+                                                       builder.CreateSharedString(v)));
         }
         auto tagsVec =
             tagOffsets.empty()
                 ? flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fbs::StringPair>>>{}
                 : builder.CreateVector(tagOffsets);
 
-        auto sourceSystemOff = builder.CreateString(node.sourceSystem);
+        // Only create string offsets for non-empty strings
+        auto sourceSystemOff = node.sourceSystem.empty()
+                                   ? flatbuffers::Offset<flatbuffers::String>{}
+                                   : builder.CreateSharedString(node.sourceSystem);
 
         const fbs::Mat4x4 *matPtr = nullptr;
         fbs::Mat4x4 mat;
@@ -368,16 +373,35 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
             matPtr = &mat;
         }
 
-        auto o = fbs::CreateNode(builder, node.id.value, nameOff, node.logVolId.value, matPtr,
-                                 node.parentId.has_value(),                // has_parent
-                                 node.parentId ? node.parentId->value : 0, // parent_id
-                                 childrenVec, originalPathOff, tagsVec, sourceSystemOff,
-                                 static_cast<uint32_t>(node.degradation.bits.to_ulong()));
-        nodeOffsets.push_back(o);
+        // Use the builder API to omit default-valued fields
+        fbs::NodeBuilder nb{builder};
+        nb.add_id(node.id.value);
+        nb.add_name(nameOff);
+        nb.add_log_vol_id(node.logVolId.value);
+        if (matPtr != nullptr) {
+            nb.add_local_transform(matPtr);
+        }
+        if (node.parentId.has_value()) {
+            nb.add_has_parent(true);
+            nb.add_parent_id(node.parentId->value);
+        }
+        if (!node.children.empty()) {
+            nb.add_children(childrenVec);
+        }
+        if (!node.tags.empty()) {
+            nb.add_tags(tagsVec);
+        }
+        if (!node.sourceSystem.empty()) {
+            nb.add_source_system(sourceSystemOff);
+        }
+        if (node.degradation.bits.any()) {
+            nb.add_degradation(static_cast<uint32_t>(node.degradation.bits.to_ulong()));
+        }
+        nodeOffsets.push_back(nb.Finish());
     }
 
     // ── Root table ──────────────────────────────────────────────────────────
-    auto sourceFileOff = builder.CreateString(scene.sourceFile);
+    auto sourceFileOff = builder.CreateSharedString(scene.sourceFile);
     auto nodesVec = builder.CreateVector(nodeOffsets);
     auto logVolsVec = builder.CreateVector(lvOffsets);
     auto shapesVec = builder.CreateVector(shapeOffsets);
@@ -458,7 +482,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                     node.children.push_back(SemanticNodeId{childId});
                 }
             }
-            node.originalPath = fbNode->original_path() ? fbNode->original_path()->str() : "";
+            // originalPath is recomputed after loading (not serialized).
             if (fbNode->tags()) {
                 for (const auto *pair : *fbNode->tags()) {
                     if (pair->key() && pair->value()) {
@@ -478,13 +502,14 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
-std::vector<uint8_t> semanticSceneToBytes(const SemanticScene &scene) {
+std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene) {
     flatbuffers::FlatBufferBuilder builder{1024};
     auto root = semanticSceneToFlatBuffer(builder, scene);
     fbs::FinishSemanticSceneBuffer(builder, root);
     auto *ptr = builder.GetBufferPointer();
     auto size = builder.GetSize();
-    return {ptr, ptr + size};
+    auto span = std::as_bytes(std::span{ptr, size});
+    return std::vector<std::byte>(span.begin(), span.end());
 }
 
 SemanticScene semanticSceneFromBytes(std::span<const std::byte> buf) {
