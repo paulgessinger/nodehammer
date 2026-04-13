@@ -106,7 +106,6 @@ table TransformPool {
 
 table NodeColumns {
     // Parallel arrays — index i corresponds to node i.
-    ids:          [uint32];
     log_vol_ids:  [uint32];
 
     // Node names: index into a string table.
@@ -137,6 +136,7 @@ table NodeColumns {
 // --- Scene (root) ---
 
 table SemanticScene {
+    // Remapped node ID in [1..N], where node i in columns has ID i+1.
     root_id:uint32;
     source_file:string;
     transforms:TransformPool;
@@ -147,5 +147,5 @@ table SemanticScene {
 }
 
 root_type SemanticScene;
-file_identifier "NHS5";
+file_identifier "NHS6";
 file_extension "nhb";

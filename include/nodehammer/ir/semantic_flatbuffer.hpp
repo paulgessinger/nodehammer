@@ -58,7 +58,7 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
 /// Serialize a SemanticScene to a standalone FlatBuffer byte buffer
-/// (with file identifier "NHS5").
+/// (with file identifier "NHS6").
 std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene);
 
 /// Deserialize a standalone FlatBuffer byte buffer to a SemanticScene.

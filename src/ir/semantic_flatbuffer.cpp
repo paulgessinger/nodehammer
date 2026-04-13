@@ -485,7 +485,6 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
 
     // ── Nodes (column-oriented) ────────────────────────────────────────────
     // Parallel arrays
-    std::vector<uint32_t> nodeIds(N);
     std::vector<uint32_t> logVolIds(N);
     std::vector<uint32_t> transformIndices(N);
     std::vector<uint32_t> parentIds(N);
@@ -512,6 +511,11 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::unordered_map<std::string, uint8_t> srcSysMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> srcSysTableOffsets;
     std::vector<uint8_t> srcSysIndices(N);
+    std::unordered_map<SemanticNodeId, uint32_t> nodeIdRemap;
+    nodeIdRemap.reserve(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        nodeIdRemap.emplace(orderedNodes[i]->id, static_cast<uint32_t>(i + 1));
+    }
 
     auto internName = [&](const std::string &s) -> uint32_t {
         auto [it, inserted] =
@@ -555,13 +559,21 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     for (std::size_t i = 0; i < N; ++i) {
         const auto &node = *orderedNodes[i];
 
-        nodeIds[i] = toU32Checked(node.id.value, "node id");
         nameIndices[i] = internName(node.name);
         logVolIds[i] = toU32Checked(node.logVolId.value, "logvol id");
         transformIndices[i] = transformPool.internTransform(node.localTransform);
 
         // Parent
-        parentIds[i] = node.parentId ? toU32Checked(node.parentId->value, "parent node id") : 0;
+        if (node.parentId) {
+            if (auto it = nodeIdRemap.find(*node.parentId); it != nodeIdRemap.end()) {
+                parentIds[i] = it->second;
+            } else {
+                throw std::runtime_error(
+                    std::format("parent node id {} missing from node remap", node.parentId->value));
+            }
+        } else {
+            parentIds[i] = 0;
+        }
 
         // Tags: per-node count + flat key/value ref pairs
         const auto tagCount = node.tags.size();
@@ -580,7 +592,6 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         degradation[i] = static_cast<uint8_t>(degr);
     }
     // Build NodeColumns
-    auto ncIdsVec = builder.CreateVector(nodeIds);
     auto ncLogVolIdsVec = builder.CreateVector(logVolIds);
     auto ncNameTableVec = builder.CreateVector(nameTableOffsets);
     auto ncNameIndicesVec = builder.CreateVector(nameIndices);
@@ -595,7 +606,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto ncDegradationVec = builder.CreateVector(degradation);
 
     auto nodeColumns = fbs::CreateNodeColumns(
-        builder, ncIdsVec, ncLogVolIdsVec, ncNameTableVec, ncNameIndicesVec, ncTransformIndicesVec,
+        builder, ncLogVolIdsVec, ncNameTableVec, ncNameIndicesVec, ncTransformIndicesVec,
         ncParentIdsVec, ncTagCountsVec, ncTagKeyTableVec, ncTagRefsVec, ncTagValueTableVec,
         ncSrcSysTableVec, ncSrcSysIndicesVec, ncDegradationVec);
 
@@ -613,9 +624,14 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto shapesVec = builder.CreateVector(shapeOffsets);
     auto matsVec = builder.CreateVector(matOffsets);
 
-    return fbs::CreateSemanticScene(builder, toU32Checked(scene.rootId.value, "root node id"),
-                                    sourceFileOff, transformPoolTable, nodeColumns, logVolsVec,
-                                    shapesVec, matsVec);
+    const auto rootIt = nodeIdRemap.find(scene.rootId);
+    if (rootIt == nodeIdRemap.end()) {
+        throw std::runtime_error(
+            std::format("root node id {} missing from node remap", scene.rootId.value));
+    }
+
+    return fbs::CreateSemanticScene(builder, rootIt->second, sourceFileOff, transformPoolTable,
+                                    nodeColumns, logVolsVec, shapesVec, matsVec);
 }
 
 SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
@@ -682,7 +698,6 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
 
     // ── Nodes (column-oriented) ────────────────────────────────────────────
     if (const auto *nc = fb.nodes()) {
-        const auto *ids = nc->ids();
         const auto *logVolIds = nc->log_vol_ids();
         const auto *nameTable = nc->name_table();
         const auto *nameIndices = nc->name_indices();
@@ -697,13 +712,23 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         const auto *degrad = nc->degradation();
         std::vector<SemanticNodeId> nodeOrder;
 
-        if (ids) {
-            const auto N = ids->size();
+        std::size_t N = 0;
+        if (parentIdsVec) {
+            N = parentIdsVec->size();
+        } else if (transformIndices) {
+            N = transformIndices->size();
+        } else if (nameIndices) {
+            N = nameIndices->size();
+        } else if (logVolIds) {
+            N = logVolIds->size();
+        }
+
+        if (N > 0) {
             nodeOrder.reserve(N);
             flatbuffers::uoffset_t tagCursor = 0;
             for (flatbuffers::uoffset_t i = 0; i < N; ++i) {
                 SemanticNode node;
-                node.id = SemanticNodeId{ids->Get(i)};
+                node.id = SemanticNodeId{static_cast<uint64_t>(i) + 1u};
                 nodeOrder.push_back(node.id);
 
                 // Name from string table
@@ -842,7 +867,6 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
     };
 
     // NodeColumns vectors
-    push("nodes.ids", report.nodeCount * sizeof(uint32_t));
     push("nodes.log_vol_ids", report.nodeCount * sizeof(uint32_t));
     push("nodes.name_indices", report.nodeCount * sizeof(uint32_t));
     push("nodes.transform_indices", report.nodeCount * sizeof(uint32_t));
@@ -882,6 +906,7 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
     os << std::format("semantic flatbuffer size report\n"
                       "  nodes={} log_vols={} daughters={} shapes={} (boolean={}) materials={}\n"
                       "  unique transforms: {} rows (rotations={}, translations={})\n"
+                      "  node ids: remapped to row order (ids column omitted)\n"
                       "  topology storage: parent_ids only (children reconstructed on load)\n"
                       "  estimated vector payload: {} ({})\n",
                       report.nodeCount, report.logicalVolumeCount, report.daughterPlacementCount,
