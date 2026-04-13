@@ -12,6 +12,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
 
+# ── FlatBuffers code generation ──────────────────────────────────────────────
+set(NH_FBS_SCHEMA ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs)
+set(NH_FBS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/flatbuffers)
+
+add_custom_command(
+    OUTPUT ${NH_FBS_GENERATED_DIR}/semantic_generated.h
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${NH_FBS_GENERATED_DIR}
+    COMMAND flatc --cpp -o ${NH_FBS_GENERATED_DIR} ${NH_FBS_SCHEMA}
+    DEPENDS ${NH_FBS_SCHEMA} flatc
+    COMMENT "Generating FlatBuffers C++ header from semantic.fbs"
+)
+add_custom_target(flatbuffers_generate DEPENDS ${NH_FBS_GENERATED_DIR}/semantic_generated.h)
+
 # ── Optional heavy backends ───────────────────────────────────────────────────
 option(NODEHAMMER_WITH_TGEO    "Enable TGeo/ROOT importer"        OFF)
 option(NODEHAMMER_WITH_DD4HEP  "Enable DD4hep importer"           OFF)
@@ -29,6 +42,8 @@ add_library(nodehammer_lib STATIC
     src/import/synthetic.cpp
     src/import/importer_registry.cpp
     src/import/json_importer.cpp
+    src/import/flatbuffer_importer.cpp
+    src/ir/semantic_flatbuffer.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
     src/tessellation/primitive_tessellator.cpp
@@ -55,7 +70,11 @@ target_link_libraries(nodehammer_lib PUBLIC
     tinygltf
     CLI11::CLI11
     zstd::libzstd_static
+    flatbuffers
 )
+
+add_dependencies(nodehammer_lib flatbuffers_generate)
+target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_FBS_GENERATED_DIR})
 
 nodehammer_set_compiler_options(nodehammer_lib)
 

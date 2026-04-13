@@ -1,0 +1,128 @@
+namespace nodehammer.fbs;
+
+// 4x4 double-precision matrix, column-major (matching GLM memory layout).
+struct Mat4x4 {
+    m00:double; m10:double; m20:double; m30:double;  // column 0
+    m01:double; m11:double; m21:double; m31:double;  // column 1
+    m02:double; m12:double; m22:double; m32:double;  // column 2
+    m03:double; m13:double; m23:double; m33:double;  // column 3
+}
+
+struct Vec3f {
+    x:float; y:float; z:float;
+}
+
+struct DVec3 {
+    x:double; y:double; z:double;
+}
+
+struct Triangle {
+    v0:DVec3;
+    v1:DVec3;
+    v2:DVec3;
+}
+
+struct Section {
+    z:double;
+    r_min:double;
+    r_max:double;
+}
+
+// --- Shape tables ---
+
+table BoxShape       { dx:double; dy:double; dz:double; }
+table TubeShape      { r_min:double; r_max:double; dz:double; phi_start:double; phi_delta:double; }
+table ConeShape      { r_min1:double; r_max1:double; r_min2:double; r_max2:double; dz:double; phi_start:double; phi_delta:double; }
+table TrdShape       { dx1:double; dx2:double; dy1:double; dy2:double; dz:double; }
+table ParaShape      { dx:double; dy:double; dz:double; alpha:double; theta:double; phi:double; }
+table PconShape      { phi_start:double; phi_delta:double; sections:[Section]; }
+table PgonShape      { phi_start:double; phi_delta:double; n_sides:int; sections:[Section]; }
+table TorusShape     { r_min:double; r_max:double; r_tor:double; phi_start:double; phi_delta:double; }
+table TessellatedShape { triangles:[Triangle]; }
+table BooleanUnion        { left:uint64; right:uint64; right_transform:Mat4x4; }
+table BooleanIntersection { left:uint64; right:uint64; right_transform:Mat4x4; }
+table BooleanSubtraction  { left:uint64; right:uint64; right_transform:Mat4x4; }
+table UnknownShape   { original_type:string; }
+
+union ShapeData {
+    BoxShape,
+    TubeShape,
+    ConeShape,
+    TrdShape,
+    ParaShape,
+    PconShape,
+    PgonShape,
+    TorusShape,
+    TessellatedShape,
+    BooleanUnion,
+    BooleanIntersection,
+    BooleanSubtraction,
+    UnknownShape
+}
+
+table Shape {
+    id:uint64;
+    data:ShapeData;
+}
+
+// --- Material ---
+
+table Material {
+    id:uint64;
+    name:string;
+    has_color:bool;
+    color:Vec3f;
+    density:double;
+}
+
+// --- Logical Volume ---
+
+table DaughterPlacement {
+    name:string;
+    log_vol_id:uint64;
+    local_transform:Mat4x4;  // optional: absent = identity
+}
+
+table LogicalVolume {
+    id:uint64;
+    name:string;
+    shape_id:uint64;
+    material_id:uint64;
+    daughters:[DaughterPlacement];
+}
+
+// --- Node ---
+
+table StringPair {
+    key:string;
+    value:string;
+}
+
+table Node {
+    id:uint64;
+    name:string;
+    log_vol_id:uint64;
+    local_transform:Mat4x4;  // optional: absent = identity
+    has_parent:bool;
+    parent_id:uint64;
+    children:[uint64];
+    original_path:string;
+    tags:[StringPair];
+    source_system:string;
+    degradation:uint32;
+}
+
+// --- Scene (root) ---
+
+table SemanticScene {
+    root_id:uint64;
+    source_file:string;
+    nodes:[Node];
+    log_vols:[LogicalVolume];
+    shapes:[Shape];
+    materials:[Material];
+}
+
+root_type SemanticScene;
+file_identifier "NHSM";
+file_extension "nhb";

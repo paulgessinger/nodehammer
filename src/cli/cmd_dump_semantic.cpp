@@ -6,10 +6,12 @@
 #include <nlohmann/json.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
+#include <nodehammer/detail/file_io.hpp>
 #include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/ir/semantic_flatbuffer.hpp>
 #include <nodehammer/markup.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <nodehammer/selection/selector.hpp>
@@ -200,6 +202,9 @@ void register_cmd_dump_semantic(CLI::App &app) {
     auto *colorOpt = sub->add_option("--color", "Color output: auto, always, never")
                          ->default_val("auto")
                          ->check(CLI::IsMember({"auto", "always", "never"}));
+    auto *outputFmtOpt = sub->add_option("--output-format", "Output format: json, nhb")
+                             ->default_val("json")
+                             ->check(CLI::IsMember({"json", "nhb"}));
 
     sub->callback([=] {
         // ── Load config (optional) ─────────────────────────────────────────────
@@ -255,14 +260,28 @@ void register_cmd_dump_semantic(CLI::App &app) {
             nodehammer::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
             printRichTree(result.scene, maxDepth, filter, con);
         } else {
-            nlohmann::json j = result.scene;
-            std::string jsonStr = j.dump(-1);
-            std::string outPath;
-            if (*outputOpt) {
+            std::string outputFmt;
+            outputFmtOpt->results(outputFmt);
+
+            if (outputFmt == "nhb") {
+                std::string outPath;
+                if (!*outputOpt) {
+                    std::println(stderr, "dump-semantic: --output-format nhb requires -o/--output");
+                    return;
+                }
                 outputOpt->results(outPath);
-                nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
+                auto bytes = nodehammer::semanticSceneToBytes(result.scene);
+                nodehammer::file_io::writeFile(outPath, std::as_bytes(std::span{bytes}));
             } else {
-                std::println("{}", jsonStr);
+                nlohmann::json j = result.scene;
+                std::string jsonStr = j.dump(-1);
+                std::string outPath;
+                if (*outputOpt) {
+                    outputOpt->results(outPath);
+                    nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
+                } else {
+                    std::println("{}", jsonStr);
+                }
             }
         }
     });

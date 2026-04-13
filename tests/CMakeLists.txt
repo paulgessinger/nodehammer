@@ -3,6 +3,7 @@ add_executable(nodehammer_tests
     ir/test_semantic_ir.cpp
     ir/test_json_roundtrip.cpp
     ir/test_shape_variant.cpp
+    ir/test_flatbuffer_roundtrip.cpp
     config/test_config_loader.cpp
     config/test_config_writer.cpp
     config/test_config_validator.cpp

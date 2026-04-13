@@ -1,3 +1,4 @@
+#include <nodehammer/import/flatbuffer_importer.hpp>
 #include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/import/json_importer.hpp>
 #include <nodehammer/import/synthetic.hpp>
@@ -111,6 +112,7 @@ ImporterRegistry makeDefaultRegistry() {
     ImporterRegistry reg;
     reg.registerImporter(std::make_unique<SyntheticImporter>());
     reg.registerImporter(std::make_unique<JsonImporter>());
+    reg.registerImporter(std::make_unique<FlatBufferImporter>());
 #ifdef NH_WITH_TGEO
     reg.registerImporter(std::make_unique<TGeoImporter>());
 #endif

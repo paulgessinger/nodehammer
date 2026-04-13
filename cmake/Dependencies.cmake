@@ -123,3 +123,23 @@ FetchContent_Declare(manifold
             target_compile_options(Clipper2 PRIVATE /W0)
         endif()
     endif()
+
+# ── FlatBuffers ──────────────────────────────────────────────────────────────
+FetchContent_Declare(flatbuffers
+    SYSTEM
+    GIT_REPOSITORY https://github.com/google/flatbuffers.git
+    GIT_TAG        v25.12.19
+    FIND_PACKAGE_ARGS 25.12.19
+)
+set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(FLATBUFFERS_BUILD_FLATC ON  CACHE BOOL "" FORCE)
+set(FLATBUFFERS_BUILD_FLATHASH OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(flatbuffers)
+
+if(TARGET flatbuffers)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        target_compile_options(flatbuffers PRIVATE -w)
+    elseif(MSVC)
+        target_compile_options(flatbuffers PRIVATE /W0)
+    endif()
+endif()
