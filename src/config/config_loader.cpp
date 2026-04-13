@@ -385,7 +385,7 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
             continue;
         }
 
-        warnUnknownKeys(*tbl, {"keep_if", "drop_if", "scope", "closure"}, "selection_rules", diags);
+        warnUnknownKeys(*tbl, {"keep_if", "drop_if", "scope"}, "selection_rules", diags);
 
         SelectionAction action{};
         std::optional<PredicateExpr> pred;
@@ -458,23 +458,9 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
             continue;
         }
 
-        ClosurePolicy closure = ClosurePolicy::None;
-        if (auto closureStr = (*tbl)["closure"].value<std::string>()) {
-            auto parsed = parseClosurePolicy(*closureStr);
-            if (!parsed) {
-                diags.error(codes::kErrConfigParse,
-                            std::format("unknown closure '{}'; expected none, ancestors, "
-                                        "descendants, or full",
-                                        *closureStr));
-                continue;
-            }
-            closure = *parsed;
-        }
-
         SelectionRule rule;
         rule.action = action;
         rule.predicate = std::move(*pred);
-        rule.closure = closure;
         if (auto scope = (*tbl)["scope"].value<std::string>()) {
             rule.scope = std::move(*scope);
         }

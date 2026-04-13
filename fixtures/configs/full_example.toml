@@ -12,7 +12,6 @@ roughness = 0.2
 
 [[selection_rules]]
 scope = "/World/Tracker/**"
-closure = "descendants"
 [selection_rules.keep_if]
 type = "name_glob"
 pattern = "*Tracker*"

@@ -73,7 +73,6 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
     // Selection rules
     REQUIRE(cfg.selection.size() == 3);
     REQUIRE(cfg.selection.at(0).action == nodehammer::SelectionAction::KeepIf);
-    REQUIRE(cfg.selection.at(0).closure == nodehammer::ClosurePolicy::Descendants);
     REQUIRE(cfg.selection.at(0).scope == "/World/Tracker/**");
     REQUIRE(
         std::holds_alternative<nodehammer::NameGlobPredicate>(cfg.selection.at(0).predicate.data));
@@ -233,17 +232,6 @@ TEST_CASE("ConfigLoader: unknown predicate type → Error", "[config][loader]") 
 [[selection_rules]]
 [selection_rules.keep_if]
 type = "not_a_real_type"
-)";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
-    REQUIRE(result.diags.hasErrors());
-}
-
-TEST_CASE("ConfigLoader: unknown closure value → Error", "[config][loader]") {
-    constexpr std::string_view toml = R"(
-[[selection_rules]]
-closure = "sideways"
-[selection_rules.keep_if]
-type = "is_leaf"
 )";
     auto result = nodehammer::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());

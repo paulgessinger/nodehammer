@@ -98,14 +98,12 @@ TEST_CASE("ConfigWriter: selection rule with name_glob round-trip", "[config][wr
     rule.action = SelectionAction::KeepIf;
     rule.predicate = PredicateExpr{NameGlobPredicate{"*Tracker*"}};
     rule.scope = "/World/**";
-    rule.closure = ClosurePolicy::Descendants;
     cfg.selection.push_back(rule);
 
     auto rt = roundTrip(cfg);
     REQUIRE(rt.selection.size() == 1);
     REQUIRE(rt.selection[0].action == SelectionAction::KeepIf);
     REQUIRE(rt.selection[0].scope == "/World/**");
-    REQUIRE(rt.selection[0].closure == ClosurePolicy::Descendants);
     REQUIRE(std::holds_alternative<NameGlobPredicate>(rt.selection[0].predicate.data));
     REQUIRE(std::get<NameGlobPredicate>(rt.selection[0].predicate.data).pattern == "*Tracker*");
 }

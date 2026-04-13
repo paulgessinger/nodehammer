@@ -28,8 +28,6 @@ struct SelectionResult {
 ///   - DropIf: predicate true → node is dropped.
 ///   - scope (optional path glob): if set, the rule is only evaluated for nodes
 ///     whose path matches the scope. Nodes outside the scope are unaffected.
-///   - closure: after per-node evaluation, expands each rule's matched seed by
-///     the given policy (None / Ancestors / Descendants / Full).
 ///
 /// Invariants enforced by dryRun:
 ///   - Descendant invariant: if a node is dropped, all descendants are dropped.

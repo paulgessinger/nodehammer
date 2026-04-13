@@ -1,5 +1,4 @@
 #include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/selection/closure.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <nodehammer/selection/selector.hpp>
 
@@ -19,7 +18,6 @@ struct CompiledRule {
     SelectionAction action{};
     std::optional<Predicate> scopePred; // nullopt when rule.scope is absent
     Predicate pred;
-    ClosurePolicy closure{};
 };
 
 std::vector<CompiledRule> compileRules(const std::vector<SelectionRule> &rules) {
@@ -29,7 +27,6 @@ std::vector<CompiledRule> compileRules(const std::vector<SelectionRule> &rules) 
         CompiledRule cr;
         cr.action = r.action;
         cr.pred = compilePredicate(r.predicate);
-        cr.closure = r.closure;
         if (r.scope.has_value()) {
             cr.scopePred = makePathGlobPredicate(*r.scope);
         }
@@ -122,10 +119,9 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
 
     // ── Step 2: evaluate rules in order (last match wins). ────────────────────
     //
-    // For each rule, build a seed of matching node IDs, expand by closure, then
-    // write the rule's action to all IDs in the expanded set. Because we process
-    // rules in order and write unconditionally, a later rule can overwrite an
-    // earlier one — giving last-match-wins semantics.
+    // For each rule, find matching node IDs and write the rule's action.
+    // Because we process rules in order and write unconditionally, a later
+    // rule can overwrite an earlier one — giving last-match-wins semantics.
     for (const auto &cr : compiledRules) {
         std::unordered_set<SemanticNodeId> seed;
 
@@ -146,8 +142,7 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
             seed.insert(id);
         }
 
-        const auto expanded = ClosureExpander::expand(scene, seed, cr.closure);
-        for (const auto &id : expanded) {
+        for (const auto &id : seed) {
             disposition[id] = cr.action;
         }
     }

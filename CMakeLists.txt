@@ -31,7 +31,6 @@ add_library(nodehammer_lib STATIC
     src/import/json_importer.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
-    src/selection/closure.cpp
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
     src/export/gltf_exporter.cpp

@@ -198,15 +198,11 @@ toml::table buildMaterialsTable(const std::vector<MaterialDef> &materials) {
 
 toml::array buildSelectionRulesArray(const std::vector<SelectionRule> &rules) {
     using enum SelectionAction;
-    using enum ClosurePolicy;
     toml::array arr;
     for (const auto &rule : rules) {
         toml::table tbl;
         if (rule.scope) {
             tbl.insert("scope", *rule.scope);
-        }
-        if (rule.closure != None) {
-            tbl.insert("closure", std::string{closurePolicyToString(rule.closure)});
         }
         const auto actionKey = rule.action == KeepIf ? "keep_if" : "drop_if";
         tbl.insert(actionKey, predicateToTable(rule.predicate));

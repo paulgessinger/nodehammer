@@ -7,36 +7,6 @@
 
 namespace nodehammer {
 
-// ── ClosurePolicy ───────────────────────────────────────────────────────────
-
-inline std::string_view closurePolicyToString(ClosurePolicy p) {
-    using enum ClosurePolicy;
-    switch (p) {
-    case None:
-        return "none";
-    case Ancestors:
-        return "ancestors";
-    case Descendants:
-        return "descendants";
-    case Full:
-        return "full";
-    }
-    return "none";
-}
-
-inline std::optional<ClosurePolicy> parseClosurePolicy(std::string_view s) {
-    using enum ClosurePolicy;
-    if (s == "none")
-        return None;
-    if (s == "ancestors")
-        return Ancestors;
-    if (s == "descendants")
-        return Descendants;
-    if (s == "full")
-        return Full;
-    return std::nullopt;
-}
-
 // ── BooleanFallback ─────────────────────────────────────────────────────────
 
 inline std::string_view booleanFallbackToString(BooleanFallback f) {

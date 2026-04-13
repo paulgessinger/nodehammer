@@ -89,7 +89,6 @@ TEST_CASE("SelectionEngine: drop_if name match drops node and its children",
     SelectionRule rule;
     rule.action = SelectionAction::DropIf;
     rule.predicate = PredicateExpr{NameGlobPredicate{"tracker"}};
-    rule.closure = ClosurePolicy::None;
 
     SelectionEngine eng{{rule}};
     auto result = eng.dryRun(scene);
@@ -108,17 +107,20 @@ TEST_CASE("SelectionEngine: keep_if by path glob keeps only matching subtree",
     SelectionRule dropAll;
     dropAll.action = SelectionAction::DropIf;
     dropAll.predicate = PredicateExpr{NameGlobPredicate{"*"}};
-    dropAll.closure = ClosurePolicy::None;
+
+    // Keep root and tracker explicitly (no closure expansion).
+    SelectionRule keepRoot;
+    keepRoot.action = SelectionAction::KeepIf;
+    keepRoot.predicate = PredicateExpr{NameGlobPredicate{"world"}};
 
     SelectionRule keepTracker;
     keepTracker.action = SelectionAction::KeepIf;
     keepTracker.predicate = PredicateExpr{PathGlobPredicate{"/world/tracker"}};
-    keepTracker.closure = ClosurePolicy::Ancestors; // also keep root
 
-    SelectionEngine eng{{dropAll, keepTracker}};
+    SelectionEngine eng{{dropAll, keepRoot, keepTracker}};
     auto result = eng.dryRun(scene);
 
-    // root kept via Ancestors closure, tracker explicitly kept
+    // root and tracker explicitly kept
     REQUIRE(result.kept.contains(rootId));
     REQUIRE(result.kept.contains(trackerId));
     // sensor was dropped by first rule and not re-kept
@@ -232,10 +234,10 @@ TEST_CASE("SelectionEngine: prune garbage-collects unreferenced logVols and mate
     const std::size_t logVolsBefore = scene.logVols.size();
     REQUIRE(logVolsBefore == 3);
 
+    // Drop tracker — sensor is force-dropped via descendant invariant.
     SelectionRule dropTracker;
     dropTracker.action = SelectionAction::DropIf;
     dropTracker.predicate = PredicateExpr{NameGlobPredicate{"tracker"}};
-    dropTracker.closure = ClosurePolicy::Descendants; // also drops sensor
 
     SelectionEngine eng{{dropTracker}};
     eng.prune(scene);
@@ -256,10 +258,10 @@ TEST_CASE("SelectionEngine: prune keeps source daughter logVol closure", "[selec
     scene.logVols.at(worldLv).daughters.push_back({"tracker", trackerLv, glm::dmat4{1.0}});
     scene.logVols.at(trackerLv).daughters.push_back({"sensor", sensorLv, glm::dmat4{1.0}});
 
+    // Drop tracker — sensor is force-dropped via descendant invariant.
     SelectionRule dropTracker;
     dropTracker.action = SelectionAction::DropIf;
     dropTracker.predicate = PredicateExpr{NameGlobPredicate{"tracker"}};
-    dropTracker.closure = ClosurePolicy::Descendants;
 
     SelectionEngine eng{{dropTracker}};
     eng.prune(scene);
