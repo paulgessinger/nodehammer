@@ -1,3 +1,4 @@
+#include <nodehammer/config/config_enums.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/predicate_parser.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
@@ -149,37 +150,6 @@ void warnUnknownKeys(const toml::table &tbl, std::initializer_list<std::string_v
 void warnUnknownKeys(const toml::table &tbl, const std::vector<std::string_view> &known,
                      std::string_view context, DiagnosticList &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
-}
-
-// ── Enum parsers ──────────────────────────────────────────────────────────────
-
-std::optional<ClosurePolicy> parseClosure(std::string_view s) {
-    if (s == "none") {
-        return ClosurePolicy::None;
-    }
-    if (s == "ancestors") {
-        return ClosurePolicy::Ancestors;
-    }
-    if (s == "descendants") {
-        return ClosurePolicy::Descendants;
-    }
-    if (s == "full") {
-        return ClosurePolicy::Full;
-    }
-    return std::nullopt;
-}
-
-std::optional<BooleanFallback> parseFallback(std::string_view s) {
-    if (s == "skip") {
-        return BooleanFallback::Skip;
-    }
-    if (s == "bbox") {
-        return BooleanFallback::BBox;
-    }
-    if (s == "fail") {
-        return BooleanFallback::Fail;
-    }
-    return std::nullopt;
 }
 
 // ── Predicate parser (recursive) ─────────────────────────────────────────────
@@ -358,12 +328,8 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
             }
         }
         if (auto am = (*tbl)["alpha_mode"].value<std::string>()) {
-            if (*am == "opaque") {
-                def.alphaMode = AlphaMode::Opaque;
-            } else if (*am == "mask") {
-                def.alphaMode = AlphaMode::Mask;
-            } else if (*am == "blend") {
-                def.alphaMode = AlphaMode::Blend;
+            if (auto parsed = parseAlphaMode(*am)) {
+                def.alphaMode = *parsed;
             } else {
                 diags.warn(codes::kWarnConfigUnknownKey,
                            std::format("materials.{}: unknown alpha_mode '{}'; "
@@ -494,7 +460,7 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
 
         ClosurePolicy closure = ClosurePolicy::None;
         if (auto closureStr = (*tbl)["closure"].value<std::string>()) {
-            auto parsed = parseClosure(*closureStr);
+            auto parsed = parseClosurePolicy(*closureStr);
             if (!parsed) {
                 diags.error(codes::kErrConfigParse,
                             std::format("unknown closure '{}'; expected none, ancestors, "
@@ -635,7 +601,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
             tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
-                auto parsed = parseFallback(*fallbackStr);
+                auto parsed = parseBooleanFallback(*fallbackStr);
                 if (!parsed) {
                     diags.error(codes::kErrConfigParse,
                                 std::format("unknown fallback '{}'; expected skip, bbox, or fail",

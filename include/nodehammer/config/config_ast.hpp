@@ -13,7 +13,6 @@ namespace nodehammer {
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
-enum class ClosurePolicy { None, Ancestors, Descendants, Full };
 enum class SelectionAction { KeepIf, DropIf };
 enum class BooleanFallback { Skip, BBox, Fail };
 
@@ -116,7 +115,6 @@ struct SelectionRule {
     SelectionAction action{SelectionAction::KeepIf};
     std::optional<std::string> scope; ///< Optional path glob pre-filter
     PredicateExpr predicate{NameGlobPredicate{"*"}};
-    ClosurePolicy closure{ClosurePolicy::None};
 };
 
 /// Free-form extras for export metadata (e.g. glTF extras).
