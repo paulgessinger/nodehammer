@@ -29,7 +29,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb);
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
 /// Serialize a SemanticScene to a standalone FlatBuffer byte buffer
-/// (with file identifier "NHSM").
+/// (with file identifier "NHS2").
 std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene);
 
 /// Deserialize a standalone FlatBuffer byte buffer to a SemanticScene.

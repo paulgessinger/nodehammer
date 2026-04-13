@@ -8,13 +8,36 @@
 #include <bit>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <map>
+#include <string_view>
 #include <stdexcept>
 #include <unordered_map>
 
 namespace nodehammer {
 
 namespace {
+
+uint32_t toU32Checked(uint64_t value, std::string_view what) {
+    if (value > std::numeric_limits<uint32_t>::max()) {
+        throw std::runtime_error(std::format("{} {} exceeds uint32 range", what, value));
+    }
+    return static_cast<uint32_t>(value);
+}
+
+uint16_t toU16Checked(std::size_t value, std::string_view what) {
+    if (value > std::numeric_limits<uint16_t>::max()) {
+        throw std::runtime_error(std::format("{} {} exceeds uint16 range", what, value));
+    }
+    return static_cast<uint16_t>(value);
+}
+
+uint8_t toU8Checked(std::size_t value, std::string_view what) {
+    if (value > std::numeric_limits<uint8_t>::max()) {
+        throw std::runtime_error(std::format("{} {} exceeds uint8 range", what, value));
+    }
+    return static_cast<uint8_t>(value);
+}
 
 // ── Mat4x4 helpers ──────────────────────────────────────────────────────────
 
@@ -141,21 +164,24 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
             [&](const BooleanUnion &s) -> ShapeOffsetResult {
                 auto rot = serializeRotation(builder, s.rightTransform);
                 auto trl = serializeTranslation(builder, s.rightTransform);
-                auto o = fbs::CreateBooleanUnion(builder, s.left.value, s.right.value, rot, trl);
+                auto o = fbs::CreateBooleanUnion(builder, toU32Checked(s.left.value, "shape id"),
+                                                 toU32Checked(s.right.value, "shape id"), rot, trl);
                 return {fbs::ShapeData_BooleanUnion, o.Union()};
             },
             [&](const BooleanIntersection &s) -> ShapeOffsetResult {
                 auto rot = serializeRotation(builder, s.rightTransform);
                 auto trl = serializeTranslation(builder, s.rightTransform);
-                auto o =
-                    fbs::CreateBooleanIntersection(builder, s.left.value, s.right.value, rot, trl);
+                auto o = fbs::CreateBooleanIntersection(
+                    builder, toU32Checked(s.left.value, "shape id"),
+                    toU32Checked(s.right.value, "shape id"), rot, trl);
                 return {fbs::ShapeData_BooleanIntersection, o.Union()};
             },
             [&](const BooleanSubtraction &s) -> ShapeOffsetResult {
                 auto rot = serializeRotation(builder, s.rightTransform);
                 auto trl = serializeTranslation(builder, s.rightTransform);
-                auto o =
-                    fbs::CreateBooleanSubtraction(builder, s.left.value, s.right.value, rot, trl);
+                auto o = fbs::CreateBooleanSubtraction(
+                    builder, toU32Checked(s.left.value, "shape id"),
+                    toU32Checked(s.right.value, "shape id"), rot, trl);
                 return {fbs::ShapeData_BooleanSubtraction, o.Union()};
             },
             [&](const UnknownShape &s) -> ShapeOffsetResult {
@@ -283,7 +309,8 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     shapeOffsets.reserve(scene.shapes.size());
     for (const auto &[id, shape] : scene.shapes) {
         auto [dataType, dataOffset] = serializeShapeVariant(builder, shape.data);
-        auto o = fbs::CreateShape(builder, shape.id.value, dataType, dataOffset);
+        auto o = fbs::CreateShape(builder, toU32Checked(shape.id.value, "shape id"), dataType,
+                                  dataOffset);
         shapeOffsets.push_back(o);
     }
 
@@ -297,7 +324,8 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         if (hasColor) {
             color = fbs::Vec3f{mat.color->x, mat.color->y, mat.color->z};
         }
-        auto o = fbs::CreateMaterial(builder, mat.id.value, nameOff, hasColor, &color, mat.density);
+        auto o = fbs::CreateMaterial(builder, toU32Checked(mat.id.value, "material id"), nameOff,
+                                     hasColor, &color, mat.density);
         matOffsets.push_back(o);
     }
 
@@ -314,7 +342,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
             auto dRot = serializeRotation(builder, d.localTransform);
             auto dTrl = serializeTranslation(builder, d.localTransform);
             auto dOff =
-                fbs::CreateDaughterPlacement(builder, dNameOff, d.logVolId.value, dRot, dTrl);
+                fbs::CreateDaughterPlacement(builder, dNameOff,
+                                             toU32Checked(d.logVolId.value, "logvol id"), dRot,
+                                             dTrl);
             daughterOffsets.push_back(dOff);
         }
 
@@ -324,8 +354,10 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                       flatbuffers::Vector<flatbuffers::Offset<fbs::DaughterPlacement>>>{}
                 : builder.CreateVector(daughterOffsets);
 
-        auto o = fbs::CreateLogicalVolume(builder, lv.id.value, nameOff, lv.shapeId.value,
-                                          lv.materialId.value, daughtersVec);
+        auto o = fbs::CreateLogicalVolume(
+            builder, toU32Checked(lv.id.value, "logvol id"), nameOff,
+            toU32Checked(lv.shapeId.value, "shape id"), toU32Checked(lv.materialId.value, "material id"),
+            daughtersVec);
         lvOffsets.push_back(o);
     }
 
@@ -342,21 +374,21 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     const auto N = orderedNodes.size();
 
     // Parallel arrays
-    std::vector<uint64_t> nodeIds(N);
-    std::vector<uint64_t> logVolIds(N);
-    std::vector<uint32_t> rotIndices(N);
+    std::vector<uint32_t> nodeIds(N);
+    std::vector<uint32_t> logVolIds(N);
+    std::vector<uint16_t> rotIndices(N);
     std::vector<double> rotations; // flattened 3x3 rotation matrices (9 doubles each)
-    std::map<std::array<uint64_t, 9>, uint32_t> rotDedup;
-    std::vector<uint32_t> trlIndices(N);
+    std::map<std::array<uint64_t, 9>, uint16_t> rotDedup;
+    std::vector<uint16_t> trlIndices(N);
     std::vector<double> translations; // flattened translations (3 doubles each)
-    std::map<std::array<uint64_t, 3>, uint32_t> trlDedup;
-    std::vector<uint64_t> parentIds(N);
+    std::map<std::array<uint64_t, 3>, uint16_t> trlDedup;
+    std::vector<uint32_t> parentIds(N);
     std::vector<uint32_t> childrenOffsets;
-    std::vector<uint64_t> childrenData;
+    std::vector<uint32_t> childrenData;
     std::vector<uint32_t> tagOffsets;
     std::vector<uint16_t> tagKeyIndices;
     std::vector<uint16_t> tagValueIndices;
-    std::vector<uint32_t> degradation(N);
+    std::vector<uint8_t> degradation(N);
 
     childrenOffsets.reserve(N + 1);
     tagOffsets.reserve(N + 1);
@@ -375,7 +407,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<flatbuffers::Offset<flatbuffers::String>> srcSysTableOffsets;
     std::vector<uint8_t> srcSysIndices(N);
 
-    static constexpr uint32_t kSentinel = 0xFFFFFFFF;
+    static constexpr uint16_t kSentinel = std::numeric_limits<uint16_t>::max();
 
     auto internName = [&](const std::string &s) -> uint32_t {
         auto [it, inserted] =
@@ -405,20 +437,21 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     };
 
     auto internSrcSys = [&](const std::string &s) -> uint8_t {
-        auto [it, inserted] =
-            srcSysMap.try_emplace(s, static_cast<uint8_t>(srcSysTableOffsets.size()));
-        if (inserted) {
-            srcSysTableOffsets.push_back(builder.CreateSharedString(s));
+        if (auto it = srcSysMap.find(s); it != srcSysMap.end()) {
+            return it->second;
         }
-        return it->second;
+        const auto idx = toU8Checked(srcSysTableOffsets.size(), "source-system table index");
+        srcSysMap.emplace(s, idx);
+        srcSysTableOffsets.push_back(builder.CreateSharedString(s));
+        return idx;
     };
 
     for (std::size_t i = 0; i < N; ++i) {
         const auto &node = *orderedNodes[i];
 
-        nodeIds[i] = node.id.value;
+        nodeIds[i] = toU32Checked(node.id.value, "node id");
         nameIndices[i] = internName(node.name);
-        logVolIds[i] = node.logVolId.value;
+        logVolIds[i] = toU32Checked(node.logVolId.value, "logvol id");
 
         // Rotation (3x3 upper-left of dmat4), deduplicated
         const auto &m = node.localTransform;
@@ -435,8 +468,11 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                         std::bit_cast<uint64_t>(m[col][row]);
                 }
             }
-            auto [it, inserted] =
-                rotDedup.try_emplace(key, static_cast<uint32_t>(rotations.size() / 9));
+            auto [it, inserted] = rotDedup.try_emplace(
+                key, toU16Checked(rotations.size() / 9, "rotation dedup index"));
+            if (inserted && it->second == kSentinel) {
+                throw std::runtime_error("too many unique rotations for uint16 index storage");
+            }
             if (inserted) {
                 for (int col = 0; col < 3; ++col) {
                     for (int row = 0; row < 3; ++row) {
@@ -457,8 +493,11 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                 std::bit_cast<uint64_t>(m[3][1]),
                 std::bit_cast<uint64_t>(m[3][2]),
             };
-            auto [it, inserted] =
-                trlDedup.try_emplace(key, static_cast<uint32_t>(translations.size() / 3));
+            auto [it, inserted] = trlDedup.try_emplace(
+                key, toU16Checked(translations.size() / 3, "translation dedup index"));
+            if (inserted && it->second == kSentinel) {
+                throw std::runtime_error("too many unique translations for uint16 index storage");
+            }
             if (inserted) {
                 translations.push_back(m[3][0]);
                 translations.push_back(m[3][1]);
@@ -468,12 +507,12 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         }
 
         // Parent
-        parentIds[i] = node.parentId ? node.parentId->value : 0;
+        parentIds[i] = node.parentId ? toU32Checked(node.parentId->value, "parent node id") : 0;
 
         // Children CSR
         childrenOffsets.push_back(static_cast<uint32_t>(childrenData.size()));
         for (const auto &childId : node.children) {
-            childrenData.push_back(childId.value);
+            childrenData.push_back(toU32Checked(childId.value, "child node id"));
         }
 
         // Tags CSR with string table indices
@@ -485,7 +524,12 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
 
         srcSysIndices[i] = internSrcSys(node.sourceSystem);
 
-        degradation[i] = static_cast<uint32_t>(node.degradation.bits.to_ulong());
+        const auto degr = node.degradation.bits.to_ulong();
+        if (degr > std::numeric_limits<uint8_t>::max()) {
+            throw std::runtime_error(
+                std::format("degradation bitmask {} exceeds uint8 range", degr));
+        }
+        degradation[i] = static_cast<uint8_t>(degr);
     }
     // CSR sentinels
     childrenOffsets.push_back(static_cast<uint32_t>(childrenData.size()));
@@ -525,8 +569,8 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto shapesVec = builder.CreateVector(shapeOffsets);
     auto matsVec = builder.CreateVector(matOffsets);
 
-    return fbs::CreateSemanticScene(builder, scene.rootId.value, sourceFileOff, nodeColumns,
-                                    logVolsVec, shapesVec, matsVec);
+    return fbs::CreateSemanticScene(builder, toU32Checked(scene.rootId.value, "root node id"),
+                                    sourceFileOff, nodeColumns, logVolsVec, shapesVec, matsVec);
 }
 
 SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
@@ -625,7 +669,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                 node.logVolId = SemanticLogVolId{logVolIds ? logVolIds->Get(i) : 0};
 
                 // Rotation + Translation
-                static constexpr uint32_t kIdentity = 0xFFFFFFFF;
+                static constexpr uint16_t kIdentity = std::numeric_limits<uint16_t>::max();
                 node.localTransform = glm::dmat4{1.0};
                 if (rotIdx && rots) {
                     auto ri = rotIdx->Get(i);
