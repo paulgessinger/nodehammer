@@ -1,13 +1,5 @@
 namespace nodehammer.fbs;
 
-// 4x4 double-precision matrix, column-major (matching GLM memory layout).
-struct Mat4x4 {
-    m00:double; m10:double; m20:double; m30:double;  // column 0
-    m01:double; m11:double; m21:double; m31:double;  // column 1
-    m02:double; m12:double; m22:double; m32:double;  // column 2
-    m03:double; m13:double; m23:double; m33:double;  // column 3
-}
-
 struct Vec3f {
     x:float; y:float; z:float;
 }
@@ -39,9 +31,9 @@ table PconShape      { phi_start:double; phi_delta:double; sections:[Section]; }
 table PgonShape      { phi_start:double; phi_delta:double; n_sides:int; sections:[Section]; }
 table TorusShape     { r_min:double; r_max:double; r_tor:double; phi_start:double; phi_delta:double; }
 table TessellatedShape { triangles:[Triangle]; }
-table BooleanUnion        { left:uint64; right:uint64; right_transform:Mat4x4; }
-table BooleanIntersection { left:uint64; right:uint64; right_transform:Mat4x4; }
-table BooleanSubtraction  { left:uint64; right:uint64; right_transform:Mat4x4; }
+table BooleanUnion        { left:uint64; right:uint64; right_rotation:[double]; right_translation:[double]; }
+table BooleanIntersection { left:uint64; right:uint64; right_rotation:[double]; right_translation:[double]; }
+table BooleanSubtraction  { left:uint64; right:uint64; right_rotation:[double]; right_translation:[double]; }
 table UnknownShape   { original_type:string; }
 
 union ShapeData {
@@ -80,7 +72,8 @@ table Material {
 table DaughterPlacement {
     name:string;
     log_vol_id:uint64;
-    local_transform:Mat4x4;  // optional: absent = identity
+    rotation:[double];     // 9 doubles, column-major 3x3; absent = identity
+    translation:[double];  // 3 doubles; absent = zero
 }
 
 table LogicalVolume {
@@ -91,25 +84,51 @@ table LogicalVolume {
     daughters:[DaughterPlacement];
 }
 
-// --- Node ---
+// --- Nodes (column-oriented) ---
 
-table StringPair {
-    key:string;
-    value:string;
-}
+table NodeColumns {
+    // Parallel arrays — index i corresponds to node i.
+    ids:          [uint64];
+    log_vol_ids:  [uint64];
 
-table Node {
-    id:uint64;
-    name:string;
-    log_vol_id:uint64;
-    local_transform:Mat4x4;  // optional: absent = identity
-    has_parent:bool;
-    parent_id:uint64;
-    children:[uint64];
-    original_path:string;
-    tags:[StringPair];
-    source_system:string;
-    degradation:uint32;
+    // Node names: index into a string table.
+    name_table:   [string];
+    name_indices: [uint32];
+
+    // Rotation: 3x3 matrix stored as 9 doubles (column-major, upper-left of dmat4).
+    // rot_indices[i] indexes into rotations[]; 0xFFFFFFFF = identity rotation.
+    rot_indices: [uint32];
+    rotations:   [double];  // flattened: rotation j is rotations[j*9 .. j*9+9)
+
+    // Translation: 3 doubles per entry.
+    // trl_indices[i] indexes into translations[]; 0xFFFFFFFF = zero translation.
+    trl_indices:  [uint32];
+    translations: [double];  // flattened: translation j is translations[j*3 .. j*3+3)
+
+    // Parent: 0 = no parent (root node).
+    parent_ids:   [uint64];
+
+    // Children as CSR (compressed sparse row):
+    //   children of node i are children_data[children_offsets[i] .. children_offsets[i+1])
+    //   children_offsets has length N+1 (sentinel at end).
+    children_offsets: [uint32];
+    children_data:    [uint64];
+
+    // Tags as CSR with string tables for keys and values:
+    //   tags for node i span [tag_offsets[i] .. tag_offsets[i+1])
+    //   tag_key_indices/tag_value_indices index into their respective tables.
+    tag_offsets:       [uint32];
+    tag_key_table:     [string];
+    tag_key_indices:   [uint16];
+    tag_value_table:   [string];
+    tag_value_indices: [uint16];
+
+    // Source system: index into a small string table.
+    source_system_table:   [string];
+    source_system_indices: [uint8];
+
+    // Degradation flags — one uint32 per node, 0 = none.
+    degradation:  [uint32];
 }
 
 // --- Scene (root) ---
@@ -117,7 +136,7 @@ table Node {
 table SemanticScene {
     root_id:uint64;
     source_file:string;
-    nodes:[Node];
+    nodes:NodeColumns;
     log_vols:[LogicalVolume];
     shapes:[Shape];
     materials:[Material];

@@ -4,8 +4,13 @@
 
 #include <flatbuffers/flatbuffers.h>
 
+#include <array>
+#include <bit>
+#include <cstdint>
 #include <format>
+#include <map>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace nodehammer {
 
@@ -13,49 +18,53 @@ namespace {
 
 // ── Mat4x4 helpers ──────────────────────────────────────────────────────────
 
-bool isIdentity(const glm::dmat4 &m) {
-    // GLM identity: diagonal = 1, rest = 0
-    for (int c = 0; c < 4; ++c) {
-        for (int r = 0; r < 4; ++r) {
-            if (m[c][r] != (c == r ? 1.0 : 0.0)) {
-                return false;
+bool isIdentityRotation(const glm::dmat4 &m) {
+    return m[0][0] == 1.0 && m[0][1] == 0.0 && m[0][2] == 0.0 && m[1][0] == 0.0 && m[1][1] == 1.0 &&
+           m[1][2] == 0.0 && m[2][0] == 0.0 && m[2][1] == 0.0 && m[2][2] == 1.0;
+}
+
+bool isZeroTranslation(const glm::dmat4 &m) {
+    return m[3][0] == 0.0 && m[3][1] == 0.0 && m[3][2] == 0.0;
+}
+
+flatbuffers::Offset<flatbuffers::Vector<double>>
+serializeRotation(flatbuffers::FlatBufferBuilder &builder, const glm::dmat4 &m) {
+    if (isIdentityRotation(m)) {
+        return {};
+    }
+    std::vector<double> r(9);
+    for (int col = 0; col < 3; ++col) {
+        for (int row = 0; row < 3; ++row) {
+            r[static_cast<std::size_t>(col * 3 + row)] = m[col][row];
+        }
+    }
+    return builder.CreateVector(r);
+}
+
+flatbuffers::Offset<flatbuffers::Vector<double>>
+serializeTranslation(flatbuffers::FlatBufferBuilder &builder, const glm::dmat4 &m) {
+    if (isZeroTranslation(m)) {
+        return {};
+    }
+    std::vector<double> t = {m[3][0], m[3][1], m[3][2]};
+    return builder.CreateVector(t);
+}
+
+glm::dmat4 deserializeRotTrl(const flatbuffers::Vector<double> *rot,
+                             const flatbuffers::Vector<double> *trl) {
+    glm::dmat4 m{1.0};
+    if (rot && rot->size() == 9) {
+        for (int col = 0; col < 3; ++col) {
+            for (int row = 0; row < 3; ++row) {
+                m[col][row] = rot->Get(static_cast<flatbuffers::uoffset_t>(col * 3 + row));
             }
         }
     }
-    return true;
-}
-
-fbs::Mat4x4 toFbsMat4(const glm::dmat4 &m) {
-    // Column-major: m[col][row]
-    return fbs::Mat4x4{
-        m[0][0], m[0][1], m[0][2], m[0][3], // col 0
-        m[1][0], m[1][1], m[1][2], m[1][3], // col 1
-        m[2][0], m[2][1], m[2][2], m[2][3], // col 2
-        m[3][0], m[3][1], m[3][2], m[3][3], // col 3
-    };
-}
-
-glm::dmat4 fromFbsMat4(const fbs::Mat4x4 *mat) {
-    if (mat == nullptr) {
-        return glm::dmat4{1.0};
+    if (trl && trl->size() == 3) {
+        m[3][0] = trl->Get(0);
+        m[3][1] = trl->Get(1);
+        m[3][2] = trl->Get(2);
     }
-    glm::dmat4 m;
-    m[0][0] = mat->m00();
-    m[0][1] = mat->m10();
-    m[0][2] = mat->m20();
-    m[0][3] = mat->m30();
-    m[1][0] = mat->m01();
-    m[1][1] = mat->m11();
-    m[1][2] = mat->m21();
-    m[1][3] = mat->m31();
-    m[2][0] = mat->m02();
-    m[2][1] = mat->m12();
-    m[2][2] = mat->m22();
-    m[2][3] = mat->m32();
-    m[3][0] = mat->m03();
-    m[3][1] = mat->m13();
-    m[3][2] = mat->m23();
-    m[3][3] = mat->m33();
     return m;
 }
 
@@ -130,35 +139,23 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                 return {fbs::ShapeData_TessellatedShape, o.Union()};
             },
             [&](const BooleanUnion &s) -> ShapeOffsetResult {
-                const fbs::Mat4x4 *matPtr = nullptr;
-                fbs::Mat4x4 mat;
-                if (!isIdentity(s.rightTransform)) {
-                    mat = toFbsMat4(s.rightTransform);
-                    matPtr = &mat;
-                }
-                auto o = fbs::CreateBooleanUnion(builder, s.left.value, s.right.value, matPtr);
+                auto rot = serializeRotation(builder, s.rightTransform);
+                auto trl = serializeTranslation(builder, s.rightTransform);
+                auto o = fbs::CreateBooleanUnion(builder, s.left.value, s.right.value, rot, trl);
                 return {fbs::ShapeData_BooleanUnion, o.Union()};
             },
             [&](const BooleanIntersection &s) -> ShapeOffsetResult {
-                const fbs::Mat4x4 *matPtr = nullptr;
-                fbs::Mat4x4 mat;
-                if (!isIdentity(s.rightTransform)) {
-                    mat = toFbsMat4(s.rightTransform);
-                    matPtr = &mat;
-                }
+                auto rot = serializeRotation(builder, s.rightTransform);
+                auto trl = serializeTranslation(builder, s.rightTransform);
                 auto o =
-                    fbs::CreateBooleanIntersection(builder, s.left.value, s.right.value, matPtr);
+                    fbs::CreateBooleanIntersection(builder, s.left.value, s.right.value, rot, trl);
                 return {fbs::ShapeData_BooleanIntersection, o.Union()};
             },
             [&](const BooleanSubtraction &s) -> ShapeOffsetResult {
-                const fbs::Mat4x4 *matPtr = nullptr;
-                fbs::Mat4x4 mat;
-                if (!isIdentity(s.rightTransform)) {
-                    mat = toFbsMat4(s.rightTransform);
-                    matPtr = &mat;
-                }
+                auto rot = serializeRotation(builder, s.rightTransform);
+                auto trl = serializeTranslation(builder, s.rightTransform);
                 auto o =
-                    fbs::CreateBooleanSubtraction(builder, s.left.value, s.right.value, matPtr);
+                    fbs::CreateBooleanSubtraction(builder, s.left.value, s.right.value, rot, trl);
                 return {fbs::ShapeData_BooleanSubtraction, o.Union()};
             },
             [&](const UnknownShape &s) -> ShapeOffsetResult {
@@ -246,7 +243,7 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
         BooleanUnion result;
         result.left = SemanticShapeId{s->left()};
         result.right = SemanticShapeId{s->right()};
-        result.rightTransform = fromFbsMat4(s->right_transform());
+        result.rightTransform = deserializeRotTrl(s->right_rotation(), s->right_translation());
         return result;
     }
     case fbs::ShapeData_BooleanIntersection: {
@@ -254,7 +251,7 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
         BooleanIntersection result;
         result.left = SemanticShapeId{s->left()};
         result.right = SemanticShapeId{s->right()};
-        result.rightTransform = fromFbsMat4(s->right_transform());
+        result.rightTransform = deserializeRotTrl(s->right_rotation(), s->right_translation());
         return result;
     }
     case fbs::ShapeData_BooleanSubtraction: {
@@ -262,7 +259,7 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
         BooleanSubtraction result;
         result.left = SemanticShapeId{s->left()};
         result.right = SemanticShapeId{s->right()};
-        result.rightTransform = fromFbsMat4(s->right_transform());
+        result.rightTransform = deserializeRotTrl(s->right_rotation(), s->right_translation());
         return result;
     }
     case fbs::ShapeData_UnknownShape: {
@@ -314,13 +311,10 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         daughterOffsets.reserve(lv.daughters.size());
         for (const auto &d : lv.daughters) {
             auto dNameOff = builder.CreateSharedString(d.name);
-            const fbs::Mat4x4 *matPtr = nullptr;
-            fbs::Mat4x4 mat;
-            if (!isIdentity(d.localTransform)) {
-                mat = toFbsMat4(d.localTransform);
-                matPtr = &mat;
-            }
-            auto dOff = fbs::CreateDaughterPlacement(builder, dNameOff, d.logVolId.value, matPtr);
+            auto dRot = serializeRotation(builder, d.localTransform);
+            auto dTrl = serializeTranslation(builder, d.localTransform);
+            auto dOff =
+                fbs::CreateDaughterPlacement(builder, dNameOff, d.logVolId.value, dRot, dTrl);
             daughterOffsets.push_back(dOff);
         }
 
@@ -335,79 +329,203 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         lvOffsets.push_back(o);
     }
 
-    // ── Nodes ───────────────────────────────────────────────────────────────
-    std::vector<flatbuffers::Offset<fbs::Node>> nodeOffsets;
-    nodeOffsets.reserve(scene.nodes.size());
+    // ── Nodes (column-oriented) ────────────────────────────────────────────
+    // Collect nodes into a stable order (sorted by ID for reproducibility).
+    std::vector<const SemanticNode *> orderedNodes;
+    orderedNodes.reserve(scene.nodes.size());
     for (const auto &[id, node] : scene.nodes) {
-        auto nameOff = builder.CreateSharedString(node.name);
-
-        auto childrenVec =
-            node.children.empty()
-                ? flatbuffers::Offset<flatbuffers::Vector<uint64_t>>{}
-                : builder.CreateVector(reinterpret_cast<const uint64_t *>(node.children.data()),
-                                       node.children.size());
-
-        // originalPath is NOT serialized — it is recomputed after loading
-        // (same as JSON and worldTransform).
-
-        std::vector<flatbuffers::Offset<fbs::StringPair>> tagOffsets;
-        tagOffsets.reserve(node.tags.size());
-        for (const auto &[k, v] : node.tags) {
-            tagOffsets.push_back(fbs::CreateStringPair(builder, builder.CreateSharedString(k),
-                                                       builder.CreateSharedString(v)));
-        }
-        auto tagsVec =
-            tagOffsets.empty()
-                ? flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<fbs::StringPair>>>{}
-                : builder.CreateVector(tagOffsets);
-
-        // Only create string offsets for non-empty strings
-        auto sourceSystemOff = node.sourceSystem.empty()
-                                   ? flatbuffers::Offset<flatbuffers::String>{}
-                                   : builder.CreateSharedString(node.sourceSystem);
-
-        const fbs::Mat4x4 *matPtr = nullptr;
-        fbs::Mat4x4 mat;
-        if (!isIdentity(node.localTransform)) {
-            mat = toFbsMat4(node.localTransform);
-            matPtr = &mat;
-        }
-
-        // Use the builder API to omit default-valued fields
-        fbs::NodeBuilder nb{builder};
-        nb.add_id(node.id.value);
-        nb.add_name(nameOff);
-        nb.add_log_vol_id(node.logVolId.value);
-        if (matPtr != nullptr) {
-            nb.add_local_transform(matPtr);
-        }
-        if (node.parentId.has_value()) {
-            nb.add_has_parent(true);
-            nb.add_parent_id(node.parentId->value);
-        }
-        if (!node.children.empty()) {
-            nb.add_children(childrenVec);
-        }
-        if (!node.tags.empty()) {
-            nb.add_tags(tagsVec);
-        }
-        if (!node.sourceSystem.empty()) {
-            nb.add_source_system(sourceSystemOff);
-        }
-        if (node.degradation.bits.any()) {
-            nb.add_degradation(static_cast<uint32_t>(node.degradation.bits.to_ulong()));
-        }
-        nodeOffsets.push_back(nb.Finish());
+        orderedNodes.push_back(&node);
     }
+    std::sort(orderedNodes.begin(), orderedNodes.end(),
+              [](const SemanticNode *a, const SemanticNode *b) { return a->id < b->id; });
+
+    const auto N = orderedNodes.size();
+
+    // Parallel arrays
+    std::vector<uint64_t> nodeIds(N);
+    std::vector<uint64_t> logVolIds(N);
+    std::vector<uint32_t> rotIndices(N);
+    std::vector<double> rotations; // flattened 3x3 rotation matrices (9 doubles each)
+    std::map<std::array<uint64_t, 9>, uint32_t> rotDedup;
+    std::vector<uint32_t> trlIndices(N);
+    std::vector<double> translations; // flattened translations (3 doubles each)
+    std::map<std::array<uint64_t, 3>, uint32_t> trlDedup;
+    std::vector<uint64_t> parentIds(N);
+    std::vector<uint32_t> childrenOffsets;
+    std::vector<uint64_t> childrenData;
+    std::vector<uint32_t> tagOffsets;
+    std::vector<uint16_t> tagKeyIndices;
+    std::vector<uint16_t> tagValueIndices;
+    std::vector<uint32_t> degradation(N);
+
+    childrenOffsets.reserve(N + 1);
+    tagOffsets.reserve(N + 1);
+
+    // String tables
+    std::unordered_map<std::string, uint32_t> nameMap;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> nameTableOffsets;
+    std::vector<uint32_t> nameIndices(N);
+
+    std::unordered_map<std::string, uint16_t> tagKeyMap;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> tagKeyTableOffsets;
+    std::unordered_map<std::string, uint16_t> tagValueMap;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> tagValueTableOffsets;
+
+    std::unordered_map<std::string, uint8_t> srcSysMap;
+    std::vector<flatbuffers::Offset<flatbuffers::String>> srcSysTableOffsets;
+    std::vector<uint8_t> srcSysIndices(N);
+
+    static constexpr uint32_t kSentinel = 0xFFFFFFFF;
+
+    auto internName = [&](const std::string &s) -> uint32_t {
+        auto [it, inserted] =
+            nameMap.try_emplace(s, static_cast<uint32_t>(nameTableOffsets.size()));
+        if (inserted) {
+            nameTableOffsets.push_back(builder.CreateSharedString(s));
+        }
+        return it->second;
+    };
+
+    auto internTagKey = [&](const std::string &s) -> uint16_t {
+        auto [it, inserted] =
+            tagKeyMap.try_emplace(s, static_cast<uint16_t>(tagKeyTableOffsets.size()));
+        if (inserted) {
+            tagKeyTableOffsets.push_back(builder.CreateSharedString(s));
+        }
+        return it->second;
+    };
+
+    auto internTagValue = [&](const std::string &s) -> uint16_t {
+        auto [it, inserted] =
+            tagValueMap.try_emplace(s, static_cast<uint16_t>(tagValueTableOffsets.size()));
+        if (inserted) {
+            tagValueTableOffsets.push_back(builder.CreateSharedString(s));
+        }
+        return it->second;
+    };
+
+    auto internSrcSys = [&](const std::string &s) -> uint8_t {
+        auto [it, inserted] =
+            srcSysMap.try_emplace(s, static_cast<uint8_t>(srcSysTableOffsets.size()));
+        if (inserted) {
+            srcSysTableOffsets.push_back(builder.CreateSharedString(s));
+        }
+        return it->second;
+    };
+
+    for (std::size_t i = 0; i < N; ++i) {
+        const auto &node = *orderedNodes[i];
+
+        nodeIds[i] = node.id.value;
+        nameIndices[i] = internName(node.name);
+        logVolIds[i] = node.logVolId.value;
+
+        // Rotation (3x3 upper-left of dmat4), deduplicated
+        const auto &m = node.localTransform;
+        bool identityRot = m[0][0] == 1.0 && m[0][1] == 0.0 && m[0][2] == 0.0 && m[1][0] == 0.0 &&
+                           m[1][1] == 1.0 && m[1][2] == 0.0 && m[2][0] == 0.0 && m[2][1] == 0.0 &&
+                           m[2][2] == 1.0;
+        if (identityRot) {
+            rotIndices[i] = kSentinel;
+        } else {
+            std::array<uint64_t, 9> key;
+            for (int col = 0; col < 3; ++col) {
+                for (int row = 0; row < 3; ++row) {
+                    key[static_cast<std::size_t>(col * 3 + row)] =
+                        std::bit_cast<uint64_t>(m[col][row]);
+                }
+            }
+            auto [it, inserted] =
+                rotDedup.try_emplace(key, static_cast<uint32_t>(rotations.size() / 9));
+            if (inserted) {
+                for (int col = 0; col < 3; ++col) {
+                    for (int row = 0; row < 3; ++row) {
+                        rotations.push_back(m[col][row]);
+                    }
+                }
+            }
+            rotIndices[i] = it->second;
+        }
+
+        // Translation, deduplicated
+        bool zeroTrl = m[3][0] == 0.0 && m[3][1] == 0.0 && m[3][2] == 0.0;
+        if (zeroTrl) {
+            trlIndices[i] = kSentinel;
+        } else {
+            std::array<uint64_t, 3> key{
+                std::bit_cast<uint64_t>(m[3][0]),
+                std::bit_cast<uint64_t>(m[3][1]),
+                std::bit_cast<uint64_t>(m[3][2]),
+            };
+            auto [it, inserted] =
+                trlDedup.try_emplace(key, static_cast<uint32_t>(translations.size() / 3));
+            if (inserted) {
+                translations.push_back(m[3][0]);
+                translations.push_back(m[3][1]);
+                translations.push_back(m[3][2]);
+            }
+            trlIndices[i] = it->second;
+        }
+
+        // Parent
+        parentIds[i] = node.parentId ? node.parentId->value : 0;
+
+        // Children CSR
+        childrenOffsets.push_back(static_cast<uint32_t>(childrenData.size()));
+        for (const auto &childId : node.children) {
+            childrenData.push_back(childId.value);
+        }
+
+        // Tags CSR with string table indices
+        tagOffsets.push_back(static_cast<uint32_t>(tagKeyIndices.size()));
+        for (const auto &[k, v] : node.tags) {
+            tagKeyIndices.push_back(internTagKey(k));
+            tagValueIndices.push_back(internTagValue(v));
+        }
+
+        srcSysIndices[i] = internSrcSys(node.sourceSystem);
+
+        degradation[i] = static_cast<uint32_t>(node.degradation.bits.to_ulong());
+    }
+    // CSR sentinels
+    childrenOffsets.push_back(static_cast<uint32_t>(childrenData.size()));
+    tagOffsets.push_back(static_cast<uint32_t>(tagKeyIndices.size()));
+
+    // Build NodeColumns
+    auto ncIdsVec = builder.CreateVector(nodeIds);
+    auto ncLogVolIdsVec = builder.CreateVector(logVolIds);
+    auto ncNameTableVec = builder.CreateVector(nameTableOffsets);
+    auto ncNameIndicesVec = builder.CreateVector(nameIndices);
+    auto ncRotIndicesVec = builder.CreateVector(rotIndices);
+    auto ncRotationsVec = builder.CreateVector(rotations);
+    auto ncTrlIndicesVec = builder.CreateVector(trlIndices);
+    auto ncTranslationsVec = builder.CreateVector(translations);
+    auto ncParentIdsVec = builder.CreateVector(parentIds);
+    auto ncChildrenOffsetsVec = builder.CreateVector(childrenOffsets);
+    auto ncChildrenDataVec = builder.CreateVector(childrenData);
+    auto ncTagOffsetsVec = builder.CreateVector(tagOffsets);
+    auto ncTagKeyTableVec = builder.CreateVector(tagKeyTableOffsets);
+    auto ncTagKeyIndicesVec = builder.CreateVector(tagKeyIndices);
+    auto ncTagValueTableVec = builder.CreateVector(tagValueTableOffsets);
+    auto ncTagValueIndicesVec = builder.CreateVector(tagValueIndices);
+    auto ncSrcSysTableVec = builder.CreateVector(srcSysTableOffsets);
+    auto ncSrcSysIndicesVec = builder.CreateVector(srcSysIndices);
+    auto ncDegradationVec = builder.CreateVector(degradation);
+
+    auto nodeColumns = fbs::CreateNodeColumns(
+        builder, ncIdsVec, ncLogVolIdsVec, ncNameTableVec, ncNameIndicesVec, ncRotIndicesVec,
+        ncRotationsVec, ncTrlIndicesVec, ncTranslationsVec, ncParentIdsVec, ncChildrenOffsetsVec,
+        ncChildrenDataVec, ncTagOffsetsVec, ncTagKeyTableVec, ncTagKeyIndicesVec,
+        ncTagValueTableVec, ncTagValueIndicesVec, ncSrcSysTableVec, ncSrcSysIndicesVec,
+        ncDegradationVec);
 
     // ── Root table ──────────────────────────────────────────────────────────
     auto sourceFileOff = builder.CreateSharedString(scene.sourceFile);
-    auto nodesVec = builder.CreateVector(nodeOffsets);
     auto logVolsVec = builder.CreateVector(lvOffsets);
     auto shapesVec = builder.CreateVector(shapeOffsets);
     auto matsVec = builder.CreateVector(matOffsets);
 
-    return fbs::CreateSemanticScene(builder, scene.rootId.value, sourceFileOff, nodesVec,
+    return fbs::CreateSemanticScene(builder, scene.rootId.value, sourceFileOff, nodeColumns,
                                     logVolsVec, shapesVec, matsVec);
 }
 
@@ -457,7 +575,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                     SemanticDaughterPlacement d;
                     d.name = fbD->name() ? fbD->name()->str() : "";
                     d.logVolId = SemanticLogVolId{fbD->log_vol_id()};
-                    d.localTransform = fromFbsMat4(fbD->local_transform());
+                    d.localTransform = deserializeRotTrl(fbD->rotation(), fbD->translation());
                     lv.daughters.push_back(std::move(d));
                 }
             }
@@ -465,35 +583,127 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         }
     }
 
-    // ── Nodes ───────────────────────────────────────────────────────────────
-    if (fb.nodes()) {
-        for (const auto *fbNode : *fb.nodes()) {
-            SemanticNode node;
-            node.id = SemanticNodeId{fbNode->id()};
-            node.name = fbNode->name() ? fbNode->name()->str() : "";
-            node.logVolId = SemanticLogVolId{fbNode->log_vol_id()};
-            node.localTransform = fromFbsMat4(fbNode->local_transform());
-            if (fbNode->has_parent()) {
-                node.parentId = SemanticNodeId{fbNode->parent_id()};
-            }
-            if (fbNode->children()) {
-                node.children.reserve(fbNode->children()->size());
-                for (auto childId : *fbNode->children()) {
-                    node.children.push_back(SemanticNodeId{childId});
-                }
-            }
-            // originalPath is recomputed after loading (not serialized).
-            if (fbNode->tags()) {
-                for (const auto *pair : *fbNode->tags()) {
-                    if (pair->key() && pair->value()) {
-                        node.tags[pair->key()->str()] = pair->value()->str();
+    // ── Nodes (column-oriented) ────────────────────────────────────────────
+    if (const auto *nc = fb.nodes()) {
+        const auto *ids = nc->ids();
+        const auto *logVolIds = nc->log_vol_ids();
+        const auto *nameTable = nc->name_table();
+        const auto *nameIndices = nc->name_indices();
+        const auto *rotIdx = nc->rot_indices();
+        const auto *rots = nc->rotations();
+        const auto *trlIdx = nc->trl_indices();
+        const auto *trls = nc->translations();
+        const auto *parentIdsVec = nc->parent_ids();
+        const auto *cOffsets = nc->children_offsets();
+        const auto *cData = nc->children_data();
+        const auto *tOffsets = nc->tag_offsets();
+        const auto *tkTable = nc->tag_key_table();
+        const auto *tkIndices = nc->tag_key_indices();
+        const auto *tvTable = nc->tag_value_table();
+        const auto *tvIndices = nc->tag_value_indices();
+        const auto *ssTable = nc->source_system_table();
+        const auto *ssIndices = nc->source_system_indices();
+        const auto *degrad = nc->degradation();
+
+        if (ids) {
+            const auto N = ids->size();
+            for (flatbuffers::uoffset_t i = 0; i < N; ++i) {
+                SemanticNode node;
+                node.id = SemanticNodeId{ids->Get(i)};
+
+                // Name from string table
+                if (nameTable && nameIndices) {
+                    auto idx = nameIndices->Get(i);
+                    if (idx < nameTable->size()) {
+                        auto *s = nameTable->Get(idx);
+                        if (s) {
+                            node.name = s->str();
+                        }
                     }
                 }
+
+                node.logVolId = SemanticLogVolId{logVolIds ? logVolIds->Get(i) : 0};
+
+                // Rotation + Translation
+                static constexpr uint32_t kIdentity = 0xFFFFFFFF;
+                node.localTransform = glm::dmat4{1.0};
+                if (rotIdx && rots) {
+                    auto ri = rotIdx->Get(i);
+                    if (ri != kIdentity) {
+                        auto base = static_cast<flatbuffers::uoffset_t>(ri * 9);
+                        auto &m = node.localTransform;
+                        for (flatbuffers::uoffset_t col = 0; col < 3; ++col) {
+                            for (flatbuffers::uoffset_t row = 0; row < 3; ++row) {
+                                m[static_cast<int>(col)][static_cast<int>(row)] =
+                                    rots->Get(base + col * 3 + row);
+                            }
+                        }
+                    }
+                }
+                if (trlIdx && trls) {
+                    auto ti = trlIdx->Get(i);
+                    if (ti != kIdentity) {
+                        auto base = static_cast<flatbuffers::uoffset_t>(ti * 3);
+                        node.localTransform[3][0] = trls->Get(base);
+                        node.localTransform[3][1] = trls->Get(base + 1);
+                        node.localTransform[3][2] = trls->Get(base + 2);
+                    }
+                }
+
+                // Parent
+                if (parentIdsVec) {
+                    auto pid = parentIdsVec->Get(i);
+                    if (pid != 0) {
+                        node.parentId = SemanticNodeId{pid};
+                    }
+                }
+
+                // Children (CSR)
+                if (cOffsets && cData) {
+                    auto begin = cOffsets->Get(i);
+                    auto end = cOffsets->Get(i + 1);
+                    node.children.reserve(end - begin);
+                    for (auto j = begin; j < end; ++j) {
+                        node.children.push_back(SemanticNodeId{cData->Get(j)});
+                    }
+                }
+
+                // Tags (CSR with string tables)
+                if (tOffsets && tkTable && tkIndices && tvTable && tvIndices) {
+                    auto begin = tOffsets->Get(i);
+                    auto end = tOffsets->Get(i + 1);
+                    for (auto j = begin; j < end; ++j) {
+                        auto ki = tkIndices->Get(j);
+                        auto vi = tvIndices->Get(j);
+                        if (ki < tkTable->size() && vi < tvTable->size()) {
+                            auto *k = tkTable->Get(ki);
+                            auto *v = tvTable->Get(vi);
+                            if (k && v) {
+                                node.tags[k->str()] = v->str();
+                            }
+                        }
+                    }
+                }
+
+                // Source system
+                if (ssTable && ssIndices) {
+                    auto idx = ssIndices->Get(i);
+                    if (idx < ssTable->size()) {
+                        auto *s = ssTable->Get(idx);
+                        if (s) {
+                            node.sourceSystem = s->str();
+                        }
+                    }
+                }
+
+                // Degradation
+                if (degrad) {
+                    node.degradation.bits =
+                        decltype(node.degradation.bits)(static_cast<unsigned long>(degrad->Get(i)));
+                }
+
+                scene.nodes[node.id] = std::move(node);
             }
-            node.sourceSystem = fbNode->source_system() ? fbNode->source_system()->str() : "";
-            node.degradation.bits =
-                decltype(node.degradation.bits)(static_cast<unsigned long>(fbNode->degradation()));
-            scene.nodes[node.id] = std::move(node);
         }
     }
 
