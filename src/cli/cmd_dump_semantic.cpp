@@ -205,6 +205,8 @@ void register_cmd_dump_semantic(CLI::App &app) {
     auto *outputFmtOpt = sub->add_option("--output-format", "Output format: json, nhb")
                              ->default_val("json")
                              ->check(CLI::IsMember({"json", "nhb"}));
+    auto *sizeReportOpt =
+        sub->add_flag("--size-report", "Print estimated FlatBuffer payload breakdown to stderr");
 
     sub->callback([=] {
         // ── Load config (optional) ─────────────────────────────────────────────
@@ -243,6 +245,11 @@ void register_cmd_dump_semantic(CLI::App &app) {
             result.scene.deduplicateMaterials();
             result.scene.deduplicateShapes();
             result.scene.deduplicateLogVols();
+        }
+
+        if (sizeReportOpt->count() > 0) {
+            auto report = nodehammer::semanticFlatbufferSizeReport(result.scene);
+            std::print(stderr, "{}", nodehammer::formatSemanticFlatbufferSizeReport(report));
         }
 
         // ── Output ─────────────────────────────────────────────────────────────

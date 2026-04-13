@@ -8,6 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace nodehammer {
@@ -26,10 +28,37 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
 /// that is the caller's responsibility (e.g. the importer).
 SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb);
 
+struct SemanticFlatbufferSizeEntry {
+    std::string label;
+    std::size_t bytes{0};
+};
+
+struct SemanticFlatbufferSizeReport {
+    std::size_t nodeCount{0};
+    std::size_t logicalVolumeCount{0};
+    std::size_t daughterPlacementCount{0};
+    std::size_t shapeCount{0};
+    std::size_t booleanShapeCount{0};
+    std::size_t materialCount{0};
+    std::size_t uniqueRotationCount{0};
+    std::size_t uniqueTranslationCount{0};
+    std::size_t uniqueTransformCount{0};
+    std::size_t estimatedVectorPayloadBytes{0};
+    std::vector<SemanticFlatbufferSizeEntry> entries;
+};
+
+/// Estimate major FlatBuffer payload contributors for the current schema.
+/// This is intended for optimization/profiling and excludes FlatBuffers table
+/// metadata overhead.
+SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &scene);
+
+/// Format a human-readable size report suitable for CLI output.
+std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeReport &report);
+
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
 /// Serialize a SemanticScene to a standalone FlatBuffer byte buffer
-/// (with file identifier "NHS2").
+/// (with file identifier "NHS3").
 std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene);
 
 /// Deserialize a standalone FlatBuffer byte buffer to a SemanticScene.

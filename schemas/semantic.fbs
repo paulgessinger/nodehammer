@@ -31,9 +31,9 @@ table PconShape      { phi_start:double; phi_delta:double; sections:[Section]; }
 table PgonShape      { phi_start:double; phi_delta:double; n_sides:int; sections:[Section]; }
 table TorusShape     { r_min:double; r_max:double; r_tor:double; phi_start:double; phi_delta:double; }
 table TessellatedShape { triangles:[Triangle]; }
-table BooleanUnion        { left:uint32; right:uint32; right_rotation:[double]; right_translation:[double]; }
-table BooleanIntersection { left:uint32; right:uint32; right_rotation:[double]; right_translation:[double]; }
-table BooleanSubtraction  { left:uint32; right:uint32; right_rotation:[double]; right_translation:[double]; }
+table BooleanUnion        { left:uint32; right:uint32; right_transform_index:uint32; }
+table BooleanIntersection { left:uint32; right:uint32; right_transform_index:uint32; }
+table BooleanSubtraction  { left:uint32; right:uint32; right_transform_index:uint32; }
 table UnknownShape   { original_type:string; }
 
 union ShapeData {
@@ -72,8 +72,7 @@ table Material {
 table DaughterPlacement {
     name:string;
     log_vol_id:uint32;
-    rotation:[double];     // 9 doubles, column-major 3x3; absent = identity
-    translation:[double];  // 3 doubles; absent = zero
+    transform_index:uint32;
 }
 
 table LogicalVolume {
@@ -82,6 +81,20 @@ table LogicalVolume {
     shape_id:uint32;
     material_id:uint32;
     daughters:[DaughterPlacement];
+}
+
+// --- Transform pool (global) ---
+
+table TransformPool {
+    // Rotation rows: 3x3 matrices flattened column-major (9 doubles each).
+    // Index j spans rotations[j*9 .. j*9+9)
+    rotations:[double];
+    // Translation rows: (x,y,z), 3 doubles each.
+    // Index j spans translations[j*3 .. j*3+3)
+    translations:[double];
+    // Transform rows map to a (rotation, translation) pair.
+    transform_rot_indices:[uint32];
+    transform_trl_indices:[uint32];
 }
 
 // --- Nodes (column-oriented) ---
@@ -95,15 +108,8 @@ table NodeColumns {
     name_table:   [string];
     name_indices: [uint32];
 
-    // Rotation: 3x3 matrix stored as 9 doubles (column-major, upper-left of dmat4).
-    // rot_indices[i] indexes into rotations[]; 0xFFFF = identity rotation.
-    rot_indices: [uint16];
-    rotations:   [double];  // flattened: rotation j is rotations[j*9 .. j*9+9)
-
-    // Translation: 3 doubles per entry.
-    // trl_indices[i] indexes into translations[]; 0xFFFF = zero translation.
-    trl_indices:  [uint16];
-    translations: [double];  // flattened: translation j is translations[j*3 .. j*3+3)
+    // Node transform references global TransformPool rows.
+    transform_indices:[uint32];
 
     // Parent: 0 = no parent (root node).
     parent_ids:   [uint32];
@@ -136,6 +142,7 @@ table NodeColumns {
 table SemanticScene {
     root_id:uint32;
     source_file:string;
+    transforms:TransformPool;
     nodes:NodeColumns;
     log_vols:[LogicalVolume];
     shapes:[Shape];
@@ -143,5 +150,5 @@ table SemanticScene {
 }
 
 root_type SemanticScene;
-file_identifier "NHS2";
+file_identifier "NHS3";
 file_extension "nhb";

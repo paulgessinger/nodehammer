@@ -4,14 +4,17 @@
 
 #include <flatbuffers/flatbuffers.h>
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstdint>
 #include <format>
 #include <limits>
 #include <map>
-#include <string_view>
+#include <sstream>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 
 namespace nodehammer {
@@ -25,13 +28,6 @@ uint32_t toU32Checked(uint64_t value, std::string_view what) {
     return static_cast<uint32_t>(value);
 }
 
-uint16_t toU16Checked(std::size_t value, std::string_view what) {
-    if (value > std::numeric_limits<uint16_t>::max()) {
-        throw std::runtime_error(std::format("{} {} exceeds uint16 range", what, value));
-    }
-    return static_cast<uint16_t>(value);
-}
-
 uint8_t toU8Checked(std::size_t value, std::string_view what) {
     if (value > std::numeric_limits<uint8_t>::max()) {
         throw std::runtime_error(std::format("{} {} exceeds uint8 range", what, value));
@@ -39,57 +35,143 @@ uint8_t toU8Checked(std::size_t value, std::string_view what) {
     return static_cast<uint8_t>(value);
 }
 
-// ── Mat4x4 helpers ──────────────────────────────────────────────────────────
+using RotationKey = std::array<uint64_t, 9>;
+using TranslationKey = std::array<uint64_t, 3>;
+using TransformKey = std::array<uint32_t, 2>;
 
-bool isIdentityRotation(const glm::dmat4 &m) {
-    return m[0][0] == 1.0 && m[0][1] == 0.0 && m[0][2] == 0.0 && m[1][0] == 0.0 && m[1][1] == 1.0 &&
-           m[1][2] == 0.0 && m[2][0] == 0.0 && m[2][1] == 0.0 && m[2][2] == 1.0;
-}
-
-bool isZeroTranslation(const glm::dmat4 &m) {
-    return m[3][0] == 0.0 && m[3][1] == 0.0 && m[3][2] == 0.0;
-}
-
-flatbuffers::Offset<flatbuffers::Vector<double>>
-serializeRotation(flatbuffers::FlatBufferBuilder &builder, const glm::dmat4 &m) {
-    if (isIdentityRotation(m)) {
-        return {};
-    }
-    std::vector<double> r(9);
+RotationKey rotationKey(const glm::dmat4 &m) {
+    RotationKey key{};
     for (int col = 0; col < 3; ++col) {
         for (int row = 0; row < 3; ++row) {
-            r[static_cast<std::size_t>(col * 3 + row)] = m[col][row];
+            key[static_cast<std::size_t>(col * 3 + row)] = std::bit_cast<uint64_t>(m[col][row]);
         }
     }
-    return builder.CreateVector(r);
+    return key;
 }
 
-flatbuffers::Offset<flatbuffers::Vector<double>>
-serializeTranslation(flatbuffers::FlatBufferBuilder &builder, const glm::dmat4 &m) {
-    if (isZeroTranslation(m)) {
-        return {};
+TranslationKey translationKey(const glm::dmat4 &m) {
+    return {
+        std::bit_cast<uint64_t>(m[3][0]),
+        std::bit_cast<uint64_t>(m[3][1]),
+        std::bit_cast<uint64_t>(m[3][2]),
+    };
+}
+
+struct TransformPoolBuild {
+    std::vector<double> rotations;    // 9 doubles per row
+    std::vector<double> translations; // 3 doubles per row
+    std::vector<uint32_t> transformRotIndices;
+    std::vector<uint32_t> transformTrlIndices;
+
+    std::map<RotationKey, uint32_t> rotDedup;
+    std::map<TranslationKey, uint32_t> trlDedup;
+    std::map<TransformKey, uint32_t> tfDedup;
+
+    TransformPoolBuild() {
+        // row 0: identity / zero
+        rotations = {
+            1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0,
+        };
+        translations = {0.0, 0.0, 0.0};
+
+        RotationKey r0{};
+        r0[0] = std::bit_cast<uint64_t>(1.0);
+        r0[4] = std::bit_cast<uint64_t>(1.0);
+        r0[8] = std::bit_cast<uint64_t>(1.0);
+        TranslationKey t0{};
+
+        rotDedup.emplace(r0, 0);
+        trlDedup.emplace(t0, 0);
+
+        transformRotIndices.push_back(0);
+        transformTrlIndices.push_back(0);
+        tfDedup.emplace(TransformKey{0, 0}, 0);
     }
-    std::vector<double> t = {m[3][0], m[3][1], m[3][2]};
-    return builder.CreateVector(t);
-}
 
-glm::dmat4 deserializeRotTrl(const flatbuffers::Vector<double> *rot,
-                             const flatbuffers::Vector<double> *trl) {
+    uint32_t internRotation(const glm::dmat4 &m) {
+        const auto key = rotationKey(m);
+        auto [it, inserted] =
+            rotDedup.try_emplace(key, static_cast<uint32_t>(rotations.size() / 9));
+        if (inserted) {
+            for (int col = 0; col < 3; ++col) {
+                for (int row = 0; row < 3; ++row) {
+                    rotations.push_back(m[col][row]);
+                }
+            }
+        }
+        return it->second;
+    }
+
+    uint32_t internTranslation(const glm::dmat4 &m) {
+        const auto key = translationKey(m);
+        auto [it, inserted] =
+            trlDedup.try_emplace(key, static_cast<uint32_t>(translations.size() / 3));
+        if (inserted) {
+            translations.push_back(m[3][0]);
+            translations.push_back(m[3][1]);
+            translations.push_back(m[3][2]);
+        }
+        return it->second;
+    }
+
+    uint32_t internTransform(const glm::dmat4 &m) {
+        const uint32_t r = internRotation(m);
+        const uint32_t t = internTranslation(m);
+        auto [it, inserted] = tfDedup.try_emplace(
+            TransformKey{r, t}, static_cast<uint32_t>(transformRotIndices.size()));
+        if (inserted) {
+            transformRotIndices.push_back(r);
+            transformTrlIndices.push_back(t);
+        }
+        return it->second;
+    }
+};
+
+glm::dmat4 decodeTransform(const flatbuffers::Vector<double> *rots,
+                           const flatbuffers::Vector<double> *trls,
+                           const flatbuffers::Vector<uint32_t> *tfRotIdx,
+                           const flatbuffers::Vector<uint32_t> *tfTrlIdx, uint32_t tfIndex) {
     glm::dmat4 m{1.0};
-    if (rot && rot->size() == 9) {
-        for (int col = 0; col < 3; ++col) {
-            for (int row = 0; row < 3; ++row) {
-                m[col][row] = rot->Get(static_cast<flatbuffers::uoffset_t>(col * 3 + row));
+    if (!rots || !trls || !tfRotIdx || !tfTrlIdx || tfIndex >= tfRotIdx->size() ||
+        tfIndex >= tfTrlIdx->size()) {
+        return m;
+    }
+
+    const auto rIdx = tfRotIdx->Get(tfIndex);
+    const auto tIdx = tfTrlIdx->Get(tfIndex);
+    const auto rBase = static_cast<flatbuffers::uoffset_t>(rIdx * 9);
+    const auto tBase = static_cast<flatbuffers::uoffset_t>(tIdx * 3);
+
+    if (rBase + 8 < rots->size()) {
+        for (flatbuffers::uoffset_t col = 0; col < 3; ++col) {
+            for (flatbuffers::uoffset_t row = 0; row < 3; ++row) {
+                m[static_cast<int>(col)][static_cast<int>(row)] = rots->Get(rBase + col * 3 + row);
             }
         }
     }
-    if (trl && trl->size() == 3) {
-        m[3][0] = trl->Get(0);
-        m[3][1] = trl->Get(1);
-        m[3][2] = trl->Get(2);
+    if (tBase + 2 < trls->size()) {
+        m[3][0] = trls->Get(tBase);
+        m[3][1] = trls->Get(tBase + 1);
+        m[3][2] = trls->Get(tBase + 2);
     }
+
     return m;
 }
+
+std::string formatBytes(std::size_t bytes) {
+    constexpr double k = 1024.0;
+    const double kib = static_cast<double>(bytes) / k;
+    const double mib = kib / k;
+    if (mib >= 1.0) {
+        return std::format("{:.2f} MiB", mib);
+    }
+    if (kib >= 1.0) {
+        return std::format("{:.2f} KiB", kib);
+    }
+    return std::format("{} B", bytes);
+}
+
+// ── Mat4x4 helpers ──────────────────────────────────────────────────────────
 
 // ── Shape serialization ─────────────────────────────────────────────────────
 
@@ -99,6 +181,7 @@ struct ShapeOffsetResult {
 };
 
 ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
+                                        TransformPoolBuild &transformPool,
                                         const SemanticShapeVariant &data) {
     return std::visit(
         detail::overloaded{
@@ -162,26 +245,23 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                 return {fbs::ShapeData_TessellatedShape, o.Union()};
             },
             [&](const BooleanUnion &s) -> ShapeOffsetResult {
-                auto rot = serializeRotation(builder, s.rightTransform);
-                auto trl = serializeTranslation(builder, s.rightTransform);
                 auto o = fbs::CreateBooleanUnion(builder, toU32Checked(s.left.value, "shape id"),
-                                                 toU32Checked(s.right.value, "shape id"), rot, trl);
+                                                 toU32Checked(s.right.value, "shape id"),
+                                                 transformPool.internTransform(s.rightTransform));
                 return {fbs::ShapeData_BooleanUnion, o.Union()};
             },
             [&](const BooleanIntersection &s) -> ShapeOffsetResult {
-                auto rot = serializeRotation(builder, s.rightTransform);
-                auto trl = serializeTranslation(builder, s.rightTransform);
-                auto o = fbs::CreateBooleanIntersection(
-                    builder, toU32Checked(s.left.value, "shape id"),
-                    toU32Checked(s.right.value, "shape id"), rot, trl);
+                auto o =
+                    fbs::CreateBooleanIntersection(builder, toU32Checked(s.left.value, "shape id"),
+                                                   toU32Checked(s.right.value, "shape id"),
+                                                   transformPool.internTransform(s.rightTransform));
                 return {fbs::ShapeData_BooleanIntersection, o.Union()};
             },
             [&](const BooleanSubtraction &s) -> ShapeOffsetResult {
-                auto rot = serializeRotation(builder, s.rightTransform);
-                auto trl = serializeTranslation(builder, s.rightTransform);
-                auto o = fbs::CreateBooleanSubtraction(
-                    builder, toU32Checked(s.left.value, "shape id"),
-                    toU32Checked(s.right.value, "shape id"), rot, trl);
+                auto o =
+                    fbs::CreateBooleanSubtraction(builder, toU32Checked(s.left.value, "shape id"),
+                                                  toU32Checked(s.right.value, "shape id"),
+                                                  transformPool.internTransform(s.rightTransform));
                 return {fbs::ShapeData_BooleanSubtraction, o.Union()};
             },
             [&](const UnknownShape &s) -> ShapeOffsetResult {
@@ -195,7 +275,11 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
 
 // ── Shape deserialization ───────────────────────────────────────────────────
 
-SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *data) {
+SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *data,
+                                             const flatbuffers::Vector<double> *poolRots,
+                                             const flatbuffers::Vector<double> *poolTrls,
+                                             const flatbuffers::Vector<uint32_t> *poolTfRotIdx,
+                                             const flatbuffers::Vector<uint32_t> *poolTfTrlIdx) {
     switch (type) {
     case fbs::ShapeData_BoxShape: {
         const auto *s = static_cast<const fbs::BoxShape *>(data);
@@ -269,7 +353,8 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
         BooleanUnion result;
         result.left = SemanticShapeId{s->left()};
         result.right = SemanticShapeId{s->right()};
-        result.rightTransform = deserializeRotTrl(s->right_rotation(), s->right_translation());
+        result.rightTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx, poolTfTrlIdx,
+                                                s->right_transform_index());
         return result;
     }
     case fbs::ShapeData_BooleanIntersection: {
@@ -277,7 +362,8 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
         BooleanIntersection result;
         result.left = SemanticShapeId{s->left()};
         result.right = SemanticShapeId{s->right()};
-        result.rightTransform = deserializeRotTrl(s->right_rotation(), s->right_translation());
+        result.rightTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx, poolTfTrlIdx,
+                                                s->right_transform_index());
         return result;
     }
     case fbs::ShapeData_BooleanSubtraction: {
@@ -285,7 +371,8 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
         BooleanSubtraction result;
         result.left = SemanticShapeId{s->left()};
         result.right = SemanticShapeId{s->right()};
-        result.rightTransform = deserializeRotTrl(s->right_rotation(), s->right_translation());
+        result.rightTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx, poolTfTrlIdx,
+                                                s->right_transform_index());
         return result;
     }
     case fbs::ShapeData_UnknownShape: {
@@ -303,12 +390,50 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
 
 flatbuffers::Offset<fbs::SemanticScene>
 semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const SemanticScene &scene) {
+    TransformPoolBuild transformPool;
+
+    // Collect nodes into a stable order (sorted by ID for reproducibility).
+    std::vector<const SemanticNode *> orderedNodes;
+    orderedNodes.reserve(scene.nodes.size());
+    for (const auto &[id, node] : scene.nodes) {
+        (void)id;
+        orderedNodes.push_back(&node);
+    }
+    std::sort(orderedNodes.begin(), orderedNodes.end(),
+              [](const SemanticNode *a, const SemanticNode *b) { return a->id < b->id; });
+    const auto N = orderedNodes.size();
+
+    // Pre-intern all transforms globally so indices are stable across sections.
+    for (const auto *node : orderedNodes) {
+        transformPool.internTransform(node->localTransform);
+    }
+    for (const auto &[id, lv] : scene.logVols) {
+        (void)id;
+        for (const auto &d : lv.daughters) {
+            transformPool.internTransform(d.localTransform);
+        }
+    }
+    for (const auto &[id, shape] : scene.shapes) {
+        (void)id;
+        std::visit(
+            detail::overloaded{
+                [&](const BooleanUnion &s) { transformPool.internTransform(s.rightTransform); },
+                [&](const BooleanIntersection &s) {
+                    transformPool.internTransform(s.rightTransform);
+                },
+                [&](const BooleanSubtraction &s) {
+                    transformPool.internTransform(s.rightTransform);
+                },
+                [&](const auto &) {},
+            },
+            shape.data);
+    }
 
     // ── Shapes ──────────────────────────────────────────────────────────────
     std::vector<flatbuffers::Offset<fbs::Shape>> shapeOffsets;
     shapeOffsets.reserve(scene.shapes.size());
     for (const auto &[id, shape] : scene.shapes) {
-        auto [dataType, dataOffset] = serializeShapeVariant(builder, shape.data);
+        auto [dataType, dataOffset] = serializeShapeVariant(builder, transformPool, shape.data);
         auto o = fbs::CreateShape(builder, toU32Checked(shape.id.value, "shape id"), dataType,
                                   dataOffset);
         shapeOffsets.push_back(o);
@@ -339,12 +464,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         daughterOffsets.reserve(lv.daughters.size());
         for (const auto &d : lv.daughters) {
             auto dNameOff = builder.CreateSharedString(d.name);
-            auto dRot = serializeRotation(builder, d.localTransform);
-            auto dTrl = serializeTranslation(builder, d.localTransform);
-            auto dOff =
-                fbs::CreateDaughterPlacement(builder, dNameOff,
-                                             toU32Checked(d.logVolId.value, "logvol id"), dRot,
-                                             dTrl);
+            const auto dTf = transformPool.internTransform(d.localTransform);
+            auto dOff = fbs::CreateDaughterPlacement(
+                builder, dNameOff, toU32Checked(d.logVolId.value, "logvol id"), dTf);
             daughterOffsets.push_back(dOff);
         }
 
@@ -354,34 +476,18 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                       flatbuffers::Vector<flatbuffers::Offset<fbs::DaughterPlacement>>>{}
                 : builder.CreateVector(daughterOffsets);
 
-        auto o = fbs::CreateLogicalVolume(
-            builder, toU32Checked(lv.id.value, "logvol id"), nameOff,
-            toU32Checked(lv.shapeId.value, "shape id"), toU32Checked(lv.materialId.value, "material id"),
-            daughtersVec);
+        auto o = fbs::CreateLogicalVolume(builder, toU32Checked(lv.id.value, "logvol id"), nameOff,
+                                          toU32Checked(lv.shapeId.value, "shape id"),
+                                          toU32Checked(lv.materialId.value, "material id"),
+                                          daughtersVec);
         lvOffsets.push_back(o);
     }
 
     // ── Nodes (column-oriented) ────────────────────────────────────────────
-    // Collect nodes into a stable order (sorted by ID for reproducibility).
-    std::vector<const SemanticNode *> orderedNodes;
-    orderedNodes.reserve(scene.nodes.size());
-    for (const auto &[id, node] : scene.nodes) {
-        orderedNodes.push_back(&node);
-    }
-    std::sort(orderedNodes.begin(), orderedNodes.end(),
-              [](const SemanticNode *a, const SemanticNode *b) { return a->id < b->id; });
-
-    const auto N = orderedNodes.size();
-
     // Parallel arrays
     std::vector<uint32_t> nodeIds(N);
     std::vector<uint32_t> logVolIds(N);
-    std::vector<uint16_t> rotIndices(N);
-    std::vector<double> rotations; // flattened 3x3 rotation matrices (9 doubles each)
-    std::map<std::array<uint64_t, 9>, uint16_t> rotDedup;
-    std::vector<uint16_t> trlIndices(N);
-    std::vector<double> translations; // flattened translations (3 doubles each)
-    std::map<std::array<uint64_t, 3>, uint16_t> trlDedup;
+    std::vector<uint32_t> transformIndices(N);
     std::vector<uint32_t> parentIds(N);
     std::vector<uint32_t> childrenOffsets;
     std::vector<uint32_t> childrenData;
@@ -406,8 +512,6 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::unordered_map<std::string, uint8_t> srcSysMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> srcSysTableOffsets;
     std::vector<uint8_t> srcSysIndices(N);
-
-    static constexpr uint16_t kSentinel = std::numeric_limits<uint16_t>::max();
 
     auto internName = [&](const std::string &s) -> uint32_t {
         auto [it, inserted] =
@@ -452,59 +556,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         nodeIds[i] = toU32Checked(node.id.value, "node id");
         nameIndices[i] = internName(node.name);
         logVolIds[i] = toU32Checked(node.logVolId.value, "logvol id");
-
-        // Rotation (3x3 upper-left of dmat4), deduplicated
-        const auto &m = node.localTransform;
-        bool identityRot = m[0][0] == 1.0 && m[0][1] == 0.0 && m[0][2] == 0.0 && m[1][0] == 0.0 &&
-                           m[1][1] == 1.0 && m[1][2] == 0.0 && m[2][0] == 0.0 && m[2][1] == 0.0 &&
-                           m[2][2] == 1.0;
-        if (identityRot) {
-            rotIndices[i] = kSentinel;
-        } else {
-            std::array<uint64_t, 9> key;
-            for (int col = 0; col < 3; ++col) {
-                for (int row = 0; row < 3; ++row) {
-                    key[static_cast<std::size_t>(col * 3 + row)] =
-                        std::bit_cast<uint64_t>(m[col][row]);
-                }
-            }
-            auto [it, inserted] = rotDedup.try_emplace(
-                key, toU16Checked(rotations.size() / 9, "rotation dedup index"));
-            if (inserted && it->second == kSentinel) {
-                throw std::runtime_error("too many unique rotations for uint16 index storage");
-            }
-            if (inserted) {
-                for (int col = 0; col < 3; ++col) {
-                    for (int row = 0; row < 3; ++row) {
-                        rotations.push_back(m[col][row]);
-                    }
-                }
-            }
-            rotIndices[i] = it->second;
-        }
-
-        // Translation, deduplicated
-        bool zeroTrl = m[3][0] == 0.0 && m[3][1] == 0.0 && m[3][2] == 0.0;
-        if (zeroTrl) {
-            trlIndices[i] = kSentinel;
-        } else {
-            std::array<uint64_t, 3> key{
-                std::bit_cast<uint64_t>(m[3][0]),
-                std::bit_cast<uint64_t>(m[3][1]),
-                std::bit_cast<uint64_t>(m[3][2]),
-            };
-            auto [it, inserted] = trlDedup.try_emplace(
-                key, toU16Checked(translations.size() / 3, "translation dedup index"));
-            if (inserted && it->second == kSentinel) {
-                throw std::runtime_error("too many unique translations for uint16 index storage");
-            }
-            if (inserted) {
-                translations.push_back(m[3][0]);
-                translations.push_back(m[3][1]);
-                translations.push_back(m[3][2]);
-            }
-            trlIndices[i] = it->second;
-        }
+        transformIndices[i] = transformPool.internTransform(node.localTransform);
 
         // Parent
         parentIds[i] = node.parentId ? toU32Checked(node.parentId->value, "parent node id") : 0;
@@ -540,10 +592,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto ncLogVolIdsVec = builder.CreateVector(logVolIds);
     auto ncNameTableVec = builder.CreateVector(nameTableOffsets);
     auto ncNameIndicesVec = builder.CreateVector(nameIndices);
-    auto ncRotIndicesVec = builder.CreateVector(rotIndices);
-    auto ncRotationsVec = builder.CreateVector(rotations);
-    auto ncTrlIndicesVec = builder.CreateVector(trlIndices);
-    auto ncTranslationsVec = builder.CreateVector(translations);
+    auto ncTransformIndicesVec = builder.CreateVector(transformIndices);
     auto ncParentIdsVec = builder.CreateVector(parentIds);
     auto ncChildrenOffsetsVec = builder.CreateVector(childrenOffsets);
     auto ncChildrenDataVec = builder.CreateVector(childrenData);
@@ -557,11 +606,18 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto ncDegradationVec = builder.CreateVector(degradation);
 
     auto nodeColumns = fbs::CreateNodeColumns(
-        builder, ncIdsVec, ncLogVolIdsVec, ncNameTableVec, ncNameIndicesVec, ncRotIndicesVec,
-        ncRotationsVec, ncTrlIndicesVec, ncTranslationsVec, ncParentIdsVec, ncChildrenOffsetsVec,
-        ncChildrenDataVec, ncTagOffsetsVec, ncTagKeyTableVec, ncTagKeyIndicesVec,
-        ncTagValueTableVec, ncTagValueIndicesVec, ncSrcSysTableVec, ncSrcSysIndicesVec,
-        ncDegradationVec);
+        builder, ncIdsVec, ncLogVolIdsVec, ncNameTableVec, ncNameIndicesVec, ncTransformIndicesVec,
+        ncParentIdsVec, ncChildrenOffsetsVec, ncChildrenDataVec, ncTagOffsetsVec, ncTagKeyTableVec,
+        ncTagKeyIndicesVec, ncTagValueTableVec, ncTagValueIndicesVec, ncSrcSysTableVec,
+        ncSrcSysIndicesVec, ncDegradationVec);
+
+    auto tpRotationsVec = builder.CreateVector(transformPool.rotations);
+    auto tpTranslationsVec = builder.CreateVector(transformPool.translations);
+    auto tpTransformRotIndicesVec = builder.CreateVector(transformPool.transformRotIndices);
+    auto tpTransformTrlIndicesVec = builder.CreateVector(transformPool.transformTrlIndices);
+    auto transformPoolTable =
+        fbs::CreateTransformPool(builder, tpRotationsVec, tpTranslationsVec,
+                                 tpTransformRotIndicesVec, tpTransformTrlIndicesVec);
 
     // ── Root table ──────────────────────────────────────────────────────────
     auto sourceFileOff = builder.CreateSharedString(scene.sourceFile);
@@ -570,7 +626,8 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     auto matsVec = builder.CreateVector(matOffsets);
 
     return fbs::CreateSemanticScene(builder, toU32Checked(scene.rootId.value, "root node id"),
-                                    sourceFileOff, nodeColumns, logVolsVec, shapesVec, matsVec);
+                                    sourceFileOff, transformPoolTable, nodeColumns, logVolsVec,
+                                    shapesVec, matsVec);
 }
 
 SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
@@ -580,12 +637,19 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         scene.sourceFile = fb.source_file()->str();
     }
 
+    const auto *pool = fb.transforms();
+    const auto *poolRots = pool ? pool->rotations() : nullptr;
+    const auto *poolTrls = pool ? pool->translations() : nullptr;
+    const auto *poolTfRotIdx = pool ? pool->transform_rot_indices() : nullptr;
+    const auto *poolTfTrlIdx = pool ? pool->transform_trl_indices() : nullptr;
+
     // ── Shapes ──────────────────────────────────────────────────────────────
     if (fb.shapes()) {
         for (const auto *fbShape : *fb.shapes()) {
             SemanticShape shape;
             shape.id = SemanticShapeId{fbShape->id()};
-            shape.data = deserializeShapeVariant(fbShape->data_type(), fbShape->data());
+            shape.data = deserializeShapeVariant(fbShape->data_type(), fbShape->data(), poolRots,
+                                                 poolTrls, poolTfRotIdx, poolTfTrlIdx);
             scene.shapes[shape.id] = std::move(shape);
         }
     }
@@ -619,7 +683,8 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                     SemanticDaughterPlacement d;
                     d.name = fbD->name() ? fbD->name()->str() : "";
                     d.logVolId = SemanticLogVolId{fbD->log_vol_id()};
-                    d.localTransform = deserializeRotTrl(fbD->rotation(), fbD->translation());
+                    d.localTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx,
+                                                       poolTfTrlIdx, fbD->transform_index());
                     lv.daughters.push_back(std::move(d));
                 }
             }
@@ -633,10 +698,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         const auto *logVolIds = nc->log_vol_ids();
         const auto *nameTable = nc->name_table();
         const auto *nameIndices = nc->name_indices();
-        const auto *rotIdx = nc->rot_indices();
-        const auto *rots = nc->rotations();
-        const auto *trlIdx = nc->trl_indices();
-        const auto *trls = nc->translations();
+        const auto *transformIndices = nc->transform_indices();
         const auto *parentIdsVec = nc->parent_ids();
         const auto *cOffsets = nc->children_offsets();
         const auto *cData = nc->children_data();
@@ -668,30 +730,10 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
 
                 node.logVolId = SemanticLogVolId{logVolIds ? logVolIds->Get(i) : 0};
 
-                // Rotation + Translation
-                static constexpr uint16_t kIdentity = std::numeric_limits<uint16_t>::max();
                 node.localTransform = glm::dmat4{1.0};
-                if (rotIdx && rots) {
-                    auto ri = rotIdx->Get(i);
-                    if (ri != kIdentity) {
-                        auto base = static_cast<flatbuffers::uoffset_t>(ri * 9);
-                        auto &m = node.localTransform;
-                        for (flatbuffers::uoffset_t col = 0; col < 3; ++col) {
-                            for (flatbuffers::uoffset_t row = 0; row < 3; ++row) {
-                                m[static_cast<int>(col)][static_cast<int>(row)] =
-                                    rots->Get(base + col * 3 + row);
-                            }
-                        }
-                    }
-                }
-                if (trlIdx && trls) {
-                    auto ti = trlIdx->Get(i);
-                    if (ti != kIdentity) {
-                        auto base = static_cast<flatbuffers::uoffset_t>(ti * 3);
-                        node.localTransform[3][0] = trls->Get(base);
-                        node.localTransform[3][1] = trls->Get(base + 1);
-                        node.localTransform[3][2] = trls->Get(base + 2);
-                    }
+                if (transformIndices) {
+                    node.localTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx,
+                                                          poolTfTrlIdx, transformIndices->Get(i));
                 }
 
                 // Parent
@@ -752,6 +794,117 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
     }
 
     return scene;
+}
+
+SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &scene) {
+    SemanticFlatbufferSizeReport report;
+    report.nodeCount = scene.nodes.size();
+    report.logicalVolumeCount = scene.logVols.size();
+    report.shapeCount = scene.shapes.size();
+    report.materialCount = scene.materials.size();
+
+    TransformPoolBuild transformPool;
+    std::size_t childEdgeCount = 0;
+    std::size_t tagCount = 0;
+    for (const auto &[id, node] : scene.nodes) {
+        (void)id;
+        transformPool.internTransform(node.localTransform);
+        childEdgeCount += node.children.size();
+        tagCount += node.tags.size();
+    }
+
+    for (const auto &[id, lv] : scene.logVols) {
+        (void)id;
+        report.daughterPlacementCount += lv.daughters.size();
+        for (const auto &d : lv.daughters) {
+            transformPool.internTransform(d.localTransform);
+        }
+    }
+
+    for (const auto &[id, shape] : scene.shapes) {
+        (void)id;
+        std::visit(detail::overloaded{
+                       [&](const BooleanUnion &s) {
+                           ++report.booleanShapeCount;
+                           transformPool.internTransform(s.rightTransform);
+                       },
+                       [&](const BooleanIntersection &s) {
+                           ++report.booleanShapeCount;
+                           transformPool.internTransform(s.rightTransform);
+                       },
+                       [&](const BooleanSubtraction &s) {
+                           ++report.booleanShapeCount;
+                           transformPool.internTransform(s.rightTransform);
+                       },
+                       [&](const auto &) {},
+                   },
+                   shape.data);
+    }
+
+    report.uniqueRotationCount = transformPool.rotations.size() / 9;
+    report.uniqueTranslationCount = transformPool.translations.size() / 3;
+    report.uniqueTransformCount = transformPool.transformRotIndices.size();
+
+    auto push = [&](std::string label, std::size_t bytes) {
+        report.entries.push_back({std::move(label), bytes});
+        report.estimatedVectorPayloadBytes += bytes;
+    };
+
+    // NodeColumns vectors
+    push("nodes.ids", report.nodeCount * sizeof(uint32_t));
+    push("nodes.log_vol_ids", report.nodeCount * sizeof(uint32_t));
+    push("nodes.name_indices", report.nodeCount * sizeof(uint32_t));
+    push("nodes.transform_indices", report.nodeCount * sizeof(uint32_t));
+    push("nodes.parent_ids", report.nodeCount * sizeof(uint32_t));
+    push("nodes.children_offsets", (report.nodeCount + 1) * sizeof(uint32_t));
+    push("nodes.children_data", childEdgeCount * sizeof(uint32_t));
+    push("nodes.tag_offsets", (report.nodeCount + 1) * sizeof(uint32_t));
+    push("nodes.tag_key_indices", tagCount * sizeof(uint16_t));
+    push("nodes.tag_value_indices", tagCount * sizeof(uint16_t));
+    push("nodes.source_system_indices", report.nodeCount * sizeof(uint8_t));
+    push("nodes.degradation", report.nodeCount * sizeof(uint8_t));
+
+    // TransformPool vectors
+    push("transforms.rotations", transformPool.rotations.size() * sizeof(double));
+    push("transforms.translations", transformPool.translations.size() * sizeof(double));
+    push("transforms.transform_rot_indices",
+         transformPool.transformRotIndices.size() * sizeof(uint32_t));
+    push("transforms.transform_trl_indices",
+         transformPool.transformTrlIndices.size() * sizeof(uint32_t));
+
+    // High-frequency scalar fields outside columns
+    push("log_vols.id", report.logicalVolumeCount * sizeof(uint32_t));
+    push("log_vols.shape_id", report.logicalVolumeCount * sizeof(uint32_t));
+    push("log_vols.material_id", report.logicalVolumeCount * sizeof(uint32_t));
+    push("daughter.log_vol_id", report.daughterPlacementCount * sizeof(uint32_t));
+    push("daughter.transform_index", report.daughterPlacementCount * sizeof(uint32_t));
+    push("shapes.id", report.shapeCount * sizeof(uint32_t));
+    push("bool.right_transform_index", report.booleanShapeCount * sizeof(uint32_t));
+    push("materials.id", report.materialCount * sizeof(uint32_t));
+
+    return report;
+}
+
+std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeReport &report) {
+    std::vector<SemanticFlatbufferSizeEntry> entries = report.entries;
+    std::sort(entries.begin(), entries.end(),
+              [](const auto &a, const auto &b) { return a.bytes > b.bytes; });
+
+    std::ostringstream os;
+    os << std::format("semantic flatbuffer size report\n"
+                      "  nodes={} log_vols={} daughters={} shapes={} (boolean={}) materials={}\n"
+                      "  unique transforms: {} rows (rotations={}, translations={})\n"
+                      "  estimated vector payload: {} ({})\n",
+                      report.nodeCount, report.logicalVolumeCount, report.daughterPlacementCount,
+                      report.shapeCount, report.booleanShapeCount, report.materialCount,
+                      report.uniqueTransformCount, report.uniqueRotationCount,
+                      report.uniqueTranslationCount, report.estimatedVectorPayloadBytes,
+                      formatBytes(report.estimatedVectorPayloadBytes));
+
+    for (const auto &e : entries) {
+        os << std::format("    {:35} {:>12} ({})\n", e.label, e.bytes, formatBytes(e.bytes));
+    }
+    return os.str();
 }
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
