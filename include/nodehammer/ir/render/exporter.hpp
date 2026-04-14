@@ -84,11 +84,11 @@ class RenderExporterRegistry {
     [[nodiscard]] const IRenderExporter *resolve(const std::filesystem::path &path,
                                                  std::string_view formatHint = {}) const noexcept;
 
+    /// Build a registry pre-populated with GltfExporter and ObjExporter.
+    [[nodiscard]] static RenderExporterRegistry makeDefault();
+
   private:
     std::vector<std::unique_ptr<IRenderExporter>> exporters_;
 };
-
-/// Build a registry pre-populated with GltfExporter and ObjExporter.
-[[nodiscard]] RenderExporterRegistry makeDefaultRenderExporterRegistry();
 
 } // namespace nodehammer

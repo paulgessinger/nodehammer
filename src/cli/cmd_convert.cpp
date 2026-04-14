@@ -159,7 +159,7 @@ void register_cmd_convert(CLI::App &app) {
         }
 
         // ── Export (one pass per output path) ─────────────────────────────────
-        const auto expRegistry = nodehammer::makeDefaultRenderExporterRegistry();
+        const auto expRegistry = nodehammer::RenderExporterRegistry::makeDefault();
 
         // Look up per-format config; GLB falls back to "gltf" if "glb" isn't set.
         const auto applyFmtCfg = [&](nodehammer::ExportConfig &ecfg, const std::string &key) {
