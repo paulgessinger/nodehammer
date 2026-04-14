@@ -3,7 +3,7 @@
 #include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
 #include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/semantic/importer_registry.hpp>
+#include <nodehammer/ir/semantic/importer.hpp>
 
 #include <chrono>
 #include <cmath>

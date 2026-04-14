@@ -3,7 +3,7 @@
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/provenance.hpp>
 #include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/semantic/importer_registry.hpp>
+#include <nodehammer/ir/semantic/importer.hpp>
 #include <nodehammer/ir/synthetic/semantic/importer.hpp>
 
 #include <unordered_set>
