@@ -1,4 +1,4 @@
-#include <nodehammer/export/semantic_flatbuffer_exporter.hpp>
+#include <nodehammer/ir/fb/semantic/exporter.hpp>
 
 #include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>

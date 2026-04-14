@@ -1,13 +1,13 @@
-#include <nodehammer/import/flatbuffer_importer.hpp>
 #include <nodehammer/import/importer_registry.hpp>
-#include <nodehammer/import/json_importer.hpp>
 #include <nodehammer/import/synthetic.hpp>
+#include <nodehammer/ir/fb/semantic/importer.hpp>
+#include <nodehammer/ir/json/semantic/importer.hpp>
 
 #ifdef NH_WITH_TGEO
-#include <nodehammer/import/tgeo/tgeo_importer.hpp>
+#include <nodehammer/ir/tgeo/semantic/importer.hpp>
 #endif
 #ifdef NH_WITH_DD4HEP
-#include <nodehammer/import/dd4hep/dd4hep_importer.hpp>
+#include <nodehammer/ir/dd4hep/semantic/importer.hpp>
 #endif
 
 #include <algorithm>
@@ -45,11 +45,12 @@ std::string sniffXmlFormat(const std::filesystem::path &path) {
 
 } // namespace
 
-void ImporterRegistry::registerImporter(std::unique_ptr<IImporter> importer) {
+void ImporterRegistry::registerImporter(std::unique_ptr<ISemanticImporter> importer) {
     importers_.push_back(std::move(importer));
 }
 
-const IImporter *ImporterRegistry::findByFormat(std::string_view formatName) const noexcept {
+const ISemanticImporter *
+ImporterRegistry::findByFormat(std::string_view formatName) const noexcept {
     for (const auto &imp : importers_) {
         if (imp->formatName() == formatName) {
             return imp.get();
@@ -58,7 +59,7 @@ const IImporter *ImporterRegistry::findByFormat(std::string_view formatName) con
     return nullptr;
 }
 
-const IImporter *ImporterRegistry::findByExtension(std::string_view ext) const noexcept {
+const ISemanticImporter *ImporterRegistry::findByExtension(std::string_view ext) const noexcept {
     const std::string needle = toLower(ext);
     for (const auto &imp : importers_) {
         for (const auto &e : imp->supportedExtensions()) {
@@ -70,8 +71,8 @@ const IImporter *ImporterRegistry::findByExtension(std::string_view ext) const n
     return nullptr;
 }
 
-const IImporter *ImporterRegistry::resolve(const std::filesystem::path &path,
-                                           std::string_view formatName) const noexcept {
+const ISemanticImporter *ImporterRegistry::resolve(const std::filesystem::path &path,
+                                                   std::string_view formatName) const noexcept {
     if (!formatName.empty()) {
         return findByFormat(formatName);
     }
@@ -84,13 +85,13 @@ const IImporter *ImporterRegistry::resolve(const std::filesystem::path &path,
         if (!stemExt.empty()) {
             // Compound: e.g. "foo.json.zst" → stemExt=".json", ext=".zst" → "json.zst"
             const std::string compound = stemExt.substr(1) + ext;
-            if (const IImporter *imp = findByExtension(compound)) {
+            if (const ISemanticImporter *imp = findByExtension(compound)) {
                 return imp;
             }
         }
 
         const std::string_view extSv{ext};
-        if (const IImporter *imp = findByExtension(extSv.substr(1))) {
+        if (const ISemanticImporter *imp = findByExtension(extSv.substr(1))) {
             return imp;
         }
         // Extension is ambiguous (e.g. .xml): try content sniffing.
@@ -104,7 +105,8 @@ const IImporter *ImporterRegistry::resolve(const std::filesystem::path &path,
     return nullptr;
 }
 
-const std::vector<std::unique_ptr<IImporter>> &ImporterRegistry::importers() const noexcept {
+const std::vector<std::unique_ptr<ISemanticImporter>> &
+ImporterRegistry::importers() const noexcept {
     return importers_;
 }
 

@@ -1,7 +1,7 @@
-#include <nodehammer/import/dd4hep/dd4hep_importer.hpp>
-#include <nodehammer/import/tgeo/tgeo_importer.hpp>
+#include <nodehammer/ir/dd4hep/semantic/importer.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/provenance.hpp>
+#include <nodehammer/ir/tgeo/semantic/importer.hpp>
 
 #include <DD4hep/DetElement.h>
 #include <DD4hep/Detector.h>

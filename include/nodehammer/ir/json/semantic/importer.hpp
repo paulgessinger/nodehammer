@@ -7,9 +7,9 @@
 
 namespace nodehammer {
 
-/// IImporter for DD4hep compact XML geometry descriptions.
-/// Format name: "dd4hep"   Extensions: none — .xml is ambiguous, explicit --input-format required.
-class DD4hepImporter final : public IImporter {
+/// ISemanticImporter that reads a previously-dumped SemanticScene JSON file.
+/// Format name: "json"   Extension: ".json"
+class JsonImporter final : public ISemanticImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;

@@ -22,9 +22,9 @@ struct TGeoTraversalResult {
 /// Does not modify gGeoManager.
 [[nodiscard]] TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile);
 
-/// IImporter for plain ROOT files containing a TGeoManager.
+/// ISemanticImporter for plain ROOT files containing a TGeoManager.
 /// Format name: "tgeo"   Extension: ".root"
-class TGeoImporter final : public IImporter {
+class TGeoImporter final : public ISemanticImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;

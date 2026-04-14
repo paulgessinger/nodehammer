@@ -30,9 +30,9 @@ class SyntheticSceneBuilder {
     [[nodiscard]] static ImportResult buildWithDiagnostics();
 };
 
-/// IImporter implementation for the "synthetic" format.
+/// ISemanticImporter implementation for the "synthetic" format.
 /// Ignores the path argument and builds a single-box scene.
-class SyntheticImporter final : public IImporter {
+class SyntheticImporter final : public ISemanticImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;

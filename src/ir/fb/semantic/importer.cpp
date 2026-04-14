@@ -1,4 +1,4 @@
-#include <nodehammer/import/flatbuffer_importer.hpp>
+#include <nodehammer/ir/fb/semantic/importer.hpp>
 
 #include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>

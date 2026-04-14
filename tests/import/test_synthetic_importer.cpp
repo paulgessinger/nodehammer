@@ -92,7 +92,7 @@ TEST_CASE("SyntheticSceneBuilder: buildBooleanSubtraction — boolean shape pres
     REQUIRE(hasBool);
 }
 
-// ── SyntheticImporter: IImporter contract ────────────────────────────────────
+// ── SyntheticImporter: ISemanticImporter contract ────────────────────────────────────
 
 TEST_CASE("SyntheticImporter: formatName and supportedExtensions", "[import][synthetic]") {
     nodehammer::SyntheticImporter imp;

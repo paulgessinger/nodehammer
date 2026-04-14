@@ -1,6 +1,6 @@
 #include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/import/json_importer.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/ir/json/semantic/importer.hpp>
 
 #include <nlohmann/json.hpp>
 

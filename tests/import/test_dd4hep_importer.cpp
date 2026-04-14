@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/import/dd4hep/dd4hep_importer.hpp>
+#include <nodehammer/ir/dd4hep/semantic/importer.hpp>
 #include <nodehammer/ir/semantic.hpp>
 
 #include <string>

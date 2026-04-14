@@ -7,9 +7,9 @@
 
 namespace nodehammer {
 
-/// IImporter that reads a previously-dumped SemanticScene JSON file.
-/// Format name: "json"   Extension: ".json"
-class JsonImporter final : public IImporter {
+/// ISemanticImporter that reads a FlatBuffer-encoded SemanticScene (.nhb/.nhb.zst).
+/// Format name: "flatbuffer"   Extensions: "nhb", "nhb.zst"
+class FlatBufferImporter final : public ISemanticImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;

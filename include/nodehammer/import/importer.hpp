@@ -18,9 +18,9 @@ struct ImportResult {
 };
 
 /// Pure interface for all geometry importers.
-class IImporter {
+class ISemanticImporter {
   public:
-    virtual ~IImporter() = default;
+    virtual ~ISemanticImporter() = default;
 
     /// Human-readable format identifier, e.g. "synthetic", "gdml", "tgeo".
     [[nodiscard]] virtual std::string_view formatName() const noexcept = 0;

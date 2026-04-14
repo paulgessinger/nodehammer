@@ -41,8 +41,8 @@ add_library(nodehammer_lib STATIC
     src/config/predicate_parser.cpp
     src/import/synthetic.cpp
     src/import/importer_registry.cpp
-    src/import/json_importer.cpp
-    src/import/flatbuffer_importer.cpp
+    src/ir/json/semantic/importer.cpp
+    src/ir/fb/semantic/importer.cpp
     src/ir/semantic_flatbuffer.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
@@ -51,8 +51,8 @@ add_library(nodehammer_lib STATIC
     src/export/gltf_exporter.cpp
     src/export/obj_exporter.cpp
     src/export/exporter_registry.cpp
-    src/export/semantic_json_exporter.cpp
-    src/export/semantic_flatbuffer_exporter.cpp
+    src/ir/json/semantic/exporter.cpp
+    src/ir/fb/semantic/exporter.cpp
     src/export/semantic_exporter_registry.cpp
     src/markup.cpp
     src/cli/cmd_convert.cpp
@@ -90,12 +90,12 @@ if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
 endif()
 
 if(NODEHAMMER_WITH_TGEO)
-    target_sources(nodehammer_lib PRIVATE src/import/tgeo/tgeo_importer.cpp)
+    target_sources(nodehammer_lib PRIVATE src/ir/tgeo/semantic/importer.cpp)
 endif()
 
 if(NODEHAMMER_WITH_DD4HEP)
     find_package(DD4hep REQUIRED)
-    target_sources(nodehammer_lib PRIVATE src/import/dd4hep/dd4hep_importer.cpp)
+    target_sources(nodehammer_lib PRIVATE src/ir/dd4hep/semantic/importer.cpp)
     target_link_libraries(nodehammer_lib PUBLIC DD4hep::DDCore)
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_DD4HEP=1)
 endif()
