@@ -108,7 +108,7 @@ const std::vector<std::unique_ptr<IImporter>> &ImporterRegistry::importers() con
     return importers_;
 }
 
-ImporterRegistry makeDefaultRegistry() {
+ImporterRegistry ImporterRegistry::makeDefault() {
     ImporterRegistry reg;
     reg.registerImporter(std::make_unique<SyntheticImporter>());
     reg.registerImporter(std::make_unique<JsonImporter>());

@@ -51,6 +51,9 @@ add_library(nodehammer_lib STATIC
     src/export/gltf_exporter.cpp
     src/export/obj_exporter.cpp
     src/export/exporter_registry.cpp
+    src/export/semantic_json_exporter.cpp
+    src/export/semantic_flatbuffer_exporter.cpp
+    src/export/semantic_exporter_registry.cpp
     src/markup.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp

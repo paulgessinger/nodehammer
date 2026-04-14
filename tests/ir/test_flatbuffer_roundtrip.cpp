@@ -420,7 +420,7 @@ TEST_CASE("FlatBuffer zstd bytes: nhb.zst roundtrip", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer importer resolves compound .nhb.zst extension", "[ir][flatbuffer]") {
-    const auto reg = makeDefaultRegistry();
+    const auto reg = ImporterRegistry::makeDefault();
     const auto *imp = reg.resolve("anything.nhb.zst", "");
 
     REQUIRE(imp != nullptr);

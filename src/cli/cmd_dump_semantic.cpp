@@ -7,7 +7,8 @@
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
 #include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
+#include <nodehammer/export/semantic_exporter.hpp>
+#include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/ir/semantic_flatbuffer.hpp>
@@ -266,38 +267,55 @@ void register_cmd_dump_semantic(CLI::App &app) {
             nodehammer::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
             printRichTree(result.scene, maxDepth, filter, con);
         } else {
-            std::string outputFmt;
-            outputFmtOpt->results(outputFmt);
-
-            // Auto-detect format from output extension if not explicitly set
             std::string outPath;
             if (*outputOpt) {
                 outputOpt->results(outPath);
-                if (!*outputFmtOpt) {
-                    std::filesystem::path p{outPath};
-                    if (p.extension() == ".nhb") {
-                        outputFmt = "nhb";
-                    } else if (p.extension() == ".zst" && p.stem().extension() == ".nhb") {
-                        outputFmt = "nhb";
-                    }
+            }
+
+            // No output file: allow JSON to stream to stdout, but require -o for
+            // binary formats (e.g. nhb) to avoid writing opaque bytes to terminal.
+            if (outPath.empty()) {
+                std::string outputFmt;
+                outputFmtOpt->results(outputFmt);
+                if (outputFmt != "json") {
+                    std::println(stderr, "dump-semantic: {} output requires -o/--output",
+                                 outputFmt);
+                    return;
+                }
+                nlohmann::json j = result.scene;
+                std::println("{}", j.dump(-1));
+                return;
+            }
+
+            auto exporters = nodehammer::SemanticExporterRegistry::makeDefault();
+            const nodehammer::ISemanticExporter *exporter = nullptr;
+
+            // Preserve prior behavior:
+            // 1) explicit --output-format wins
+            // 2) otherwise infer from extension (including compound extensions)
+            // 3) otherwise fallback to JSON
+            if (*outputFmtOpt) {
+                std::string outputFmt;
+                outputFmtOpt->results(outputFmt);
+                exporter = exporters.resolve(outPath, outputFmt);
+            } else {
+                exporter = exporters.resolve(outPath);
+                if (exporter == nullptr) {
+                    exporter = exporters.findByFormat("json");
                 }
             }
 
-            if (outputFmt == "nhb") {
-                if (outPath.empty()) {
-                    std::println(stderr, "dump-semantic: nhb format requires -o/--output");
-                    return;
-                }
-                auto bytes = nodehammer::semanticSceneToBytes(result.scene);
-                nodehammer::zstd_io::writeBytesToFile(outPath, std::as_bytes(std::span{bytes}));
-            } else {
-                nlohmann::json j = result.scene;
-                std::string jsonStr = j.dump(-1);
-                if (!outPath.empty()) {
-                    nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
-                } else {
-                    std::println("{}", jsonStr);
-                }
+            if (exporter == nullptr) {
+                std::println(stderr, "[error] {} cannot determine output format for '{}'",
+                             nodehammer::codes::kErrExportWriteFailed, outPath);
+                return;
+            }
+
+            nodehammer::SemanticExportConfig exportCfg;
+            auto exportResult = exporter->write(result.scene, outPath, exportCfg);
+            nodehammer::cli::printDiags(exportResult.diags);
+            if (exportResult.diags.hasErrors()) {
+                std::println(stderr, "dump-semantic: export failed");
             }
         }
     });

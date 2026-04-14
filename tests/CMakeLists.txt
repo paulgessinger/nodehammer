@@ -14,6 +14,7 @@ add_executable(nodehammer_tests
     tessellation/test_primitive_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
     export/test_gltf_exporter.cpp
+    export/test_semantic_exporter_registry.cpp
     test_markup.cpp
 )
 

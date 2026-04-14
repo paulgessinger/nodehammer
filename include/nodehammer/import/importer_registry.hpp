@@ -33,12 +33,12 @@ class ImporterRegistry {
     /// All registered importers, in registration order.
     [[nodiscard]] const std::vector<std::unique_ptr<IImporter>> &importers() const noexcept;
 
+    /// Build a registry pre-populated with all built-in importers.
+    /// Currently registers: SyntheticImporter.
+    [[nodiscard]] static ImporterRegistry makeDefault();
+
   private:
     std::vector<std::unique_ptr<IImporter>> importers_;
 };
-
-/// Build a registry pre-populated with all built-in importers.
-/// Currently registers: SyntheticImporter.
-[[nodiscard]] ImporterRegistry makeDefaultRegistry();
 
 } // namespace nodehammer
