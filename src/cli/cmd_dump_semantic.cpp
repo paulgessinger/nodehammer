@@ -6,7 +6,6 @@
 #include <nlohmann/json.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/detail/file_io.hpp>
 #include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
@@ -193,7 +192,7 @@ void register_cmd_dump_semantic(CLI::App &app) {
     auto *formatOpt =
         sub->add_option("--input-format", "Input format (required when --input is not given)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file (applies selection)");
-    auto *outputOpt = sub->add_option("-o,--output", "Output JSON file (default: stdout)");
+    auto *outputOpt = sub->add_option("-o,--output", "Output file (default: stdout for json)");
     auto *richOpt = sub->add_flag("--rich", "Rich tree display instead of JSON");
     auto *depthOpt =
         sub->add_option("--depth,-d", "Maximum depth for --rich display (-1 = unlimited)")
@@ -278,6 +277,8 @@ void register_cmd_dump_semantic(CLI::App &app) {
                     std::filesystem::path p{outPath};
                     if (p.extension() == ".nhb") {
                         outputFmt = "nhb";
+                    } else if (p.extension() == ".zst" && p.stem().extension() == ".nhb") {
+                        outputFmt = "nhb";
                     }
                 }
             }
@@ -288,7 +289,7 @@ void register_cmd_dump_semantic(CLI::App &app) {
                     return;
                 }
                 auto bytes = nodehammer::semanticSceneToBytes(result.scene);
-                nodehammer::file_io::writeFile(outPath, std::as_bytes(std::span{bytes}));
+                nodehammer::zstd_io::writeBytesToFile(outPath, std::as_bytes(std::span{bytes}));
             } else {
                 nlohmann::json j = result.scene;
                 std::string jsonStr = j.dump(-1);

@@ -7,8 +7,8 @@
 
 namespace nodehammer {
 
-/// IImporter that reads a FlatBuffer-encoded SemanticScene (.nhb).
-/// Format name: "flatbuffer"   Extension: "nhb"
+/// IImporter that reads a FlatBuffer-encoded SemanticScene (.nhb/.nhb.zst).
+/// Format name: "flatbuffer"   Extensions: "nhb", "nhb.zst"
 class FlatBufferImporter final : public IImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;

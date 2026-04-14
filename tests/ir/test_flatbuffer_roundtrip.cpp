@@ -1,10 +1,14 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <nodehammer/detail/zstd_io.hpp>
+#include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/ir/semantic_flatbuffer.hpp>
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <numbers>
 #include <span>
 
@@ -392,4 +396,33 @@ TEST_CASE("FlatBuffer roundtrip: Layer 1 API composes", "[ir][flatbuffer]") {
     REQUIRE(restored.nodes.size() == scene.nodes.size());
     REQUIRE(restored.nodes.contains(restored.rootId));
     REQUIRE(restored.nodes.at(restored.rootId).name == "root");
+}
+
+TEST_CASE("FlatBuffer zstd bytes: nhb.zst roundtrip", "[ir][flatbuffer]") {
+    auto scene = makeMinimalScene();
+    auto bytes = semanticSceneToBytes(scene);
+
+    const auto uniqueSuffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     std::filesystem::path{"nodehammer_flatbuffer_roundtrip_test_" +
+                                           std::to_string(uniqueSuffix) + ".nhb.zst"};
+    nodehammer::zstd_io::writeBytesToFile(tmp, std::as_bytes(std::span{bytes}));
+
+    auto decoded = nodehammer::zstd_io::readBytesFromFile(tmp);
+    auto restored = semanticSceneFromBytes(decoded);
+
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+
+    REQUIRE(restored.sourceFile == scene.sourceFile);
+    REQUIRE(restored.nodes.contains(restored.rootId));
+    REQUIRE(restored.nodes.at(restored.rootId).name == "root");
+}
+
+TEST_CASE("FlatBuffer importer resolves compound .nhb.zst extension", "[ir][flatbuffer]") {
+    const auto reg = makeDefaultRegistry();
+    const auto *imp = reg.resolve("anything.nhb.zst", "");
+
+    REQUIRE(imp != nullptr);
+    REQUIRE(imp->formatName() == "flatbuffer");
 }

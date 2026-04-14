@@ -50,12 +50,31 @@ inline std::vector<std::byte> decompress(std::span<const std::byte> input) {
     return output;
 }
 
+/// Write a byte buffer to a file, compressing with zstd if the path ends in .zst.
+inline void writeBytesToFile(const std::filesystem::path &path, std::span<const std::byte> data,
+                             int level = 3) {
+    if (hasZstdExtension(path)) {
+        auto compressed = compress(data, level);
+        file_io::writeFile(path, compressed);
+        return;
+    }
+    file_io::writeFile(path, data);
+}
+
+/// Read a byte buffer from a file, decompressing if the path ends in .zst.
+inline std::vector<std::byte> readBytesFromFile(const std::filesystem::path &path) {
+    auto raw = file_io::readFile(path);
+    if (hasZstdExtension(path)) {
+        return decompress(raw);
+    }
+    return raw;
+}
+
 /// Write JSON string to a file, compressing with zstd if the path ends in .zst.
 inline void writeJsonToFile(const std::filesystem::path &path, const std::string &json) {
     auto asBytes = std::as_bytes(std::span{json});
     if (hasZstdExtension(path)) {
-        auto compressed = compress(asBytes);
-        file_io::writeFile(path, compressed);
+        writeBytesToFile(path, asBytes);
     } else {
         // Plain text: append newline
         std::ofstream f{path};
@@ -65,11 +84,7 @@ inline void writeJsonToFile(const std::filesystem::path &path, const std::string
 
 /// Read a JSON string from a file, decompressing if the path ends in .zst.
 inline std::string readJsonFromFile(const std::filesystem::path &path) {
-    auto raw = file_io::readFile(path);
-    if (hasZstdExtension(path)) {
-        auto decompressed = decompress(raw);
-        return {reinterpret_cast<const char *>(decompressed.data()), decompressed.size()};
-    }
+    auto raw = readBytesFromFile(path);
     return {reinterpret_cast<const char *>(raw.data()), raw.size()};
 }
 
