@@ -12,7 +12,7 @@
 #include <tiny_gltf.h>
 #pragma GCC diagnostic pop
 
-#include <nodehammer/export/gltf_exporter.hpp>
+#include <nodehammer/ir/gltf/render/exporter.hpp>
 
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <set>

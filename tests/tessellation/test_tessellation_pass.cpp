@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/import/synthetic.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/ir/synthetic/semantic/importer.hpp>
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 

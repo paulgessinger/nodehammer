@@ -5,9 +5,9 @@
 #include <format>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/export/exporter.hpp>
 #include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/ir/render/exporter.hpp>
 #include <nodehammer/selection/selector.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 #include <print>
@@ -159,7 +159,7 @@ void register_cmd_convert(CLI::App &app) {
         }
 
         // ── Export (one pass per output path) ─────────────────────────────────
-        const auto expRegistry = nodehammer::makeDefaultExporterRegistry();
+        const auto expRegistry = nodehammer::makeDefaultRenderExporterRegistry();
 
         // Look up per-format config; GLB falls back to "gltf" if "glb" isn't set.
         const auto applyFmtCfg = [&](nodehammer::ExportConfig &ecfg, const std::string &key) {

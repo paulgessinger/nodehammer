@@ -1,5 +1,5 @@
-#include <nodehammer/export/obj_exporter.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/ir/obj/render/exporter.hpp>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_inverse.hpp>

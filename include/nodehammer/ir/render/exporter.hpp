@@ -48,11 +48,11 @@ struct ExportResult {
     DiagnosticList diags;
 };
 
-// ── IExporter ─────────────────────────────────────────────────────────────────
+// ── IRenderExporter ───────────────────────────────────────────────────────────
 
-class IExporter {
+class IRenderExporter {
   public:
-    virtual ~IExporter() = default;
+    virtual ~IRenderExporter() = default;
 
     /// Human-readable format identifier, e.g. "gltf", "obj".
     [[nodiscard]] virtual std::string_view formatName() const noexcept = 0;
@@ -67,28 +67,28 @@ class IExporter {
                                              const ExportConfig &config) const = 0;
 };
 
-// ── ExporterRegistry ──────────────────────────────────────────────────────────
+// ── RenderExporterRegistry ────────────────────────────────────────────────────
 
-class ExporterRegistry {
+class RenderExporterRegistry {
   public:
-    void registerExporter(std::unique_ptr<IExporter> exporter);
+    void registerExporter(std::unique_ptr<IRenderExporter> exporter);
 
     /// Look up by exact format name (case-sensitive).
-    [[nodiscard]] const IExporter *findByFormat(std::string_view formatName) const noexcept;
+    [[nodiscard]] const IRenderExporter *findByFormat(std::string_view formatName) const noexcept;
 
     /// Look up by file extension (with leading dot, case-insensitive).
-    [[nodiscard]] const IExporter *findByExtension(std::string_view ext) const noexcept;
+    [[nodiscard]] const IRenderExporter *findByExtension(std::string_view ext) const noexcept;
 
     /// Resolve an exporter from a path and an optional explicit format name.
     /// formatHint takes precedence when non-empty; otherwise the path extension is used.
-    [[nodiscard]] const IExporter *resolve(const std::filesystem::path &path,
-                                           std::string_view formatHint = {}) const noexcept;
+    [[nodiscard]] const IRenderExporter *resolve(const std::filesystem::path &path,
+                                                 std::string_view formatHint = {}) const noexcept;
 
   private:
-    std::vector<std::unique_ptr<IExporter>> exporters_;
+    std::vector<std::unique_ptr<IRenderExporter>> exporters_;
 };
 
 /// Build a registry pre-populated with GltfExporter and ObjExporter.
-[[nodiscard]] ExporterRegistry makeDefaultExporterRegistry();
+[[nodiscard]] RenderExporterRegistry makeDefaultRenderExporterRegistry();
 
 } // namespace nodehammer

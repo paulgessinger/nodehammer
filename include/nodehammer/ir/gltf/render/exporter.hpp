@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/export/exporter.hpp>
+#include <nodehammer/ir/render/exporter.hpp>
 
 namespace nodehammer {
 
@@ -9,7 +9,7 @@ namespace nodehammer {
 /// Geometry is stored with interleaved POSITION+NORMAL attributes.
 /// MeshAssets are deduplicated: the same asset referenced by multiple nodes
 /// produces one set of buffer views and accessors, shared by all referencing nodes.
-class GltfExporter final : public IExporter {
+class GltfExporter final : public IRenderExporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;

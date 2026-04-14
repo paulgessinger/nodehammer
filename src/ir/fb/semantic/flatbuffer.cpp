@@ -1,4 +1,4 @@
-#include <nodehammer/ir/semantic_flatbuffer.hpp>
+#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
 
 #include <nodehammer/detail/overloaded.hpp>
 

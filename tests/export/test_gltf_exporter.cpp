@@ -1,15 +1,15 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-// Include tinygltf for read-back (implementation lives in gltf_exporter.cpp).
+// Include tinygltf for read-back (implementation lives in ir/gltf/render/exporter.cpp).
 #define TINYGLTF_NO_STB_IMAGE
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
 #include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/export/gltf_exporter.hpp>
-#include <nodehammer/export/obj_exporter.hpp>
-#include <nodehammer/import/synthetic.hpp>
+#include <nodehammer/ir/gltf/render/exporter.hpp>
+#include <nodehammer/ir/obj/render/exporter.hpp>
+#include <nodehammer/ir/synthetic/semantic/importer.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 
 #include <filesystem>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/export/exporter.hpp>
+#include <nodehammer/ir/render/exporter.hpp>
 
 namespace nodehammer {
 
@@ -10,7 +10,7 @@ namespace nodehammer {
 /// Normals are transformed with the inverse-transpose of the worldTransform.
 /// A companion .mtl file is written alongside the .obj with Kd/Ks/Ke entries
 /// derived from each material's PBR baseColorFactor and emissiveFactor.
-class ObjExporter final : public IExporter {
+class ObjExporter final : public IRenderExporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;

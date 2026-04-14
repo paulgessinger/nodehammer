@@ -1,7 +1,7 @@
 #include <nodehammer/import/importer_registry.hpp>
-#include <nodehammer/import/synthetic.hpp>
 #include <nodehammer/ir/fb/semantic/importer.hpp>
 #include <nodehammer/ir/json/semantic/importer.hpp>
+#include <nodehammer/ir/synthetic/semantic/importer.hpp>
 
 #ifdef NH_WITH_TGEO
 #include <nodehammer/ir/tgeo/semantic/importer.hpp>

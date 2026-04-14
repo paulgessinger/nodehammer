@@ -1,6 +1,6 @@
-#include <nodehammer/export/exporter.hpp>
-#include <nodehammer/export/gltf_exporter.hpp>
-#include <nodehammer/export/obj_exporter.hpp>
+#include <nodehammer/ir/gltf/render/exporter.hpp>
+#include <nodehammer/ir/obj/render/exporter.hpp>
+#include <nodehammer/ir/render/exporter.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -19,11 +19,12 @@ std::string toLower(std::string_view s) {
 
 } // namespace
 
-void ExporterRegistry::registerExporter(std::unique_ptr<IExporter> exporter) {
+void RenderExporterRegistry::registerExporter(std::unique_ptr<IRenderExporter> exporter) {
     exporters_.push_back(std::move(exporter));
 }
 
-const IExporter *ExporterRegistry::findByFormat(std::string_view formatName) const noexcept {
+const IRenderExporter *
+RenderExporterRegistry::findByFormat(std::string_view formatName) const noexcept {
     for (const auto &exp : exporters_) {
         if (exp->formatName() == formatName) {
             return exp.get();
@@ -32,7 +33,8 @@ const IExporter *ExporterRegistry::findByFormat(std::string_view formatName) con
     return nullptr;
 }
 
-const IExporter *ExporterRegistry::findByExtension(std::string_view ext) const noexcept {
+const IRenderExporter *
+RenderExporterRegistry::findByExtension(std::string_view ext) const noexcept {
     const std::string needle = toLower(ext);
     for (const auto &exp : exporters_) {
         for (const auto &e : exp->supportedExtensions()) {
@@ -44,8 +46,8 @@ const IExporter *ExporterRegistry::findByExtension(std::string_view ext) const n
     return nullptr;
 }
 
-const IExporter *ExporterRegistry::resolve(const std::filesystem::path &path,
-                                           std::string_view formatHint) const noexcept {
+const IRenderExporter *RenderExporterRegistry::resolve(const std::filesystem::path &path,
+                                                       std::string_view formatHint) const noexcept {
     if (!formatHint.empty()) {
         return findByFormat(formatHint);
     }
@@ -56,8 +58,8 @@ const IExporter *ExporterRegistry::resolve(const std::filesystem::path &path,
     return nullptr;
 }
 
-ExporterRegistry makeDefaultExporterRegistry() {
-    ExporterRegistry reg;
+RenderExporterRegistry makeDefaultRenderExporterRegistry() {
+    RenderExporterRegistry reg;
     reg.registerExporter(std::make_unique<GltfExporter>());
     reg.registerExporter(std::make_unique<ObjExporter>());
     return reg;

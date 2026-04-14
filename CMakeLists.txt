@@ -39,18 +39,18 @@ add_library(nodehammer_lib STATIC
     src/config/config_writer.cpp
     src/config/config_validator.cpp
     src/config/predicate_parser.cpp
-    src/import/synthetic.cpp
+    src/ir/synthetic/semantic/importer.cpp
     src/import/importer_registry.cpp
     src/ir/json/semantic/importer.cpp
     src/ir/fb/semantic/importer.cpp
-    src/ir/semantic_flatbuffer.cpp
+    src/ir/fb/semantic/flatbuffer.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
-    src/export/gltf_exporter.cpp
-    src/export/obj_exporter.cpp
-    src/export/exporter_registry.cpp
+    src/ir/gltf/render/exporter.cpp
+    src/ir/obj/render/exporter.cpp
+    src/ir/render/exporter_registry.cpp
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
     src/export/semantic_exporter_registry.cpp
@@ -84,7 +84,7 @@ nodehammer_set_compiler_options(nodehammer_lib)
 # ── Optional backends ──────────────────────────────────────────────────────────
 if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
     find_package(ROOT REQUIRED COMPONENTS Geom)
-    target_sources(nodehammer_lib PRIVATE src/import/tgeo/tgeo_shape_dispatch.cpp)
+    target_sources(nodehammer_lib PRIVATE src/ir/tgeo/semantic/shape_dispatch.cpp)
     target_link_libraries(nodehammer_lib PUBLIC ROOT::Geom)
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_TGEO=1)
 endif()

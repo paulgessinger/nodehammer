@@ -1,7 +1,7 @@
-#include <nodehammer/import/tgeo/tgeo_shape_dispatch.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/provenance.hpp>
 #include <nodehammer/ir/tgeo/semantic/importer.hpp>
+#include <nodehammer/ir/tgeo/semantic/shape_dispatch.hpp>
 
 #include <TColor.h>
 #include <TError.h>
