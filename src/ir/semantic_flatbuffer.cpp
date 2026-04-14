@@ -515,6 +515,19 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<uint8_t> tagCounts(N);
     std::vector<fbs::TagRef> tagRefs;
     std::vector<uint8_t> degradation(N);
+    struct NodeRowData {
+        const SemanticNode *node{nullptr};
+        uint32_t depth{0};
+        uint64_t parentOldId{0};
+        uint32_t logVolIndex{0};
+        uint32_t nameIndex{0};
+        uint32_t transformIndex{0};
+        uint8_t sourceSystemIndex{0};
+        uint8_t degradation{0};
+        uint8_t tagCount{0};
+    };
+    std::vector<NodeRowData> nodeRows;
+    nodeRows.reserve(N);
 
     std::size_t totalTagCount = 0;
     for (const auto *node : orderedNodes) {
@@ -526,6 +539,23 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::unordered_map<std::string, uint32_t> nameMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> nameTableOffsets;
     std::vector<uint32_t> nameIndices(N);
+    std::unordered_map<std::string, std::size_t> nameFreq;
+    nameFreq.reserve(orderedNodes.size());
+    for (const auto *node : orderedNodes) {
+        ++nameFreq[node->name];
+    }
+    std::vector<std::pair<std::string, std::size_t>> rankedNames{nameFreq.begin(), nameFreq.end()};
+    std::sort(rankedNames.begin(), rankedNames.end(), [](const auto &a, const auto &b) {
+        if (a.second != b.second) {
+            return a.second > b.second;
+        }
+        return a.first < b.first;
+    });
+    for (const auto &[name, _freq] : rankedNames) {
+        const auto idx = toU32Checked(nameTableOffsets.size(), "name table index");
+        nameMap.emplace(name, idx);
+        nameTableOffsets.push_back(builder.CreateSharedString(name));
+    }
 
     std::unordered_map<std::string, uint8_t> tagKeyMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> tagKeyTableOffsets;
@@ -535,22 +565,82 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::unordered_map<std::string, uint8_t> srcSysMap;
     std::vector<flatbuffers::Offset<flatbuffers::String>> srcSysTableOffsets;
     std::vector<uint8_t> srcSysIndices(N);
-    std::unordered_map<SemanticNodeId, uint32_t> nodeIdRemap;
-    nodeIdRemap.reserve(N);
+    std::unordered_map<std::string, std::size_t> srcSysFreq;
+    srcSysFreq.reserve(orderedNodes.size());
+    for (const auto *node : orderedNodes) {
+        ++srcSysFreq[node->sourceSystem];
+    }
+    std::vector<std::pair<std::string, std::size_t>> rankedSrcSystems{srcSysFreq.begin(),
+                                                                      srcSysFreq.end()};
+    std::sort(rankedSrcSystems.begin(), rankedSrcSystems.end(), [](const auto &a, const auto &b) {
+        if (a.second != b.second) {
+            return a.second > b.second;
+        }
+        return a.first < b.first;
+    });
+    for (const auto &[sourceSystem, _freq] : rankedSrcSystems) {
+        const auto idx = toU8Checked(srcSysTableOffsets.size(), "source-system table index");
+        srcSysMap.emplace(sourceSystem, idx);
+        srcSysTableOffsets.push_back(builder.CreateSharedString(sourceSystem));
+    }
+
     uint32_t maxNodeLogVolId = 0;
     uint32_t maxNodeNameIndex = 0;
     uint32_t maxNodeTransformIndex = 0;
-    for (std::size_t i = 0; i < N; ++i) {
-        nodeIdRemap.emplace(orderedNodes[i]->id, static_cast<uint32_t>(i + 1));
+    std::unordered_map<SemanticNodeId, const SemanticNode *> nodeById;
+    nodeById.reserve(orderedNodes.size());
+    for (const auto *node : orderedNodes) {
+        nodeById.emplace(node->id, node);
     }
-
-    auto internName = [&](const std::string &s) -> uint32_t {
-        auto [it, inserted] =
-            nameMap.try_emplace(s, static_cast<uint32_t>(nameTableOffsets.size()));
-        if (inserted) {
-            nameTableOffsets.push_back(builder.CreateSharedString(s));
+    std::unordered_map<SemanticNodeId, uint32_t> nodeDepth;
+    nodeDepth.reserve(orderedNodes.size());
+    auto computeDepth = [&](const SemanticNode *start) -> uint32_t {
+        if (!start) {
+            return 0;
         }
-        return it->second;
+        if (const auto it = nodeDepth.find(start->id); it != nodeDepth.end()) {
+            return it->second;
+        }
+
+        std::vector<const SemanticNode *> chain;
+        chain.reserve(16);
+        const SemanticNode *cur = start;
+        while (cur) {
+            if (const auto it = nodeDepth.find(cur->id); it != nodeDepth.end()) {
+                uint32_t d = it->second;
+                for (auto rit = chain.rbegin(); rit != chain.rend(); ++rit) {
+                    ++d;
+                    nodeDepth.emplace((*rit)->id, d);
+                }
+                return nodeDepth.at(start->id);
+            }
+            chain.push_back(cur);
+            if (!cur->parentId) {
+                uint32_t d = 0;
+                for (auto rit = chain.rbegin(); rit != chain.rend(); ++rit) {
+                    nodeDepth.emplace((*rit)->id, d++);
+                }
+                return nodeDepth.at(start->id);
+            }
+            const auto parentIt = nodeById.find(*cur->parentId);
+            if (parentIt == nodeById.end()) {
+                uint32_t d = 0;
+                for (auto rit = chain.rbegin(); rit != chain.rend(); ++rit) {
+                    nodeDepth.emplace((*rit)->id, d++);
+                }
+                return nodeDepth.at(start->id);
+            }
+            // Guard against cycles in malformed scenes.
+            if (std::find(chain.begin(), chain.end(), parentIt->second) != chain.end()) {
+                uint32_t d = 0;
+                for (auto rit = chain.rbegin(); rit != chain.rend(); ++rit) {
+                    nodeDepth.emplace((*rit)->id, d++);
+                }
+                return nodeDepth.at(start->id);
+            }
+            cur = parentIt->second;
+        }
+        return 0;
     };
 
     auto internTagKey = [&](const std::string &s) -> uint8_t {
@@ -573,25 +663,80 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         return idx;
     };
 
-    auto internSrcSys = [&](const std::string &s) -> uint8_t {
-        if (auto it = srcSysMap.find(s); it != srcSysMap.end()) {
-            return it->second;
+    for (const auto *node : orderedNodes) {
+        const auto nameIt = nameMap.find(node->name);
+        if (nameIt == nameMap.end()) {
+            throw std::runtime_error(
+                std::format("node name '{}' missing from name table", node->name));
         }
-        const auto idx = toU8Checked(srcSysTableOffsets.size(), "source-system table index");
-        srcSysMap.emplace(s, idx);
-        srcSysTableOffsets.push_back(builder.CreateSharedString(s));
-        return idx;
-    };
+
+        const auto srcIt = srcSysMap.find(node->sourceSystem);
+        if (srcIt == srcSysMap.end()) {
+            throw std::runtime_error(std::format(
+                "source system '{}' missing from source-system table", node->sourceSystem));
+        }
+
+        const auto degr = node->degradation.bits.to_ulong();
+        if (degr > std::numeric_limits<uint8_t>::max()) {
+            throw std::runtime_error(
+                std::format("degradation bitmask {} exceeds uint8 range", degr));
+        }
+
+        const auto tagCount = toU8Checked(node->tags.size(), "per-node tag count");
+
+        NodeRowData row;
+        row.node = node;
+        row.depth = computeDepth(node);
+        row.parentOldId = node->parentId ? node->parentId->value : 0;
+        row.nameIndex = nameIt->second;
+        row.logVolIndex = remapLogVolId(node->logVolId, "node logvol");
+        row.transformIndex = transformPool.internTransform(node->localTransform);
+        row.sourceSystemIndex = srcIt->second;
+        row.degradation = static_cast<uint8_t>(degr);
+        row.tagCount = tagCount;
+        nodeRows.push_back(row);
+
+        maxNodeNameIndex = std::max(maxNodeNameIndex, row.nameIndex);
+        maxNodeLogVolId = std::max(maxNodeLogVolId, row.logVolIndex);
+        maxNodeTransformIndex = std::max(maxNodeTransformIndex, row.transformIndex);
+    }
+
+    // Reorder row serialization for better column locality/compression.
+    std::sort(nodeRows.begin(), nodeRows.end(), [](const auto &a, const auto &b) {
+        if (a.depth != b.depth) {
+            return a.depth < b.depth;
+        }
+        if (a.parentOldId != b.parentOldId) {
+            return a.parentOldId < b.parentOldId;
+        }
+        if (a.logVolIndex != b.logVolIndex) {
+            return a.logVolIndex < b.logVolIndex;
+        }
+        if (a.transformIndex != b.transformIndex) {
+            return a.transformIndex < b.transformIndex;
+        }
+        if (a.nameIndex != b.nameIndex) {
+            return a.nameIndex < b.nameIndex;
+        }
+        return a.node->id.value < b.node->id.value;
+    });
+
+    std::unordered_map<SemanticNodeId, uint32_t> nodeIdRemap;
+    nodeIdRemap.reserve(N);
+    for (std::size_t i = 0; i < N; ++i) {
+        nodeIdRemap.emplace(nodeRows[i].node->id, static_cast<uint32_t>(i + 1));
+    }
 
     for (std::size_t i = 0; i < N; ++i) {
-        const auto &node = *orderedNodes[i];
+        const auto &row = nodeRows[i];
+        const auto &node = *row.node;
 
-        nameIndices[i] = internName(node.name);
-        maxNodeNameIndex = std::max(maxNodeNameIndex, nameIndices[i]);
-        logVolIds32[i] = remapLogVolId(node.logVolId, "node logvol");
-        maxNodeLogVolId = std::max(maxNodeLogVolId, logVolIds32[i]);
-        transformIndices[i] = transformPool.internTransform(node.localTransform);
-        maxNodeTransformIndex = std::max(maxNodeTransformIndex, transformIndices[i]);
+        nameIndices[i] = row.nameIndex;
+        logVolIds32[i] = row.logVolIndex;
+        transformIndices[i] = row.transformIndex;
+        srcSysIndices[i] = row.sourceSystemIndex;
+        degradation[i] = row.degradation;
+        tagCounts[i] = row.tagCount;
 
         // Parent
         if (node.parentId) {
@@ -606,20 +751,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         }
 
         // Tags: per-node count + flat key/value ref pairs
-        const auto tagCount = node.tags.size();
-        tagCounts[i] = toU8Checked(tagCount, "per-node tag count");
         for (const auto &[k, v] : node.tags) {
             tagRefs.emplace_back(internTagKey(k), internTagValue(v));
         }
-
-        srcSysIndices[i] = internSrcSys(node.sourceSystem);
-
-        const auto degr = node.degradation.bits.to_ulong();
-        if (degr > std::numeric_limits<uint8_t>::max()) {
-            throw std::runtime_error(
-                std::format("degradation bitmask {} exceeds uint8 range", degr));
-        }
-        degradation[i] = static_cast<uint8_t>(degr);
     }
     // Build NodeColumns
     const bool useU16LogVolIds = maxNodeLogVolId <= std::numeric_limits<uint16_t>::max();

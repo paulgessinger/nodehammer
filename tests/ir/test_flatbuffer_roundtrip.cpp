@@ -49,19 +49,18 @@ TEST_CASE("FlatBuffer roundtrip: minimal scene", "[ir][flatbuffer]") {
 
     auto restored = semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
 
-    REQUIRE(restored.rootId == original.rootId);
     REQUIRE(restored.sourceFile == original.sourceFile);
     REQUIRE(restored.nodes.size() == original.nodes.size());
     REQUIRE(restored.shapes.size() == original.shapes.size());
     REQUIRE(restored.logVols.size() == original.logVols.size());
     REQUIRE(restored.materials.size() == original.materials.size());
 
-    // Check node
-    const auto &origNode = original.nodes.begin()->second;
-    const auto &resNode = restored.nodes.at(origNode.id);
-    REQUIRE(resNode.name == origNode.name);
-    REQUIRE(resNode.logVolId == origNode.logVolId);
-    REQUIRE(resNode.sourceSystem == origNode.sourceSystem);
+    // Check root node semantics (node ID may be remapped by serialization order).
+    REQUIRE(restored.nodes.contains(restored.rootId));
+    const auto &resNode = restored.nodes.at(restored.rootId);
+    REQUIRE(resNode.name == "root");
+    REQUIRE(resNode.logVolId.value != 0);
+    REQUIRE(resNode.sourceSystem == "test");
 
     // Check shape (box)
     const auto &origShape = original.shapes.begin()->second;
@@ -266,22 +265,38 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
     auto restored = semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
 
     REQUIRE(restored.nodes.size() == 3);
-    REQUIRE(restored.rootId == rootId);
     REQUIRE(restored.sourceFile == "/test/detector.xml");
 
+    auto findNodeIdByName = [&](std::string_view name) -> std::optional<SemanticNodeId> {
+        for (const auto &[id, node] : restored.nodes) {
+            if (node.name == name) {
+                return id;
+            }
+        }
+        return std::nullopt;
+    };
+
+    const auto resRootId = findNodeIdByName("world");
+    const auto resChildId = findNodeIdByName("sensor_0");
+    const auto resGrandchildId = findNodeIdByName("pixel_0");
+    REQUIRE(resRootId.has_value());
+    REQUIRE(resChildId.has_value());
+    REQUIRE(resGrandchildId.has_value());
+    REQUIRE(restored.rootId == *resRootId);
+
     // Root tags
-    const auto &resRoot = restored.nodes.at(rootId);
+    const auto &resRoot = restored.nodes.at(*resRootId);
     REQUIRE(resRoot.tags.size() == 2);
     REQUIRE(resRoot.tags.at("detector") == "tracker");
     REQUIRE(resRoot.tags.at("sensitive") == "true");
     REQUIRE(resRoot.sourceSystem == "dd4hep");
     REQUIRE(resRoot.children.size() == 1);
-    REQUIRE(resRoot.children[0] == childId);
+    REQUIRE(resRoot.children[0] == *resChildId);
 
     // Child transform
-    const auto &resChild = restored.nodes.at(childId);
+    const auto &resChild = restored.nodes.at(*resChildId);
     REQUIRE(resChild.parentId.has_value());
-    REQUIRE(*resChild.parentId == rootId);
+    REQUIRE(*resChild.parentId == *resRootId);
     REQUIRE(resChild.localTransform[3][0] == Approx(100.0));
     REQUIRE(resChild.localTransform[3][1] == Approx(200.0));
     REQUIRE(resChild.localTransform[3][2] == Approx(300.0));
@@ -292,9 +307,9 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
     REQUIRE(resChild.degradation.bits.to_ulong() == 0b0101);
 
     // Grandchild: identity transform, has parent
-    const auto &resGrandchild = restored.nodes.at(grandchildId);
+    const auto &resGrandchild = restored.nodes.at(*resGrandchildId);
     REQUIRE(resGrandchild.parentId.has_value());
-    REQUIRE(*resGrandchild.parentId == childId);
+    REQUIRE(*resGrandchild.parentId == *resChildId);
     // Identity transform check
     REQUIRE(resGrandchild.localTransform[0][0] == Approx(1.0));
     REQUIRE(resGrandchild.localTransform[3][0] == Approx(0.0));
@@ -373,7 +388,8 @@ TEST_CASE("FlatBuffer roundtrip: Layer 1 API composes", "[ir][flatbuffer]") {
     const auto *fb = fbs::GetSemanticScene(ptr);
     auto restored = semanticSceneFromFlatBuffer(*fb);
 
-    REQUIRE(restored.rootId == scene.rootId);
     REQUIRE(restored.sourceFile == scene.sourceFile);
     REQUIRE(restored.nodes.size() == scene.nodes.size());
+    REQUIRE(restored.nodes.contains(restored.rootId));
+    REQUIRE(restored.nodes.at(restored.rootId).name == "root");
 }
