@@ -1,11 +1,11 @@
-#include <nodehammer/markup.hpp>
+#include <nodehammer/detail/markup.hpp>
 
 #include <array>
 #include <string>
 #include <string_view>
 #include <utility>
 
-namespace nodehammer {
+namespace nodehammer::detail {
 
 namespace {
 
@@ -159,4 +159,4 @@ std::string markup(std::string_view input) { return process(input, false); }
 
 std::string stripMarkup(std::string_view input) { return process(input, true); }
 
-} // namespace nodehammer
+} // namespace nodehammer::detail

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <CLI/CLI.hpp>
+#include <nodehammer/detail/markup.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/semantic/importer_registry.hpp>
-#include <nodehammer/markup.hpp>
 
 #include <nodehammer/ir/diagnostics.hpp>
 
@@ -14,7 +14,7 @@ namespace nodehammer::cli {
 
 /// Print diagnostics to stderr with colored severity.
 inline void printDiags(const DiagnosticList &diags) {
-    static Console errCon{ColorMode::Auto};
+    static detail::Console errCon{detail::ColorMode::Auto};
     for (const auto &d : diags.items()) {
         std::string_view color;
         std::string_view label;

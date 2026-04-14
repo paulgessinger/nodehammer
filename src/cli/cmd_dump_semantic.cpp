@@ -6,13 +6,13 @@
 #include <nlohmann/json.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
+#include <nodehammer/detail/markup.hpp>
 #include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/ir/semantic/exporter.hpp>
-#include <nodehammer/markup.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <nodehammer/selection/selector.hpp>
 #include <print>
@@ -20,14 +20,14 @@
 
 namespace {
 
-nodehammer::ColorMode parseColorMode(const std::string &s) {
+nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
     if (s == "always") {
-        return nodehammer::ColorMode::Always;
+        return nodehammer::detail::ColorMode::Always;
     }
     if (s == "never") {
-        return nodehammer::ColorMode::Never;
+        return nodehammer::detail::ColorMode::Never;
     }
-    return nodehammer::ColorMode::Auto;
+    return nodehammer::detail::ColorMode::Auto;
 }
 
 std::string shapeTypeName(const nodehammer::SemanticShapeVariant &data) {
@@ -61,7 +61,7 @@ std::string formatTranslation(const glm::dmat4 &m) {
 }
 
 void printRichTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
-                   const nodehammer::Console &con) {
+                   const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
@@ -264,7 +264,7 @@ void register_cmd_dump_semantic(CLI::App &app) {
             colorOpt->results(colorStr);
 
             nodehammer::cli::Pager pager;
-            nodehammer::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+            nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
             printRichTree(result.scene, maxDepth, filter, con);
         } else {
             std::string outPath;

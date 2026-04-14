@@ -12,7 +12,7 @@
 #include <unistd.h>
 #endif
 
-namespace nodehammer {
+namespace nodehammer::detail {
 
 /// Controls when Console emits ANSI escape codes.
 enum class ColorMode {
@@ -117,4 +117,4 @@ void markupPrintln(FILE *f, std::format_string<Args...> fmt, Args &&...args) {
     Console{}.println(f, fmt, std::forward<Args>(args)...);
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::detail

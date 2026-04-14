@@ -2,13 +2,13 @@
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/markup.hpp>
+#include <nodehammer/detail/markup.hpp>
 
-using nodehammer::ColorMode;
-using nodehammer::Console;
-using nodehammer::markup;
-using nodehammer::markupFormat;
-using nodehammer::stripMarkup;
+using nodehammer::detail::ColorMode;
+using nodehammer::detail::Console;
+using nodehammer::detail::markup;
+using nodehammer::detail::markupFormat;
+using nodehammer::detail::stripMarkup;
 
 TEST_CASE("markup: plain text passes through unchanged", "[markup]") {
     CHECK(markup("hello world") == "hello world");

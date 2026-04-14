@@ -1,6 +1,6 @@
 #pragma once
 
-#include "nodehammer/markup.hpp"
+#include "nodehammer/detail/markup.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -18,7 +18,7 @@ namespace nodehammer::cli {
 class Pager {
   public:
     Pager() {
-        if (!nodehammer::Console::isTTY()) {
+        if (!nodehammer::detail::Console::isTTY()) {
             return;
         }
 
@@ -60,9 +60,10 @@ class Pager {
 
     /// Returns the color mode to use: Always when paging (pager handles ANSI),
     /// otherwise the requested mode.
-    [[nodiscard]] ColorMode effectiveColorMode(ColorMode requested = ColorMode::Auto) const {
-        if (active_ && requested == ColorMode::Auto) {
-            return ColorMode::Always;
+    [[nodiscard]] detail::ColorMode
+    effectiveColorMode(detail::ColorMode requested = detail::ColorMode::Auto) const {
+        if (active_ && requested == detail::ColorMode::Auto) {
+            return detail::ColorMode::Always;
         }
         return requested;
     }

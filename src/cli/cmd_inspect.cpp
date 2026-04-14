@@ -3,9 +3,9 @@
 
 #include <CLI/CLI.hpp>
 #include <map>
+#include <nodehammer/detail/markup.hpp>
 #include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/markup.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <print>
 #include <set>
@@ -13,14 +13,14 @@
 
 namespace {
 
-nodehammer::ColorMode parseColorMode(const std::string &s) {
+nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
     if (s == "always") {
-        return nodehammer::ColorMode::Always;
+        return nodehammer::detail::ColorMode::Always;
     }
     if (s == "never") {
-        return nodehammer::ColorMode::Never;
+        return nodehammer::detail::ColorMode::Never;
     }
-    return nodehammer::ColorMode::Auto;
+    return nodehammer::detail::ColorMode::Auto;
 }
 
 // ── Summary ─��─────────────────────────────────���──────────────────────────────
@@ -91,7 +91,7 @@ void printSummary(const nodehammer::ImportResult &result, std::string_view forma
 // ── Tree ───────────────────────────���───────────────────────────���─────────────
 
 void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
-               const nodehammer::Console &con) {
+               const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
@@ -192,7 +192,7 @@ void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::
 
 // ── Tags ──────────��───────────────────────────────���──────────────────────────
 
-void printTags(const nodehammer::SemanticScene &scene, const nodehammer::Console &con) {
+void printTags(const nodehammer::SemanticScene &scene, const nodehammer::detail::Console &con) {
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
     int nodesWithTags = 0;
@@ -280,7 +280,7 @@ void register_cmd_inspect(CLI::App &app) {
         colorOpt->results(colorStr);
 
         nodehammer::cli::Pager pager;
-        nodehammer::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+        nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
         printTree(result.scene, maxDepth, filter, con);
     });
 
@@ -293,7 +293,7 @@ void register_cmd_inspect(CLI::App &app) {
         colorOpt->results(colorStr);
 
         nodehammer::cli::Pager pager;
-        nodehammer::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+        nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
         printTags(result.scene, con);
     });
 }

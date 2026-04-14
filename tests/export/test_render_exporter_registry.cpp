@@ -4,7 +4,7 @@
 using namespace nodehammer;
 
 TEST_CASE("RenderExporterRegistry resolves by extension", "[export][render]") {
-    const auto reg = makeDefaultRenderExporterRegistry();
+    const auto reg = RenderExporterRegistry::makeDefault();
 
     REQUIRE(reg.resolve("out.glb") != nullptr);
     REQUIRE(reg.resolve("out.glb")->formatName() == "gltf");
@@ -17,7 +17,7 @@ TEST_CASE("RenderExporterRegistry resolves by extension", "[export][render]") {
 }
 
 TEST_CASE("RenderExporterRegistry resolves by explicit format", "[export][render]") {
-    const auto reg = makeDefaultRenderExporterRegistry();
+    const auto reg = RenderExporterRegistry::makeDefault();
 
     REQUIRE(reg.resolve("out.unknown", "gltf") != nullptr);
     REQUIRE(reg.resolve("out.unknown", "gltf")->formatName() == "gltf");

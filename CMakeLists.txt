@@ -54,7 +54,7 @@ add_library(nodehammer_lib STATIC
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
-    src/markup.cpp
+    src/detail/markup.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
     src/cli/cmd_validate_config.cpp
