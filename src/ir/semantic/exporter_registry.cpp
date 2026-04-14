@@ -1,4 +1,4 @@
-#include <nodehammer/export/semantic_exporter.hpp>
+#include <nodehammer/ir/semantic/exporter.hpp>
 
 #include <nodehammer/ir/fb/semantic/exporter.hpp>
 #include <nodehammer/ir/json/semantic/exporter.hpp>

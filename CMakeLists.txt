@@ -40,7 +40,7 @@ add_library(nodehammer_lib STATIC
     src/config/config_validator.cpp
     src/config/predicate_parser.cpp
     src/ir/synthetic/semantic/importer.cpp
-    src/import/importer_registry.cpp
+    src/ir/semantic/importer_registry.cpp
     src/ir/json/semantic/importer.cpp
     src/ir/fb/semantic/importer.cpp
     src/ir/fb/semantic/flatbuffer.cpp
@@ -53,7 +53,7 @@ add_library(nodehammer_lib STATIC
     src/ir/render/exporter_registry.cpp
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
-    src/export/semantic_exporter_registry.cpp
+    src/ir/semantic/exporter_registry.cpp
     src/markup.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
@@ -102,9 +102,6 @@ endif()
 
 if(NODEHAMMER_WITH_GEANT4)
     find_package(Geant4 REQUIRED)
-    target_sources(nodehammer_lib PRIVATE
-        src/import/gdml/gdml_importer.cpp
-    )
     target_link_libraries(nodehammer_lib PUBLIC ${Geant4_LIBRARIES})
     target_include_directories(nodehammer_lib PUBLIC ${Geant4_INCLUDE_DIRS})
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_GEANT4=1)

@@ -1,8 +1,8 @@
 #pragma once
 
 #include <CLI/CLI.hpp>
-#include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/ir/semantic/importer_registry.hpp>
 #include <nodehammer/markup.hpp>
 
 #include <nodehammer/ir/diagnostics.hpp>

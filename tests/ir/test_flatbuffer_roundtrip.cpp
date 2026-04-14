@@ -1,9 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
 #include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/ir/semantic/importer_registry.hpp>
 
 #include <chrono>
 #include <cmath>

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/import/importer.hpp>
+#include <nodehammer/ir/semantic/importer.hpp>
 
 #include <filesystem>
 #include <memory>

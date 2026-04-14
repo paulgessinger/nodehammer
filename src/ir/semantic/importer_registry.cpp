@@ -1,6 +1,6 @@
-#include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/fb/semantic/importer.hpp>
 #include <nodehammer/ir/json/semantic/importer.hpp>
+#include <nodehammer/ir/semantic/importer_registry.hpp>
 #include <nodehammer/ir/synthetic/semantic/importer.hpp>
 
 #ifdef NH_WITH_TGEO

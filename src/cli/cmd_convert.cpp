@@ -5,9 +5,9 @@
 #include <format>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/import/importer_registry.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/render/exporter.hpp>
+#include <nodehammer/ir/semantic/importer_registry.hpp>
 #include <nodehammer/selection/selector.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 #include <print>

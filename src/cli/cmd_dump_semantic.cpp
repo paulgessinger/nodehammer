@@ -7,11 +7,11 @@
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
 #include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/export/semantic_exporter.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
 #include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/ir/semantic/exporter.hpp>
 #include <nodehammer/markup.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <nodehammer/selection/selector.hpp>
