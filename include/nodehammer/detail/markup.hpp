@@ -57,7 +57,7 @@ class Console {
     template <typename... Args>
     void println(std::format_string<Args...> fmt, Args &&...args) const {
         auto text = std::format(fmt, std::forward<Args>(args)...);
-        if (shouldColorize(STDOUT_FILENO)) {
+        if (shouldColorize(stdoutFileDescriptor())) {
             std::println("{}", markup(text));
         } else {
             std::println("{}", stripMarkup(text));
@@ -68,7 +68,7 @@ class Console {
     template <typename... Args>
     void println(FILE *f, std::format_string<Args...> fmt, Args &&...args) const {
         auto text = std::format(fmt, std::forward<Args>(args)...);
-        if (shouldColorize(fileno(f))) {
+        if (shouldColorize(fileDescriptor(f))) {
             std::println(f, "{}", markup(text));
         } else {
             std::println(f, "{}", stripMarkup(text));
@@ -85,6 +85,24 @@ class Console {
     }
 
   private:
+    static int fileDescriptor(FILE *f) {
+#ifdef _WIN32
+        return _fileno(f);
+#else
+        return fileno(f);
+#endif
+    }
+
+    static int stdoutFileDescriptor() { return fileDescriptor(stdout); }
+
+    static bool isATerminal(int fd) {
+#ifdef _WIN32
+        return _isatty(fd) != 0;
+#else
+        return isatty(fd) != 0;
+#endif
+    }
+
     bool shouldColorize(int fd) const {
         switch (m_mode) {
         case ColorMode::Always:
@@ -93,7 +111,7 @@ class Console {
             return false;
         case ColorMode::Auto:
         default:
-            return isatty(fd) != 0;
+            return isATerminal(fd);
         }
     }
 

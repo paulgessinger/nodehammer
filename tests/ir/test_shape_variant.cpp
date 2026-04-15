@@ -125,7 +125,7 @@ TEST_CASE("SemanticShapeVariant: std::visit dispatches to_json for each type", "
     auto checkType = [](const V &v, std::string_view expectedType) {
         nlohmann::json j;
         std::visit([&j](const auto &s) { to_json(j, s); }, v);
-        REQUIRE(j["type"] == expectedType);
+        REQUIRE(j["type"].get<std::string>() == expectedType);
     };
 
     checkType(nodehammer::BoxShape{1, 2, 3}, "box");

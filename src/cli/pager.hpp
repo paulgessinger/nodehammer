@@ -2,12 +2,6 @@
 
 #include "nodehammer/detail/markup.hpp"
 #include <cstdio>
-#include <cstdlib>
-#include <string>
-
-#ifndef _WIN32
-#include <unistd.h>
-#endif
 
 namespace nodehammer::cli {
 
@@ -17,64 +11,32 @@ namespace nodehammer::cli {
 /// If stdout is not a TTY (piped/redirected), does nothing.
 class Pager {
   public:
-    Pager() {
-        if (!nodehammer::detail::Console::isTTY()) {
-            return;
-        }
-
-        const char *pager = std::getenv("PAGER");
-        std::string cmd = (pager != nullptr && pager[0] != '\0') ? pager : "less -R";
-
-        // Save original stdout fd.
-        savedFd_ = dup(fileno(stdout));
-        if (savedFd_ < 0) {
-            return;
-        }
-
-        pipe_ = popen(cmd.c_str(), "w");
-        if (pipe_ == nullptr) {
-            close(savedFd_);
-            savedFd_ = -1;
-            return;
-        }
-
-        // Redirect stdout fd to the pipe.
-        std::fflush(stdout);
-        dup2(fileno(pipe_), fileno(stdout));
-        active_ = true;
-    }
-
-    ~Pager() {
-        if (!active_) {
-            return;
-        }
-        // Restore original stdout.
-        std::fflush(stdout);
-        dup2(savedFd_, fileno(stdout));
-        close(savedFd_);
-        pclose(pipe_);
-    }
+    Pager();
+    ~Pager();
 
     /// True when output is going through a pager.
-    [[nodiscard]] bool isActive() const { return active_; }
+    [[nodiscard]] bool isActive() const;
 
     /// Returns the color mode to use: Always when paging (pager handles ANSI),
     /// otherwise the requested mode.
     [[nodiscard]] detail::ColorMode
-    effectiveColorMode(detail::ColorMode requested = detail::ColorMode::Auto) const {
-        if (active_ && requested == detail::ColorMode::Auto) {
-            return detail::ColorMode::Always;
-        }
-        return requested;
-    }
+    effectiveColorMode(detail::ColorMode requested = detail::ColorMode::Auto) const;
 
     Pager(const Pager &) = delete;
     Pager &operator=(const Pager &) = delete;
 
   private:
+    static int fileNo(FILE *f);
+    static int duplicateFd(int fd);
+    static int duplicateTo(int source, int target);
+    static int closeFd(int fd);
+    static FILE *popenPipe(const char *command, const char *mode);
+    static int pclosePipe(FILE *pipe);
+
     FILE *pipe_{nullptr};
     int savedFd_{-1};
     bool active_{false};
+    bool pagerSupportsAnsi_{false};
 };
 
 } // namespace nodehammer::cli

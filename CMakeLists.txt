@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(nodehammer VERSION 0.1.0 LANGUAGES CXX)
+project(nodehammer VERSION 0.1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,7 @@ add_library(nodehammer_lib STATIC
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
     src/detail/markup.cpp
+    src/cli/pager.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
     src/cli/cmd_validate_config.cpp
