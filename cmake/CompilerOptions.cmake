@@ -18,6 +18,9 @@ function(nodehammer_set_compiler_options target)
         target_compile_options(${target} PRIVATE
             /W4
             /permissive-
+            /external:anglebrackets
+            /external:W0
+            /external:templates-
         )
     endif()
 

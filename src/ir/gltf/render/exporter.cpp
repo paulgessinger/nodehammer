@@ -6,11 +6,15 @@
 
 // tinygltf and its bundled nlohmann/json produce warnings in strict mode.
 // Suppress them at the include site since they are not our code to fix.
+#ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-literal-operator"
 #pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
 #include <tiny_gltf.h>
+#ifdef __GNUC__
 #pragma GCC diagnostic pop
+#endif
 
 #include <nodehammer/ir/gltf/render/exporter.hpp>
 

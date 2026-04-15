@@ -23,7 +23,7 @@ namespace nodehammer {
 namespace {
 
 std::size_t hashCombine(std::size_t seed, std::size_t h) {
-    return seed ^ (h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
+    return seed ^ (h + static_cast<std::size_t>(0x9e3779b97f4a7c15ULL) + (seed << 6) + (seed >> 2));
 }
 
 std::size_t hashDouble(double d) { return std::hash<uint64_t>{}(std::bit_cast<uint64_t>(d)); }

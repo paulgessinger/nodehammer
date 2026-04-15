@@ -21,6 +21,7 @@ add_executable(nodehammer_tests
 
 target_compile_definitions(nodehammer_tests PRIVATE
     NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
+    $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
 )
 
 target_link_libraries(nodehammer_tests PRIVATE

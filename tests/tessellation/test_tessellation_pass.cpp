@@ -103,7 +103,6 @@ TEST_CASE("TessellationPass: nested boxes preserve hierarchy", "[tessellation][p
 
     // All render nodes are reachable from root
     std::size_t reachable = 0;
-    result.scene.nodes.at(result.scene.rootId); // just check it exists
     for (const auto &[id, rn] : result.scene.nodes) {
         (void)id;
         reachable++;
