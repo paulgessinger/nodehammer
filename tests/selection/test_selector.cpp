@@ -71,7 +71,7 @@ static auto makeThreeLevelScene() {
 
 // ── dryRun: basic disposition ─────────────────────────────────────────────────
 
-TEST_CASE("SelectionEngine: no rules — all nodes kept", "[selection][selector]") {
+TEST_CASE("SelectionEngine: no rules -- all nodes kept", "[selection][selector]") {
     auto [scene, rootId, trackerId, sensorId] = makeThreeLevelScene();
 
     SelectionEngine eng{{}};

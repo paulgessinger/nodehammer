@@ -10,7 +10,7 @@
 
 // ── SyntheticSceneBuilder: buildSingleBox ─────────────────────────────────────
 
-TEST_CASE("SyntheticSceneBuilder: buildSingleBox — geometry correct", "[import][synthetic]") {
+TEST_CASE("SyntheticSceneBuilder: buildSingleBox -- geometry correct", "[import][synthetic]") {
     auto scene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
 
     REQUIRE(scene.nodes.size() == 1);
@@ -32,7 +32,7 @@ TEST_CASE("SyntheticSceneBuilder: buildSingleBox — geometry correct", "[import
 
 // ── SyntheticSceneBuilder: buildNestedBoxes ───────────────────────────────────
 
-TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — correct parent-child links",
+TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes -- correct parent-child links",
           "[import][synthetic]") {
     auto scene = nodehammer::SyntheticSceneBuilder::buildNestedBoxes();
 
@@ -46,7 +46,7 @@ TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — correct parent-child link
     REQUIRE(child.parentId == scene.rootId);
 }
 
-TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — all nodes reachable from root",
+TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes -- all nodes reachable from root",
           "[import][synthetic]") {
     auto scene = nodehammer::SyntheticSceneBuilder::buildNestedBoxes();
 
@@ -57,7 +57,7 @@ TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — all nodes reachable from 
 
 // ── SyntheticSceneBuilder: buildWithDiagnostics ───────────────────────────────
 
-TEST_CASE("SyntheticSceneBuilder: buildWithDiagnostics — UnknownShape degradation flag set",
+TEST_CASE("SyntheticSceneBuilder: buildWithDiagnostics -- UnknownShape degradation flag set",
           "[import][synthetic]") {
     auto result = nodehammer::SyntheticSceneBuilder::buildWithDiagnostics();
 
@@ -76,7 +76,7 @@ TEST_CASE("SyntheticSceneBuilder: buildWithDiagnostics — UnknownShape degradat
 
 // ── SyntheticSceneBuilder: buildBooleanSubtraction ───────────────────────────
 
-TEST_CASE("SyntheticSceneBuilder: buildBooleanSubtraction — boolean shape present",
+TEST_CASE("SyntheticSceneBuilder: buildBooleanSubtraction -- boolean shape present",
           "[import][synthetic]") {
     auto scene = nodehammer::SyntheticSceneBuilder::buildBooleanSubtraction();
 
@@ -115,7 +115,7 @@ TEST_CASE("SyntheticImporter: sourceSystem is synthetic", "[import][synthetic]")
 
 // ── worldTransform accumulation ───────────────────────────────────────────────
 
-TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — root has identity worldTransform",
+TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes -- root has identity worldTransform",
           "[import][synthetic]") {
     auto scene = nodehammer::SyntheticSceneBuilder::buildNestedBoxes();
 
@@ -124,7 +124,7 @@ TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — root has identity worldTr
     REQUIRE(root.worldTransform == identity);
 }
 
-TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes — child worldTransform z == 100",
+TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes -- child worldTransform z == 100",
           "[import][synthetic]") {
     auto scene = nodehammer::SyntheticSceneBuilder::buildNestedBoxes();
 

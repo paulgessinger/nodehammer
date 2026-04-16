@@ -44,10 +44,12 @@ TEST_CASE("GltfExporter: single box -> GLB magic bytes", "[export][gltf]") {
     REQUIRE(std::filesystem::exists(out));
 
     // GLB magic = "glTF" = 0x46546C67 (little-endian)
-    std::ifstream f{out, std::ios::binary};
-    uint32_t magic{};
-    f.read(reinterpret_cast<char *>(&magic), 4);
-    CHECK(magic == 0x46546C67u);
+    {
+        std::ifstream f{out, std::ios::binary};
+        uint32_t magic{};
+        f.read(reinterpret_cast<char *>(&magic), 4);
+        CHECK(magic == 0x46546C67u);
+    }
 
     std::filesystem::remove(out);
 }
@@ -171,20 +173,22 @@ TEST_CASE("ObjExporter: single box -> OBJ + MTL files exist", "[export][obj]") {
     CHECK(std::filesystem::exists(mtl));
 
     // OBJ should have at least v, vn, and f lines
-    std::ifstream f{out};
-    std::string line;
-    bool hasV{}, hasVn{}, hasF{};
-    while (std::getline(f, line)) {
-        if (line.starts_with("v "))
-            hasV = true;
-        if (line.starts_with("vn "))
-            hasVn = true;
-        if (line.starts_with("f "))
-            hasF = true;
+    {
+        std::ifstream f{out};
+        std::string line;
+        bool hasV{}, hasVn{}, hasF{};
+        while (std::getline(f, line)) {
+            if (line.starts_with("v "))
+                hasV = true;
+            if (line.starts_with("vn "))
+                hasVn = true;
+            if (line.starts_with("f "))
+                hasF = true;
+        }
+        CHECK(hasV);
+        CHECK(hasVn);
+        CHECK(hasF);
     }
-    CHECK(hasV);
-    CHECK(hasVn);
-    CHECK(hasF);
 
     std::filesystem::remove(out);
     std::filesystem::remove(mtl);

@@ -7,6 +7,7 @@
 
 #include <format>
 #include <set>
+#include <span>
 #include <utility>
 
 namespace nodehammer {
@@ -630,23 +631,28 @@ ConfigResult parseTable(const toml::table &tbl) {
         // Each key declares which formats accept it (empty = all).
         // Each format group defines a factory that constructs its variant type
         // from the parsed TOML table + common config.
+        // Named static arrays so the spans below remain valid; storing an
+        // initializer_list inline dangles its backing array on MSVC.
+        static constexpr std::string_view kGltfGlbFormats[] = {"gltf", "glb"};
+        static constexpr std::string_view kObjFormats[] = {"obj"};
+
         struct ExportKeyDef {
             std::string_view key;
-            std::initializer_list<std::string_view> formats;
+            std::span<const std::string_view> formats;
         };
         static constexpr ExportKeyDef kExportKeys[] = {
             {"unit_scale", {}},
             {"bake_unit_scale", {}},
-            {"multi_scene", {"gltf", "glb"}},
-            {"scene_name_separator", {"gltf", "glb"}},
+            {"multi_scene", kGltfGlbFormats},
+            {"scene_name_separator", kGltfGlbFormats},
         };
 
         struct FormatGroup {
-            std::initializer_list<std::string_view> formats;
+            std::span<const std::string_view> formats;
             ExportFormatConfig (*build)(const toml::table &, const CommonExportConfig &);
         };
         static const FormatGroup kFormatGroups[] = {
-            {{"gltf", "glb"},
+            {kGltfGlbFormats,
              [](const toml::table &t, const CommonExportConfig &c) -> ExportFormatConfig {
                  GltfExportFormatConfig out;
                  out.common = c;
@@ -658,7 +664,7 @@ ConfigResult parseTable(const toml::table &tbl) {
                  }
                  return out;
              }},
-            {{"obj"},
+            {kObjFormats,
              [](const toml::table &, const CommonExportConfig &c) -> ExportFormatConfig {
                  ObjExportFormatConfig out;
                  out.common = c;
