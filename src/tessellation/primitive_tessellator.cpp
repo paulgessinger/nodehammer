@@ -156,9 +156,9 @@ TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &
         const glm::vec3 n0{std::cos(a0), std::sin(a0), 0};
         const glm::vec3 n1{std::cos(a1), std::sin(a1), 0};
         appendQuad(out, {glm::vec3{rMax * n0.x, rMax * n0.y, -hz}, n0},
-                   {glm::vec3{rMax * n0.x, rMax * n0.y, hz}, n0},
+                   {glm::vec3{rMax * n1.x, rMax * n1.y, -hz}, n1},
                    {glm::vec3{rMax * n1.x, rMax * n1.y, hz}, n1},
-                   {glm::vec3{rMax * n1.x, rMax * n1.y, -hz}, n1});
+                   {glm::vec3{rMax * n0.x, rMax * n0.y, hz}, n0});
     }
 
     // ── Inner wall (hollow tube only) ─────────────────────────────────────────
@@ -169,9 +169,9 @@ TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &
             const glm::vec3 n0{-std::cos(a0), -std::sin(a0), 0};
             const glm::vec3 n1{-std::cos(a1), -std::sin(a1), 0};
             appendQuad(out, {glm::vec3{rMin * std::cos(a0), rMin * std::sin(a0), hz}, n0},
-                       {glm::vec3{rMin * std::cos(a0), rMin * std::sin(a0), -hz}, n0},
+                       {glm::vec3{rMin * std::cos(a1), rMin * std::sin(a1), hz}, n1},
                        {glm::vec3{rMin * std::cos(a1), rMin * std::sin(a1), -hz}, n1},
-                       {glm::vec3{rMin * std::cos(a1), rMin * std::sin(a1), hz}, n1});
+                       {glm::vec3{rMin * std::cos(a0), rMin * std::sin(a0), -hz}, n0});
         }
     }
 
@@ -237,14 +237,14 @@ TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &
             if (rMin > 0.0f) {
                 if (side == 0) {
                     appendQuad(out, {glm::vec3{rMax * ca, rMax * sa, -hz}, n},
-                               {glm::vec3{rMax * ca, rMax * sa, hz}, n},
+                               {glm::vec3{rMin * ca, rMin * sa, -hz}, n},
                                {glm::vec3{rMin * ca, rMin * sa, hz}, n},
-                               {glm::vec3{rMin * ca, rMin * sa, -hz}, n});
+                               {glm::vec3{rMax * ca, rMax * sa, hz}, n});
                 } else {
                     appendQuad(out, {glm::vec3{rMin * ca, rMin * sa, -hz}, n},
-                               {glm::vec3{rMin * ca, rMin * sa, hz}, n},
+                               {glm::vec3{rMax * ca, rMax * sa, -hz}, n},
                                {glm::vec3{rMax * ca, rMax * sa, hz}, n},
-                               {glm::vec3{rMax * ca, rMax * sa, -hz}, n});
+                               {glm::vec3{rMin * ca, rMin * sa, hz}, n});
                 }
             } else {
                 // Solid tube: the side cap is a full rectangle from axis to rMax.
@@ -252,17 +252,17 @@ TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &
                 // lie at z=-hz and z=+hz (four distinct corners).
                 if (side == 0) {
                     appendTriangle(out, {glm::vec3{0, 0, -hz}, n},
+                                   {glm::vec3{rMax * ca, rMax * sa, hz}, n},
+                                   {glm::vec3{rMax * ca, rMax * sa, -hz}, n});
+                    appendTriangle(out, {glm::vec3{0, 0, -hz}, n}, {glm::vec3{0, 0, hz}, n},
+                                   {glm::vec3{rMax * ca, rMax * sa, hz}, n});
+                } else {
+                    appendTriangle(out, {glm::vec3{0, 0, -hz}, n},
                                    {glm::vec3{rMax * ca, rMax * sa, -hz}, n},
                                    {glm::vec3{rMax * ca, rMax * sa, hz}, n});
                     appendTriangle(out, {glm::vec3{0, 0, -hz}, n},
                                    {glm::vec3{rMax * ca, rMax * sa, hz}, n},
                                    {glm::vec3{0, 0, hz}, n});
-                } else {
-                    appendTriangle(out, {glm::vec3{0, 0, -hz}, n},
-                                   {glm::vec3{rMax * ca, rMax * sa, hz}, n},
-                                   {glm::vec3{rMax * ca, rMax * sa, -hz}, n});
-                    appendTriangle(out, {glm::vec3{0, 0, -hz}, n}, {glm::vec3{0, 0, hz}, n},
-                                   {glm::vec3{rMax * ca, rMax * sa, hz}, n});
                 }
             }
         }
