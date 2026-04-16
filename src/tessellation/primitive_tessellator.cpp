@@ -276,12 +276,15 @@ TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &
 // Each end can independently have an inner and outer radius, allowing hollow
 // frustums. Side view (frustum example):
 //
-//         rMin2  rMax2
-//          |-----|         z = +hz (top)
-//         /       \
-//        /         \       ← outer slant wall
-//       /     ___   \
-//      /_____|   |___\     z = -hz (bottom)
+/*
+ *        rMin2  rMax2
+ *         |-----|         z = +hz (top)
+ *        /       \
+ *       /         \       <- outer slant wall
+ *      /     ___   \
+ *     /_____|   |___\     z = -hz (bottom)
+ */
+//
 //      |-----|   |---|
 //      rMin1     rMax1
 //
@@ -721,12 +724,14 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
 //
 //   Top view (nSides = 6):
 //
-//       V-------V      ← vertices at circumradius = rMax / cos(π/6)
-//      / |     | \
-//     /  |←rMax→|  \   ← rMax = apothem (face midpoint distance)
-//     \  |     |  /
-//      \ |     | /
-//       V-------V
+/*
+ *      V-------V      <- vertices at circumradius = rMax / cos(pi/6)
+ *     / |     | \
+ *    /  |<rMax>|  \   <- rMax = apothem (face midpoint distance)
+ *    \  |     |  /
+ *     \ |     | /
+ *      V-------V
+ */
 //
 // The face normal for each side points from the axis to the face midpoint, i.e.
 // in the direction at the midpoint angle amid = (a0+a1)/2.

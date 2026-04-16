@@ -648,21 +648,21 @@ ConfigResult parseTable(const toml::table &tbl) {
         static const FormatGroup kFormatGroups[] = {
             {{"gltf", "glb"},
              [](const toml::table &t, const CommonExportConfig &c) -> ExportFormatConfig {
-                 GltfExportFormatConfig cfg;
-                 cfg.common = c;
+                 GltfExportFormatConfig out;
+                 out.common = c;
                  if (auto v = t["multi_scene"].value<bool>()) {
-                     cfg.multiScene = *v;
+                     out.multiScene = *v;
                  }
                  if (auto v = t["scene_name_separator"].value<std::string>()) {
-                     cfg.sceneNameSeparator = std::move(*v);
+                     out.sceneNameSeparator = std::move(*v);
                  }
-                 return cfg;
+                 return out;
              }},
             {{"obj"},
              [](const toml::table &, const CommonExportConfig &c) -> ExportFormatConfig {
-                 ObjExportFormatConfig cfg;
-                 cfg.common = c;
-                 return cfg;
+                 ObjExportFormatConfig out;
+                 out.common = c;
+                 return out;
              }},
         };
 

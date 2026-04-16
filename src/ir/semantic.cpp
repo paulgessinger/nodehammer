@@ -84,57 +84,57 @@ std::size_t ShapeHash::operator()(const SemanticShapeVariant &v) const {
                                           hashDouble(s.dz));
                    },
                    [](const TubeShape &s) {
-                       std::size_t h = hashCombine(hashDouble(s.rMin), hashDouble(s.rMax));
-                       h = hashCombine(h, hashDouble(s.dz));
-                       h = hashCombine(h, hashDouble(s.phiStart));
-                       return hashCombine(h, hashDouble(s.phiDelta));
+                       std::size_t hh = hashCombine(hashDouble(s.rMin), hashDouble(s.rMax));
+                       hh = hashCombine(hh, hashDouble(s.dz));
+                       hh = hashCombine(hh, hashDouble(s.phiStart));
+                       return hashCombine(hh, hashDouble(s.phiDelta));
                    },
                    [](const ConeShape &s) {
-                       std::size_t h = hashCombine(hashDouble(s.rMin1), hashDouble(s.rMax1));
-                       h = hashCombine(h, hashDouble(s.rMin2));
-                       h = hashCombine(h, hashDouble(s.rMax2));
-                       h = hashCombine(h, hashDouble(s.dz));
-                       h = hashCombine(h, hashDouble(s.phiStart));
-                       return hashCombine(h, hashDouble(s.phiDelta));
+                       std::size_t hh = hashCombine(hashDouble(s.rMin1), hashDouble(s.rMax1));
+                       hh = hashCombine(hh, hashDouble(s.rMin2));
+                       hh = hashCombine(hh, hashDouble(s.rMax2));
+                       hh = hashCombine(hh, hashDouble(s.dz));
+                       hh = hashCombine(hh, hashDouble(s.phiStart));
+                       return hashCombine(hh, hashDouble(s.phiDelta));
                    },
                    [](const TrdShape &s) {
-                       std::size_t h = hashCombine(hashDouble(s.dx1), hashDouble(s.dx2));
-                       h = hashCombine(h, hashDouble(s.dy1));
-                       h = hashCombine(h, hashDouble(s.dy2));
-                       return hashCombine(h, hashDouble(s.dz));
+                       std::size_t hh = hashCombine(hashDouble(s.dx1), hashDouble(s.dx2));
+                       hh = hashCombine(hh, hashDouble(s.dy1));
+                       hh = hashCombine(hh, hashDouble(s.dy2));
+                       return hashCombine(hh, hashDouble(s.dz));
                    },
                    [](const ParaShape &s) {
-                       std::size_t h = hashCombine(hashDouble(s.dx), hashDouble(s.dy));
-                       h = hashCombine(h, hashDouble(s.dz));
-                       h = hashCombine(h, hashDouble(s.alpha));
-                       h = hashCombine(h, hashDouble(s.theta));
-                       return hashCombine(h, hashDouble(s.phi));
+                       std::size_t hh = hashCombine(hashDouble(s.dx), hashDouble(s.dy));
+                       hh = hashCombine(hh, hashDouble(s.dz));
+                       hh = hashCombine(hh, hashDouble(s.alpha));
+                       hh = hashCombine(hh, hashDouble(s.theta));
+                       return hashCombine(hh, hashDouble(s.phi));
                    },
                    [](const PconShape &s) {
-                       std::size_t h = hashCombine(hashDouble(s.phiStart), hashDouble(s.phiDelta));
-                       return hashCombine(h, hashSections(s.sections));
+                       std::size_t hh = hashCombine(hashDouble(s.phiStart), hashDouble(s.phiDelta));
+                       return hashCombine(hh, hashSections(s.sections));
                    },
                    [](const PgonShape &s) {
-                       std::size_t h = hashCombine(hashDouble(s.phiStart), hashDouble(s.phiDelta));
-                       h = hashCombine(h, hashInt(s.nSides));
-                       return hashCombine(h, hashSections(s.sections));
+                       std::size_t hh = hashCombine(hashDouble(s.phiStart), hashDouble(s.phiDelta));
+                       hh = hashCombine(hh, hashInt(s.nSides));
+                       return hashCombine(hh, hashSections(s.sections));
                    },
                    [](const TorusShape &s) {
-                       std::size_t h = hashCombine(hashDouble(s.rMin), hashDouble(s.rMax));
-                       h = hashCombine(h, hashDouble(s.rTor));
-                       h = hashCombine(h, hashDouble(s.phiStart));
-                       return hashCombine(h, hashDouble(s.phiDelta));
+                       std::size_t hh = hashCombine(hashDouble(s.rMin), hashDouble(s.rMax));
+                       hh = hashCombine(hh, hashDouble(s.rTor));
+                       hh = hashCombine(hh, hashDouble(s.phiStart));
+                       return hashCombine(hh, hashDouble(s.phiDelta));
                    },
                    [](const TessellatedShape &s) {
-                       std::size_t h = s.triangles.size();
+                       std::size_t hh = s.triangles.size();
                        for (const auto &tri : s.triangles) {
-                           for (const auto &v : tri.vertices) {
-                               h = hashCombine(h, hashDouble(v.x));
-                               h = hashCombine(h, hashDouble(v.y));
-                               h = hashCombine(h, hashDouble(v.z));
+                           for (const auto &vert : tri.vertices) {
+                               hh = hashCombine(hh, hashDouble(vert.x));
+                               hh = hashCombine(hh, hashDouble(vert.y));
+                               hh = hashCombine(hh, hashDouble(vert.z));
                            }
                        }
-                       return h;
+                       return hh;
                    },
                    [](const BooleanUnion &s) -> std::size_t {
                        return hashCombine(hashCombine(hashId(s.left), hashId(s.right)),
