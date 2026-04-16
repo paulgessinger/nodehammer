@@ -64,8 +64,7 @@ PagerChoice choosePager() {
     if (!env.empty()) {
         // Heuristic: if the pager name contains "less" or "bat", assume ANSI
         // support.  For anything else, be conservative.
-        bool ansi = env.find("less") != std::string::npos ||
-                    env.find("bat") != std::string::npos;
+        bool ansi = env.find("less") != std::string::npos || env.find("bat") != std::string::npos;
         return {env, ansi};
     }
 
@@ -130,8 +129,7 @@ bool Pager::isActive() const { return active_; }
 
 detail::ColorMode Pager::effectiveColorMode(detail::ColorMode requested) const {
     if (active_ && requested == detail::ColorMode::Auto) {
-        return pagerSupportsAnsi_ ? detail::ColorMode::Always
-                                  : detail::ColorMode::Never;
+        return pagerSupportsAnsi_ ? detail::ColorMode::Always : detail::ColorMode::Never;
     }
     return requested;
 }
