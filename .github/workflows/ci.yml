@@ -52,13 +52,19 @@ jobs:
       - name: Detect Conan profile
         run: conan profile detect --force
 
-      - name: Cache Conan packages
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      - name: Restore Conan cache
+        id: conan-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.conan2/p
           key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py') }}
           restore-keys: |
             conan-${{ runner.os }}-
+
+      - name: Set up ccache
+        uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce # v1.2.22
+        with:
+          key: ccache-${{ runner.os }}
 
       - name: Conan install
         run: >
@@ -66,11 +72,64 @@ jobs:
           -s:a compiler.cppstd=23
           -c tools.cmake.cmaketoolchain:generator=Ninja
 
+      - name: Save Conan cache
+        if: always() && steps.conan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py') }}
+
       - name: Configure
-        run: cmake --preset conan-release -DNODEHAMMER_WERROR=ON
+        run: >
+          cmake --preset conan-release
+          -DNODEHAMMER_WERROR=ON
+          -DNODEHAMMER_BUILD_TESTS=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build --preset conan-release
 
       - name: Test
         run: ctest --test-dir build/Release --output-on-failure
+
+  lcg:
+    name: LCG 109 (el9-gcc15-opt)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Mount CVMFS
+        uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
+
+      - name: Restore ccache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-lcg109-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-lcg109-
+
+      - name: Build and test in LCG view
+        uses: aidasoft/run-lcg-view@d8db17c61216548c9192889942d46ff2d7c3a3b6 # v6
+        with:
+          release-platform: "LCG_109/x86_64-el9-gcc15-opt"
+          run_local_checkout: "true"
+          run: |
+            export CCACHE_DIR="$(pwd)/.ccache"
+            ccache --zero-stats
+            cmake --preset basic \
+              -DNODEHAMMER_WERROR=ON \
+              -DNODEHAMMER_BUILD_TESTS=ON \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+            cmake --build --preset basic
+            ccache --show-stats
+            ctest --test-dir build --output-on-failure
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-lcg109-${{ github.run_id }}-${{ github.run_attempt }}

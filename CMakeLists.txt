@@ -53,6 +53,7 @@ option(NODEHAMMER_WITH_GEANT4  "Enable GDML/Geant4 importer"      OFF)
 option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"        OFF)
 option(NODEHAMMER_ENABLE_ASAN  "Enable AddressSanitizer"          OFF)
 option(NODEHAMMER_WERROR       "Treat project warnings as errors" OFF)
+option(NODEHAMMER_BUILD_TESTS  "Build the unit-test binary"       OFF)
 
 # ── Library target ─────────────────────────────────────────────────────────────
 add_library(nodehammer_lib STATIC
@@ -139,5 +140,7 @@ target_link_libraries(nodehammer PRIVATE nodehammer_lib)
 nodehammer_set_compiler_options(nodehammer)
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
-enable_testing()
-add_subdirectory(tests)
+if(NODEHAMMER_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
