@@ -40,17 +40,14 @@ std::string getEnv(const char *name) {
 }
 #endif
 
-/// Returns true if `exe` can be found on the system PATH.
-bool exeOnPath([[maybe_unused]] const char *exe) {
 #ifdef _WIN32
+/// Returns true if `exe` can be found on the system PATH.
+bool exeOnPath(const char *exe) {
     // "where" exits 0 when found, non-zero otherwise.
     auto cmd = std::format("where {} >nul 2>nul", exe);
     return std::system(cmd.c_str()) == 0;
-#else
-    auto cmd = std::format("command -v {} >/dev/null 2>&1", exe);
-    return std::system(cmd.c_str()) == 0;
-#endif
 }
+#endif
 
 struct PagerChoice {
     std::string command;

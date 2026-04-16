@@ -61,6 +61,7 @@ FetchContent_Declare(glm
     SYSTEM
     GIT_REPOSITORY https://github.com/g-truc/glm.git
     GIT_TAG        1.0.1
+    FIND_PACKAGE_ARGS 1.0.1
 )
 # GLM 1.x uses the global BUILD_SHARED_LIBS to decide shared vs static.
 # This is set before MakeAvailable; if other deps later need the opposite,
@@ -92,6 +93,12 @@ set(TINYGLTF_INSTALL               OFF CACHE BOOL "" FORCE)
 set(TINYGLTF_HEADER_ONLY           ON  CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(tinygltf)
+
+# Canonical target is TinyGLTF::TinyGLTF (provided by Conan).
+# FetchContent only creates plain tinygltf; alias to the namespaced name.
+if(TARGET tinygltf AND NOT TARGET TinyGLTF::TinyGLTF)
+    add_library(TinyGLTF::TinyGLTF ALIAS tinygltf)
+endif()
 
 # ── Manifold (boolean mesh operations) ─────────────────────────────────────────
 FetchContent_Declare(manifold
@@ -136,6 +143,14 @@ set(FLATBUFFERS_BUILD_FLATC ON  CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATHASH OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(flatbuffers)
 
+# Canonical target is flatbuffers::flatbuffers (provided by Conan).
+# FetchContent only creates plain flatbuffers; alias to the namespaced name.
+if(TARGET flatbuffers AND NOT TARGET flatbuffers::flatbuffers)
+    add_library(flatbuffers::flatbuffers ALIAS flatbuffers)
+endif()
+
+# Silence warnings from the FetchContent-built flatbuffers (the Conan binary
+# was built elsewhere, so its flags are already fixed).
 if(TARGET flatbuffers)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(flatbuffers PRIVATE -w)

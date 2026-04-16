@@ -26,11 +26,22 @@ include(cmake/CompilerOptions.cmake)
 set(NH_FBS_SCHEMA ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs)
 set(NH_FBS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/flatbuffers)
 
+# Conan tool_requires exposes flatbuffers::flatc; FetchContent builds a plain
+# flatc target; a system install is on PATH. Resolve to whichever is present.
+if(TARGET flatbuffers::flatc)
+    set(NH_FLATC flatbuffers::flatc)
+elseif(TARGET flatc)
+    set(NH_FLATC flatc)
+else()
+    find_program(NH_FLATC_EXE flatc REQUIRED)
+    set(NH_FLATC "${NH_FLATC_EXE}")
+endif()
+
 add_custom_command(
     OUTPUT ${NH_FBS_GENERATED_DIR}/semantic_generated.h
     COMMAND ${CMAKE_COMMAND} -E make_directory ${NH_FBS_GENERATED_DIR}
-    COMMAND flatc --cpp -o ${NH_FBS_GENERATED_DIR} ${NH_FBS_SCHEMA}
-    DEPENDS ${NH_FBS_SCHEMA} flatc
+    COMMAND ${NH_FLATC} --cpp -o ${NH_FBS_GENERATED_DIR} ${NH_FBS_SCHEMA}
+    DEPENDS ${NH_FBS_SCHEMA} ${NH_FLATC}
     COMMENT "Generating FlatBuffers C++ header from semantic.fbs"
 )
 add_custom_target(flatbuffers_generate DEPENDS ${NH_FBS_GENERATED_DIR}/semantic_generated.h)
@@ -81,10 +92,10 @@ target_link_libraries(nodehammer_lib PUBLIC
     tomlplusplus::tomlplusplus
     nlohmann_json::nlohmann_json
     glm::glm
-    tinygltf
+    TinyGLTF::TinyGLTF
     CLI11::CLI11
     zstd::libzstd_static
-    flatbuffers
+    flatbuffers::flatbuffers
 )
 
 add_dependencies(nodehammer_lib flatbuffers_generate)
