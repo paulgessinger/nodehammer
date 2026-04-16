@@ -127,9 +127,17 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
 
         for (const auto id : reachable) {
             const auto &node = scene.nodes.at(id);
+            std::string_view matName;
+            if (scene.logVols.contains(node.logVolId)) {
+                const auto &lv = scene.logVols.at(node.logVolId);
+                if (scene.materials.contains(lv.materialId)) {
+                    matName = scene.materials.at(lv.materialId).name;
+                }
+            }
             NodeView view;
             view.name = node.name;
             view.path = node.originalPath;
+            view.materialName = matName;
             view.isLeaf = node.children.empty();
             view.tags = &node.tags;
 
