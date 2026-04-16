@@ -71,7 +71,7 @@ static bool hasNoDegenerateTriangles(const TessellationOutput &out) {
 
 // ── TGeoBBox ──────────────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoBBox dispatches to BoxShape and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoBBox dispatches to BoxShape and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_box", "tgeo_box");
     TGeoBBox shape{"box", 5.0, 10.0, 15.0};
@@ -87,7 +87,7 @@ TEST_CASE("TGeo→Tess: TGeoBBox dispatches to BoxShape and tessellates", "[tgeo
 
 // ── TGeoTube ──────────────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoTube (solid) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoTube (solid) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_tube_solid", "tgeo_tube_solid");
     TGeoTube shape{"tube_solid", 0.0, 3.0, 10.0};
@@ -102,7 +102,7 @@ TEST_CASE("TGeo→Tess: TGeoTube (solid) dispatches and tessellates", "[tgeo][te
     REQUIRE(hasNoDegenerateTriangles(out));
 }
 
-TEST_CASE("TGeo→Tess: TGeoTube (hollow) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoTube (hollow) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_tube_hollow", "tgeo_tube_hollow");
     TGeoTube shape{"tube_hollow", 1.5, 3.0, 10.0};
@@ -117,7 +117,7 @@ TEST_CASE("TGeo→Tess: TGeoTube (hollow) dispatches and tessellates", "[tgeo][t
     REQUIRE(hasNoDegenerateTriangles(out));
 }
 
-TEST_CASE("TGeo→Tess: TGeoTubeSeg (partial phi) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoTubeSeg (partial phi) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_tubeseg", "tgeo_tubeseg");
     TGeoTubeSeg shape{"tubeseg", 1.0, 3.0, 10.0, 0.0, 270.0};
@@ -134,7 +134,7 @@ TEST_CASE("TGeo→Tess: TGeoTubeSeg (partial phi) dispatches and tessellates", "
 
 // ── TGeoCone ──────────────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoCone (solid frustum) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoCone (solid frustum) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_cone_frustum", "tgeo_cone_frustum");
     // rmin1=0, rmax1=2, rmin2=0, rmax2=4, dz=5
@@ -150,7 +150,7 @@ TEST_CASE("TGeo→Tess: TGeoCone (solid frustum) dispatches and tessellates", "[
     REQUIRE(hasNoDegenerateTriangles(out));
 }
 
-TEST_CASE("TGeo→Tess: TGeoCone (hollow frustum, rMin>0) dispatches and tessellates",
+TEST_CASE("TGeo->Tess: TGeoCone (hollow frustum, rMin>0) dispatches and tessellates",
           "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_cone_hollow", "tgeo_cone_hollow");
@@ -168,7 +168,7 @@ TEST_CASE("TGeo→Tess: TGeoCone (hollow frustum, rMin>0) dispatches and tessell
     // Hollow frustum: outer wall + inner wall + bottom cap (annular) + top cap (annular)
 }
 
-TEST_CASE("TGeo→Tess: TGeoCone (apex) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoCone (apex) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_cone_apex", "tgeo_cone_apex");
     // rmin1=0, rmax1=3, rmin2=0, rmax2=0, dz=5  → pointed tip at +z
@@ -186,7 +186,7 @@ TEST_CASE("TGeo→Tess: TGeoCone (apex) dispatches and tessellates", "[tgeo][tes
 
 // ── TGeoTrd2 ──────────────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoTrd2 dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoTrd2 dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_trd2", "tgeo_trd2");
     // dx1=2, dx2=4, dy1=1, dy2=3, dz=5
@@ -203,7 +203,7 @@ TEST_CASE("TGeo→Tess: TGeoTrd2 dispatches and tessellates", "[tgeo][tess]") {
 
 // ── TGeoTorus ─────────────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoTorus (solid) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoTorus (solid) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_torus_solid", "tgeo_torus_solid");
     // rmin=0, rmax=0.5, rtor=3, phi1=0, dphi=360
@@ -219,7 +219,7 @@ TEST_CASE("TGeo→Tess: TGeoTorus (solid) dispatches and tessellates", "[tgeo][t
     REQUIRE(hasNoDegenerateTriangles(out));
 }
 
-TEST_CASE("TGeo→Tess: TGeoTorus (hollow annular) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoTorus (hollow annular) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_torus_hollow", "tgeo_torus_hollow");
     // rmin=0.2, rmax=0.5, rtor=3, phi1=0, dphi=360  → hollow tube cross-section
@@ -237,7 +237,7 @@ TEST_CASE("TGeo→Tess: TGeoTorus (hollow annular) dispatches and tessellates", 
 
 // ── TGeoPcon ──────────────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoPcon (solid, stepped) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoPcon (solid, stepped) dispatches and tessellates", "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_pcon_solid", "tgeo_pcon_solid");
     // 3-section polycone: narrower at both ends, wider in the middle (rMin=0 throughout)
@@ -256,7 +256,7 @@ TEST_CASE("TGeo→Tess: TGeoPcon (solid, stepped) dispatches and tessellates", "
     REQUIRE(hasNoDegenerateTriangles(out));
 }
 
-TEST_CASE("TGeo→Tess: TGeoPcon (hollow, constant radii) dispatches and tessellates",
+TEST_CASE("TGeo->Tess: TGeoPcon (hollow, constant radii) dispatches and tessellates",
           "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_pcon_hollow", "tgeo_pcon_hollow");
@@ -276,7 +276,7 @@ TEST_CASE("TGeo→Tess: TGeoPcon (hollow, constant radii) dispatches and tessell
     REQUIRE(hasNoDegenerateTriangles(out));
 }
 
-TEST_CASE("TGeo→Tess: TGeoPcon (varying rMin, flanged beampipe) dispatches and tessellates",
+TEST_CASE("TGeo->Tess: TGeoPcon (varying rMin, flanged beampipe) dispatches and tessellates",
           "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_pcon_flange", "tgeo_pcon_flange");
@@ -300,7 +300,7 @@ TEST_CASE("TGeo→Tess: TGeoPcon (varying rMin, flanged beampipe) dispatches and
 
 // ── TGeoPgon ──────────────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoPgon (solid hexagonal prism) dispatches and tessellates",
+TEST_CASE("TGeo->Tess: TGeoPgon (solid hexagonal prism) dispatches and tessellates",
           "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_pgon_solid", "tgeo_pgon_solid");
@@ -320,7 +320,7 @@ TEST_CASE("TGeo→Tess: TGeoPgon (solid hexagonal prism) dispatches and tessella
     REQUIRE(out.indices.size() == 72); // 24 triangles × 3
 }
 
-TEST_CASE("TGeo→Tess: TGeoPgon (hollow hexagonal prism) dispatches and tessellates",
+TEST_CASE("TGeo->Tess: TGeoPgon (hollow hexagonal prism) dispatches and tessellates",
           "[tgeo][tess]") {
     resetManager();
     new TGeoManager("tgeo_pgon_hollow", "tgeo_pgon_hollow");
@@ -342,7 +342,7 @@ TEST_CASE("TGeo→Tess: TGeoPgon (hollow hexagonal prism) dispatches and tessell
 
 // ── TGeoTessellated ───────────────────────────────────────────────────────────
 
-TEST_CASE("TGeo→Tess: TGeoTessellated (tetrahedron) dispatches and tessellates", "[tgeo][tess]") {
+TEST_CASE("TGeo->Tess: TGeoTessellated (tetrahedron) dispatches and tessellates", "[tgeo][tess]") {
     using Vertex_t = TGeoTessellated::Vertex_t;
 
     resetManager();

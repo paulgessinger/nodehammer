@@ -275,56 +275,62 @@ TEST_CASE("PredicateParser: extra whitespace", "[config][parser]") {
 
 // ── Error cases ──────────────────────────────────────────────────────────────
 
-TEST_CASE("PredicateParser: empty input → error", "[config][parser]") { mustFail(""); }
+TEST_CASE("PredicateParser: empty input -> error", "[config][parser]") { mustFail(""); }
 
-TEST_CASE("PredicateParser: unterminated string → error", "[config][parser]") {
+TEST_CASE("PredicateParser: unterminated string -> error", "[config][parser]") {
     mustFail(R"(name ~= "unterminated)");
 }
 
-TEST_CASE("PredicateParser: missing pattern after ~= → error", "[config][parser]") {
+TEST_CASE("PredicateParser: missing pattern after ~= -> error", "[config][parser]") {
     mustFail("name ~=");
 }
 
-TEST_CASE("PredicateParser: missing tag key → error", "[config][parser]") { mustFail("tag."); }
+TEST_CASE("PredicateParser: missing tag key -> error", "[config][parser]") { mustFail("tag."); }
 
-TEST_CASE("PredicateParser: missing dot after tag → error", "[config][parser]") {
+TEST_CASE("PredicateParser: missing dot after tag -> error", "[config][parser]") {
     mustFail("tag == \"x\"");
 }
 
-TEST_CASE("PredicateParser: unknown identifier → error", "[config][parser]") { mustFail("foobar"); }
+TEST_CASE("PredicateParser: unknown identifier -> error", "[config][parser]") {
+    mustFail("foobar");
+}
 
-TEST_CASE("PredicateParser: unclosed paren → error", "[config][parser]") {
+TEST_CASE("PredicateParser: unclosed paren -> error", "[config][parser]") {
     mustFail("(true && false");
 }
 
-TEST_CASE("PredicateParser: missing operand after && → error", "[config][parser]") {
+TEST_CASE("PredicateParser: missing operand after && -> error", "[config][parser]") {
     mustFail("true &&");
 }
 
-TEST_CASE("PredicateParser: missing operand after || → error", "[config][parser]") {
+TEST_CASE("PredicateParser: missing operand after || -> error", "[config][parser]") {
     mustFail("true ||");
 }
 
-TEST_CASE("PredicateParser: missing operand after ! → error", "[config][parser]") { mustFail("!"); }
+TEST_CASE("PredicateParser: missing operand after ! -> error", "[config][parser]") {
+    mustFail("!");
+}
 
-TEST_CASE("PredicateParser: trailing token → error", "[config][parser]") { mustFail("true false"); }
+TEST_CASE("PredicateParser: trailing token -> error", "[config][parser]") {
+    mustFail("true false");
+}
 
-TEST_CASE("PredicateParser: single & → error with hint", "[config][parser]") {
+TEST_CASE("PredicateParser: single & -> error with hint", "[config][parser]") {
     auto result = parsePredicateExpr("true & false");
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().find("&&") != std::string::npos);
 }
 
-TEST_CASE("PredicateParser: single | → error with hint", "[config][parser]") {
+TEST_CASE("PredicateParser: single | -> error with hint", "[config][parser]") {
     auto result = parsePredicateExpr("true | false");
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().find("||") != std::string::npos);
 }
 
-TEST_CASE("PredicateParser: any() missing closing paren → error", "[config][parser]") {
+TEST_CASE("PredicateParser: any() missing closing paren -> error", "[config][parser]") {
     mustFail("any(true, false");
 }
 
-TEST_CASE("PredicateParser: tag.key == non-string → error", "[config][parser]") {
+TEST_CASE("PredicateParser: tag.key == non-string -> error", "[config][parser]") {
     mustFail("tag.x == 42");
 }

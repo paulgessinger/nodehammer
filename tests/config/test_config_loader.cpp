@@ -17,7 +17,7 @@ TEST_CASE("ConfigLoader: loadFromString succeeds on empty config", "[config][loa
     REQUIRE(result.config.selection.empty());
 }
 
-TEST_CASE("ConfigLoader: invalid TOML syntax → Error diagnostic with source position",
+TEST_CASE("ConfigLoader: invalid TOML syntax -> Error diagnostic with source position",
           "[config][loader]") {
     constexpr std::string_view bad = "[unclosed\nkey = 1\n";
     auto result = nodehammer::ConfigLoader::loadFromString(bad, "test_input");
@@ -106,7 +106,7 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
     REQUIRE_FALSE(cfg.rules.at(3).match.has_value());
 }
 
-TEST_CASE("ConfigLoader: missing file → Error diagnostic", "[config][loader]") {
+TEST_CASE("ConfigLoader: missing file -> Error diagnostic", "[config][loader]") {
     auto result = nodehammer::ConfigLoader::loadFromFile("/nonexistent/path/config.toml");
     REQUIRE(result.diags.hasErrors());
 }
@@ -195,7 +195,7 @@ keep_if = 'tag.sensitive == "true" && any(path ~= "**/A/**", path ~= "**/B/**")'
     REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::AndPredicate>>(pred.data));
 }
 
-TEST_CASE("ConfigLoader: keep_if invalid expression → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: keep_if invalid expression -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[selection_rules]]
 keep_if = 'unknown_keyword'
@@ -217,7 +217,7 @@ match = 'tag.sensitive == "true"'
         std::holds_alternative<nodehammer::TagPredicate>(result.config.rules.at(0).match->data));
 }
 
-TEST_CASE("ConfigLoader: rules match invalid expression → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: rules match invalid expression -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[rules]]
 material = "steel"
@@ -227,7 +227,7 @@ match = 'bad expression @@'
     REQUIRE(result.diags.hasErrors());
 }
 
-TEST_CASE("ConfigLoader: unknown predicate type → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: unknown predicate type -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[selection_rules]]
 [selection_rules.keep_if]
@@ -237,7 +237,7 @@ type = "not_a_real_type"
     REQUIRE(result.diags.hasErrors());
 }
 
-TEST_CASE("ConfigLoader: rule missing keep_if or drop_if → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: rule missing keep_if or drop_if -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[selection_rules]]
 closure = "none"
@@ -246,7 +246,7 @@ closure = "none"
     REQUIRE(result.diags.hasErrors());
 }
 
-TEST_CASE("ConfigLoader: unknown fallback → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: unknown fallback -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[rules]]
 [rules.tessellation]
@@ -259,7 +259,7 @@ fallback = "explode"
 
 // ── Unknown-key warnings ──────────────────────────────────────────────────────
 
-TEST_CASE("ConfigLoader: unknown top-level key → Warning", "[config][loader]") {
+TEST_CASE("ConfigLoader: unknown top-level key -> Warning", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [tessellation_rulesx]
 max_segments_circle = 32
@@ -277,7 +277,7 @@ max_segments_circle = 32
     REQUIRE(found);
 }
 
-TEST_CASE("ConfigLoader: unknown key in material table → Warning", "[config][loader]") {
+TEST_CASE("ConfigLoader: unknown key in material table -> Warning", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [materials.steel]
 metallick = 0.8
@@ -296,7 +296,7 @@ roughness = 0.2
     REQUIRE(result.config.materials.at(0).metallic == 0.0f); // ignored, stays at default
 }
 
-TEST_CASE("ConfigLoader: unknown key in rules.tessellation → Warning", "[config][loader]") {
+TEST_CASE("ConfigLoader: unknown key in rules.tessellation -> Warning", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[rules]]
 [rules.tessellation]
@@ -316,7 +316,7 @@ fallback = "skip"
     REQUIRE_FALSE(result.config.rules.at(0).tessellation->maxSegmentsCircle.has_value()); // not set
 }
 
-TEST_CASE("ConfigLoader: unknown key in selection_rule → Warning", "[config][loader]") {
+TEST_CASE("ConfigLoader: unknown key in selection_rule -> Warning", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [[selection_rules]]
 scop = "/World/**"
@@ -338,7 +338,7 @@ type = "is_leaf"
 
 // ── Format-specific export key validation ────────────────────────────────────
 
-TEST_CASE("ConfigLoader: gltf-only key under [export.obj] → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: gltf-only key under [export.obj] -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [export.obj]
 multi_scene = true
@@ -356,7 +356,7 @@ multi_scene = true
     REQUIRE(found);
 }
 
-TEST_CASE("ConfigLoader: gltf-only key under [export.gltf] → no error", "[config][loader]") {
+TEST_CASE("ConfigLoader: gltf-only key under [export.gltf] -> no error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [export.gltf]
 multi_scene = true
@@ -370,7 +370,7 @@ scene_name_separator = " > "
     REQUIRE(gltfCfg.sceneNameSeparator == " > ");
 }
 
-TEST_CASE("ConfigLoader: gltf-only key under [export.glb] → no error", "[config][loader]") {
+TEST_CASE("ConfigLoader: gltf-only key under [export.glb] -> no error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [export.glb]
 multi_scene = true
@@ -382,7 +382,7 @@ multi_scene = true
     REQUIRE(glbCfg.multiScene == true);
 }
 
-TEST_CASE("ConfigLoader: scene_name_separator under [export.obj] → Error", "[config][loader]") {
+TEST_CASE("ConfigLoader: scene_name_separator under [export.obj] -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [export.obj]
 scene_name_separator = " / "
@@ -469,7 +469,7 @@ TEST_CASE("ConfigLoader: nested includes", "[config][loader][include]") {
     REQUIRE(hasSteel);
 }
 
-TEST_CASE("ConfigLoader: circular include → Error", "[config][loader][include]") {
+TEST_CASE("ConfigLoader: circular include -> Error", "[config][loader][include]") {
     auto result =
         nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_cycle.toml");
     REQUIRE(result.diags.hasErrors());
@@ -482,7 +482,7 @@ TEST_CASE("ConfigLoader: circular include → Error", "[config][loader][include]
     REQUIRE(foundCycle);
 }
 
-TEST_CASE("ConfigLoader: include non-existent file → Error", "[config][loader][include]") {
+TEST_CASE("ConfigLoader: include non-existent file -> Error", "[config][loader][include]") {
     auto result =
         nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_bad_path.toml");
     REQUIRE(result.diags.hasErrors());

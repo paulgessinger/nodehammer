@@ -32,7 +32,7 @@ std::filesystem::path tmpPath(const std::string &name) {
 
 } // namespace
 
-TEST_CASE("GltfExporter: single box → GLB magic bytes", "[export][gltf]") {
+TEST_CASE("GltfExporter: single box -> GLB magic bytes", "[export][gltf]") {
     const auto out = tmpPath("box.glb");
 
     nodehammer::GltfExporter exp;
@@ -52,7 +52,7 @@ TEST_CASE("GltfExporter: single box → GLB magic bytes", "[export][gltf]") {
     std::filesystem::remove(out);
 }
 
-TEST_CASE("GltfExporter: single box → node/mesh/material counts", "[export][gltf]") {
+TEST_CASE("GltfExporter: single box -> node/mesh/material counts", "[export][gltf]") {
     const auto out = tmpPath("box_counts.glb");
     const auto scene = buildBoxRenderScene();
 
@@ -147,15 +147,17 @@ TEST_CASE("GltfExporter: write as GLTF (text)", "[export][gltf]") {
     REQUIRE(std::filesystem::exists(out));
 
     // GLTF JSON starts with '{'
-    std::ifstream f{out};
-    char first{};
-    f >> first;
-    CHECK(first == '{');
+    {
+        std::ifstream f{out};
+        char first{};
+        f >> first;
+        CHECK(first == '{');
+    }
 
     std::filesystem::remove(out);
 }
 
-TEST_CASE("ObjExporter: single box → OBJ + MTL files exist", "[export][obj]") {
+TEST_CASE("ObjExporter: single box -> OBJ + MTL files exist", "[export][obj]") {
     const auto out = tmpPath("box.obj");
     const auto mtl = tmpPath("box.mtl");
 
