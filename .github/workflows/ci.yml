@@ -7,7 +7,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -43,11 +43,33 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+
+      - name: Install Conan
+        run: uv tool install conan
+
+      - name: Detect Conan profile
+        run: conan profile detect --force
+
+      - name: Cache Conan packages
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.conan2/p
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py') }}
+          restore-keys: |
+            conan-${{ runner.os }}-
+
+      - name: Conan install
+        run: >
+          conan install . --build=missing
+          -c tools.cmake.cmaketoolchain:generator=Ninja
+
       - name: Configure
-        run: cmake --preset basic
+        run: cmake --preset conan-release
 
       - name: Build
-        run: cmake --build --preset basic
+        run: cmake --build --preset conan-release
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build/Release --output-on-failure
