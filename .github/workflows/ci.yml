@@ -63,6 +63,7 @@ jobs:
       - name: Conan install
         run: >
           conan install . --build=missing
+          -s:a compiler.cppstd=23
           -c tools.cmake.cmaketoolchain:generator=Ninja
 
       - name: Configure
