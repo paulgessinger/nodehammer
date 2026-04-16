@@ -1,0 +1,34 @@
+# ODD calorimeters: ECal + HCal
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/ECal"',
+  'path ~= "**/ECalBarrel"',
+  'path ~= "**/ECalEndcap_A"',
+  'path ~= "**/ECalEndcap_B"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/HCal"',
+  'path ~= "**/HCalBarrel"',
+  'path ~= "**/HCalEndcap_A"',
+  'path ~= "**/HCalEndcap_B"',
+]
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+[[rules]]
+match = 'path ~= "**/ECal/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "**/HCal/**"'
+material = "hcal"
+
+[[rules]]
+match = 'any(path ~= "**/ECal", path ~= "**/HCal")'
+[rules.tessellation]
+skip_geometry = true

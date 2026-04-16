@@ -79,6 +79,33 @@ base_color = "#B66A3C"
 metallic = 1.0
 roughness = 0.18
 
+[materials.tungsten_dens24]
+base_color = "#808078"
+metallic = 1.0
+roughness = 0.50
+specular = 0.50
+anisotropy = 0.0
+clearcoat = 0.0
+clearcoat_roughness = 0.0
+
+[materials.g10]
+base_color = "#B5A85A"
+metallic = 0.0
+roughness = 0.65
+specular = 0.30
+
+[materials.ground_or_hv_mix]
+base_color = "#A0623A"
+metallic = 1.0
+roughness = 0.55
+specular = 0.55
+
+[materials.si_pcb_mix]
+base_color = "#966050"
+metallic = 0.85
+roughness = 0.60
+specular = 0.50
+
 # ── Source-material → render-material mapping rules ──────────────────────────
 
 [[rules]]
@@ -108,3 +135,19 @@ material = "carbon_foam"
 [[rules]]
 match = 'material ~= "Copper"'
 material = "copper"
+
+[[rules]]
+match = 'material ~= "TungstenDens24"'
+material = "tungsten_dens24"
+
+[[rules]]
+match = 'material ~= "G10"'
+material = "g10"
+
+[[rules]]
+match = 'material ~= "GroundOrHvMix"'
+material = "ground_or_hv_mix"
+
+[[rules]]
+match = 'material ~= "SiPcbMix"'
+material = "si_pcb_mix"

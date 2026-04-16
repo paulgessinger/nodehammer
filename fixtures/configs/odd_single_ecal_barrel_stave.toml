@@ -1,0 +1,41 @@
+# ODD single ECal barrel stave — innermost layer (layer1), merged.
+
+include = ["odd/base.toml", "odd/materials.toml"]
+
+hoist_orphans = true
+
+[export.gltf]
+unit_scale = 0.1
+bake_unit_scale = true
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+[[selection_rules]]
+keep_if = 'path ~= "**/ECalBarrel/stave1"'
+
+[[selection_rules]]
+keep_if = 'path ~= "**/ECalBarrel/stave1/**" && is_leaf && material != "Air"'
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+[[rules]]
+match = 'path ~= "/world"'
+[rules.tessellation]
+skip_geometry = true
+
+[[rules]]
+match = 'path ~= "**/ECalBarrel/stave1"'
+material = "ecal"
+[rules.tessellation]
+merge_descendants = true
+# skip_geometry = true
+max_segments_circle = 10
+fallback = "fail"
+
+[[rules]]
+material = "ecal"
+
+[[rules]]
+[rules.tessellation]
+max_segments_circle = 48
+fallback = "skip"

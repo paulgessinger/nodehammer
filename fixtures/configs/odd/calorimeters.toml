@@ -8,10 +8,42 @@ keep_if = [
   'path ~= "**/ECalBarrel"',
   'path ~= "**/ECalEndcap_A"',
   'path ~= "**/ECalEndcap_B"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/ECalBarrel/stave*"',
+  'path ~= "**/ECalEndcap_A/stave*"',
+  'path ~= "**/ECalEndcap_B/stave*"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/ECalBarrel/stave*/**" && is_leaf && material != "Air"',
+  'path ~= "**/ECalEndcap_A/stave*/**" && is_leaf && material != "Air"',
+  'path ~= "**/ECalEndcap_B/stave*/**" && is_leaf && material != "Air"',
+]
+
+[[selection_rules]]
+keep_if = [
   'path ~= "**/HCal"',
   'path ~= "**/HCalBarrel"',
   'path ~= "**/HCalEndcap_A"',
   'path ~= "**/HCalEndcap_B"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/HCalBarrel/stave*"',
+  'path ~= "**/HCalEndcap_A/stave*"',
+  'path ~= "**/HCalEndcap_B/stave*"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/HCalBarrel/stave*/**" && is_leaf && material != "Air"',
+  'path ~= "**/HCalEndcap_A/stave*/**" && is_leaf && material != "Air"',
+  'path ~= "**/HCalEndcap_B/stave*/**" && is_leaf && material != "Air"',
 ]
 
 # ── Rules ────────────────────────────────────────────────────────────────────
@@ -28,3 +60,22 @@ material = "hcal"
 match = 'any(path ~= "**/ECal", path ~= "**/HCal")'
 [rules.tessellation]
 skip_geometry = true
+
+[[rules]]
+match = 'any(path ~= "**/ECalBarrel", path ~= "**/ECalEndcap_A", path ~= "**/ECalEndcap_B", path ~= "**/HCalBarrel", path ~= "**/HCalEndcap_A", path ~= "**/HCalEndcap_B")'
+[rules.tessellation]
+skip_geometry = true
+
+[[rules]]
+match = [
+  'path ~= "**/ECalBarrel/stave*"',
+  'path ~= "**/ECalEndcap_A/stave*"',
+  'path ~= "**/ECalEndcap_B/stave*"',
+  'path ~= "**/HCalBarrel/stave*"',
+  'path ~= "**/HCalEndcap_A/stave*"',
+  'path ~= "**/HCalEndcap_B/stave*"',
+]
+[rules.tessellation]
+merge_descendants = true
+max_segments_circle = 10
+fallback = "fail"

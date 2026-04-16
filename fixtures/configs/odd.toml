@@ -11,8 +11,8 @@
 include = [
   "odd/base.toml",
   "odd/materials.toml",
-  "odd/tracker.toml",
-  # "odd/calorimeters.toml",
+  # "odd/tracker.toml",
+  "odd/calorimeters.toml",
   # "odd/muon.toml",
 ]
 
