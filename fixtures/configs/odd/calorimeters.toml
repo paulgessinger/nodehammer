@@ -49,14 +49,6 @@ keep_if = [
 # ── Rules ────────────────────────────────────────────────────────────────────
 
 [[rules]]
-match = 'path ~= "**/ECal/**"'
-material = "ecal"
-
-[[rules]]
-match = 'path ~= "**/HCal/**"'
-material = "hcal"
-
-[[rules]]
 match = 'any(path ~= "**/ECal", path ~= "**/HCal")'
 [rules.tessellation]
 skip_geometry = true

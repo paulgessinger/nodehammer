@@ -29,9 +29,8 @@ unit_scale = 1.0
 
 # ── Selection ────────────────────────────────────────────────────────────────
 
-# Beam pipe (not in any subsystem fragment).
-# [[selection_rules]]
-# keep_if = ['name == "BeamPipe"']
+[[selection_rules]]
+keep_if = ['name == "BeamPipe"', 'name ~= "Solenoid*"']
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 
@@ -41,9 +40,12 @@ match = 'path ~= "/world"'
 [rules.tessellation]
 skip_geometry = true
 
-# Fallback material.
+# Solenoid: needs more phi segments.
 [[rules]]
-material = "support"
+match = 'name ~= "Solenoid*"'
+[rules.tessellation]
+max_segments_circle = 48
+
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 # Global fallback for tessellation and extras — applies when no rule sets a

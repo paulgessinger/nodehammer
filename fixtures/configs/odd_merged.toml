@@ -1,0 +1,35 @@
+# ODD full detector — single merged mesh for Blender boolean operations.
+#
+# Same selection as odd.toml, but merges all geometry under the world node
+# into a single mesh by forcing one material and using merge_descendants.
+
+include = [
+  "odd/base.toml",
+  "odd/materials.toml",
+  "odd/tracker.toml",
+  "odd/calorimeters.toml",
+  "odd/muon.toml",
+]
+
+hoist_orphans = true
+
+[export.gltf]
+unit_scale = 0.1
+bake_unit_scale = true
+
+[export.obj]
+unit_scale = 1.0
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+# World node: merge all descendants into a single mesh.
+[[rules]]
+match = 'path ~= "/world"'
+[rules.tessellation]
+merge_descendants = true
+max_segments_circle = 10
+fallback = "skip"
+
+# Force a single material so merge_descendants produces one mesh.
+[[rules]]
+material = "support"

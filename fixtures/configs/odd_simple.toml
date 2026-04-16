@@ -1,0 +1,235 @@
+# ODD simplified detector configuration
+#
+# Tracker: only sensitive volumes (leaf nodes tagged by DD4hep).
+# Calorimeters: only ECal/HCal barrel and endcap outer volumes.
+# Muon: only chamber-level volumes.
+
+include = ["odd/base.toml", "odd/materials.toml", "odd/simple_materials.toml"]
+
+hoist_orphans = true
+
+[export.gltf]
+unit_scale = 0.1
+bake_unit_scale = true
+
+[export.obj]
+unit_scale = 1.0
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+# Beam pipe and solenoid.
+[[selection_rules]]
+keep_if = ['name == "BeamPipe"', 'name ~= "Solenoid*"']
+
+# Tracker: structural parents + sensitive leaves only.
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/Pixels"',
+  'path ~= "**/Pixels/*Barrel"',
+  'path ~= "**/Pixels/*EndcapN"',
+  'path ~= "**/Pixels/*EndcapP"',
+  'path ~= "**/ShortStrips"',
+  'path ~= "**/ShortStrips/*Barrel"',
+  'path ~= "**/ShortStrips/*EndcapN"',
+  'path ~= "**/ShortStrips/*EndcapP"',
+  'path ~= "**/LongStrips"',
+  'path ~= "**/LongStrips/*Barrel"',
+  'path ~= "**/LongStrips/*EndcapN"',
+  'path ~= "**/LongStrips/*EndcapP"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/PixelLayer*"',
+  'path ~= "**/PixelLayer*/stave*"',
+  'path ~= "**/PixelEndcapN*"',
+  'path ~= "**/PixelEndcapN*/disk*"',
+  'path ~= "**/PixelEndcapP*"',
+  'path ~= "**/PixelEndcapP*/disk*"',
+  'path ~= "**/ShortStripLayer*"',
+  'path ~= "**/ShortStripLayer*/stave*"',
+  'path ~= "**/ShortStripEndcapN*"',
+  'path ~= "**/ShortStripEndcapN*/disk*"',
+  'path ~= "**/ShortStripEndcapP*"',
+  'path ~= "**/ShortStripEndcapP*/disk*"',
+  'path ~= "**/LongStripLayer*"',
+  'path ~= "**/LongStripLayer*/stave*"',
+  'path ~= "**/LongStripEndcapN*"',
+  'path ~= "**/LongStripEndcapN*/disk*"',
+  'path ~= "**/LongStripEndcapP*"',
+  'path ~= "**/LongStripEndcapP*/disk*"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/PixelLayer*/stave*/**" && is_leaf',
+  'path ~= "**/PixelEndcapN*/disk*/**" && is_leaf',
+  'path ~= "**/PixelEndcapP*/disk*/**" && is_leaf',
+  'path ~= "**/ShortStripLayer*/stave*/**" && is_leaf',
+  'path ~= "**/ShortStripEndcapN*/disk*/**" && is_leaf',
+  'path ~= "**/ShortStripEndcapP*/disk*/**" && is_leaf',
+  'path ~= "**/LongStripLayer*/stave*/**" && is_leaf',
+  'path ~= "**/LongStripEndcapN*/disk*/**" && is_leaf',
+  'path ~= "**/LongStripEndcapP*/disk*/**" && is_leaf',
+]
+
+# Calorimeters: outer volumes only (from calorimeters_simple.toml).
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/ECal"',
+  'path ~= "**/ECalBarrel"',
+  'path ~= "**/ECalEndcap_A"',
+  'path ~= "**/ECalEndcap_B"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/HCal"',
+  'path ~= "**/HCalBarrel"',
+  'path ~= "**/HCalEndcap_A"',
+  'path ~= "**/HCalEndcap_B"',
+]
+
+# Muon: chamber volumes only (from muon_simple.toml).
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/MuonSpectrometerBarrel"',
+  'path ~= "**/MuonSpectrometerBarrel/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapN"',
+  'path ~= "**/MuonSpectrometerEndCapN/*/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapP"',
+  'path ~= "**/MuonSpectrometerEndCapP/*/chamber*"',
+]
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+# World node: no geometry.
+[[rules]]
+match = 'path ~= "/world"'
+[rules.tessellation]
+skip_geometry = true
+
+# Structural tracker nodes: no geometry.
+[[rules]]
+match = [
+  'path ~= "**/Pixels"',
+  'path ~= "**/Pixels/*Barrel"',
+  'path ~= "**/Pixels/*EndcapN"',
+  'path ~= "**/Pixels/*EndcapP"',
+  'path ~= "**/ShortStrips"',
+  'path ~= "**/ShortStrips/*Barrel"',
+  'path ~= "**/ShortStrips/*EndcapN"',
+  'path ~= "**/ShortStrips/*EndcapP"',
+  'path ~= "**/LongStrips"',
+  'path ~= "**/LongStrips/*Barrel"',
+  'path ~= "**/LongStrips/*EndcapN"',
+  'path ~= "**/LongStrips/*EndcapP"',
+  'path ~= "**/PixelLayer*"',
+  'path ~= "**/PixelEndcapN*"',
+  'path ~= "**/PixelEndcapP*"',
+  'path ~= "**/ShortStripLayer*"',
+  'path ~= "**/ShortStripEndcapN*"',
+  'path ~= "**/ShortStripEndcapP*"',
+  'path ~= "**/LongStripLayer*"',
+  'path ~= "**/LongStripEndcapN*"',
+  'path ~= "**/LongStripEndcapP*"',
+]
+[rules.tessellation]
+skip_geometry = true
+
+# Tracker staves and disks: merge descendants into per-material meshes.
+[[rules]]
+match = [
+  'path ~= "**/PixelLayer*/stave*"',
+  'path ~= "**/PixelEndcapN*/disk*"',
+  'path ~= "**/PixelEndcapP*/disk*"',
+  'path ~= "**/ShortStripLayer*/stave*"',
+  'path ~= "**/ShortStripEndcapN*/disk*"',
+  'path ~= "**/ShortStripEndcapP*/disk*"',
+  'path ~= "**/LongStripLayer*/stave*"',
+  'path ~= "**/LongStripEndcapN*/disk*"',
+  'path ~= "**/LongStripEndcapP*/disk*"',
+]
+[rules.tessellation]
+merge_descendants = true
+max_segments_circle = 10
+fallback = "skip"
+
+# Beam pipe.
+[[rules]]
+match = 'name == "BeamPipe"'
+material = "beam_pipe"
+
+# Solenoid.
+[[rules]]
+match = 'name ~= "Solenoid*"'
+material = "solenoid"
+[rules.tessellation]
+max_segments_circle = 48
+
+# Tracker sensitive volumes — per-subsystem colors.
+[[rules]]
+match = 'path ~= "**/Pixels/**"'
+material = "pixel"
+
+[[rules]]
+match = 'path ~= "**/ShortStrips/**"'
+material = "short_strip"
+
+[[rules]]
+match = 'path ~= "**/LongStrips/**"'
+material = "long_strip"
+
+# ECal: barrel (red) / endcap (orange).
+[[rules]]
+match = 'path ~= "**/ECalBarrel"'
+material = "ecal_barrel"
+
+[[rules]]
+match = 'any(path ~= "**/ECalEndcap_A", path ~= "**/ECalEndcap_B")'
+material = "ecal_endcap"
+
+# HCal: barrel (dark magenta) / endcap (light purple).
+[[rules]]
+match = 'path ~= "**/HCalBarrel"'
+material = "hcal_barrel"
+
+[[rules]]
+match = 'any(path ~= "**/HCalEndcap_A", path ~= "**/HCalEndcap_B")'
+material = "hcal_endcap"
+
+# Calorimeter parent nodes: no geometry.
+[[rules]]
+match = 'any(path ~= "**/ECal", path ~= "**/HCal")'
+[rules.tessellation]
+skip_geometry = true
+
+# Muon: barrel (blue-violet) / endcap (black).
+[[rules]]
+match = 'path ~= "**/MuonSpectrometerBarrel/**"'
+material = "muon_barrel"
+
+[[rules]]
+match = 'any(path ~= "**/MuonSpectrometerEndCapN/**", path ~= "**/MuonSpectrometerEndCapP/**")'
+material = "muon_endcap"
+
+# Muon parent nodes: no geometry.
+[[rules]]
+match = '''any(
+  path ~= "**/MuonSpectrometerBarrel",
+  path ~= "**/MuonSpectrometerEndCapN",
+  path ~= "**/MuonSpectrometerEndCapP",
+)'''
+[rules.tessellation]
+skip_geometry = true
+
+
+# ── Defaults ────────────────────────────────────────────────────────────────
+
+[defaults.tessellation]
+max_segments_circle = 10
+fallback = "skip"
+
+[defaults.extras]
+visible = true
+opacity = 1.0

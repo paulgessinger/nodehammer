@@ -24,10 +24,6 @@ keep_if = [
 # ── Rules ────────────────────────────────────────────────────────────────────
 
 [[rules]]
-match = 'path ~= "**/MuonSpectrometer*/**"'
-material = "muon"
-
-[[rules]]
 match = '''any(
   path ~= "**/MuonSpectrometerBarrel",
   path ~= "**/MuonSpectrometerEndCapN",

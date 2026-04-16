@@ -1,0 +1,59 @@
+# Subsystem-specific display materials for the simplified ODD config.
+#
+# These assign one color per subsystem / barrel-endcap split, replacing the
+# per-source-material rendering used by the full config.
+
+[materials.beam_pipe]
+base_color = "#000000"
+metallic = 0.9
+roughness = 0.3
+
+[materials.pixel]
+base_color = "#ADD1E7"
+metallic = 0.9
+roughness = 0.3
+
+[materials.short_strip]
+base_color = "#0BB3FA"
+metallic = 0.9
+roughness = 0.3
+
+[materials.long_strip]
+base_color = "#6261EB"
+metallic = 0.9
+roughness = 0.3
+
+[materials.solenoid]
+base_color = "#A0A0A0"
+metallic = 0.5
+roughness = 0.4
+
+[materials.ecal_barrel]
+base_color = "#DF1C22"
+metallic = 0.2
+roughness = 0.6
+
+[materials.ecal_endcap]
+base_color = "#FD8C14"
+metallic = 0.2
+roughness = 0.6
+
+[materials.hcal_barrel]
+base_color = "#96208E"
+metallic = 0.2
+roughness = 0.6
+
+[materials.hcal_endcap]
+base_color = "#A56EA5"
+metallic = 0.2
+roughness = 0.6
+
+[materials.muon_barrel]
+base_color = "#8A2BE2"
+metallic = 0.3
+roughness = 0.5
+
+[materials.muon_endcap]
+base_color = "#4C187C"
+metallic = 0.3
+roughness = 0.5
