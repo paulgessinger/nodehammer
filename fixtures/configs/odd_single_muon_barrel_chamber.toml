@@ -1,0 +1,41 @@
+# ODD single muon barrel chamber — merged.
+
+include = ["odd/base.toml", "odd/materials.toml"]
+
+hoist_orphans = true
+
+[export.gltf]
+unit_scale = 0.1
+bake_unit_scale = true
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+[[selection_rules]]
+keep_if = 'path ~= "**/MuonSpectrometerBarrel/chamber1"'
+
+[[selection_rules]]
+keep_if = 'path ~= "**/MuonSpectrometerBarrel/chamber1/**" && is_leaf && material != "Air" && material != "ArCO2"'
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+[[rules]]
+match = 'path ~= "/world"'
+[rules.tessellation]
+skip_geometry = true
+
+[[rules]]
+match = 'path ~= "**/MuonSpectrometerBarrel/chamber1"'
+material = "muon"
+[rules.tessellation]
+# merge_descendants = true
+skip_geometry = true
+max_segments_circle = 10
+fallback = "fail"
+
+[[rules]]
+material = "muon"
+
+[[rules]]
+[rules.tessellation]
+max_segments_circle = 10
+fallback = "skip"

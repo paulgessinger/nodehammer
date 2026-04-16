@@ -5,15 +5,15 @@
 # tessellation settings.
 #
 # Include order matters: base.toml provides the drop-all rule, then subsystem
-# fragments add keep rules and specific settings. The main file's rules come
-# last and serve as fallbacks.
+# fragments add keep rules and specific settings. Global fallback values live
+# in [defaults] so they never override specific rules regardless of ordering.
 
 include = [
   "odd/base.toml",
   "odd/materials.toml",
-  # "odd/tracker.toml",
+  "odd/tracker.toml",
   "odd/calorimeters.toml",
-  # "odd/muon.toml",
+  "odd/muon.toml",
 ]
 
 hoist_orphans = true
@@ -45,11 +45,14 @@ skip_geometry = true
 [[rules]]
 material = "support"
 
-# Fallback tessellation.
-[[rules]]
-[rules.tessellation]
-max_segments_circle = 48
+# ── Defaults ────────────────────────────────────────────────────────────────
+# Global fallback for tessellation and extras — applies when no rule sets a
+# field, so specific rules in subsystem fragments always win.
+
+[defaults.tessellation]
+max_segments_circle = 10
 fallback = "skip"
-[rules.extras]
+
+[defaults.extras]
 visible = true
 opacity = 1.0

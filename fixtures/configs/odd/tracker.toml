@@ -100,10 +100,15 @@ merge_descendants = true
 max_segments_circle = 10
 fallback = "fail"
 
-# [[rules]]
-# match = ['path ~= "**/PixelEndcap*/**/DiskSupport_*"']
-# [rules.tessellation]
-# max_segments_circle = 48
+# @TODO: Add SupportCylinder0_0...
+
+[[rules]]
+match = [
+  'path ~= "**/PixelEndcap*/**/DiskSupport_*"',
+  'path ~= "**/*StripEndcap*/**/RingSupport*"',
+]
+[rules.tessellation]
+max_segments_circle = 48
 #
 # [rules.extras]
 # visible = true

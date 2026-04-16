@@ -77,15 +77,16 @@ struct MergeDescendantSignature {
     SemanticMaterialId sourceMaterialId;
     std::string materialKey;
     glm::dmat4 toMergeLocal{1.0};
+    int maxSegmentsCircle{64};
 
     bool operator==(const MergeDescendantSignature &o) const {
         return shapeId == o.shapeId && sourceMaterialId == o.sourceMaterialId &&
-               materialKey == o.materialKey && matrixEqual(toMergeLocal, o.toMergeLocal);
+               materialKey == o.materialKey && matrixEqual(toMergeLocal, o.toMergeLocal) &&
+               maxSegmentsCircle == o.maxSegmentsCircle;
     }
 };
 
 struct MergeCacheKey {
-    int maxSegmentsCircle{64};
     BooleanFallback fallback{BooleanFallback::Skip};
     std::vector<MergeDescendantSignature> descendants;
 
@@ -94,14 +95,14 @@ struct MergeCacheKey {
 
 struct MergeCacheKeyHash {
     std::size_t operator()(const MergeCacheKey &k) const {
-        std::size_t h = std::hash<int>{}(k.maxSegmentsCircle);
-        h = hashCombine(h, std::hash<int>{}(static_cast<int>(k.fallback)));
+        std::size_t h = std::hash<int>{}(static_cast<int>(k.fallback));
         h = hashCombine(h, std::hash<std::size_t>{}(k.descendants.size()));
         for (const auto &d : k.descendants) {
             h = hashCombine(h, std::hash<uint64_t>{}(d.shapeId.value));
             h = hashCombine(h, std::hash<uint64_t>{}(d.sourceMaterialId.value));
             h = hashCombine(h, std::hash<std::string>{}(d.materialKey));
             h = hashCombine(h, hashMatrix(d.toMergeLocal));
+            h = hashCombine(h, std::hash<int>{}(d.maxSegmentsCircle));
         }
         return h;
     }
@@ -110,6 +111,7 @@ struct MergeCacheKeyHash {
 struct MergeDescendant {
     SemanticNodeId nodeId;
     glm::dmat4 toMergeLocal{1.0};
+    int maxSegmentsCircle{64};
 };
 
 struct PrototypeDescendantSignature {
@@ -173,6 +175,9 @@ bool mergeDescendantLess(const MergeDescendantSignature &a, const MergeDescendan
     if (a.materialKey != b.materialKey) {
         return a.materialKey < b.materialKey;
     }
+    if (a.maxSegmentsCircle != b.maxSegmentsCircle) {
+        return a.maxSegmentsCircle < b.maxSegmentsCircle;
+    }
     return matrixLess(a.toMergeLocal, b.toMergeLocal);
 }
 
@@ -193,6 +198,7 @@ bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv
     struct SelectedMaterialUse {
         std::size_t count{0};
         std::string materialKey;
+        int maxSegmentsCircle{64};
         bool hasMaterialKey{false};
         bool ambiguous{false};
     };
@@ -203,8 +209,10 @@ bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv
         ++use.count;
         if (!use.hasMaterialKey) {
             use.materialKey = selected.materialKey;
+            use.maxSegmentsCircle = selected.maxSegmentsCircle;
             use.hasMaterialKey = true;
-        } else if (use.materialKey != selected.materialKey) {
+        } else if (use.materialKey != selected.materialKey ||
+                   use.maxSegmentsCircle != selected.maxSegmentsCircle) {
             use.ambiguous = true;
         }
     }
@@ -225,8 +233,8 @@ bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv
             return false;
         }
         --it->second.count;
-        prototypeKey.push_back(
-            {proto.shapeId, proto.sourceMaterialId, it->second.materialKey, proto.toMergeLocal});
+        prototypeKey.push_back({proto.shapeId, proto.sourceMaterialId, it->second.materialKey,
+                                proto.toMergeLocal, it->second.maxSegmentsCircle});
     }
 
     for (const auto &[_, use] : selectedUses) {
@@ -241,8 +249,10 @@ bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv
 }
 
 // Merge tessellation settings from all matching rules (last match wins per
-// field), then apply defaults for anything still unset.
-ResolvedTessellation resolveTessellation(const std::vector<Rule> &rules, const NodeView &view) {
+// field), then apply config defaults, then hardcoded defaults for anything
+// still unset.
+ResolvedTessellation resolveTessellation(const std::vector<Rule> &rules,
+                                         const Rule::Tessellation &defaults, const NodeView &view) {
     Rule::Tessellation merged;
     for (const auto &r : rules) {
         if (!r.tessellation.has_value()) {
@@ -265,11 +275,14 @@ ResolvedTessellation resolveTessellation(const std::vector<Rule> &rules, const N
             merged.fallback = *t.fallback;
         }
     }
+    // Config defaults override hardcoded defaults but not rule-matched values.
     return ResolvedTessellation{
-        .skipGeometry = merged.skipGeometry.value_or(false),
-        .mergeDescendants = merged.mergeDescendants.value_or(false),
-        .maxSegmentsCircle = merged.maxSegmentsCircle.value_or(64),
-        .fallback = merged.fallback.value_or(BooleanFallback::Skip),
+        .skipGeometry = merged.skipGeometry.value_or(defaults.skipGeometry.value_or(false)),
+        .mergeDescendants =
+            merged.mergeDescendants.value_or(defaults.mergeDescendants.value_or(false)),
+        .maxSegmentsCircle =
+            merged.maxSegmentsCircle.value_or(defaults.maxSegmentsCircle.value_or(64)),
+        .fallback = merged.fallback.value_or(defaults.fallback.value_or(BooleanFallback::Skip)),
     };
 }
 
@@ -286,8 +299,10 @@ const std::string *resolveMaterial(const std::vector<Rule> &rules, const NodeVie
     return nullptr;
 }
 
-// Resolve extras from the first matching rule that has them.
-RenderExtrasMap resolveExtras(const std::vector<Rule> &rules, const NodeView &view) {
+// Resolve extras from the first matching rule that has them, falling back to
+// config-level defaults.
+RenderExtrasMap resolveExtras(const std::vector<Rule> &rules,
+                              const std::optional<ExtrasMap> &defaults, const NodeView &view) {
     for (const auto &r : rules) {
         if (!r.extras.has_value()) {
             continue;
@@ -295,6 +310,9 @@ RenderExtrasMap resolveExtras(const std::vector<Rule> &rules, const NodeView &vi
         if (ruleMatches(r, view)) {
             return *r.extras;
         }
+    }
+    if (defaults.has_value()) {
+        return *defaults;
     }
     return {};
 }
@@ -519,7 +537,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         // ── Resolve extras from unified rules ──────────────────────────────────
         {
             NodeView ev = makeNodeView(semNode);
-            rn.extras = resolveExtras(config_.rules, ev);
+            rn.extras = resolveExtras(config_.rules, config_.extrasDefaults, ev);
         }
 
         nodeMap[semId] = rnId;
@@ -529,7 +547,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
         // ── Resolve tessellation rule ──────────────────────────────────────────
         NodeView nv = makeNodeView(semNode);
-        const auto rule = resolveTessellation(config_.rules, nv);
+        const auto rule = resolveTessellation(config_.rules, config_.tessellationDefaults, nv);
         TessellationParams params;
         params.maxSegmentsCircle = rule.maxSegmentsCircle;
 
@@ -547,7 +565,6 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         // to the render tree.
         if (rule.mergeDescendants) {
             MergeCacheKey mergeKey;
-            mergeKey.maxSegmentsCircle = params.maxSegmentsCircle;
             mergeKey.fallback = rule.fallback;
 
             std::vector<MergeDescendant> mergeDescendants;
@@ -591,9 +608,13 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     matName != nullptr ? "config:" + *matName
                                        : std::format("source:{}", descLv.materialId.value);
 
-                mergeKey.descendants.push_back(
-                    {descLv.shapeId, descLv.materialId, materialKey, mergeDesc.toMergeLocal});
-                mergeDescendants.push_back(mergeDesc);
+                const auto descTess =
+                    resolveTessellation(config_.rules, config_.tessellationDefaults, descView);
+                const int descSegs = descTess.maxSegmentsCircle;
+
+                mergeKey.descendants.push_back({descLv.shapeId, descLv.materialId, materialKey,
+                                                mergeDesc.toMergeLocal, descSegs});
+                mergeDescendants.push_back({mergeDesc.nodeId, mergeDesc.toMergeLocal, descSegs});
             }
 
             if (!tryUsePrototypeMergeKey(scene, semNode.logVolId, mergeKey)) {
@@ -626,7 +647,10 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     continue;
                 }
 
-                // Tessellate (using cache)
+                // Tessellate (using cache) — use per-descendant segment count.
+                TessellationParams descParams;
+                descParams.maxSegmentsCircle = mergeDesc.maxSegmentsCircle;
+
                 const SemanticShape &descShape = scene.shapes.at(descLv.shapeId);
                 const bool descIsBoolean =
                     std::holds_alternative<BooleanUnion>(descShape.data) ||
@@ -635,12 +659,12 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 auto &descSegMap = meshCache[descLv.shapeId];
                 MeshAssetId descMid;
                 bool isBBoxProxy = false;
-                if (!descSegMap.contains(params.maxSegmentsCircle)) {
+                if (!descSegMap.contains(descParams.maxSegmentsCircle)) {
                     TessellationOutput tessOut;
                     if (descIsBoolean) {
-                        tessOut = tessellateBooleanShape(descShape.data, scene, tess, params);
+                        tessOut = tessellateBooleanShape(descShape.data, scene, tess, descParams);
                     } else {
-                        tessOut = tess.tessellate(descShape.data, params);
+                        tessOut = tess.tessellate(descShape.data, descParams);
                     }
                     result.diags.append(tessOut.diags);
                     if (descIsBoolean && tessOut.vertices.empty()) {
@@ -655,7 +679,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                                 descNode.name);
                             return result;
                         case BooleanFallback::BBox:
-                            tessOut = makeBBoxProxy(descShape.data, scene, tess, params);
+                            tessOut = makeBBoxProxy(descShape.data, scene, tess, descParams);
                             result.diags.append(tessOut.diags);
                             isBBoxProxy = true;
                             break;
@@ -676,9 +700,9 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                     ma.provenance.sourceName = descLv.name;
                     descMid = ma.id;
                     result.scene.meshAssets[descMid] = std::move(ma);
-                    descSegMap[params.maxSegmentsCircle] = descMid;
+                    descSegMap[descParams.maxSegmentsCircle] = descMid;
                 } else {
-                    descMid = descSegMap.at(params.maxSegmentsCircle);
+                    descMid = descSegMap.at(descParams.maxSegmentsCircle);
                 }
 
                 if (!result.scene.meshAssets.contains(descMid)) {

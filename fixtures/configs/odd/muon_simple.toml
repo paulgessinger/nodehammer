@@ -1,0 +1,28 @@
+# ODD muon spectrometer
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/MuonSpectrometerBarrel"',
+  'path ~= "**/MuonSpectrometerBarrel/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapN"',
+  'path ~= "**/MuonSpectrometerEndCapN/*/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapP"',
+  'path ~= "**/MuonSpectrometerEndCapP/*/chamber*"',
+]
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+[[rules]]
+match = 'path ~= "**/MuonSpectrometer*/**"'
+material = "muon"
+
+[[rules]]
+match = '''any(
+  path ~= "**/MuonSpectrometerBarrel",
+  path ~= "**/MuonSpectrometerEndCapN",
+  path ~= "**/MuonSpectrometerEndCapP",
+)'''
+[rules.tessellation]
+skip_geometry = true

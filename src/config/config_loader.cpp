@@ -615,10 +615,10 @@ ConfigResult parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
-    warnUnknownKeys(
-        tbl,
-        {"hoist_orphans", "deduplicate_shapes", "export", "materials", "selection_rules", "rules"},
-        "<top-level>", diags);
+    warnUnknownKeys(tbl,
+                    {"hoist_orphans", "deduplicate_shapes", "export", "materials",
+                     "selection_rules", "rules", "defaults"},
+                    "<top-level>", diags);
     if (auto v = tbl["hoist_orphans"].value<bool>()) {
         cfg.hoistOrphans = *v;
     }
@@ -725,6 +725,34 @@ ConfigResult parseTable(const toml::table &tbl) {
     parseMaterials(tbl, cfg, diags);
     parseSelectionRules(tbl, cfg, diags);
     parseRules(tbl, cfg, diags);
+
+    // ── [defaults] — global fallback for tessellation and extras ─────────────
+    if (const auto *defTbl = tbl["defaults"].as_table()) {
+        warnUnknownKeys(*defTbl, {"tessellation", "extras"}, "defaults", diags);
+        if (const auto *tessTbl = (*defTbl)["tessellation"].as_table()) {
+            warnUnknownKeys(
+                *tessTbl, {"skip_geometry", "merge_descendants", "max_segments_circle", "fallback"},
+                "defaults.tessellation", diags);
+            auto &td = cfg.tessellationDefaults;
+            td.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
+            td.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
+            td.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
+            if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
+                auto parsed = parseBooleanFallback(*fallbackStr);
+                if (!parsed) {
+                    diags.error(codes::kErrConfigParse,
+                                std::format("unknown fallback '{}'; expected skip, bbox, or fail",
+                                            *fallbackStr),
+                                "defaults.tessellation");
+                } else {
+                    td.fallback = *parsed;
+                }
+            }
+        }
+        if (const auto *extrasTbl = (*defTbl)["extras"].as_table()) {
+            cfg.extrasDefaults = parseExtras(*extrasTbl);
+        }
+    }
 
     return ConfigResult{std::move(cfg), std::move(diags)};
 }

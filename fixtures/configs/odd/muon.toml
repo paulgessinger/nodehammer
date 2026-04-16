@@ -7,9 +7,18 @@ keep_if = [
   'path ~= "**/MuonSpectrometerBarrel"',
   'path ~= "**/MuonSpectrometerBarrel/chamber*"',
   'path ~= "**/MuonSpectrometerEndCapN"',
-  'path ~= "**/MuonSpectrometerEndCapN/*/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapN/layer*"',
+  'path ~= "**/MuonSpectrometerEndCapN/layer*/chamber*"',
   'path ~= "**/MuonSpectrometerEndCapP"',
-  'path ~= "**/MuonSpectrometerEndCapP/*/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapP/layer*"',
+  'path ~= "**/MuonSpectrometerEndCapP/layer*/chamber*"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "**/MuonSpectrometerBarrel/chamber*/**" && is_leaf && material != "Air" && material != "ArCO2"',
+  'path ~= "**/MuonSpectrometerEndCapN/layer*/chamber*/**" && is_leaf && material != "Air" && material != "ArCO2"',
+  'path ~= "**/MuonSpectrometerEndCapP/layer*/chamber*/**" && is_leaf && material != "Air" && material != "ArCO2"',
 ]
 
 # ── Rules ────────────────────────────────────────────────────────────────────
@@ -22,7 +31,19 @@ material = "muon"
 match = '''any(
   path ~= "**/MuonSpectrometerBarrel",
   path ~= "**/MuonSpectrometerEndCapN",
+  path ~= "**/MuonSpectrometerEndCapN/layer*",
   path ~= "**/MuonSpectrometerEndCapP",
+  path ~= "**/MuonSpectrometerEndCapP/layer*",
 )'''
 [rules.tessellation]
 skip_geometry = true
+
+[[rules]]
+match = [
+  'path ~= "**/MuonSpectrometerBarrel/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapN/layer*/chamber*"',
+  'path ~= "**/MuonSpectrometerEndCapP/layer*/chamber*"',
+]
+[rules.tessellation]
+merge_descendants = true
+max_segments_circle = 10

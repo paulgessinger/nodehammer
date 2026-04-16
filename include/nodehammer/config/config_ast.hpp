@@ -177,6 +177,11 @@ struct NHConfig {
     std::vector<MaterialDef> materials;
     std::vector<SelectionRule> selection;
     std::vector<Rule> rules;
+
+    /// Global fallback for tessellation fields not set by any matching rule.
+    Rule::Tessellation tessellationDefaults;
+    /// Global fallback extras applied when no rule provides extras.
+    std::optional<ExtrasMap> extrasDefaults;
 };
 
 } // namespace nodehammer
