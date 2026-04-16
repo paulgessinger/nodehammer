@@ -24,6 +24,14 @@ function(nodehammer_set_compiler_options target)
         )
     endif()
 
+    if(NODEHAMMER_WERROR)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            target_compile_options(${target} PRIVATE -Werror)
+        elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    endif()
+
     if(NODEHAMMER_ENABLE_ASAN)
         if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
             # ASan must propagate to consumers linking this target (static lib + exe).

@@ -67,7 +67,7 @@ jobs:
           -c tools.cmake.cmaketoolchain:generator=Ninja
 
       - name: Configure
-        run: cmake --preset conan-release
+        run: cmake --preset conan-release -DNODEHAMMER_WERROR=ON
 
       - name: Build
         run: cmake --build --preset conan-release

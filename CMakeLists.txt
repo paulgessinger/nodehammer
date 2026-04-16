@@ -52,6 +52,7 @@ option(NODEHAMMER_WITH_DD4HEP  "Enable DD4hep importer"           OFF)
 option(NODEHAMMER_WITH_GEANT4  "Enable GDML/Geant4 importer"      OFF)
 option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"        OFF)
 option(NODEHAMMER_ENABLE_ASAN  "Enable AddressSanitizer"          OFF)
+option(NODEHAMMER_WERROR       "Treat project warnings as errors" OFF)
 
 # ── Library target ─────────────────────────────────────────────────────────────
 add_library(nodehammer_lib STATIC
