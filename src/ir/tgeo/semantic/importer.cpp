@@ -146,6 +146,7 @@ TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile
     tr.result.scene.computeWorldTransforms();
     tr.result.scene.computeOriginalPaths();
     tr.nodeMap = std::move(st.nodeMap);
+    tr.lvMap = std::move(st.lvCache);
     return tr;
 }
 

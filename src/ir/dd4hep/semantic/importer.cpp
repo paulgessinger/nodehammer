@@ -17,6 +17,7 @@
 #include <format>
 #include <print>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace nodehammer {
 
@@ -57,15 +58,31 @@ void annotateDetElement(const dd4hep::DetElement &elem, SemanticScene &scene, Di
 
 // Tag sensitivity on all nodes by checking DD4hep volume metadata.
 // This catches sensitive volumes that have no corresponding DetElement.
+//
+// We work via lvMap (TGeoVolume* → SemanticLogVolId) rather than nodeMap
+// (TGeoNode* → SemanticNodeId) because multiple SemanticNodes can originate
+// from the same TGeoNode when a parent volume is placed more than once.
+// The nodeMap only stores the last such mapping, so iterating it would miss
+// most placements.  The lvMap is 1:1 and lets us tag every node whose
+// logical volume is sensitive.
 void tagSensitiveVolumes(SemanticScene &scene,
-                         const std::unordered_map<const TGeoNode *, SemanticNodeId> &nodeMap) {
-    for (const auto &[geoNode, nodeId] : nodeMap) {
-        if (geoNode == nullptr || geoNode->GetVolume() == nullptr) {
+                         const std::unordered_map<const TGeoVolume *, SemanticLogVolId> &lvMap) {
+    // Step 1: collect the set of sensitive logVolIds.
+    std::unordered_set<SemanticLogVolId> sensitiveLogVols;
+    for (const auto &[vol, logVolId] : lvMap) {
+        if (vol == nullptr) {
             continue;
         }
-        dd4hep::Volume ddVol{const_cast<TGeoVolume *>(geoNode->GetVolume())};
+        dd4hep::Volume ddVol{const_cast<TGeoVolume *>(vol)};
         if (ddVol.isSensitive()) {
-            scene.nodes[nodeId].tags["sensitive"] = "true";
+            sensitiveLogVols.insert(logVolId);
+        }
+    }
+
+    // Step 2: tag every node that references a sensitive logVol.
+    for (auto &[_, node] : scene.nodes) {
+        if (sensitiveLogVols.contains(node.logVolId)) {
+            node.tags["sensitive"] = "true";
         }
     }
 }
@@ -100,7 +117,7 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     auto tr = traverseTGeoManager(&detOwner->manager(), path.string());
 
     // Pass 2: tag sensitivity on all volumes using DD4hep metadata.
-    tagSensitiveVolumes(tr.result.scene, tr.nodeMap);
+    tagSensitiveVolumes(tr.result.scene, tr.lvMap);
 
     // Pass 3: walk the DD4hep DetElement tree and annotate nodes with richer
     // names, provenance, and metadata tags (subdetector type, etc.).

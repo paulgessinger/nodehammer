@@ -8,6 +8,7 @@
 
 class TGeoManager;
 class TGeoNode;
+class TGeoVolume;
 
 namespace nodehammer {
 
@@ -16,6 +17,7 @@ namespace nodehammer {
 struct TGeoTraversalResult {
     ImportResult result;
     std::unordered_map<const TGeoNode *, SemanticNodeId> nodeMap;
+    std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvMap;
 };
 
 /// Walk a TGeoManager and produce a SemanticScene plus the node mapping.

@@ -286,17 +286,20 @@ ResolvedTessellation resolveTessellation(const std::vector<Rule> &rules,
     };
 }
 
-// Return the material name from the first matching rule that has one, or nullptr.
+// Return the material name from the last matching rule that has one, or nullptr.
+// This is consistent with tessellation resolution (last-match-wins per field)
+// and means later includes / parent configs can override earlier ones.
 const std::string *resolveMaterial(const std::vector<Rule> &rules, const NodeView &view) {
+    const std::string *result = nullptr;
     for (const auto &r : rules) {
         if (!r.material.has_value()) {
             continue;
         }
         if (ruleMatches(r, view)) {
-            return &*r.material;
+            result = &*r.material;
         }
     }
-    return nullptr;
+    return result;
 }
 
 // Resolve extras from the first matching rule that has them, falling back to
