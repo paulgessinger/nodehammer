@@ -105,34 +105,16 @@ jobs:
       - name: Mount CVMFS
         uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5
 
-      - name: Restore ccache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-lcg109-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            ccache-lcg109-
-
       - name: Build and test in LCG view
         uses: aidasoft/run-lcg-view@d8db17c61216548c9192889942d46ff2d7c3a3b6 # v6
         with:
           release-platform: "LCG_109/x86_64-el9-gcc15-opt"
-          run_local_checkout: "true"
+          ccache-key: ccache-lcg109
           run: |
-            export CCACHE_DIR="$(pwd)/.ccache"
-            ccache --zero-stats
             cmake --preset basic \
               -DNODEHAMMER_WERROR=ON \
               -DNODEHAMMER_BUILD_TESTS=ON \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache \
               -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
             cmake --build --preset basic
-            ccache --show-stats
             ctest --test-dir build --output-on-failure
-
-      - name: Save ccache
-        if: always()
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ${{ github.workspace }}/.ccache
-          key: ccache-lcg109-${{ github.run_id }}-${{ github.run_attempt }}
