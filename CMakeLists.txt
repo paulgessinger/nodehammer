@@ -6,6 +6,16 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(CheckIncludeFileCXX)
+check_include_file_cxx(print NODEHAMMER_HAS_STD_PRINT)
+if(NOT NODEHAMMER_HAS_STD_PRINT)
+    message(FATAL_ERROR
+        "nodehammer requires a C++23 standard library with <print>, but "
+        "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} at "
+        "${CMAKE_CXX_COMPILER} cannot find it. "
+        "Use GCC >= 14, Clang >= 18 with libc++ >= 18, or MSVC >= 19.37.")
+endif()
+
 # Export compile commands for tooling
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
