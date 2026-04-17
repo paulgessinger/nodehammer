@@ -111,10 +111,11 @@ jobs:
           release-platform: "LCG_109/x86_64-el9-gcc15-opt"
           ccache-key: ccache-lcg109
           run: |
-            cmake --preset basic \
+            cmake -G Ninja -B build \
+              -DCMAKE_BUILD_TYPE=Release \
               -DNODEHAMMER_WERROR=ON \
               -DNODEHAMMER_BUILD_TESTS=ON \
               -DCMAKE_C_COMPILER_LAUNCHER=ccache \
               -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-            cmake --build --preset basic
+            cmake --build build
             ctest --test-dir build --output-on-failure
