@@ -56,12 +56,12 @@ jobs:
           cp ~/.conan2/profiles/default ./.conan-profile-snapshot
 
       - name: Restore Conan cache
-        id: conan-cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.conan2/p
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
           restore-keys: |
+            conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-
             conan-${{ runner.os }}-
 
       - name: Set up ccache
@@ -76,11 +76,11 @@ jobs:
           -c tools.cmake.cmaketoolchain:generator=Ninja
 
       - name: Save Conan cache
-        if: always() && steps.conan-cache.outputs.cache-hit != 'true'
+        if: always()
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.conan2/p
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}
+          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
 
       - name: Configure
         run: >
