@@ -85,6 +85,7 @@ jobs:
       - name: Configure
         run: >
           cmake --preset conan-release
+          -GNinja
           -DNODEHAMMER_WERROR=ON
           -DNODEHAMMER_BUILD_TESTS=ON
           -DCMAKE_C_COMPILER_LAUNCHER=ccache
@@ -108,7 +109,7 @@ jobs:
       - name: Restore Conan cache
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: ~/.conan2/p
+          path: ${{ github.workspace }}/.conan2/p
           key: conan-lcg109-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
           restore-keys: |
             conan-lcg109-${{ hashFiles('conanfile.py') }}-
@@ -120,6 +121,7 @@ jobs:
           release-platform: "LCG_109/x86_64-el9-gcc15-opt"
           ccache-key: ccache-lcg109
           run: |
+            export CONAN_HOME=$GITHUB_WORKSPACE/.conan2
             curl -LsSf https://astral.sh/uv/0.11.7/install.sh | sh
             source "$HOME/.local/bin/env"
             uv tool install conan
@@ -128,6 +130,7 @@ jobs:
               -s:a compiler.cppstd=23 \
               -c tools.cmake.cmaketoolchain:generator=Ninja
             cmake --preset conan-release \
+              -GNinja \
               -DNODEHAMMER_WERROR=ON \
               -DNODEHAMMER_BUILD_TESTS=ON \
               -DNODEHAMMER_WITH_TGEO=ON \
@@ -141,5 +144,5 @@ jobs:
         if: always()
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
-          path: ~/.conan2/p
+          path: ${{ github.workspace }}/.conan2/p
           key: conan-lcg109-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
