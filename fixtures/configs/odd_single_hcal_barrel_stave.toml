@@ -1,4 +1,4 @@
-# ODD single ECal barrel stave — innermost layer (layer1), merged.
+# ODD single HCal barrel stave — innermost layer (layer1), merged.
 
 include = ["odd/base.toml", "odd/materials.toml"]
 
@@ -11,10 +11,10 @@ bake_unit_scale = true
 # ── Selection ────────────────────────────────────────────────────────────────
 
 [[selection_rules]]
-keep_if = 'path ~= "**/ECalBarrel/stave1"'
+keep_if = 'path ~= "**/HCalBarrel/stave1"'
 
 [[selection_rules]]
-keep_if = 'path ~= "**/ECalBarrel/stave1/**" && is_leaf && material != "Air"'
+keep_if = 'path ~= "**/HCalBarrel/stave1/**" && is_leaf && material != "Air"'
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 
@@ -24,10 +24,9 @@ match = 'path ~= "/world"'
 skip_geometry = true
 
 [[rules]]
-match = 'path ~= "**/ECalBarrel/stave1"'
+match = 'path ~= "**/HCalBarrel/stave1"'
 [rules.tessellation]
-merge_descendants = true
-# skip_geometry = true
+skip_geometry = true
 max_segments_circle = 10
 fallback = "fail"
 

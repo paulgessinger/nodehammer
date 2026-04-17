@@ -5,6 +5,7 @@
 #include <format>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
+#include <nodehammer/detail/timing.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/render/exporter.hpp>
 #include <nodehammer/ir/semantic/importer.hpp>
@@ -83,6 +84,7 @@ void register_cmd_convert(CLI::App &app) {
         "--output-format",
         "Output format (auto-detected from extension if omitted; applies to all outputs)");
     auto *strictOpt = sub->add_flag("--strict", "Treat warnings as errors");
+    auto *timingOpt = sub->add_flag("--timing", "Print per-step wall-clock timings");
 
     sub->callback([=] {
         std::string outputFmt;
@@ -92,10 +94,14 @@ void register_cmd_convert(CLI::App &app) {
             fmtOutOpt->results(outputFmt);
         }
         const bool strict = strictOpt->count() > 0;
+        const bool showTiming = timingOpt->count() > 0;
+
+        nodehammer::detail::TimingReport timings;
 
         // ── Load config ────────────────────────────────────────────────────────
         nodehammer::NHConfig cfg;
         if (*configOpt) {
+            auto _t = timings.scope("config");
             std::string cfgPath;
             configOpt->results(cfgPath);
             auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
@@ -115,7 +121,9 @@ void register_cmd_convert(CLI::App &app) {
         }
 
         // ── Import ─────────────────────────────────────────────────────────────
+        nodehammer::detail::Timer importTimer;
         auto [importResult, importFmt] = nodehammer::cli::importOrExit(inputOpt, fmtInOpt);
+        timings.record("import", importTimer.elapsed());
         printDiags(importResult.diags);
         if (importResult.diags.hasErrors() ||
             (strict && !importResult.diags.empty() && !importResult.diags.hasErrors())) {
@@ -125,6 +133,7 @@ void register_cmd_convert(CLI::App &app) {
 
         // ── Select ─────────────────────────────────────────────────────────────
         if (!cfg.selection.empty()) {
+            auto _t = timings.scope("select");
             nodehammer::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
             auto selDiags = sel.prune(importResult.scene);
             printDiags(selDiags);
@@ -136,6 +145,7 @@ void register_cmd_convert(CLI::App &app) {
 
         // ── Deduplicate shapes ─────────────────────────────────────────────────
         if (cfg.deduplicateShapes) {
+            auto _t = timings.scope("deduplicate");
             const auto matsRemoved = importResult.scene.deduplicateMaterials();
             const auto shapesRemoved = importResult.scene.deduplicateShapes();
             const auto logVolsRemoved = importResult.scene.deduplicateLogVols();
@@ -150,8 +160,10 @@ void register_cmd_convert(CLI::App &app) {
         }
 
         // ── Tessellate ─────────────────────────────────────────────────────────
+        nodehammer::detail::Timer tessTimer;
         nodehammer::TessellationPass pass{cfg};
         auto tessResult = pass.lower(importResult.scene);
+        timings.record("tessellate", tessTimer.elapsed());
         printDiags(tessResult.diags);
         if (tessResult.diags.hasErrors()) {
             std::println(stderr, "convert: tessellation failed");
@@ -216,7 +228,9 @@ void register_cmd_convert(CLI::App &app) {
             }
 
             std::println("Writing {} ...", outputPath);
+            nodehammer::detail::Timer expTimer;
             auto expResult = exp->write(tessResult.scene, outputPath, ecfg);
+            timings.record(std::format("export[{}]", outputPath), expTimer.elapsed());
             printDiags(expResult.diags);
             if (expResult.diags.hasErrors()) {
                 std::println(stderr, "convert: export to '{}' failed", outputPath);
@@ -242,6 +256,10 @@ void register_cmd_convert(CLI::App &app) {
                          tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(),
                          totalTris, tessResult.scene.materials.size(), warnings, errors);
             printWrittenOutputSizes(convertOutputArtifacts(outputPath, ecfg.format));
+        }
+
+        if (showTiming) {
+            timings.print(stderr, "Timings");
         }
     });
 }

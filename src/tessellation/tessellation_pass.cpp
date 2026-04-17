@@ -492,6 +492,11 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 auto dm = makeDefaultMaterial(result.scene, srcMat);
                 defaultMatCache[srcMatId] = dm.id;
                 result.scene.materials[dm.id] = std::move(dm);
+                result.diags.warn(codes::kWarnTessDefaultMaterial,
+                                  std::format("no material rule matched source material '{}'; "
+                                              "using default grey fallback",
+                                              srcMat.name),
+                                  node.name);
             }
             rmId = defaultMatCache.at(srcMatId);
         }

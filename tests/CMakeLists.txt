@@ -17,6 +17,7 @@ add_executable(nodehammer_tests
     export/test_render_exporter_registry.cpp
     export/test_semantic_exporter_registry.cpp
     test_markup.cpp
+    test_timing.cpp
 )
 
 target_compile_definitions(nodehammer_tests PRIVATE

@@ -81,6 +81,20 @@ metallic = 0.85
 roughness = 0.60
 specular = 0.50
 
+[materials.steel]
+base_color = "#7F8487"
+metallic = 1.0
+roughness = 0.35
+specular = 0.50
+
+[materials.polystyrene]
+base_color = "#E8E4DA"
+metallic = 0.0
+roughness = 0.50
+ior = 1.59
+transmission = 0.15
+clearcoat = 0.05
+
 # ── Source-material → render-material mapping rules ──────────────────────────
 
 [[rules]]
@@ -124,9 +138,17 @@ match = 'material ~= "G10"'
 material = "g10"
 
 [[rules]]
-match = 'material ~= "GroundOrHvMix"'
+match = 'material ~= "GroundOrHvMix" || material ~= "GroundOrHVMix"'
 material = "ground_or_hv_mix"
 
 [[rules]]
-match = 'material ~= "SiPcbMix"'
+match = 'material ~= "SiPcbMix" || material ~= "siPCBMix"'
 material = "si_pcb_mix"
+
+[[rules]]
+match = 'material ~= "Steel*"'
+material = "steel"
+
+[[rules]]
+match = 'material ~= "Polystyrene"'
+material = "polystyrene"
