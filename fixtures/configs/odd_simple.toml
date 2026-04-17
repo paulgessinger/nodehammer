@@ -62,15 +62,15 @@ keep_if = [
 
 [[selection_rules]]
 keep_if = [
-  'path ~= "**/PixelLayer*/stave*/**" && is_leaf',
-  'path ~= "**/PixelEndcapN*/disk*/**" && is_leaf',
-  'path ~= "**/PixelEndcapP*/disk*/**" && is_leaf',
-  'path ~= "**/ShortStripLayer*/stave*/**" && is_leaf',
-  'path ~= "**/ShortStripEndcapN*/disk*/**" && is_leaf',
-  'path ~= "**/ShortStripEndcapP*/disk*/**" && is_leaf',
-  'path ~= "**/LongStripLayer*/stave*/**" && is_leaf',
-  'path ~= "**/LongStripEndcapN*/disk*/**" && is_leaf',
-  'path ~= "**/LongStripEndcapP*/disk*/**" && is_leaf',
+  'path ~= "**/PixelLayer*/stave*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/PixelEndcapN*/disk*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/PixelEndcapP*/disk*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/ShortStripLayer*/stave*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/ShortStripEndcapN*/disk*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/ShortStripEndcapP*/disk*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/LongStripLayer*/stave*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/LongStripEndcapN*/disk*/**" && is_leaf && tag.sensitive == "true"',
+  'path ~= "**/LongStripEndcapP*/disk*/**" && is_leaf && tag.sensitive == "true"',
 ]
 
 # Calorimeters: outer volumes only (from calorimeters_simple.toml).
