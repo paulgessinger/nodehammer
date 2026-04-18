@@ -28,15 +28,23 @@ jobs:
           - os: ubuntu-24.04
             artifact-name: nodehammer-linux-x86_64
             binary: build/Release/nodehammer
+            binary-name: nodehammer
+            archive: tar.gz
           - os: ubuntu-24.04-arm
             artifact-name: nodehammer-linux-aarch64
             binary: build/Release/nodehammer
+            binary-name: nodehammer
+            archive: tar.gz
           - os: macos-15
             artifact-name: nodehammer-macos-aarch64
             binary: build/Release/nodehammer
+            binary-name: nodehammer
+            archive: tar.gz
           - os: windows-2025
-            artifact-name: nodehammer-windows-x86_64.exe
+            artifact-name: nodehammer-windows-x86_64
             binary: build/Release/nodehammer.exe
+            binary-name: nodehammer.exe
+            archive: zip
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -110,19 +118,24 @@ jobs:
       - name: Test
         run: ctest --test-dir build/Release --output-on-failure
 
-      - name: Stage binary
+      - name: Package binary
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           mkdir -p stage
-          cp "${{ matrix.binary }}" "stage/${{ matrix.artifact-name }}"
+          cp "${{ matrix.binary }}" "stage/${{ matrix.binary-name }}"
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            7z a "${{ matrix.artifact-name }}.zip" "./stage/${{ matrix.binary-name }}"
+          else
+            tar czf "${{ matrix.artifact-name }}.tar.gz" -C stage "${{ matrix.binary-name }}"
+          fi
 
-      - name: Upload binary
+      - name: Upload archive
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: stage/${{ matrix.artifact-name }}
+          path: ${{ matrix.artifact-name }}.${{ matrix.archive }}
           if-no-files-found: error
 
   release:
