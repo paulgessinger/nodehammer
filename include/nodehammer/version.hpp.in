@@ -1,0 +1,12 @@
+#pragma once
+
+#include <string_view>
+
+namespace nodehammer {
+
+inline constexpr std::string_view VERSION = "@NODEHAMMER_VERSION@";
+inline constexpr int VERSION_MAJOR = @NODEHAMMER_VERSION_MAJOR@;
+inline constexpr int VERSION_MINOR = @NODEHAMMER_VERSION_MINOR@;
+inline constexpr int VERSION_PATCH = @NODEHAMMER_VERSION_PATCH@;
+
+} // namespace nodehammer

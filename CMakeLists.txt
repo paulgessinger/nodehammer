@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(nodehammer VERSION 0.1.0 LANGUAGES C CXX)
+# Derive version from the nearest git tag (vMAJOR.MINOR.PATCH).
+# On an exact tag the version is clean (e.g. "1.2.3"); between tags it carries
+# the commit distance and hash (e.g. "1.2.3-7-gabcdef").
+include(cmake/Version.cmake)
+
+project(nodehammer
+    VERSION "${NODEHAMMER_VERSION_MAJOR}.${NODEHAMMER_VERSION_MINOR}.${NODEHAMMER_VERSION_PATCH}"
+    LANGUAGES C CXX
+)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -86,8 +94,15 @@ add_library(nodehammer_lib STATIC
     src/cli/cmd_dump_render.cpp
 )
 
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/nodehammer/version.hpp.in
+    ${CMAKE_CURRENT_BINARY_DIR}/include/nodehammer/version.hpp
+    @ONLY
+)
+
 target_include_directories(nodehammer_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_BINARY_DIR}/include
 )
 
 target_link_libraries(nodehammer_lib PUBLIC
