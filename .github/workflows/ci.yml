@@ -140,17 +140,9 @@ jobs:
             cmake --build --preset conan-release
             ctest --test-dir build/Release --output-on-failure -j4
 
-      - name: Debug Conan cache paths
+      - name: Fix Conan cache ownership
         if: always()
-        run: |
-          echo "=== github.workspace ==="
-          echo "${{ github.workspace }}"
-          echo "=== workspace .conan2 ==="
-          ls -la "${{ github.workspace }}/.conan2" 2>&1 || echo "(not found)"
-          echo "=== HOME .conan2 ==="
-          ls -la ~/.conan2 2>&1 || echo "(not found)"
-          echo "=== find .conan2 from cwd ==="
-          find . -maxdepth 3 -name ".conan2" 2>/dev/null || echo "(not found)"
+        run: sudo chown -R "$USER" "${{ github.workspace }}/.conan2" || true
 
       - name: Save Conan cache
         if: always()
