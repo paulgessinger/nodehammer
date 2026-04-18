@@ -14,6 +14,13 @@ function(nodehammer_set_compiler_options target)
             -Wnon-virtual-dtor
             -Woverloaded-virtual
         )
+        # Clang 19+ flags Catch2's use of __COUNTER__ under -Wpedantic as a
+        # "C2y extension". __COUNTER__ has been a de facto standard extension
+        # across gcc/clang/msvc for ages; silence the new warning class.
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+                AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 19)
+            target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
+        endif()
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         target_compile_options(${target} PRIVATE
             /W4

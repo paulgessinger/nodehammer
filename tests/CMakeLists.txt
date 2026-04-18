@@ -51,11 +51,19 @@ nodehammer_set_compiler_options(nodehammer_tests)
 nodehammer_apply_emscripten_exe_options(nodehammer_tests)
 
 include(CTest)
-include(Catch)
-# Under cross-compile (emscripten), defer test enumeration until `ctest` runs so
-# discovery uses CMAKE_CROSSCOMPILING_EMULATOR (node) to invoke the .js binary.
+# catch_discover_tests runs the test binary to enumerate cases. Under
+# cross-compile the binary is a .js file that needs `node` as emulator, and
+# Catch2 3.7.1's discovery script doesn't thread CMAKE_CROSSCOMPILING_EMULATOR
+# through every path — it tries to execve the .js and gets EACCES. Register a
+# single ctest entry invoking node directly. Catch2's own runner still prints
+# per-case results on stdout.
 if(CMAKE_CROSSCOMPILING)
-    catch_discover_tests(nodehammer_tests DISCOVERY_MODE PRE_TEST)
+    find_program(NODEHAMMER_NODE_EXECUTABLE node REQUIRED)
+    add_test(
+        NAME nodehammer_tests
+        COMMAND "${NODEHAMMER_NODE_EXECUTABLE}" "$<TARGET_FILE:nodehammer_tests>"
+    )
 else()
+    include(Catch)
     catch_discover_tests(nodehammer_tests)
 endif()

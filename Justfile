@@ -66,12 +66,13 @@ wasm-deps: _require-emsdk
         --build=missing
 
 wasm-configure: _require-emsdk
-    cmake --preset conan-emscripten-release --fresh
+    cmake --preset conan-emscripten-release --fresh \
+        -DNODEHAMMER_BUILD_TESTS=ON
 
 wasm-build: _require-emsdk
     cmake --build --preset conan-emscripten-release
 
 wasm-test: _require-emsdk
-    ctest --preset conan-emscripten-release
+    ctest --preset conan-emscripten-release --output-on-failure
 
 wasm: wasm-deps wasm-configure wasm-build wasm-test
