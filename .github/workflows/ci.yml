@@ -121,7 +121,7 @@ jobs:
           release-platform: "LCG_109/x86_64-el9-gcc15-opt"
           ccache-key: ccache-lcg109
           run: |
-            export CONAN_HOME=$GITHUB_WORKSPACE/.conan2
+            export CONAN_HOME=$(pwd)/.conan2
             curl -LsSf https://astral.sh/uv/0.11.7/install.sh | sh
             source "$HOME/.local/bin/env"
             uv tool install conan
@@ -139,6 +139,18 @@ jobs:
               -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
             cmake --build --preset conan-release
             ctest --test-dir build/Release --output-on-failure -j4
+
+      - name: Debug Conan cache paths
+        if: always()
+        run: |
+          echo "=== github.workspace ==="
+          echo "${{ github.workspace }}"
+          echo "=== workspace .conan2 ==="
+          ls -la "${{ github.workspace }}/.conan2" 2>&1 || echo "(not found)"
+          echo "=== HOME .conan2 ==="
+          ls -la ~/.conan2 2>&1 || echo "(not found)"
+          echo "=== find .conan2 from cwd ==="
+          find . -maxdepth 3 -name ".conan2" 2>/dev/null || echo "(not found)"
 
       - name: Save Conan cache
         if: always()
