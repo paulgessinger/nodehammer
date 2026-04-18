@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 concurrency:
@@ -18,12 +19,24 @@ jobs:
       - uses: j178/prek-action@cbc2f23eb5539cf20d82d1aabd0d0ecbcc56f4e3 # v2.0.2
 
   build:
-    name: ${{ matrix.os }}
+    name: ${{ matrix.artifact-name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        include:
+          - os: ubuntu-24.04
+            artifact-name: nodehammer-linux-x86_64
+            binary: build/Release/nodehammer
+          - os: ubuntu-24.04-arm
+            artifact-name: nodehammer-linux-aarch64
+            binary: build/Release/nodehammer
+          - os: macos-15
+            artifact-name: nodehammer-macos-aarch64
+            binary: build/Release/nodehammer
+          - os: windows-2025
+            artifact-name: nodehammer-windows-x86_64.exe
+            binary: build/Release/nodehammer.exe
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -59,15 +72,15 @@ jobs:
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.conan2/p
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
+          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
           restore-keys: |
-            conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-
-            conan-${{ runner.os }}-
+            conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-
+            conan-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce # v1.2.22
         with:
-          key: ccache-${{ runner.os }}
+          key: ccache-${{ runner.os }}-${{ runner.arch }}
 
       - name: Conan install
         run: >
@@ -80,7 +93,7 @@ jobs:
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.conan2/p
-          key: conan-${{ runner.os }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
+          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
 
       - name: Configure
         run: >
@@ -96,6 +109,33 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build/Release --output-on-failure
+
+      - name: Upload binary
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: ${{ matrix.binary }}
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-slim
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
 
   lcg:
     name: LCG 109 (el9-gcc15-opt)
