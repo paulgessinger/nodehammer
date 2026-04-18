@@ -104,14 +104,27 @@ endif()
 FetchContent_Declare(manifold
         SYSTEM
         GIT_REPOSITORY https://github.com/elalish/manifold.git
-        GIT_TAG        v3.0.1
-        FIND_PACKAGE_ARGS 3.0
+        GIT_TAG        v3.2.1
+        FIND_PACKAGE_ARGS 3.2
     )
     set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)
     set(MANIFOLD_PYBIND OFF CACHE BOOL "" FORCE)
     set(MANIFOLD_CBIND OFF CACHE BOOL "" FORCE)
     set(MANIFOLD_JSBIND OFF CACHE BOOL "" FORCE)
     set(MANIFOLD_EXPORT OFF CACHE BOOL "" FORCE)
+    # Single-threaded under cross-compile (emscripten has no system TBB/OpenMP).
+    # MANIFOLD_PAR is a plain bool — any non-empty value is truthy, so we must
+    # set it to OFF explicitly (not "NONE"). Belt-and-suspenders: also disable
+    # the builtin TBB fetch so manifold can't pull it in another way.
+    # Also use manifold's bundled clipper2 fetch: the CCI manifold recipe
+    # applies a target-name rename (clipper2::clipper2 -> Clipper2) that
+    # manifold's own CMake depends on, and we can't replicate that via
+    # FetchContent. Letting manifold own its clipper2 sidesteps the mismatch.
+    if(CMAKE_CROSSCOMPILING OR EMSCRIPTEN)
+        set(MANIFOLD_PAR OFF CACHE BOOL "" FORCE)
+        set(MANIFOLD_USE_BUILTIN_TBB OFF CACHE BOOL "" FORCE)
+        set(MANIFOLD_USE_BUILTIN_CLIPPER2 ON CACHE BOOL "" FORCE)
+    endif()
     FetchContent_MakeAvailable(manifold)
 
     # Global CMAKE_CXX_FLAGS / toolchain warnings apply to subprojects too; keep third-party
@@ -139,7 +152,14 @@ FetchContent_Declare(flatbuffers
     FIND_PACKAGE_ARGS 25.12.19
 )
 set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(FLATBUFFERS_BUILD_FLATC ON  CACHE BOOL "" FORCE)
+# flatc is a host tool (runs at build time, not on the target). When cross-
+# compiling (e.g. emscripten) we cannot build it here — expect one on PATH
+# and resolve via find_program() in the main CMakeLists.
+if(CMAKE_CROSSCOMPILING)
+    set(FLATBUFFERS_BUILD_FLATC OFF CACHE BOOL "" FORCE)
+else()
+    set(FLATBUFFERS_BUILD_FLATC ON  CACHE BOOL "" FORCE)
+endif()
 set(FLATBUFFERS_BUILD_FLATHASH OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(flatbuffers)
 

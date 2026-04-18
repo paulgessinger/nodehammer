@@ -48,7 +48,14 @@ if(NODEHAMMER_WITH_DD4HEP)
 endif()
 
 nodehammer_set_compiler_options(nodehammer_tests)
+nodehammer_apply_emscripten_exe_options(nodehammer_tests)
 
 include(CTest)
 include(Catch)
-catch_discover_tests(nodehammer_tests)
+# Under cross-compile (emscripten), defer test enumeration until `ctest` runs so
+# discovery uses CMAKE_CROSSCOMPILING_EMULATOR (node) to invoke the .js binary.
+if(CMAKE_CROSSCOMPILING)
+    catch_discover_tests(nodehammer_tests DISCOVERY_MODE PRE_TEST)
+else()
+    catch_discover_tests(nodehammer_tests)
+endif()

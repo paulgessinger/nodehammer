@@ -42,3 +42,17 @@ function(nodehammer_set_compiler_options target)
         endif()
     endif()
 endfunction()
+
+# Apply link options that Emscripten executables need to run under node:
+# NODERAWFS exposes the host filesystem (so fixture paths resolve), EXIT_RUNTIME
+# makes the process return the C++ exit code, and ALLOW_MEMORY_GROWTH avoids
+# OOM aborts on larger test inputs. No-op on non-emscripten builds.
+function(nodehammer_apply_emscripten_exe_options target)
+    if(EMSCRIPTEN)
+        target_link_options(${target} PRIVATE
+            "-sNODERAWFS=1"
+            "-sEXIT_RUNTIME=1"
+            "-sALLOW_MEMORY_GROWTH=1"
+        )
+    endif()
+endfunction()

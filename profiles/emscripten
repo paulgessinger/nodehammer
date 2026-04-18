@@ -1,0 +1,49 @@
+# Conan host profile for cross-compiling nodehammer to WebAssembly via emsdk.
+#
+# Prereqs in the shell running `conan install`:
+#   - emsdk installed and activated (e.g. `source ~/emsdk/emsdk_env.sh` so
+#     $EMSDK is set and emcc/em++ are on PATH).
+#
+# Usage (always with a build-context profile for tool_requires like flatc):
+#   conan install . \
+#       -pr:h profiles/emscripten \
+#       -pr:b default \
+#       -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
+#       --build=missing
+#
+# The build_folder_vars knob differentiates the generated folder/preset
+# (`conan-emscripten-release`) from the native ones so both can coexist.
+#
+# compiler.version tracks the llvm bundled in your active emsdk; bump if your
+# emsdk ships a different clang major.
+
+[settings]
+os=Emscripten
+arch=wasm
+build_type=Release
+compiler=clang
+compiler.version=19
+compiler.libcxx=libc++
+compiler.cppstd=23
+
+# Conan does not inherit the calling shell's PATH into dependency build
+# subprocesses, so we have to re-inject emsdk here. `os.getenv` is Jinja
+# expansion that runs when conan reads this profile.
+[buildenv]
+PATH=+(path){{ os.getenv("EMSDK") }}/upstream/emscripten
+EMSDK={{ os.getenv("EMSDK") }}
+
+[conf]
+tools.build:compiler_executables={"c": "emcc", "cpp": "em++"}
+tools.cmake.cmaketoolchain:generator=Ninja
+# Enable native WebAssembly exceptions everywhere (compile + link, all deps).
+# Without this, C++ `throw` compiles to abort() under emscripten, which breaks
+# CLI11, catch2, and anything that uses exceptions.
+tools.build:cxxflags=["-fwasm-exceptions"]
+tools.build:exelinkflags=["-fwasm-exceptions"]
+tools.build:sharedlinkflags=["-fwasm-exceptions"]
+# manifold's CMake defaults MANIFOLD_JSBIND=ON under EMSCRIPTEN, but the JS
+# bindings need a .d.ts source file that isn't present in a plain source
+# checkout. Upstream uses cmake_dependent_option (no FORCE), so a cache
+# override wins.
+tools.cmake.cmaketoolchain:extra_variables={"MANIFOLD_JSBIND": "OFF"}

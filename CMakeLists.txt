@@ -27,6 +27,15 @@ endif()
 # Export compile commands for tooling
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Emscripten: compile and link all in-tree code (including FetchContent'd
+# manifold/clipper2) with native wasm exceptions. Must be set BEFORE
+# Dependencies.cmake so FetchContent targets inherit it. The matching conan
+# profile flags cover conan-built deps (catch2 etc.) — the two must agree.
+if(EMSCRIPTEN)
+    add_compile_options(-fwasm-exceptions)
+    add_link_options(-fwasm-exceptions)
+endif()
+
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
 
@@ -153,6 +162,7 @@ target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 add_executable(nodehammer src/cli/main.cpp)
 target_link_libraries(nodehammer PRIVATE nodehammer_lib)
 nodehammer_set_compiler_options(nodehammer)
+nodehammer_apply_emscripten_exe_options(nodehammer)
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 if(NODEHAMMER_BUILD_TESTS)

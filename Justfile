@@ -40,3 +40,38 @@ cli *args:
     #!/usr/bin/env bash
     set -euo pipefail
     exec "{{justfile_directory()}}/build/RelWithDebInfo/nodehammer" {{args}}
+
+# ── Emscripten / wasm ────────────────────────────────────────────────────────
+# Prereqs (one-time):
+#   git clone https://github.com/emscripten-core/emsdk ~/emsdk
+#   ~/emsdk/emsdk install latest && ~/emsdk/emsdk activate latest
+# Each shell session:
+#   source ~/emsdk/emsdk_env.sh  # exports EMSDK and puts em++ on PATH
+#
+# flatc comes in via conan's tool_requires (built for the native build profile),
+# so no separate `brew install flatbuffers` is needed.
+
+_require-emsdk:
+    #!/usr/bin/env bash
+    if [ -z "${EMSDK:-}" ]; then
+        echo "EMSDK is not set. Run: source ~/emsdk/emsdk_env.sh" >&2
+        exit 1
+    fi
+
+wasm-deps: _require-emsdk
+    conan install . \
+        -pr:h profiles/emscripten \
+        -pr:b default \
+        -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
+        --build=missing
+
+wasm-configure: _require-emsdk
+    cmake --preset conan-emscripten-release --fresh
+
+wasm-build: _require-emsdk
+    cmake --build --preset conan-emscripten-release
+
+wasm-test: _require-emsdk
+    ctest --preset conan-emscripten-release
+
+wasm: wasm-deps wasm-configure wasm-build wasm-test
