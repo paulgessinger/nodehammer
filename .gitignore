@@ -5,3 +5,7 @@
 /build-*
 /compile_commands.json
 /.cache
+
+# Geometry data exports (derivative of MPL-licensed ODD, kept local only)
+*.nhb
+*.nhb.zst
