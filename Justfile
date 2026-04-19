@@ -62,17 +62,26 @@ wasm-deps: _require-emsdk
     conan install . \
         -pr:h profiles/emscripten \
         -pr:b default \
+        -s build_type=RelWithDebInfo \
         -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
         --build=missing
 
-wasm-configure: _require-emsdk
-    cmake --preset conan-emscripten-release --fresh \
-        -DNODEHAMMER_BUILD_TESTS=ON
+wasm-configure *args: _require-emsdk
+    cmake --preset conan-emscripten-relwithdebinfo --fresh \
+        -GNinja \
+        -DNODEHAMMER_BUILD_TESTS=ON {{args}}
 
 wasm-build: _require-emsdk
-    cmake --build --preset conan-emscripten-release
+    cmake --build --preset conan-emscripten-relwithdebinfo
 
 wasm-test: _require-emsdk
-    ctest --preset conan-emscripten-release --output-on-failure
+    ctest --preset conan-emscripten-relwithdebinfo --output-on-failure
+
+# Layer additional cmake cache variables onto the wasm build without --fresh.
+# Uses --preset so the emscripten toolchain/env stay in effect even if the
+# cache is new. Follow up with `just wasm-build`.
+# Example: just wasm-set -DNODEHAMMER_PROFILING=ON
+wasm-set *args: _require-emsdk
+    cmake --preset conan-emscripten-relwithdebinfo {{args}}
 
 wasm: wasm-deps wasm-configure wasm-build wasm-test

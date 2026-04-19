@@ -71,6 +71,23 @@ option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"        OFF)
 option(NODEHAMMER_ENABLE_ASAN  "Enable AddressSanitizer"          OFF)
 option(NODEHAMMER_WERROR       "Treat project warnings as errors" OFF)
 option(NODEHAMMER_BUILD_TESTS  "Build the unit-test binary"       OFF)
+option(NODEHAMMER_PROFILING    "Preserve symbols and frame pointers for sampling profilers" OFF)
+
+# Profiling flags are additive on top of any build type (Release, RelWithDebInfo,
+# Debug). Same interface across native and wasm; the flags differ per toolchain:
+# Clang/GCC get -g + frame pointers; MSVC gets /Zi + /Oy-; emscripten gets
+# --profiling-funcs on top so wasm function names survive the linker.
+if(NODEHAMMER_PROFILING)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        add_compile_options(-g -fno-omit-frame-pointer)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        add_compile_options(/Zi /Oy-)
+        add_link_options(/DEBUG)
+    endif()
+    if(EMSCRIPTEN)
+        add_link_options(--profiling-funcs)
+    endif()
+endif()
 
 # ── Library target ─────────────────────────────────────────────────────────────
 add_library(nodehammer_lib STATIC
