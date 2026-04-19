@@ -1,6 +1,8 @@
 #include <nodehammer/detail/overloaded.hpp>
 #include <nodehammer/selection/predicate.hpp>
 
+#include <memory>
+
 namespace nodehammer {
 
 // ── matchGlob ─────────────────────────────────────────────────────────────────
@@ -17,49 +19,16 @@ namespace nodehammer {
 // When a mismatch occurs after a '*' or '**', it backtracks to the restart
 // point and advances by one text character. This avoids recursion and runs
 // in O(n*m) worst case with minimal overhead.
+//
+// CompiledGlob caches the pattern analysis — literal segments for fast-reject
+// and specialized match modes — so hot paths (selection + tessellation rule
+// evaluation) don't re-scan the pattern on every call.
 
 namespace {
 
-// Extract contiguous literal segments from a pattern (substrings between wildcards).
-// Used for fast rejection: if any literal segment is not found in the text,
-// the pattern cannot match.
-bool fastReject(std::string_view pattern, std::string_view text) {
-    std::size_t i = 0;
-    while (i < pattern.size()) {
-        // Skip wildcards and the optional '/' after '**'.
-        if (pattern[i] == '*') {
-            if (i + 1 < pattern.size() && pattern[i + 1] == '*') {
-                i += 2;
-                if (i < pattern.size() && pattern[i] == '/') {
-                    ++i;
-                }
-            } else {
-                ++i;
-            }
-            continue;
-        }
-        // Collect literal segment
-        std::size_t start = i;
-        while (i < pattern.size() && pattern[i] != '*') {
-            ++i;
-        }
-        std::string_view segment = pattern.substr(start, i - start);
-        // A literal segment must appear somewhere in the text.
-        if (segment.size() > 1 && text.find(segment) == std::string_view::npos) {
-            return true; // reject
-        }
-    }
-    return false;
-}
-
-} // namespace
-
-bool matchGlob(std::string_view pattern, std::string_view text) {
-    // Fast reject: check that all literal segments exist in the text.
-    if (fastReject(pattern, text)) {
-        return false;
-    }
-
+// Core two-pointer matcher — no fast-reject. Callers that have a compiled
+// pattern apply fast-reject with precomputed segments before calling this.
+bool matchGlobCore(std::string_view pattern, std::string_view text) {
     std::size_t pi = 0; // pattern index
     std::size_t ti = 0; // text index
 
@@ -128,19 +97,134 @@ bool matchGlob(std::string_view pattern, std::string_view text) {
     return true;
 }
 
+// Precompiled form of a glob pattern, analyzed once at predicate-build time.
+struct CompiledGlob {
+    enum class Kind {
+        MatchAll,         // pattern is "*", "**", or any string of consecutive '*'
+        Literal,          // pattern has no '*' → equality check
+        PrefixDoubleStar, // pattern is "<LITERAL>**" with nothing after → starts_with check
+        General,          // full two-pointer matcher with precomputed literal segments
+    };
+
+    Kind kind{Kind::General};
+    std::string pattern;                    // held for General and Literal; storage for segments
+    std::string_view literal;               // for Literal / PrefixDoubleStar
+    std::vector<std::string_view> segments; // for General fast-reject (views into pattern)
+};
+
+// Analyze a pattern once, picking the most specific Kind we can prove correct.
+// segments are views into `pattern`; we std::move the string after analysis so
+// the views stay valid inside the owning CompiledGlob.
+std::shared_ptr<const CompiledGlob> compileGlob(std::string pattern) {
+    auto g = std::make_shared<CompiledGlob>();
+
+    bool hasStar = false;
+    bool allStar = !pattern.empty();
+    for (char c : pattern) {
+        if (c == '*') {
+            hasStar = true;
+        } else {
+            allStar = false;
+        }
+    }
+
+    if (allStar) {
+        g->kind = CompiledGlob::Kind::MatchAll;
+        return g;
+    }
+    if (!hasStar) {
+        g->kind = CompiledGlob::Kind::Literal;
+        g->pattern = std::move(pattern);
+        g->literal = g->pattern;
+        return g;
+    }
+
+    // Detect "<LITERAL>**" — the common scope / prefix-glob form.
+    // Requires: pattern ends with "**" and the prefix has no '*'.
+    if (pattern.size() >= 2 && pattern[pattern.size() - 1] == '*' &&
+        pattern[pattern.size() - 2] == '*') {
+        std::string_view prefix{pattern.data(), pattern.size() - 2};
+        if (prefix.find('*') == std::string_view::npos) {
+            g->kind = CompiledGlob::Kind::PrefixDoubleStar;
+            g->pattern = std::move(pattern);
+            g->literal = std::string_view{g->pattern.data(), g->pattern.size() - 2};
+            return g;
+        }
+    }
+
+    // General case: precompute literal segments for fast-reject. Matches the
+    // existing fastReject behavior — segments of size > 1 only.
+    g->kind = CompiledGlob::Kind::General;
+    g->pattern = std::move(pattern);
+    std::string_view p{g->pattern};
+    std::size_t i = 0;
+    while (i < p.size()) {
+        if (p[i] == '*') {
+            if (i + 1 < p.size() && p[i + 1] == '*') {
+                i += 2;
+                if (i < p.size() && p[i] == '/') {
+                    ++i;
+                }
+            } else {
+                ++i;
+            }
+            continue;
+        }
+        std::size_t start = i;
+        while (i < p.size() && p[i] != '*') {
+            ++i;
+        }
+        if (i - start > 1) {
+            g->segments.push_back(p.substr(start, i - start));
+        }
+    }
+    return g;
+}
+
+bool matchCompiledGlob(const CompiledGlob &g, std::string_view text) {
+    switch (g.kind) {
+    case CompiledGlob::Kind::MatchAll:
+        return true;
+    case CompiledGlob::Kind::Literal:
+        return text == g.literal;
+    case CompiledGlob::Kind::PrefixDoubleStar:
+        return text.starts_with(g.literal);
+    case CompiledGlob::Kind::General:
+        for (const auto &seg : g.segments) {
+            if (text.find(seg) == std::string_view::npos) {
+                return false;
+            }
+        }
+        return matchGlobCore(g.pattern, text);
+    }
+    return false; // unreachable
+}
+
+} // namespace
+
+// Public API — preserves the test/CLI entry point. Production hot paths go
+// through compiled predicates (compileGlob is called once at predicate build).
+bool matchGlob(std::string_view pattern, std::string_view text) {
+    const auto g = compileGlob(std::string{pattern});
+    return matchCompiledGlob(*g, text);
+}
+
 // ── Factory functions ─────────────────────────────────────────────────────────
 
 Predicate makeNameGlobPredicate(std::string pattern) {
-    return [p = std::move(pattern)](const NodeView &v) -> bool { return matchGlob(p, v.name); };
+    auto g = compileGlob(std::move(pattern));
+    return [g = std::move(g)](const NodeView &v) -> bool { return matchCompiledGlob(*g, v.name); };
 }
 
 Predicate makePathGlobPredicate(std::string pattern) {
-    return [p = std::move(pattern)](const NodeView &v) -> bool { return matchGlob(p, v.path); };
+    auto g = compileGlob(std::move(pattern));
+    return [g = std::move(g)](const NodeView &v) -> bool { return matchCompiledGlob(*g, v.path); };
 }
 
 Predicate makeMaterialGlobPredicate(std::string pattern) {
-    return [p = std::move(pattern)](const NodeView &v) -> bool {
-        return matchGlob(p, v.materialName);
+    auto g = compileGlob(std::move(pattern));
+    return [g = std::move(g)](const NodeView &v) -> bool {
+        return matchCompiledGlob(*g, v.materialName);
     };
 }
 

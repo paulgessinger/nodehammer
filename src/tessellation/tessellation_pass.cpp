@@ -55,11 +55,32 @@ bool matrixLess(const glm::dmat4 &a, const glm::dmat4 &b) {
     return false;
 }
 
-// Does a rule's scope/match apply to the given node?
-bool ruleMatches(const Rule &r, const NodeView &view) {
-    if (r.match.has_value()) {
-        auto pred = compilePredicate(*r.match);
-        return pred(view);
+// A Rule paired with its once-compiled match predicate. Compiling is non-trivial
+// (recursive closure construction), so doing it per node × per rule × per resolver
+// shows up prominently in profiles — we compile once per lower() call instead.
+struct CompiledRule {
+    const Rule *rule{nullptr};
+    std::optional<Predicate> match; // nullopt ⇔ rule->match is nullopt (match-all)
+};
+
+std::vector<CompiledRule> compileRulePredicates(const std::vector<Rule> &rules) {
+    std::vector<CompiledRule> out;
+    out.reserve(rules.size());
+    for (const auto &r : rules) {
+        CompiledRule cr;
+        cr.rule = &r;
+        if (r.match.has_value()) {
+            cr.match = compilePredicate(*r.match);
+        }
+        out.push_back(std::move(cr));
+    }
+    return out;
+}
+
+// Does a rule's match predicate apply to the given node?
+bool ruleMatches(const CompiledRule &cr, const NodeView &view) {
+    if (cr.match.has_value()) {
+        return (*cr.match)(view);
     }
     return true; // no predicate → matches everything
 }
@@ -251,17 +272,17 @@ bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv
 // Merge tessellation settings from all matching rules (last match wins per
 // field), then apply config defaults, then hardcoded defaults for anything
 // still unset.
-ResolvedTessellation resolveTessellation(const std::vector<Rule> &rules,
+ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
                                          const Rule::Tessellation &defaults, const NodeView &view) {
     Rule::Tessellation merged;
-    for (const auto &r : rules) {
-        if (!r.tessellation.has_value()) {
+    for (const auto &cr : rules) {
+        if (!cr.rule->tessellation.has_value()) {
             continue;
         }
-        if (!ruleMatches(r, view)) {
+        if (!ruleMatches(cr, view)) {
             continue;
         }
-        const auto &t = *r.tessellation;
+        const auto &t = *cr.rule->tessellation;
         if (t.skipGeometry.has_value()) {
             merged.skipGeometry = *t.skipGeometry;
         }
@@ -289,14 +310,14 @@ ResolvedTessellation resolveTessellation(const std::vector<Rule> &rules,
 // Return the material name from the last matching rule that has one, or nullptr.
 // This is consistent with tessellation resolution (last-match-wins per field)
 // and means later includes / parent configs can override earlier ones.
-const std::string *resolveMaterial(const std::vector<Rule> &rules, const NodeView &view) {
+const std::string *resolveMaterial(const std::vector<CompiledRule> &rules, const NodeView &view) {
     const std::string *result = nullptr;
-    for (const auto &r : rules) {
-        if (!r.material.has_value()) {
+    for (const auto &cr : rules) {
+        if (!cr.rule->material.has_value()) {
             continue;
         }
-        if (ruleMatches(r, view)) {
-            result = &*r.material;
+        if (ruleMatches(cr, view)) {
+            result = &*cr.rule->material;
         }
     }
     return result;
@@ -304,14 +325,14 @@ const std::string *resolveMaterial(const std::vector<Rule> &rules, const NodeVie
 
 // Resolve extras from the first matching rule that has them, falling back to
 // config-level defaults.
-RenderExtrasMap resolveExtras(const std::vector<Rule> &rules,
+RenderExtrasMap resolveExtras(const std::vector<CompiledRule> &rules,
                               const std::optional<ExtrasMap> &defaults, const NodeView &view) {
-    for (const auto &r : rules) {
-        if (!r.extras.has_value()) {
+    for (const auto &cr : rules) {
+        if (!cr.rule->extras.has_value()) {
             continue;
         }
-        if (ruleMatches(r, view)) {
-            return *r.extras;
+        if (ruleMatches(cr, view)) {
+            return *cr.rule->extras;
         }
     }
     if (defaults.has_value()) {
@@ -403,6 +424,11 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         return result;
     }
 
+    // Compile rule match predicates once up front, reused across every resolver
+    // call below. The three resolve* helpers each iterate every rule for every
+    // node, so compiling per-call dominated the tessellation profile.
+    const auto compiledRules = compileRulePredicates(config_.rules);
+
     PrimitiveTessellator tess;
 
     // Helper: build a NodeView for a semantic node, resolving its source material name.
@@ -446,7 +472,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                                      const SemanticNode &node) -> RenderMaterialId {
         const auto &srcMat = scene.materials.at(srcMatId);
         NodeView view = makeNodeView(node);
-        const std::string *matName = resolveMaterial(config_.rules, view);
+        const std::string *matName = resolveMaterial(compiledRules, view);
         RenderMaterialId rmId;
         if (matName != nullptr) {
             auto cit = namedMatCache.find(*matName);
@@ -545,7 +571,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
         // ── Resolve extras from unified rules ──────────────────────────────────
         {
             NodeView ev = makeNodeView(semNode);
-            rn.extras = resolveExtras(config_.rules, config_.extrasDefaults, ev);
+            rn.extras = resolveExtras(compiledRules, config_.extrasDefaults, ev);
         }
 
         nodeMap[semId] = rnId;
@@ -555,7 +581,7 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
         // ── Resolve tessellation rule ──────────────────────────────────────────
         NodeView nv = makeNodeView(semNode);
-        const auto rule = resolveTessellation(config_.rules, config_.tessellationDefaults, nv);
+        const auto rule = resolveTessellation(compiledRules, config_.tessellationDefaults, nv);
         TessellationParams params;
         params.maxSegmentsCircle = rule.maxSegmentsCircle;
 
@@ -611,13 +637,13 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
                 }
 
                 NodeView descView = makeNodeView(descNode);
-                const std::string *matName = resolveMaterial(config_.rules, descView);
+                const std::string *matName = resolveMaterial(compiledRules, descView);
                 const std::string materialKey =
                     matName != nullptr ? "config:" + *matName
                                        : std::format("source:{}", descLv.materialId.value);
 
                 const auto descTess =
-                    resolveTessellation(config_.rules, config_.tessellationDefaults, descView);
+                    resolveTessellation(compiledRules, config_.tessellationDefaults, descView);
                 const int descSegs = descTess.maxSegmentsCircle;
 
                 mergeKey.descendants.push_back({descLv.shapeId, descLv.materialId, materialKey,
