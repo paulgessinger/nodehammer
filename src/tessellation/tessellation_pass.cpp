@@ -8,6 +8,8 @@
 
 #include <glm/gtc/matrix_inverse.hpp>
 
+#include <ankerl/unordered_dense.h>
+
 #include <algorithm>
 #include <bit>
 #include <cstdint>
@@ -16,7 +18,6 @@
 #include <map>
 #include <print>
 #include <queue>
-#include <unordered_map>
 
 namespace nodehammer {
 
@@ -461,11 +462,12 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
 
     // Cache: SemanticMaterialId → RenderMaterialId (avoid creating duplicate RenderMaterials
     // for nodes that share a SourceMaterial and match no named material rule).
-    std::unordered_map<SemanticMaterialId, RenderMaterialId> defaultMatCache;
+    ankerl::unordered_dense::map<SemanticMaterialId, RenderMaterialId> defaultMatCache;
     // Cache: MaterialDef name → RenderMaterialId (avoid duplicating named config materials).
-    std::unordered_map<std::string, RenderMaterialId> namedMatCache;
+    ankerl::unordered_dense::map<std::string, RenderMaterialId> namedMatCache;
     // Cache: (shapeId, maxSegmentsCircle) → MeshAssetId (LV deduplication).
-    std::unordered_map<SemanticShapeId, std::unordered_map<int, MeshAssetId>> meshCache;
+    ankerl::unordered_dense::map<SemanticShapeId, ankerl::unordered_dense::map<int, MeshAssetId>>
+        meshCache;
 
     // Resolve a SourceMaterial to a RenderMaterialId using the rule system + caches.
     auto resolveRenderMaterial = [&](SemanticMaterialId srcMatId,
@@ -532,10 +534,11 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
     // Cache merged descendant meshes by their actual merge inputs. A logVolId alone is not
     // enough here: two placements may share/deduplicate the same container volume while their
     // descendants are mirrored or otherwise arranged differently in the merge node's local frame.
-    std::unordered_map<MergeCacheKey, std::vector<MeshBinding>, MergeCacheKeyHash> mergeCache;
+    ankerl::unordered_dense::map<MergeCacheKey, std::vector<MeshBinding>, MergeCacheKeyHash>
+        mergeCache;
 
     // Map SemanticNodeId → RenderNodeId for parent-linking after creation.
-    std::unordered_map<SemanticNodeId, RenderNodeId> nodeMap;
+    ankerl::unordered_dense::map<SemanticNodeId, RenderNodeId> nodeMap;
 
     // BFS order ensures parents are processed before children.
     std::queue<SemanticNodeId> q;

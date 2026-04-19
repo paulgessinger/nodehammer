@@ -144,6 +144,17 @@ FetchContent_Declare(manifold
         endif()
     endif()
 
+# ── ankerl::unordered_dense ───────────────────────────────────────────────────
+# Open-addressed hash map — drop-in faster replacement for std::unordered_map
+# on the hot scene lookups (scene.nodes etc.). Header-only.
+FetchContent_Declare(unordered_dense
+    SYSTEM
+    GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
+    GIT_TAG        v4.5.0
+    FIND_PACKAGE_ARGS 4.0
+)
+FetchContent_MakeAvailable(unordered_dense)
+
 # ── FlatBuffers ──────────────────────────────────────────────────────────────
 FetchContent_Declare(flatbuffers
     SYSTEM

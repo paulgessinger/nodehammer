@@ -139,6 +139,7 @@ target_link_libraries(nodehammer_lib PUBLIC
     CLI11::CLI11
     zstd::libzstd_static
     flatbuffers::flatbuffers
+    unordered_dense::unordered_dense
 )
 
 add_dependencies(nodehammer_lib flatbuffers_generate)

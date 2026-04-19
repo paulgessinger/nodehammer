@@ -18,6 +18,7 @@ class Nodehammer(ConanFile):
         self.requires("tomlplusplus/3.4.0")
         self.requires("tinygltf/2.9.7")
         self.requires("flatbuffers/25.9.23")
+        self.requires("unordered_dense/4.8.1")
         # manifold/3.2.1's upstream CMake early-returns under EMSCRIPTEN, which
         # skips header install, leaving the conan package with a broken
         # INTERFACE_INCLUDE_DIRECTORIES. Fall back to FetchContent on wasm; the

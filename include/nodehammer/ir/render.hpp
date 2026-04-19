@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ankerl/unordered_dense.h>
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 #include <nodehammer/ir/provenance.hpp>
@@ -7,7 +8,6 @@
 
 #include <cstdint>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace nodehammer {
@@ -107,9 +107,9 @@ struct RenderNode {
 struct RenderScene {
     RenderNodeId rootId;
 
-    std::unordered_map<RenderNodeId, RenderNode> nodes;
-    std::unordered_map<MeshAssetId, MeshAsset> meshAssets;
-    std::unordered_map<RenderMaterialId, RenderMaterial> materials;
+    ankerl::unordered_dense::map<RenderNodeId, RenderNode> nodes;
+    ankerl::unordered_dense::map<MeshAssetId, MeshAsset> meshAssets;
+    ankerl::unordered_dense::map<RenderMaterialId, RenderMaterial> materials;
 
     // ID allocation
     RenderNodeId nextNodeId() { return RenderNodeId{nextNodeId_++}; }

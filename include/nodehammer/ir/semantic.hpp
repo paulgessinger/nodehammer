@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ankerl/unordered_dense.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <nlohmann/json.hpp>
@@ -13,7 +14,6 @@
 #include <optional>
 #include <queue>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -232,10 +232,10 @@ class SemanticScene {
     std::string sourceFile; ///< Input file path (set by importer)
 
     // Flat maps indexed by ID
-    std::unordered_map<SemanticNodeId, SemanticNode> nodes;
-    std::unordered_map<SemanticLogVolId, SemanticLogicalVolume> logVols;
-    std::unordered_map<SemanticShapeId, SemanticShape> shapes;
-    std::unordered_map<SemanticMaterialId, SourceMaterial> materials;
+    ankerl::unordered_dense::map<SemanticNodeId, SemanticNode> nodes;
+    ankerl::unordered_dense::map<SemanticLogVolId, SemanticLogicalVolume> logVols;
+    ankerl::unordered_dense::map<SemanticShapeId, SemanticShape> shapes;
+    ankerl::unordered_dense::map<SemanticMaterialId, SourceMaterial> materials;
 
     /// BFS pass: compose parent × local to set worldTransform on every node.
     void computeWorldTransforms();

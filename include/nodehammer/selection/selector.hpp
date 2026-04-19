@@ -1,10 +1,10 @@
 #pragma once
 
+#include <ankerl/unordered_dense.h>
 #include <nodehammer/config/config_ast.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/semantic.hpp>
 
-#include <unordered_set>
 #include <vector>
 
 namespace nodehammer {
@@ -12,8 +12,8 @@ namespace nodehammer {
 // ── SelectionResult ───────────────────────────────────────────────────────────
 
 struct SelectionResult {
-    std::unordered_set<SemanticNodeId> kept;
-    std::unordered_set<SemanticNodeId> dropped;
+    ankerl::unordered_dense::set<SemanticNodeId> kept;
+    ankerl::unordered_dense::set<SemanticNodeId> dropped;
     DiagnosticList diags;
 };
 
