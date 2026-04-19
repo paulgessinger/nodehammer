@@ -117,41 +117,49 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
         disposition[id] = SelectionAction::KeepIf;
     }
 
-    // ── Step 2: evaluate rules in order (last match wins). ────────────────────
+    // ── Step 2a: precompute NodeViews once per reachable node. ────────────────
+    //
+    // NodeView construction is rule-independent, so building it once up front
+    // avoids O(rules × nodes) rebuilds and collapses the per-iteration
+    // scene.nodes / scene.logVols / scene.materials hash-map traffic.
+    struct NodeEntry {
+        SemanticNodeId id;
+        NodeView view;
+    };
+    std::vector<NodeEntry> nodeEntries;
+    nodeEntries.reserve(reachable.size());
+    for (const auto id : reachable) {
+        const auto &node = scene.nodes.at(id);
+        std::string_view matName;
+        if (auto lvIt = scene.logVols.find(node.logVolId); lvIt != scene.logVols.end()) {
+            if (auto matIt = scene.materials.find(lvIt->second.materialId);
+                matIt != scene.materials.end()) {
+                matName = matIt->second.name;
+            }
+        }
+        NodeView view;
+        view.name = node.name;
+        view.path = node.originalPath;
+        view.materialName = matName;
+        view.isLeaf = node.children.empty();
+        view.tags = &node.tags;
+        nodeEntries.push_back({id, view});
+    }
+
+    // ── Step 2b: evaluate rules in order (last match wins). ───────────────────
     //
     // For each rule, find matching node IDs and write the rule's action.
     // Because we process rules in order and write unconditionally, a later
     // rule can overwrite an earlier one — giving last-match-wins semantics.
     for (const auto &cr : compiledRules) {
-        std::unordered_set<SemanticNodeId> seed;
-
-        for (const auto id : reachable) {
-            const auto &node = scene.nodes.at(id);
-            std::string_view matName;
-            if (scene.logVols.contains(node.logVolId)) {
-                const auto &lv = scene.logVols.at(node.logVolId);
-                if (scene.materials.contains(lv.materialId)) {
-                    matName = scene.materials.at(lv.materialId).name;
-                }
-            }
-            NodeView view;
-            view.name = node.name;
-            view.path = node.originalPath;
-            view.materialName = matName;
-            view.isLeaf = node.children.empty();
-            view.tags = &node.tags;
-
-            if (cr.scopePred.has_value() && !(*cr.scopePred)(view)) {
+        for (const auto &entry : nodeEntries) {
+            if (cr.scopePred.has_value() && !(*cr.scopePred)(entry.view)) {
                 continue;
             }
-            if (!cr.pred(view)) {
+            if (!cr.pred(entry.view)) {
                 continue;
             }
-            seed.insert(id);
-        }
-
-        for (const auto &id : seed) {
-            disposition[id] = cr.action;
+            disposition[entry.id] = cr.action;
         }
     }
 
