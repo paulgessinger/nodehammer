@@ -103,6 +103,7 @@ struct CompiledGlob {
         MatchAll,         // pattern is "*", "**", or any string of consecutive '*'
         Literal,          // pattern has no '*' → equality check
         PrefixDoubleStar, // pattern is "<LITERAL>**" with nothing after → starts_with check
+        Contains,         // pattern is "**<LITERAL>**" → text.find(LITERAL) check
         General,          // full two-pointer matcher with precomputed literal segments
     };
 
@@ -152,8 +153,25 @@ std::shared_ptr<const CompiledGlob> compileGlob(std::string pattern) {
         }
     }
 
-    // General case: precompute literal segments for fast-reject. Matches the
-    // existing fastReject behavior — segments of size > 1 only.
+    // Detect "**<LITERAL>**" — unambiguously equivalent to text.find(LITERAL).
+    // Requires LITERAL to have no '*' and not start with '/' (a leading '/'
+    // would interact with the "consume trailing '/' after '**'" rule in the
+    // matcher and give different semantics).
+    if (pattern.size() >= 5 && pattern[0] == '*' && pattern[1] == '*' &&
+        pattern[pattern.size() - 1] == '*' && pattern[pattern.size() - 2] == '*') {
+        std::string_view middle{pattern.data() + 2, pattern.size() - 4};
+        if (!middle.empty() && middle[0] != '/' && middle.find('*') == std::string_view::npos) {
+            g->kind = CompiledGlob::Kind::Contains;
+            g->pattern = std::move(pattern);
+            g->literal = std::string_view{g->pattern.data() + 2, g->pattern.size() - 4};
+            return g;
+        }
+    }
+
+    // General case: precompute literal segments for fast-reject. Rejecting
+    // mismatched (pattern, text) pairs via text.find is a big net win here —
+    // removing this step regressed wasm runtime 2–3× in practice, because most
+    // (rule × node) pairs don't match and fastReject catches them cheaply.
     g->kind = CompiledGlob::Kind::General;
     g->pattern = std::move(pattern);
     std::string_view p{g->pattern};
@@ -189,6 +207,8 @@ bool matchCompiledGlob(const CompiledGlob &g, std::string_view text) {
         return text == g.literal;
     case CompiledGlob::Kind::PrefixDoubleStar:
         return text.starts_with(g.literal);
+    case CompiledGlob::Kind::Contains:
+        return text.find(g.literal) != std::string_view::npos;
     case CompiledGlob::Kind::General:
         for (const auto &seg : g.segments) {
             if (text.find(seg) == std::string_view::npos) {
