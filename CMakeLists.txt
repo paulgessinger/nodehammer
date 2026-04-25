@@ -36,6 +36,19 @@ if(EMSCRIPTEN)
     add_link_options(-fwasm-exceptions)
 endif()
 
+# ── Options ───────────────────────────────────────────────────────────────────
+# Declared before Dependencies.cmake so dep fetching can gate on them
+# (the viewer pulls bgfx/SDL3/ImGui only when NODEHAMMER_WITH_VIEWER is ON).
+option(NODEHAMMER_WITH_TGEO     "Enable TGeo/ROOT importer"                            OFF)
+option(NODEHAMMER_WITH_DD4HEP   "Enable DD4hep importer"                               OFF)
+option(NODEHAMMER_WITH_GEANT4   "Enable GDML/Geant4 importer"                          OFF)
+option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"                             OFF)
+option(NODEHAMMER_WITH_VIEWER   "Build the bgfx/SDL3/Dear ImGui interactive viewer"    OFF)
+option(NODEHAMMER_ENABLE_ASAN   "Enable AddressSanitizer"                              OFF)
+option(NODEHAMMER_WERROR        "Treat project warnings as errors"                     OFF)
+option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                           OFF)
+option(NODEHAMMER_PROFILING     "Preserve symbols and frame pointers for sampling profilers" OFF)
+
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
 
@@ -62,16 +75,6 @@ add_custom_command(
     COMMENT "Generating FlatBuffers C++ header from semantic.fbs"
 )
 add_custom_target(flatbuffers_generate DEPENDS ${NH_FBS_GENERATED_DIR}/semantic_generated.h)
-
-# ── Optional heavy backends ───────────────────────────────────────────────────
-option(NODEHAMMER_WITH_TGEO    "Enable TGeo/ROOT importer"        OFF)
-option(NODEHAMMER_WITH_DD4HEP  "Enable DD4hep importer"           OFF)
-option(NODEHAMMER_WITH_GEANT4  "Enable GDML/Geant4 importer"      OFF)
-option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"        OFF)
-option(NODEHAMMER_ENABLE_ASAN  "Enable AddressSanitizer"          OFF)
-option(NODEHAMMER_WERROR       "Treat project warnings as errors" OFF)
-option(NODEHAMMER_BUILD_TESTS  "Build the unit-test binary"       OFF)
-option(NODEHAMMER_PROFILING    "Preserve symbols and frame pointers for sampling profilers" OFF)
 
 # Profiling flags are additive on top of any build type (Release, RelWithDebInfo,
 # Debug). Same interface across native and wasm; the flags differ per toolchain:
@@ -176,11 +179,26 @@ endif()
 target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
 target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 
+# ── Optional viewer (bgfx + SDL3 + Dear ImGui) ────────────────────────────────
+if(NODEHAMMER_WITH_VIEWER)
+    add_subdirectory(src/viewer)
+    add_subdirectory(shaders)
+    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_VIEWER=1)
+endif()
+
 # ── CLI executable ─────────────────────────────────────────────────────────────
 add_executable(nodehammer src/cli/main.cpp)
 target_link_libraries(nodehammer PRIVATE nodehammer_lib)
+if(NODEHAMMER_WITH_VIEWER)
+    target_sources(nodehammer PRIVATE src/cli/cmd_viewer.cpp)
+    target_link_libraries(nodehammer PRIVATE nodehammer_viewer)
+endif()
 nodehammer_set_compiler_options(nodehammer)
-nodehammer_apply_emscripten_exe_options(nodehammer)
+if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
+    nodehammer_apply_emscripten_viewer_options(nodehammer)
+else()
+    nodehammer_apply_emscripten_exe_options(nodehammer)
+endif()
 
 # ── Tests ──────────────────────────────────────────────────────────────────────
 if(NODEHAMMER_BUILD_TESTS)

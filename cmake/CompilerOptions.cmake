@@ -63,3 +63,26 @@ function(nodehammer_apply_emscripten_exe_options target)
         )
     endif()
 endfunction()
+
+# Apply link options for the browser viewer build (Emscripten only). Use this
+# *instead* of nodehammer_apply_emscripten_exe_options when building the viewer:
+# NODERAWFS is incompatible with browsers, so we deliberately do not set it.
+# WebGL2 + offscreen framebuffer is what bgfx's GLES path expects. The shell
+# file wraps the generated bundle with a canvas + status element.
+function(nodehammer_apply_emscripten_viewer_options target)
+    if(NOT EMSCRIPTEN)
+        return()
+    endif()
+    target_link_options(${target} PRIVATE
+        "-sEXIT_RUNTIME=0"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sFORCE_FILESYSTEM=1"
+        "-sUSE_WEBGL2=1"
+        "-sFULL_ES3=1"
+        "-sMIN_WEBGL_VERSION=2"
+        "-sMAX_WEBGL_VERSION=2"
+        "-sOFFSCREEN_FRAMEBUFFER=1"
+        "--shell-file=${CMAKE_SOURCE_DIR}/web/viewer.html"
+    )
+    set_target_properties(${target} PROPERTIES SUFFIX ".html")
+endfunction()

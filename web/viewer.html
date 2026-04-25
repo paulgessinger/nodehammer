@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>nodehammer viewer</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #1a1f25;
+            color: #c5cdd9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            overflow: hidden;
+            height: 100%;
+        }
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            outline: none;
+        }
+        #status {
+            position: fixed;
+            left: 12px;
+            bottom: 12px;
+            font-size: 12px;
+            opacity: 0.6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+    <div id="status">loading…</div>
+    <script>
+        var statusEl = document.getElementById('status');
+        var Module = {
+            canvas: document.getElementById('canvas'),
+            print: function (msg) { console.log(msg); },
+            printErr: function (msg) { console.error(msg); },
+            setStatus: function (text) {
+                if (text) {
+                    statusEl.textContent = text;
+                    statusEl.style.display = 'block';
+                } else {
+                    statusEl.style.display = 'none';
+                }
+            },
+            arguments: ['viewer'],
+        };
+        Module.setStatus('downloading…');
+        window.onerror = function (msg) {
+            Module.setStatus('error — see console');
+            console.error(msg);
+        };
+    </script>
+    {{{ SCRIPT }}}
+</body>
+</html>

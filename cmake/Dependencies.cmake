@@ -189,3 +189,98 @@ if(TARGET flatbuffers)
         target_compile_options(flatbuffers PRIVATE /W0)
     endif()
 endif()
+
+# ── Viewer dependencies (bgfx + SDL3 + Dear ImGui) ────────────────────────────
+# Only fetched when NODEHAMMER_WITH_VIEWER is ON. bgfx is wired via the
+# bkaradzic/bgfx.cmake wrapper (which builds bgfx + bx + bimg + shaderc as plain
+# CMake targets). The CCI Conan recipe for bgfx is currently broken on
+# emscripten (PR #29596 open), so we always go through FetchContent for it.
+# SDL3 and ImGui can come from Conan if available; FetchContent is the fallback.
+if(NODEHAMMER_WITH_VIEWER)
+    # bgfx via bgfx.cmake — multi-target wrapper
+    FetchContent_Declare(bgfx
+        SYSTEM
+        GIT_REPOSITORY https://github.com/bkaradzic/bgfx.cmake.git
+        GIT_TAG        v1.136.9135-512
+    )
+    set(BGFX_BUILD_EXAMPLES        OFF CACHE BOOL "" FORCE)
+    set(BGFX_BUILD_TESTS           OFF CACHE BOOL "" FORCE)
+    set(BGFX_INSTALL               OFF CACHE BOOL "" FORCE)
+    set(BGFX_OPENGLES_VERSION      30  CACHE STRING "" FORCE)
+    # bgfx.cmake itself disables BGFX_CONFIG_MULTITHREADED on emscripten via
+    # cmake_dependent_option — do NOT override it here. Tools (shaderc, bin2c)
+    # are host-only; under cross-compile they must be provided separately.
+    if(CMAKE_CROSSCOMPILING)
+        set(BGFX_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+    else()
+        set(BGFX_BUILD_TOOLS ON CACHE BOOL "" FORCE)
+    endif()
+    FetchContent_MakeAvailable(bgfx)
+
+    # bgfx.cmake exposes bgfxToolUtils.cmake (bgfx_compile_shaders helper).
+    # When consuming via add_subdirectory it isn't auto-included; pull it in.
+    # Also set BGFX_SHADER_INCLUDE_PATH (which Config.cmake.in sets for installs
+    # but isn't populated for add_subdirectory) so shaderc can find bgfx_shader.sh.
+    if(EXISTS "${bgfx_SOURCE_DIR}/cmake/bgfxToolUtils.cmake")
+        include("${bgfx_SOURCE_DIR}/cmake/bgfxToolUtils.cmake")
+    endif()
+    set(BGFX_SHADER_INCLUDE_PATH "${bgfx_SOURCE_DIR}/bgfx/src" CACHE INTERNAL
+        "Path to bgfx_shader.sh and friends, used by bgfx_compile_shaders")
+
+    # SDL3 — Conan provides SDL3::SDL3 / SDL3::SDL3-static; FetchContent build
+    # uses the same target names since 3.2.
+    FetchContent_Declare(SDL3
+        SYSTEM
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG        release-3.2.10
+        FIND_PACKAGE_ARGS 3.2
+    )
+    set(SDL_SHARED  OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC  ON  CACHE BOOL "" FORCE)
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(SDL_TESTS   OFF CACHE BOOL "" FORCE)
+    set(SDL_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(SDL3)
+
+    # Dear ImGui — no upstream CMake. Fetch sources, then create a static
+    # target that compiles core + the SDL3 backend. The bgfx backend lives
+    # in-tree under src/viewer/.
+    FetchContent_Declare(imgui
+        SYSTEM
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG        v1.91.5
+    )
+    FetchContent_MakeAvailable(imgui)
+
+    if(NOT TARGET imgui)
+        add_library(imgui STATIC
+            ${imgui_SOURCE_DIR}/imgui.cpp
+            ${imgui_SOURCE_DIR}/imgui_demo.cpp
+            ${imgui_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+        )
+        target_include_directories(imgui SYSTEM PUBLIC
+            ${imgui_SOURCE_DIR}
+            ${imgui_SOURCE_DIR}/backends
+        )
+        target_link_libraries(imgui PUBLIC SDL3::SDL3-static)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            target_compile_options(imgui PRIVATE -w)
+        elseif(MSVC)
+            target_compile_options(imgui PRIVATE /W0)
+        endif()
+    endif()
+
+    # Quiet third-party warnings on bgfx/SDL3 too — same pattern as zstd/manifold.
+    foreach(_t bgfx bx bimg SDL3-static)
+        if(TARGET ${_t})
+            if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+                target_compile_options(${_t} PRIVATE -w)
+            elseif(MSVC)
+                target_compile_options(${_t} PRIVATE /W0)
+            endif()
+        endif()
+    endforeach()
+endif()

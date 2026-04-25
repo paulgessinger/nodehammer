@@ -12,7 +12,8 @@ configure:
         -GNinja \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-        -DNODEHAMMER_BUILD_TESTS=ON
+        -DNODEHAMMER_BUILD_TESTS=ON \
+        -DNODEHAMMER_WITH_VIEWER=ON
 
 build:
     cmake --build --preset conan-relwithdebinfo
