@@ -1,6 +1,13 @@
 deps:
     conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja
 
+# Refresh the third-party license texts committed under third_party_licenses/.
+# The script parses cmake/Dependencies.cmake for NH_DEP_<NAME>_LICENSE_URL and
+# downloads each into the committed tree. Pass `--check` to diff against
+# upstream without writing — used by CI to catch drift.
+licenses *args:
+    uv run scripts/harvest_licenses.py {{args}}
+
 configure:
     # Avoid -B: it overrides the preset binaryDir from Conan cmake_layout.
     cmake --preset conan-relwithdebinfo --fresh \

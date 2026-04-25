@@ -1,12 +1,109 @@
 include(FetchContent)
 
+# ── Third-party metadata ─────────────────────────────────────────────────────
+# Single source of truth for the versions and licenses of every third-party
+# component. Each entry declares:
+#   NH_DEP_<NAME>_VERSION      — version used across FetchContent / Conan / find_package
+#   NH_DEP_<NAME>_LICENSE      — SPDX identifier
+#   NH_DEP_<NAME>_LICENSE_URL  — raw URL to the license text at the pinned version
+#
+# scripts/harvest_licenses.py greps this file for the URLs and writes each
+# dep's text to third_party_licenses/<slug>/LICENSE (committed). CMakeLists.txt
+# assembles THIRD-PARTY-NOTICES.txt at configure time from the subset of slugs
+# whose NODEHAMMER_WITH_<SLUG_UPPER> gate (if any) evaluates truthy, and
+# installs that artifact alongside the binary. Run `just licenses` after a
+# version bump; CI fails the `prek` job on drift.
+
+set(NH_THIRD_PARTY
+    zstd
+    catch2
+    cli11
+    nlohmann_json
+    glm
+    tomlplusplus
+    tinygltf
+    stb
+    manifold
+    clipper2
+    unordered_dense
+    flatbuffers
+    # Backend deps — resolved via find_package from Spack / LCG / a system
+    # install, gated by NODEHAMMER_WITH_TGEO / NODEHAMMER_WITH_DD4HEP. Versions
+    # here are documentation — bump to match whatever the shipping environment
+    # actually provides.
+    root
+    dd4hep
+)
+
+set(NH_DEP_ZSTD_VERSION            1.5.6)
+set(NH_DEP_ZSTD_LICENSE            BSD-3-Clause)
+set(NH_DEP_ZSTD_LICENSE_URL        "https://raw.githubusercontent.com/facebook/zstd/v${NH_DEP_ZSTD_VERSION}/LICENSE")
+
+set(NH_DEP_CATCH2_VERSION          3.7.1)
+set(NH_DEP_CATCH2_LICENSE          BSL-1.0)
+set(NH_DEP_CATCH2_LICENSE_URL      "https://raw.githubusercontent.com/catchorg/Catch2/v${NH_DEP_CATCH2_VERSION}/LICENSE.txt")
+
+set(NH_DEP_CLI11_VERSION           2.4.2)
+set(NH_DEP_CLI11_LICENSE           BSD-3-Clause)
+set(NH_DEP_CLI11_LICENSE_URL       "https://raw.githubusercontent.com/CLIUtils/CLI11/v${NH_DEP_CLI11_VERSION}/LICENSE")
+
+set(NH_DEP_NLOHMANN_JSON_VERSION   3.11.3)
+set(NH_DEP_NLOHMANN_JSON_LICENSE   MIT)
+set(NH_DEP_NLOHMANN_JSON_LICENSE_URL "https://raw.githubusercontent.com/nlohmann/json/v${NH_DEP_NLOHMANN_JSON_VERSION}/LICENSE.MIT")
+
+set(NH_DEP_GLM_VERSION             1.0.1)
+set(NH_DEP_GLM_LICENSE             MIT)
+set(NH_DEP_GLM_LICENSE_URL         "https://raw.githubusercontent.com/g-truc/glm/${NH_DEP_GLM_VERSION}/copying.txt")
+
+set(NH_DEP_TOMLPLUSPLUS_VERSION    3.4.0)
+set(NH_DEP_TOMLPLUSPLUS_LICENSE    MIT)
+set(NH_DEP_TOMLPLUSPLUS_LICENSE_URL "https://raw.githubusercontent.com/marzer/tomlplusplus/v${NH_DEP_TOMLPLUSPLUS_VERSION}/LICENSE")
+
+set(NH_DEP_TINYGLTF_VERSION        2.9.7)
+set(NH_DEP_TINYGLTF_LICENSE        MIT)
+set(NH_DEP_TINYGLTF_LICENSE_URL    "https://raw.githubusercontent.com/syoyo/tinygltf/v${NH_DEP_TINYGLTF_VERSION}/LICENSE")
+
+# stb is a transitive (via tinygltf) — no direct FetchContent/find_package.
+# Upstream has no versioned tags; pin to the commit that matches the ConanCenter
+# cci.20240531 snapshot to keep the license text stable.
+set(NH_DEP_STB_VERSION             cci.20240531)
+set(NH_DEP_STB_LICENSE             "MIT OR Unlicense")
+set(NH_DEP_STB_LICENSE_URL         "https://raw.githubusercontent.com/nothings/stb/013ac3beddff3dbffafd5177e7972067cd2b5083/LICENSE")
+
+set(NH_DEP_MANIFOLD_VERSION        3.2.1)
+set(NH_DEP_MANIFOLD_LICENSE        Apache-2.0)
+set(NH_DEP_MANIFOLD_LICENSE_URL    "https://raw.githubusercontent.com/elalish/manifold/v${NH_DEP_MANIFOLD_VERSION}/LICENSE")
+
+# clipper2 is a transitive (conan transitive of manifold on native; builtin fetch
+# inside manifold on wasm). Version matches what manifold 3.2.1 pulls.
+set(NH_DEP_CLIPPER2_VERSION        1.4.0)
+set(NH_DEP_CLIPPER2_LICENSE        BSL-1.0)
+set(NH_DEP_CLIPPER2_LICENSE_URL    "https://raw.githubusercontent.com/AngusJohnson/Clipper2/Clipper2_${NH_DEP_CLIPPER2_VERSION}/LICENSE")
+
+set(NH_DEP_UNORDERED_DENSE_VERSION 4.5.0)
+set(NH_DEP_UNORDERED_DENSE_LICENSE MIT)
+set(NH_DEP_UNORDERED_DENSE_LICENSE_URL "https://raw.githubusercontent.com/martinus/unordered_dense/v${NH_DEP_UNORDERED_DENSE_VERSION}/LICENSE")
+
+set(NH_DEP_FLATBUFFERS_VERSION     25.9.23)
+set(NH_DEP_FLATBUFFERS_LICENSE     Apache-2.0)
+set(NH_DEP_FLATBUFFERS_LICENSE_URL "https://raw.githubusercontent.com/google/flatbuffers/v${NH_DEP_FLATBUFFERS_VERSION}/LICENSE")
+
+# Backend deps are resolved from Spack/LCG/system; the version actually linked
+# varies by deployment, so only the license SPDX id and a stable license-text
+# URL are pinned here.
+set(NH_DEP_ROOT_LICENSE            LGPL-2.1-or-later)
+set(NH_DEP_ROOT_LICENSE_URL        "https://raw.githubusercontent.com/root-project/root/v6-34-08/LICENSE")
+
+set(NH_DEP_DD4HEP_LICENSE          LGPL-3.0-or-later)
+set(NH_DEP_DD4HEP_LICENSE_URL      "https://raw.githubusercontent.com/AIDASoft/DD4hep/v01-32/LICENSE")
+
 # ── zstd ──────────────────────────────────────────────────────────────────────
 FetchContent_Declare(zstd
     SYSTEM
     GIT_REPOSITORY https://github.com/facebook/zstd.git
-    GIT_TAG        v1.5.6
+    GIT_TAG        v${NH_DEP_ZSTD_VERSION}
     SOURCE_SUBDIR  build/cmake
-    FIND_PACKAGE_ARGS 1.5.6
+    FIND_PACKAGE_ARGS ${NH_DEP_ZSTD_VERSION}
 )
 set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_STATIC ON  CACHE BOOL "" FORCE)
@@ -33,8 +130,8 @@ endif()
 FetchContent_Declare(Catch2
     SYSTEM
     GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG        v3.7.1
-    FIND_PACKAGE_ARGS 3.7.1
+    GIT_TAG        v${NH_DEP_CATCH2_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_CATCH2_VERSION}
 )
 FetchContent_MakeAvailable(Catch2)
 
@@ -42,8 +139,8 @@ FetchContent_MakeAvailable(Catch2)
 FetchContent_Declare(CLI11
     SYSTEM
     GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
-    GIT_TAG        v2.4.2
-    FIND_PACKAGE_ARGS 2.4.2
+    GIT_TAG        v${NH_DEP_CLI11_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_CLI11_VERSION}
 )
 FetchContent_MakeAvailable(CLI11)
 
@@ -51,8 +148,8 @@ FetchContent_MakeAvailable(CLI11)
 FetchContent_Declare(nlohmann_json
     SYSTEM
     GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG        v3.11.3
-    FIND_PACKAGE_ARGS 3.11.3
+    GIT_TAG        v${NH_DEP_NLOHMANN_JSON_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_NLOHMANN_JSON_VERSION}
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
@@ -60,8 +157,8 @@ FetchContent_MakeAvailable(nlohmann_json)
 FetchContent_Declare(glm
     SYSTEM
     GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG        1.0.1
-    FIND_PACKAGE_ARGS 1.0.1
+    GIT_TAG        ${NH_DEP_GLM_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_GLM_VERSION}
 )
 # GLM 1.x uses the global BUILD_SHARED_LIBS to decide shared vs static.
 # This is set before MakeAvailable; if other deps later need the opposite,
@@ -73,8 +170,8 @@ FetchContent_MakeAvailable(glm)
 FetchContent_Declare(tomlplusplus
     SYSTEM
     GIT_REPOSITORY https://github.com/marzer/tomlplusplus.git
-    GIT_TAG        v3.4.0
-    FIND_PACKAGE_ARGS 3.4.0
+    GIT_TAG        v${NH_DEP_TOMLPLUSPLUS_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_TOMLPLUSPLUS_VERSION}
 )
 FetchContent_MakeAvailable(tomlplusplus)
 
@@ -83,8 +180,8 @@ FetchContent_MakeAvailable(tomlplusplus)
 FetchContent_Declare(tinygltf
     SYSTEM
     GIT_REPOSITORY https://github.com/syoyo/tinygltf.git
-    GIT_TAG        v2.9.7
-    FIND_PACKAGE_ARGS 2.9.7
+    GIT_TAG        v${NH_DEP_TINYGLTF_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_TINYGLTF_VERSION}
 )
 
 # Disable tinygltf's own examples/tests
@@ -104,8 +201,8 @@ endif()
 FetchContent_Declare(manifold
         SYSTEM
         GIT_REPOSITORY https://github.com/elalish/manifold.git
-        GIT_TAG        v3.2.1
-        FIND_PACKAGE_ARGS 3.2
+        GIT_TAG        v${NH_DEP_MANIFOLD_VERSION}
+        FIND_PACKAGE_ARGS ${NH_DEP_MANIFOLD_VERSION}
     )
     set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)
     set(MANIFOLD_PYBIND OFF CACHE BOOL "" FORCE)
@@ -150,8 +247,8 @@ FetchContent_Declare(manifold
 FetchContent_Declare(unordered_dense
     SYSTEM
     GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
-    GIT_TAG        v4.5.0
-    FIND_PACKAGE_ARGS 4.0
+    GIT_TAG        v${NH_DEP_UNORDERED_DENSE_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_UNORDERED_DENSE_VERSION}
 )
 FetchContent_MakeAvailable(unordered_dense)
 
@@ -159,8 +256,8 @@ FetchContent_MakeAvailable(unordered_dense)
 FetchContent_Declare(flatbuffers
     SYSTEM
     GIT_REPOSITORY https://github.com/google/flatbuffers.git
-    GIT_TAG        v25.12.19
-    FIND_PACKAGE_ARGS 25.12.19
+    GIT_TAG        v${NH_DEP_FLATBUFFERS_VERSION}
+    FIND_PACKAGE_ARGS ${NH_DEP_FLATBUFFERS_VERSION}
 )
 set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 # flatc is a host tool (runs at build time, not on the target). When cross-

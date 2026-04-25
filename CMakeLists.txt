@@ -148,7 +148,12 @@ target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_FBS_GENERATED_DIR})
 nodehammer_set_compiler_options(nodehammer_lib)
 
 # ── Optional backends ──────────────────────────────────────────────────────────
+# NODEHAMMER_WITH_ROOT is a derived flag — ROOT is linked whenever either the
+# TGeo or the DD4hep importer is on. Kept separate so the notices assembler
+# can look up a single gate per slug (see the Install section).
+set(NODEHAMMER_WITH_ROOT OFF)
 if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
+    set(NODEHAMMER_WITH_ROOT ON)
     find_package(ROOT REQUIRED COMPONENTS Geom)
     target_sources(nodehammer_lib PRIVATE src/ir/tgeo/semantic/shape_dispatch.cpp)
     target_link_libraries(nodehammer_lib PUBLIC ROOT::Geom)
@@ -187,3 +192,68 @@ if(NODEHAMMER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# ── Install ────────────────────────────────────────────────────────────────────
+include(GNUInstallDirs)
+
+install(TARGETS nodehammer
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# Assemble THIRD-PARTY-NOTICES.txt at configure time from the per-dep license
+# texts under third_party_licenses/<slug>/LICENSE (refreshed by
+# scripts/harvest_licenses.py — `just licenses`). Each slug is gated on the
+# CMake option NODEHAMMER_WITH_<SLUG_UPPER>; if that variable exists and is
+# false, the section is omitted. Deps with no matching option are always
+# included. The output is a build artifact — never committed.
+set(_nh_notices "${CMAKE_BINARY_DIR}/THIRD-PARTY-NOTICES.txt")
+set(_nh_rule "------------------------------------------------------------------------")
+set(_nh_sep  "========================================================================")
+set(_nh_body
+"Third-party notices for ${PROJECT_NAME} ${PROJECT_VERSION}
+${_nh_sep}
+
+The ${PROJECT_NAME} binary includes the following third-party software.
+Each component is distributed under its own license, reproduced below.
+
+")
+
+foreach(_nh_slug IN LISTS NH_THIRD_PARTY)
+    string(TOUPPER "${_nh_slug}" _nh_key)
+    set(_nh_gate "NODEHAMMER_WITH_${_nh_key}")
+    if(DEFINED ${_nh_gate} AND NOT ${_nh_gate})
+        continue()
+    endif()
+
+    set(_nh_file "${CMAKE_SOURCE_DIR}/third_party_licenses/${_nh_slug}/LICENSE")
+    if(NOT EXISTS "${_nh_file}")
+        message(FATAL_ERROR
+            "Missing third-party license: ${_nh_file}\n"
+            "Run `just licenses` to populate it.")
+    endif()
+    file(READ "${_nh_file}" _nh_text)
+    string(STRIP "${_nh_text}" _nh_text)
+
+    set(_nh_header "${_nh_slug}")
+    if(DEFINED NH_DEP_${_nh_key}_VERSION)
+        string(APPEND _nh_header " ${NH_DEP_${_nh_key}_VERSION}")
+    endif()
+    string(APPEND _nh_header " (${NH_DEP_${_nh_key}_LICENSE})")
+
+    string(APPEND _nh_body
+"${_nh_rule}
+${_nh_header}
+${_nh_rule}
+
+${_nh_text}
+
+")
+endforeach()
+
+file(WRITE "${_nh_notices}" "${_nh_body}")
+
+install(FILES
+    "${CMAKE_SOURCE_DIR}/LICENSE"
+    "${_nh_notices}"
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
+)
