@@ -238,7 +238,7 @@ jobs:
         run: cmake --build --preset conan-emscripten-release
 
       - name: Test
-        run: ctest --preset conan-emscripten-release
+        run: ctest --preset conan-emscripten-release --output-on-failure
 
   lcg:
     name: LCG 109 (el9-gcc15-opt)

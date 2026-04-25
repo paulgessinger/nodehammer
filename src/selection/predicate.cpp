@@ -129,7 +129,9 @@ std::shared_ptr<const CompiledGlob> compileGlob(std::string pattern) {
         }
     }
 
-    if (allStar) {
+    // MatchAll only when the pattern contains a '**' run — a lone '*' must not
+    // cross '/', so it falls through to the general matcher.
+    if (allStar && pattern.size() >= 2) {
         g->kind = CompiledGlob::Kind::MatchAll;
         return g;
     }

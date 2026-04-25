@@ -8,13 +8,17 @@ deps: recipes
     conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja
 
 configure:
-    # Avoid -B: it overrides the preset binaryDir from Conan cmake_layout.
     cmake --preset conan-relwithdebinfo --fresh \
         -GNinja \
-        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -DNODEHAMMER_BUILD_TESTS=ON
 
 build:
     cmake --build --preset conan-relwithdebinfo
+
+test:
+    ctest --preset conan-relwithdebinfo --output-on-failure -j14
 
 configure-full:
     #!/bin/bash
@@ -27,6 +31,7 @@ configure-full:
         -DNODEHAMMER_WITH_TGEO=1 \
         -DNODEHAMMER_WITH_DD4HEP=1 \
         -DNODEHAMMER_BUILD_TESTS=1 \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         --fresh \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
         -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -75,6 +80,7 @@ wasm-deps: _require-emsdk recipes
 wasm-configure *args: _require-emsdk
     cmake --preset conan-emscripten-relwithdebinfo --fresh \
         -GNinja \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DNODEHAMMER_BUILD_TESTS=ON {{args}}
 
 wasm-build: _require-emsdk
