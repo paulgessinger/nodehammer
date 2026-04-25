@@ -66,6 +66,23 @@ jobs:
           version: 3.1.74
           actions-cache-folder: emsdk-cache
 
+      - name: Stabilize emsdk path
+        if: matrix.kind == 'wasm'
+        shell: bash
+        run: |
+          # setup-emsdk extracts to /home/runner/work/_temp/<random-uuid>/emsdk-main.
+          # The UUID changes every run, so it appears in -I args, in the conan
+          # toolchain preset (baked at conan-install time), and in #line markers
+          # of preprocessed output -> 0% ccache hits. Symlink to a stable path
+          # and rewrite EMSDK/PATH for downstream steps.
+          stable="$HOME/emsdk-stable"
+          ln -sfn "$EMSDK" "$stable"
+          echo "EMSDK=$stable" >> "$GITHUB_ENV"
+          {
+            echo "$stable"
+            echo "$stable/upstream/emscripten"
+          } >> "$GITHUB_PATH"
+
       - name: Set up uv
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
 
@@ -119,6 +136,15 @@ jobs:
         env:
           CCACHE_DEBUG: "1"
           CCACHE_DEBUGDIR: ${{ github.workspace }}/ccache-debug
+          # emcc is freshly extracted each run -> mtimes differ, so hash by
+          # content. BASEDIR + NOHASHDIR strip the workspace prefix from cwd
+          # and from absolute include paths in compile args / #line markers.
+          # SLOPPINESS lets us cache TUs that touch __DATE__/__TIME__ and
+          # absorbs include-mtime jitter from re-extracted toolchains/deps.
+          CCACHE_COMPILERCHECK: content
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_NOHASHDIR: "1"
+          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines,system_headers,locale,clang_index_store
         run: ci/build.sh build ${{ matrix.kind }}
 
       - name: ccache post-build stats
@@ -129,12 +155,15 @@ jobs:
           ccache -sv
           echo "--- sample miss reasons ---"
           # Each .ccache-log explains why that TU missed/hit; pull the first
-          # 20 logs and print up to 20 verdict lines from each.
-          mapfile -t logs < <(find "${{ github.workspace }}/ccache-debug" -name '*.ccache-log' 2>/dev/null | sort | head -n 20)
-          for f in "${logs[@]}"; do
+          # 20 logs and print up to 20 verdict lines from each. macOS bash 3.2
+          # has no mapfile, so collect via a temp file.
+          list=$(mktemp)
+          find "${{ github.workspace }}/ccache-debug" -name '*.ccache-log' 2>/dev/null | sort | head -n 20 > "$list"
+          while IFS= read -r f; do
             echo "=== $f ==="
             grep -m 20 -E '(Result:|Disabling|Compiler option|preprocessor|hash:|input file|cache hit|cache miss)' "$f" || true
-          done
+          done < "$list"
+          rm -f "$list"
 
       - name: Upload ccache debug logs
         if: always()
