@@ -90,6 +90,9 @@ jobs:
         with:
           key: ccache-${{ runner.os }}-${{ runner.arch }}
 
+      - name: Export vendored Conan recipes
+        run: conan export recipes/manifold --version=3.2.1
+
       - name: Conan install
         run: >
           conan install . --build=missing
@@ -205,6 +208,9 @@ jobs:
         with:
           key: ccache-emscripten
 
+      - name: Export vendored Conan recipes
+        run: conan export recipes/manifold --version=3.2.1
+
       - name: Conan install (host=emscripten, build=default)
         run: >
           conan install .
@@ -263,6 +269,7 @@ jobs:
             source "$HOME/.local/bin/env"
             uv tool install conan
             conan profile detect --force
+            conan export recipes/manifold --version=3.2.1
             conan install . --build=missing \
               -s:a compiler.cppstd=23 \
               -c tools.cmake.cmaketoolchain:generator=Ninja

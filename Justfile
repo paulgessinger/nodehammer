@@ -1,4 +1,10 @@
-deps:
+# Vendored Conan recipes — currently only manifold, patched to ship its
+# install/export rules under Emscripten. Cheap to re-export every time; conan
+# dedupes by recipe revision.
+recipes:
+    conan export recipes/manifold --version=3.2.1
+
+deps: recipes
     conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja
 
 configure:
@@ -58,7 +64,7 @@ _require-emsdk:
         exit 1
     fi
 
-wasm-deps: _require-emsdk
+wasm-deps: _require-emsdk recipes
     conan install . \
         -pr:h profiles/emscripten \
         -pr:b default \

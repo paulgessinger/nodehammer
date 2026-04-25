@@ -23,22 +23,13 @@ class Nodehammer(ConanFile):
         self.requires("tinygltf/2.9.7")
         self.requires("flatbuffers/25.9.23")
         self.requires("unordered_dense/4.8.1")
-        # manifold/3.2.1's upstream CMake early-returns under EMSCRIPTEN, which
-        # skips header install, leaving the conan package with a broken
-        # INTERFACE_INCLUDE_DIRECTORIES. Fall back to FetchContent on wasm; the
-        # native package is fine (and pulls clipper2 as a transitive).
-        if self.settings.os != "Emscripten":
-            self.requires("manifold/3.2.1")
-        else:
-            # Emscripten still needs manifold's license + transitives for the
-            # NOTICES file. visible/headers/libs=False keeps Conan from
-            # generating CMakeDeps for it (so the FetchContent target wins),
-            # but the package is still downloaded and its licenses/ folder is
-            # accessible to generate().
-            self.requires(
-                "manifold/3.2.1",
-                visible=False, headers=False, libs=False,
-            )
+        # manifold's upstream CMake early-returns under Emscripten, skipping
+        # the install/export rules. We patch that out via a vendored recipe
+        # under recipes/manifold/ — `conan export` of that recipe runs in the
+        # build flow (see Justfile / ci.yml), and Conan resolves to our local
+        # revision. With the patch applied, manifold's Conan package works
+        # for both native and wasm and we can drop the FetchContent fallback.
+        self.requires("manifold/3.2.1")
 
     def configure(self):
         self.settings.compiler.cppstd = "23"
