@@ -6,6 +6,7 @@
 /compile_commands.json
 /.cache
 
-# Geometry data exports (derivative of MPL-licensed ODD, kept local only)
+# Geometry data exports — ignore by default, allow the test fixture.
 *.nhb
 *.nhb.zst
+!/odd.nhb.zst

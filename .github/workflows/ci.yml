@@ -115,6 +115,23 @@ jobs:
         shell: bash
         run: ci/build.sh test ${{ matrix.kind }}
 
+      - name: Install hyperfine
+        uses: taiki-e/install-action@cf525cb33f51aca27cd6fa02034117ab963ff9f1 # v2.75.22
+        with:
+          tool: hyperfine
+
+      - name: Benchmark
+        shell: bash
+        run: ci/bench.sh ${{ matrix.kind }} ${{ matrix.artifact-name }}
+
+      - name: Upload bench
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bench-${{ matrix.artifact-name }}
+          path: bench.json
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Stage install tree
         shell: bash
         run: ci/build.sh install ${{ matrix.kind }} stage
@@ -135,6 +152,23 @@ jobs:
           path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+
+  bench-summary:
+    name: Benchmark summary
+    needs: build
+    runs-on: ubuntu-24.04
+    if: always()
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Download bench artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: bench-results
+          pattern: bench-*
+
+      - name: Render summary
+        run: python3 ci/bench-summary.py bench-results >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Create Release
