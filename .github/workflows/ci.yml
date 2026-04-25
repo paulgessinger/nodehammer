@@ -109,13 +109,6 @@ jobs:
         with:
           key: ccache-${{ matrix.artifact-name }}
 
-      - name: ccache pre-build stats
-        shell: bash
-        run: |
-          ccache --version
-          ccache -p | grep -E '(compiler_check|sloppiness|base_dir|hash_dir|cache_dir|max_size)' || true
-          ccache -sv
-
       - name: Conan install
         shell: bash
         run: ci/build.sh conan-install ${{ matrix.kind }}
@@ -134,8 +127,6 @@ jobs:
       - name: Build
         shell: bash
         env:
-          CCACHE_DEBUG: "1"
-          CCACHE_DEBUGDIR: ${{ github.workspace }}/ccache-debug
           # emcc is freshly extracted each run -> mtimes differ, so hash by
           # content. BASEDIR + NOHASHDIR strip the workspace prefix from cwd
           # and from absolute include paths in compile args / #line markers.
@@ -150,29 +141,7 @@ jobs:
       - name: ccache post-build stats
         if: always()
         shell: bash
-        run: |
-          set +o pipefail
-          ccache -sv
-          echo "--- sample miss reasons ---"
-          # Each .ccache-log explains why that TU missed/hit; pull the first
-          # 20 logs and print up to 20 verdict lines from each. macOS bash 3.2
-          # has no mapfile, so collect via a temp file.
-          list=$(mktemp)
-          find "${{ github.workspace }}/ccache-debug" -name '*.ccache-log' 2>/dev/null | sort | head -n 20 > "$list"
-          while IFS= read -r f; do
-            echo "=== $f ==="
-            grep -m 20 -E '(Result:|Disabling|Compiler option|preprocessor|hash:|input file|cache hit|cache miss)' "$f" || true
-          done < "$list"
-          rm -f "$list"
-
-      - name: Upload ccache debug logs
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ccache-debug-${{ matrix.artifact-name }}
-          path: ccache-debug
-          if-no-files-found: ignore
-          retention-days: 3
+        run: ccache -sv
 
       - name: Test
         shell: bash
