@@ -28,12 +28,7 @@ case "$kind" in
     ;;
 esac
 
-# Smoke-run once with output visible so any platform-specific failure surfaces
-# the actual stderr; hyperfine hides command output by default, which makes
-# real bugs look like generic "exit code 1" failures.
-eval "$cmd"
-
-hyperfine --warmup 2 --runs 10 \
+hyperfine --shell=none --warmup 2 --runs 10 \
   --command-name "$command_name" \
   --export-json bench.json \
   "$cmd"
