@@ -26,25 +26,20 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
+            kind: native
             artifact-name: nodehammer-linux-x86_64
-            binary: build/Release/nodehammer
-            binary-name: nodehammer
-            archive: tar.gz
           - os: ubuntu-24.04-arm
+            kind: native
             artifact-name: nodehammer-linux-aarch64
-            binary: build/Release/nodehammer
-            binary-name: nodehammer
-            archive: tar.gz
           - os: macos-15
+            kind: native
             artifact-name: nodehammer-macos-aarch64
-            binary: build/Release/nodehammer
-            binary-name: nodehammer
-            archive: tar.gz
           - os: windows-2025
+            kind: native
             artifact-name: nodehammer-windows-x86_64
-            binary: build/Release/nodehammer.exe
-            binary-name: nodehammer.exe
-            archive: zip
+          - os: ubuntu-24.04
+            kind: wasm
+            artifact-name: nodehammer-wasm32
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -64,6 +59,13 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
 
+      - name: Install emsdk
+        if: matrix.kind == 'wasm'
+        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
+        with:
+          version: 3.1.74
+          actions-cache-folder: emsdk-cache
+
       - name: Set up uv
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
 
@@ -80,55 +82,47 @@ jobs:
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.conan2/p
-          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
+          key: conan-${{ matrix.artifact-name }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot', 'profiles/emscripten') }}-${{ github.run_id }}
           restore-keys: |
-            conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-
-            conan-${{ runner.os }}-${{ runner.arch }}-
+            conan-${{ matrix.artifact-name }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot', 'profiles/emscripten') }}-
+            conan-${{ matrix.artifact-name }}-
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce # v1.2.22
         with:
-          key: ccache-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Export vendored Conan recipes
-        run: conan export recipes/manifold --version=3.2.1
+          key: ccache-${{ matrix.artifact-name }}
 
       - name: Conan install
-        run: >
-          conan install . --build=missing
-          -s:a compiler.cppstd=23
-          -c tools.cmake.cmaketoolchain:generator=Ninja
+        shell: bash
+        run: ci/build.sh conan-install ${{ matrix.kind }}
 
       - name: Save Conan cache
         if: always()
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ~/.conan2/p
-          key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot') }}-${{ github.run_id }}
+          key: conan-${{ matrix.artifact-name }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot', 'profiles/emscripten') }}-${{ github.run_id }}
 
       - name: Configure
-        run: >
-          cmake --preset conan-release
-          -GNinja
-          -DNODEHAMMER_WERROR=ON
-          -DNODEHAMMER_BUILD_TESTS=ON
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+        shell: bash
+        run: ci/build.sh configure ${{ matrix.kind }}
 
       - name: Build
-        run: cmake --build --preset conan-release
+        shell: bash
+        run: ci/build.sh build ${{ matrix.kind }}
 
       - name: Test
-        run: ctest --test-dir build/Release --output-on-failure
+        shell: bash
+        run: ci/build.sh test ${{ matrix.kind }}
 
       - name: Stage install tree
         shell: bash
-        run: cmake --install build/Release --prefix stage --strip
+        run: ci/build.sh install ${{ matrix.kind }} stage
 
       - name: Package archive
         shell: bash
         run: |
-          if [ "${{ matrix.archive }}" = "zip" ]; then
+          if [ "${{ runner.os }}" = "Windows" ]; then
             (cd stage && 7z a "../${{ matrix.artifact-name }}.zip" .)
           else
             tar czf "${{ matrix.artifact-name }}.tar.gz" -C stage .
@@ -138,7 +132,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact-name }}
-          path: ${{ matrix.artifact-name }}.${{ matrix.archive }}
+          path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
 
@@ -160,83 +154,6 @@ jobs:
         with:
           files: artifacts/**/*
           generate_release_notes: true
-
-  wasm:
-    name: Emscripten (wasm32)
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-
-      - name: Install CMake and Ninja
-        uses: lukka/get-cmake@ea83089aa35e08e459464341fe24ad024ee2466f # v4.3.1
-
-      - name: Install GCC 14 (for native tool_requires like flatc)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14
-          echo "CC=gcc-14" >> "$GITHUB_ENV"
-          echo "CXX=g++-14" >> "$GITHUB_ENV"
-
-      - name: Install emsdk
-        uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
-        with:
-          version: 3.1.74
-          actions-cache-folder: emsdk-cache
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
-
-      - name: Install Conan
-        run: uv tool install conan
-
-      - name: Detect Conan profile (native/build context)
-        run: conan profile detect --force
-
-      - name: Restore Conan cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ~/.conan2/p
-          key: conan-emscripten-${{ hashFiles('conanfile.py', 'profiles/emscripten') }}-${{ github.run_id }}
-          restore-keys: |
-            conan-emscripten-${{ hashFiles('conanfile.py', 'profiles/emscripten') }}-
-            conan-emscripten-
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@33522472633dbd32578e909b315f5ee43ba878ce # v1.2.22
-        with:
-          key: ccache-emscripten
-
-      - name: Export vendored Conan recipes
-        run: conan export recipes/manifold --version=3.2.1
-
-      - name: Conan install (host=emscripten, build=default)
-        run: >
-          conan install .
-          -pr:h profiles/emscripten
-          -pr:b default
-          -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]'
-          --build=missing
-
-      - name: Save Conan cache
-        if: always()
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
-        with:
-          path: ~/.conan2/p
-          key: conan-emscripten-${{ hashFiles('conanfile.py', 'profiles/emscripten') }}-${{ github.run_id }}
-
-      - name: Configure
-        run: >
-          cmake --preset conan-emscripten-release
-          -DNODEHAMMER_WERROR=ON
-          -DNODEHAMMER_BUILD_TESTS=ON
-          -DCMAKE_C_COMPILER_LAUNCHER=ccache
-          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-
-      - name: Build
-        run: cmake --build --preset conan-emscripten-release
-
-      - name: Test
-        run: ctest --preset conan-emscripten-release --output-on-failure
 
   lcg:
     name: LCG 109 (el9-gcc15-opt)
@@ -267,20 +184,10 @@ jobs:
             source "$HOME/.local/bin/env"
             uv tool install conan
             conan profile detect --force
-            conan export recipes/manifold --version=3.2.1
-            conan install . --build=missing \
-              -s:a compiler.cppstd=23 \
-              -c tools.cmake.cmaketoolchain:generator=Ninja
-            cmake --preset conan-release \
-              -GNinja \
-              -DNODEHAMMER_WERROR=ON \
-              -DNODEHAMMER_BUILD_TESTS=ON \
-              -DNODEHAMMER_WITH_TGEO=ON \
-              -DNODEHAMMER_WITH_DD4HEP=ON \
-              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-              -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
-            cmake --build --preset conan-release
-            ctest --test-dir build/Release --output-on-failure -j4
+            ci/build.sh conan-install native
+            ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
+            ci/build.sh build native
+            ci/build.sh test native -j4
 
       # blubb
 

@@ -195,6 +195,15 @@ install(TARGETS nodehammer
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
+# Emscripten produces a sidecar .wasm next to the .js loader; CMake's
+# install(TARGETS RUNTIME) only picks up the primary output, so install the
+# blob explicitly.
+if(EMSCRIPTEN)
+    install(FILES "$<TARGET_FILE_DIR:nodehammer>/nodehammer.wasm"
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
 install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
 )
