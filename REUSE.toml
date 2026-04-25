@@ -1,0 +1,10 @@
+version = 1
+
+# Bulk annotation: every tracked file in this repo is original work authored by
+# Paul Gessinger and licensed MIT, unless a per-file SPDX header says otherwise
+# (in which case the in-file info is aggregated on top of this default).
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Paul Gessinger"
+SPDX-License-Identifier = "MIT"
