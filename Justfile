@@ -104,13 +104,31 @@ wasm: wasm-deps wasm-configure wasm-build wasm-test
 # Serve the wasm viewer locally. Browsers refuse to load .wasm from file://, so
 # we need a real http server. Defaults to port 8000; override with `just
 # wasm-serve 9000`. Open http://localhost:<port>/nodehammer.html.
+#
+# Symlinks the input + config tree the viewer needs (odd.nhb.zst and the
+# odd_simple.toml fragment set) into the served directory. The Module.preRun
+# block in viewer.html issues fetch() requests for these paths at startup;
+# without them you'll see "FS.createPreloadedFile failed" in the console.
 wasm-serve port='8000':
     #!/usr/bin/env bash
     set -euo pipefail
-    dir="{{justfile_directory()}}/build/emscripten/RelWithDebInfo"
+    root="{{justfile_directory()}}"
+    dir="$root/build/emscripten/RelWithDebInfo"
     if [ ! -f "$dir/nodehammer.html" ]; then
         echo "nodehammer.html not found in $dir — run 'just wasm-build' first." >&2
         exit 1
     fi
+    # Stage data files alongside the wasm. Symlinks rather than copies so an
+    # in-place edit on the source side picks up next reload. Top-level entry
+    # points get generic names (scene.nhb.zst / scene.toml) so the wasm shell
+    # doesn't bake in the choice of detector — swap which file is symlinked
+    # to retarget without rebuilding. Transitive include paths inside the
+    # config are hard-coded in the toml, so they keep their original names.
+    ln -sf "$root/odd.nhb.zst" "$dir/scene.nhb.zst"
+    ln -sf "$root/fixtures/configs/odd.toml" "$dir/scene.toml"
+    mkdir -p "$dir/odd"
+    for f in base.toml materials.toml tracker.toml calorimeters.toml muon.toml; do
+        ln -sf "$root/fixtures/configs/odd/$f" "$dir/odd/$f"
+    done
     echo "serving $dir at http://localhost:{{port}}/nodehammer.html"
     cd "$dir" && exec python3 -m http.server {{port}}

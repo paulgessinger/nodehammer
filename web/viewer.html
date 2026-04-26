@@ -48,6 +48,31 @@
             };
         })();
 
+        // Asset loading via runtime fetch. Top-level entry points have
+        // generic names so the wasm shell isn't tied to a specific detector;
+        // override per-page with ?input=… &config=… &include=a&include=b
+        // (include can repeat). The C++ TOML loader resolves `include = […]`
+        // entries relative to the config's parent dir, so those fragment
+        // paths must match what's in the toml — they keep their real names
+        // even when the entry-point file is renamed to scene.toml.
+        var params = new URLSearchParams(window.location.search);
+        var inputUrl = params.get('input') || 'scene.nhb.zst';
+        var configUrl = params.get('config') || 'scene.toml';
+
+        // Transitive toml fragments to fetch. Hard-coded for now since the
+        // include resolver runs in C++ at config-load time, so we can't
+        // introspect from JS. Override via repeated ?include= query params.
+        var configIncludes = params.getAll('include');
+        if (configIncludes.length === 0) {
+            configIncludes = [
+                'odd/base.toml',
+                'odd/materials.toml',
+                'odd/tracker.toml',
+                'odd/calorimeters.toml',
+                'odd/muon.toml',
+            ];
+        }
+
         var statusEl = document.getElementById('status');
         var Module = {
             canvas: document.getElementById('canvas'),
@@ -61,9 +86,33 @@
                     statusEl.style.display = 'none';
                 }
             },
-            arguments: ['viewer'],
+            preRun: [function () {
+                // FS.createPreloadedFile expects (parent, name, url, canRead, canWrite).
+                // It runs the fetch async; emscripten waits for all preRun work
+                // to settle before invoking main(), so by the time the viewer
+                // subcommand runs, fopen of these paths just works.
+                Module.setStatus('fetching ' + inputUrl);
+                FS.createPreloadedFile('/', inputUrl, inputUrl, true, false);
+                FS.createPreloadedFile('/', configUrl, configUrl, true, false);
+                FS.createPath('/', 'odd', true, false);
+                for (var i = 0; i < configIncludes.length; ++i) {
+                    var p = configIncludes[i];
+                    var slash = p.lastIndexOf('/');
+                    var dir = slash >= 0 ? p.substring(0, slash) : '';
+                    var name = slash >= 0 ? p.substring(slash + 1) : p;
+                    if (dir) {
+                        FS.createPath('/', dir, true, false);
+                    }
+                    FS.createPreloadedFile('/' + (dir || ''), name, p, true, false);
+                }
+            }],
+            arguments: [
+                'viewer',
+                '--input', '/' + inputUrl,
+                '--config', '/' + configUrl,
+            ],
         };
-        Module.setStatus('downloading…');
+        Module.setStatus('downloading wasm…');
         window.onerror = function (msg) {
             Module.setStatus('error — see console');
             console.error(msg);
