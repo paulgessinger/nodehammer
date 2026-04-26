@@ -36,6 +36,7 @@ class SceneRenderer {
         bool wireframe{false};
         bool cull_back{false};
         bool angle_cut{false};
+        bool shader_angle_cut{true};
         float angle_cut_start_deg{0.f};
         float angle_cut_end_deg{90.f};
     };

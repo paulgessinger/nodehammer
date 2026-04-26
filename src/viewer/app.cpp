@@ -49,6 +49,7 @@ struct App::Impl {
     bool auto_orbit{false};
     float auto_orbit_speed_deg{15.f};
     bool angle_cut{false};
+    bool shader_angle_cut{true};
     float angle_cut_start_deg{0.f};
     float angle_cut_end_deg{90.f};
 
@@ -185,6 +186,7 @@ void App::Impl::render() {
         flags.wireframe = wireframe;
         flags.cull_back = cull_back;
         flags.angle_cut = angle_cut;
+        flags.shader_angle_cut = shader_angle_cut;
         flags.angle_cut_start_deg = angle_cut_start_deg;
         flags.angle_cut_end_deg = angle_cut_end_deg;
         const uint64_t scene_submit_start = stm_now();
@@ -297,6 +299,7 @@ void App::Impl::on_frame() {
         ImGui::Checkbox("auto orbit", &auto_orbit);
         ImGui::SliderFloat("orbit speed", &auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
         ImGui::Checkbox("angle cut", &angle_cut);
+        ImGui::Checkbox("shader angle cut", &shader_angle_cut);
         ImGui::SliderFloat("cut start", &angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);

@@ -10,6 +10,7 @@
 #include "scene.glsl.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
@@ -62,6 +63,67 @@ struct InstanceGroupKeyHash {
 };
 
 constexpr int kInstanceVbufSlot = 1;
+constexpr float kTau = 6.28318530717958647692f;
+
+float normalize_angle(float angle) {
+    angle = std::fmod(angle, kTau);
+    if (angle < 0.f) {
+        angle += kTau;
+    }
+    return angle;
+}
+
+float angle_span(float start, float end) {
+    const float span = normalize_angle(end) - normalize_angle(start);
+    return span >= 0.f ? span : span + kTau;
+}
+
+bool angle_in_range(float angle, float start, float end) {
+    angle = normalize_angle(angle);
+    start = normalize_angle(start);
+    end = normalize_angle(end);
+    if (std::abs(start - end) < 0.0001f) {
+        return false;
+    }
+    if (start <= end) {
+        return angle >= start && angle <= end;
+    }
+    return angle >= start || angle <= end;
+}
+
+bool aabb_fully_inside_angle_cut(const glm::vec3 &min, const glm::vec3 &max, float start,
+                                 float end) {
+    if (std::abs(normalize_angle(start) - normalize_angle(end)) < 0.0001f) {
+        return false;
+    }
+    if (min.x <= 0.f && max.x >= 0.f && min.y <= 0.f && max.y >= 0.f) {
+        return false;
+    }
+
+    const float cut_width = angle_span(start, end);
+    const bool test_kept_sector = cut_width > 0.5f * kTau;
+    const float test_start = test_kept_sector ? end : start;
+    const float test_end = test_kept_sector ? start : end;
+
+    const glm::vec2 corners[4] = {
+        {min.x, min.y},
+        {min.x, max.y},
+        {max.x, min.y},
+        {max.x, max.y},
+    };
+    for (const auto &corner : corners) {
+        const bool in_test_sector =
+            angle_in_range(std::atan2(corner.y, corner.x), test_start, test_end);
+        if (test_kept_sector) {
+            if (in_test_sector) {
+                return false;
+            }
+        } else if (!in_test_sector) {
+            return false;
+        }
+    }
+    return true;
+}
 
 } // namespace
 
@@ -82,10 +144,14 @@ struct SceneRenderer::Impl {
     struct DrawGroup {
         MeshAssetId mesh;
         RenderMaterialId material;
-        size_t instance_byte_offset{0}; // where in instance_buf this group's matrices live
+        size_t visible_byte_offset{0}; // where in instance_buf this frame's matrices live
+        uint32_t visible_count{0};
         std::vector<glm::mat4> instances;
+        std::vector<glm::vec3> bounds_min;
+        std::vector<glm::vec3> bounds_max;
     };
     std::vector<DrawGroup> groups;
+    std::vector<glm::mat4> visible_instances;
 
     uint32_t node_count{0};
     uint64_t triangle_count{0};
@@ -165,6 +231,7 @@ void SceneRenderer::Impl::destroy_gpu() {
     meshes.clear();
     material_colors.clear();
     groups.clear();
+    visible_instances.clear();
     if (instance_buf.id != SG_INVALID_ID) {
         sg_destroy_buffer(instance_buf);
         instance_buf = sg_buffer{};
@@ -176,28 +243,20 @@ void SceneRenderer::Impl::destroy_gpu() {
 }
 
 void SceneRenderer::Impl::upload_instance_buffer() {
-    // Total mat4 count across all groups; pack contiguously.
     size_t total = 0;
-    for (auto &g : groups) {
-        g.instance_byte_offset = total * sizeof(glm::mat4);
+    for (const auto &g : groups) {
         total += g.instances.size();
     }
     if (total == 0) {
         return;
     }
-    std::vector<glm::mat4> packed;
-    packed.reserve(total);
-    for (const auto &g : groups) {
-        packed.insert(packed.end(), g.instances.begin(), g.instances.end());
-    }
-    const size_t bytes = packed.size() * sizeof(glm::mat4);
+    visible_instances.reserve(total);
+    const size_t bytes = total * sizeof(glm::mat4);
 
     sg_buffer_desc bdesc{};
     bdesc.size = bytes;
     bdesc.usage.vertex_buffer = true;
-    bdesc.usage.immutable = true;
-    bdesc.data.ptr = packed.data();
-    bdesc.data.size = bytes;
+    bdesc.usage.stream_update = true;
     instance_buf = sg_make_buffer(&bdesc);
     instance_buf_capacity = bytes;
 }
@@ -289,15 +348,18 @@ void SceneRenderer::upload(const RenderScene &scene) {
             const InstanceGroupKey key{binding.meshId, binding.materialId};
             auto [it, inserted] = group_idx.try_emplace(key, impl_->groups.size());
             if (inserted) {
-                impl_->groups.push_back({binding.meshId, binding.materialId, 0, {}});
+                impl_->groups.push_back({binding.meshId, binding.materialId, 0, 0, {}, {}, {}});
             }
-            impl_->groups[it->second].instances.push_back(node.worldTransform);
             ++impl_->node_count;
             impl_->triangle_count += mesh_it->second.triangle_count;
 
             glm::vec3 wmin, wmax;
             transform_aabb(node.worldTransform, mesh_it->second.local_min,
                            mesh_it->second.local_max, wmin, wmax);
+            auto &group = impl_->groups[it->second];
+            group.instances.push_back(node.worldTransform);
+            group.bounds_min.push_back(wmin);
+            group.bounds_max.push_back(wmax);
             bmin = glm::min(bmin, wmin);
             bmax = glm::max(bmax, wmax);
             any_bounds = true;
@@ -329,6 +391,27 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         return;
     }
 
+    impl_->visible_instances.clear();
+    const float cut_start = glm::radians(flags.angle_cut_start_deg);
+    const float cut_end = glm::radians(flags.angle_cut_end_deg);
+    for (auto &g : impl_->groups) {
+        g.visible_byte_offset = impl_->visible_instances.size() * sizeof(glm::mat4);
+        const size_t start_count = impl_->visible_instances.size();
+        for (size_t i = 0; i < g.instances.size(); ++i) {
+            if (flags.angle_cut &&
+                aabb_fully_inside_angle_cut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
+                continue;
+            }
+            impl_->visible_instances.push_back(g.instances[i]);
+        }
+        g.visible_count = static_cast<uint32_t>(impl_->visible_instances.size() - start_count);
+    }
+    if (impl_->visible_instances.empty()) {
+        return;
+    }
+    const size_t visible_bytes = impl_->visible_instances.size() * sizeof(glm::mat4);
+    sg_update_buffer(impl_->instance_buf, {impl_->visible_instances.data(), visible_bytes});
+
     sg_apply_pipeline(pipeline);
 
     (void)flags.wireframe; // wireframe also pipeline-state; same future work.
@@ -358,7 +441,7 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
             continue;
         }
         const auto &mesh = mesh_it->second;
-        const auto inst_count = static_cast<int>(g.instances.size());
+        const auto inst_count = static_cast<int>(g.visible_count);
         if (inst_count == 0) {
             continue;
         }
@@ -371,7 +454,7 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         scene_fs_params_t fs_params{};
         std::memcpy(fs_params.base_color, glm::value_ptr(base), sizeof(fs_params.base_color));
         std::memcpy(fs_params.light_dir, glm::value_ptr(light_dir), sizeof(fs_params.light_dir));
-        const glm::vec4 cut_params{flags.angle_cut ? 1.f : 0.f,
+        const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
                                    glm::radians(flags.angle_cut_start_deg),
                                    glm::radians(flags.angle_cut_end_deg), 0.f};
         std::memcpy(fs_params.cut_params, glm::value_ptr(cut_params), sizeof(fs_params.cut_params));
@@ -380,7 +463,7 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         sg_bindings bind{};
         bind.vertex_buffers[0] = mesh.vbuf;
         bind.vertex_buffers[1] = impl_->instance_buf;
-        bind.vertex_buffer_offsets[1] = static_cast<int>(g.instance_byte_offset);
+        bind.vertex_buffer_offsets[1] = static_cast<int>(g.visible_byte_offset);
         bind.index_buffer = mesh.ibuf;
         sg_apply_bindings(&bind);
 
