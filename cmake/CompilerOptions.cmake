@@ -85,6 +85,11 @@ function(nodehammer_apply_emscripten_viewer_options target)
         "-sFULL_ES3=1"
         "-sMIN_WEBGL_VERSION=2"
         "-sMAX_WEBGL_VERSION=2"
+        # Fetch API runtime: emscripten_fetch with onsuccess/onprogress
+        # callbacks. The viewer uses it to download config/geometry/include
+        # assets after main() starts, so imgui can render a progress UI
+        # instead of blocking startup on FS.createPreloadedFile.
+        "-sFETCH=1"
         # The wasm-exceptions runtime emits JS that calls $stackSave/
         # $stackRestore, which in turn need the C-level emscripten_stack_*
         # helpers from libcompiler_rt. Force-include those JS lib funcs;

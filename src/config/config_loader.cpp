@@ -796,6 +796,29 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
     return ConfigResult{{}, std::move(diags)};
 }
 
+std::vector<std::string> ConfigLoader::peekIncludes(const std::filesystem::path &path) {
+    std::vector<std::string> result;
+    try {
+        auto tbl = toml::parse_file(path.string());
+        const auto *includeNode = tbl.get("include");
+        if (includeNode == nullptr) {
+            return result;
+        }
+        if (includeNode->is_string()) {
+            result.push_back(std::string{includeNode->as_string()->get()});
+        } else if (includeNode->is_array()) {
+            for (const auto &e : *includeNode->as_array()) {
+                if (auto s = e.value<std::string>()) {
+                    result.push_back(std::move(*s));
+                }
+            }
+        }
+    } catch (...) {
+        // Swallow — caller will surface the same error via the full loadFromFile.
+    }
+    return result;
+}
+
 ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName) {
     DiagnosticList diags;
     try {

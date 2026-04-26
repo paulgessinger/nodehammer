@@ -125,6 +125,7 @@ add_library(nodehammer_lib STATIC
     src/cli/cmd_validate_config.cpp
     src/cli/cmd_dump_semantic.cpp
     src/cli/cmd_dump_render.cpp
+    src/scene_build.cpp
 )
 
 configure_file(

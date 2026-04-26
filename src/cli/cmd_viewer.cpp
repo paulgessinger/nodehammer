@@ -1,16 +1,16 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
 #include <nodehammer/ir/render.hpp>
-#include <nodehammer/selection/selector.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <nodehammer/scene_build.hpp>
 #include <nodehammer/viewer/app.hpp>
+#include <nodehammer/viewer/asset_loader.hpp>
 #include <nodehammer/viewer/config.hpp>
 
 #include <memory>
+#include <optional>
 #include <print>
+#include <string>
 
 using nodehammer::cli::printDiags;
 
@@ -87,69 +87,49 @@ void register_cmd_viewer(CLI::App &app) {
             cfg->initial_camera = *initialCamera;
         }
 
-        // Build the scene first (in CPU memory) so the viewer either gets a
-        // valid RenderScene or no scene at all (falls back to demo triangle).
-        std::shared_ptr<nodehammer::RenderScene> scene;
-
+        std::string inputPath, configPath, inputFmt;
         if (*inputOpt) {
-            nodehammer::NHConfig nhcfg;
-            if (*configOpt) {
-                std::string cfgPath;
-                configOpt->results(cfgPath);
-                auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
-                printDiags(loaded.diags);
-                if (loaded.diags.hasErrors()) {
-                    std::println(stderr, "viewer: config load failed");
-                    std::exit(1);
-                }
-                nhcfg = std::move(loaded.config);
-                auto validDiags = nodehammer::ConfigValidator::validate(nhcfg);
-                printDiags(validDiags);
-                if (validDiags.hasErrors()) {
-                    std::println(stderr, "viewer: config validation failed");
-                    std::exit(1);
-                }
-            }
-
-            auto [importResult, importFmt] = nodehammer::cli::importOrExit(inputOpt, fmtInOpt);
-            printDiags(importResult.diags);
-            if (importResult.diags.hasErrors()) {
-                std::println(stderr, "viewer: import failed");
-                std::exit(1);
-            }
-
-            if (!nhcfg.selection.empty()) {
-                nodehammer::SelectionEngine sel{nhcfg.selection, nhcfg.hoistOrphans};
-                auto selDiags = sel.prune(importResult.scene);
-                printDiags(selDiags);
-                if (selDiags.hasErrors()) {
-                    std::println(stderr, "viewer: selection failed");
-                    std::exit(1);
-                }
-            }
-
-            if (nhcfg.deduplicateShapes) {
-                importResult.scene.deduplicateMaterials();
-                importResult.scene.deduplicateShapes();
-                importResult.scene.deduplicateLogVols();
-            }
-
-            nodehammer::TessellationPass pass{nhcfg};
-            auto tessResult = pass.lower(importResult.scene);
-            printDiags(tessResult.diags);
-            if (tessResult.diags.hasErrors()) {
-                std::println(stderr, "viewer: tessellation failed");
-                std::exit(1);
-            }
-            scene = std::make_shared<nodehammer::RenderScene>(std::move(tessResult.scene));
-            std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
-                         scene->nodes.size(), scene->meshAssets.size(), scene->materials.size());
+            inputOpt->results(inputPath);
+        }
+        if (*configOpt) {
+            configOpt->results(configPath);
+        }
+        if (fmtInOpt != nullptr && *fmtInOpt) {
+            fmtInOpt->results(inputFmt);
         }
 
         nodehammer::viewer::App application(*cfg);
-        if (scene) {
-            application.set_scene(std::move(scene));
+
+#ifdef __EMSCRIPTEN__
+        // Web entry: skip the synchronous build entirely. The App will draw
+        // an imgui progress panel while emscripten_fetch downloads the
+        // config (+ its includes, discovered as each one lands) and the
+        // geometry; on completion it runs build_scene_from_paths against
+        // the MEMFS-resident files and calls set_scene.
+        if (!inputPath.empty() && !configPath.empty()) {
+            auto loader = std::make_unique<nodehammer::viewer::AssetLoader>();
+            loader->start(configPath, inputPath);
+            application.set_loader(std::move(loader));
         }
+#else
+        // Native: load synchronously before the window opens, exactly as
+        // before. Keeps CLI semantics (errors print + exit non-zero).
+        if (!inputPath.empty()) {
+            auto built = nodehammer::build_scene_from_paths(
+                configPath, inputPath,
+                inputFmt.empty() ? std::nullopt : std::optional<std::string>(inputFmt));
+            printDiags(built.diags);
+            if (!built.scene) {
+                std::println(stderr, "viewer: scene build failed");
+                std::exit(1);
+            }
+            std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
+                         built.scene->nodes.size(), built.scene->meshAssets.size(),
+                         built.scene->materials.size());
+            application.set_scene(std::move(built.scene));
+        }
+#endif
+
         const int rc = application.run();
         if (rc != 0) {
             std::println(stderr, "viewer exited with code {}", rc);

@@ -4,6 +4,8 @@
 #include "scene_renderer.hpp"
 
 #include <nodehammer/ir/render.hpp>
+#include <nodehammer/scene_build.hpp>
+#include <nodehammer/viewer/asset_loader.hpp>
 #include <nodehammer/viewer/camera.hpp>
 
 #include <imgui.h>
@@ -16,6 +18,7 @@
 #include <cmath>
 #include <iomanip>
 #include <memory>
+#include <print>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -39,11 +42,20 @@ EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *ma
 
     history.replaceState(null, "", url);
 });
+#else
+void nh_viewer_commit_url_state(const char *state_query, const char *managed_keys);
 #endif
 
 namespace nodehammer::viewer {
 
 namespace {
+
+static constexpr bool kIsEmscripten =
+#ifdef __EMSCRIPTEN__
+    true;
+#else
+    false;
+#endif
 
 float wrap_degrees(float angle) {
     angle = std::fmod(angle, 360.f);
@@ -94,6 +106,7 @@ struct App::Impl {
     bool quit{false};
 
     std::shared_ptr<const RenderScene> scene;
+    std::unique_ptr<AssetLoader> loader;
     SceneRenderer scene_renderer;
     Camera camera;
     /// Bounding-sphere radius of the loaded scene; live-only state derived
@@ -290,13 +303,14 @@ std::string App::Impl::browser_url_state_query() const {
 }
 
 void App::Impl::sync_browser_url() const {
-#ifdef __EMSCRIPTEN__
-    const std::string state_query = browser_url_state_query();
-    constexpr const char *managed_keys =
-        "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,cutEnd,"
-        "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
-    nh_viewer_commit_url_state(state_query.c_str(), managed_keys);
-#endif
+    if constexpr (kIsEmscripten) {
+        const std::string state_query = browser_url_state_query();
+        constexpr const char *managed_keys =
+            "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
+            "cutEnd,"
+            "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
+        nh_viewer_commit_url_state(state_query.c_str(), managed_keys);
+    }
 }
 
 void App::Impl::on_frame() {
@@ -377,12 +391,65 @@ void App::Impl::on_frame() {
     ImGui::Text("FPS: %.1f", fps);
     ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", frame_interval_ms,
                 render_submit_ms, scene_submit_ms);
-#ifdef __EMSCRIPTEN__
-    if (ImGui::Button("Commit settings to URL")) {
-        sync_browser_url();
+    if constexpr (kIsEmscripten) {
+        if (ImGui::Button("Commit settings to URL")) {
+            sync_browser_url();
+        }
     }
-#endif
     ImGui::Checkbox("pause when unfocused", &cfg.pause_when_unfocused);
+    if (loader && !scene) {
+        ImGui::Separator();
+        loader->poll();
+        const auto state = loader->state();
+        if (state == LoadState::Error) {
+            ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
+            ImGui::TextWrapped("%s", loader->error_message().c_str());
+        } else if (state == LoadState::Ready) {
+            // Run the disk-backed pipeline against MEMFS-resident files. The
+            // diagnostics print to stderr (browser console via Module.printErr).
+            auto built = build_scene_from_paths(loader->config_path(), loader->input_path());
+            for (const auto &d : built.diags.items()) {
+                std::println(stderr, "scene_build: {} {}", d.code, d.message);
+            }
+            if (built.scene) {
+                std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
+                             built.scene->nodes.size(), built.scene->meshAssets.size(),
+                             built.scene->materials.size());
+                scene = std::move(built.scene);
+                scene_uploaded = false;
+                camera_framed = false;
+                loader.reset();
+            } else {
+                // Stash the diagnostic message so the UI shows something
+                // useful next frame instead of an empty Ready state.
+                std::string msg = "scene build failed";
+                for (const auto &d : built.diags.items()) {
+                    if (d.severity >= DiagnosticSeverity::Error) {
+                        msg = d.message;
+                        break;
+                    }
+                }
+                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", msg.c_str());
+                loader.reset();
+            }
+        } else {
+            ImGui::Text("Downloading assets…");
+            for (const auto &p : loader->progress()) {
+                if (p.bytes_total > 0) {
+                    const float frac = static_cast<float>(static_cast<double>(p.bytes_done) /
+                                                          static_cast<double>(p.bytes_total));
+                    ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+                } else {
+                    // Indeterminate — show received bytes only.
+                    ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
+                                       ImVec2(-1.f, 0.f), "");
+                }
+                ImGui::SameLine();
+                ImGui::Text("%s", p.url.c_str());
+            }
+        }
+    }
+
     if (scene) {
         ImGui::Separator();
         ImGui::Text("Meshes: %u", scene_renderer.mesh_asset_count());
@@ -421,7 +488,7 @@ void App::Impl::on_frame() {
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
-    } else {
+    } else if (!loader) {
         ImGui::Text("(no scene loaded)");
     }
     ImGui::End();
@@ -444,6 +511,8 @@ void App::set_scene(std::shared_ptr<const RenderScene> scene) {
     impl_->scene_uploaded = false;
     impl_->camera_framed = false;
 }
+
+void App::set_loader(std::unique_ptr<AssetLoader> loader) { impl_->loader = std::move(loader); }
 
 App::App(Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
 
@@ -470,9 +539,9 @@ int App::run() {
     // its async exception, mirroring the bgfx App's emscripten_set_main_loop_arg
     // call. The Impl pointer must outlive that unwind, so detach it: the
     // wasm runtime takes ownership for the page lifetime.
-#ifdef __EMSCRIPTEN__
-    impl_.release();
-#endif
+    if constexpr (kIsEmscripten) {
+        impl_.release();
+    }
     sapp_run(&desc);
     return 0;
 }

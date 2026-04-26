@@ -33,12 +33,12 @@
     <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
     <div id="status">loading…</div>
     <script>
-        // Asset loading via runtime fetch. Top-level entry points have generic
-        // names so the wasm shell isn't tied to a specific detector; override
-        // per-page with ?input=… &config=… &include=a&include=b (include can
-        // repeat). The C++ TOML loader resolves `include = […]` entries
-        // relative to the config's parent dir, so those fragment paths must
-        // match what's in the toml.
+        // Asset loading happens inside wasm via emscripten_fetch — see the
+        // C++ AssetLoader. Top-level entry points have generic names so the
+        // wasm shell isn't tied to a specific detector; override per-page
+        // with ?input=… &config=…. Includes are discovered automatically by
+        // walking the config's `include = [...]` array as each TOML file
+        // arrives, so they don't need to be listed in the URL.
         var params = new URLSearchParams(window.location.search);
         var inputUrl = params.get('input') || 'scene.nhb.zst';
         var configUrl = params.get('config') || 'scene.toml';
@@ -65,17 +65,6 @@
             if (value !== null && value !== '') {
                 args.push(flag, value);
             }
-        }
-
-        var configIncludes = params.getAll('include');
-        if (configIncludes.length === 0) {
-            configIncludes = [
-                'odd/base.toml',
-                'odd/materials.toml',
-                'odd/tracker.toml',
-                'odd/calorimeters.toml',
-                'odd/muon.toml',
-            ];
         }
 
         // Backend selection: WebGPU when available, WebGL2 otherwise. Force
@@ -136,26 +125,9 @@
                 if (path.endsWith('.wasm')) return bundleBase + '.wasm';
                 return path;
             },
-            preRun: [function () {
-                // FS.createPreloadedFile(parent, name, url, canRead, canWrite).
-                // Async fetch; emscripten waits for all preRun work to settle
-                // before invoking main(), so by the time the viewer subcommand
-                // runs, fopen of these paths just works.
-                Module.setStatus('fetching ' + inputUrl);
-                FS.createPreloadedFile('/', inputUrl, inputUrl, true, false);
-                FS.createPreloadedFile('/', configUrl, configUrl, true, false);
-                FS.createPath('/', 'odd', true, false);
-                for (var i = 0; i < configIncludes.length; ++i) {
-                    var p = configIncludes[i];
-                    var slash = p.lastIndexOf('/');
-                    var dir = slash >= 0 ? p.substring(0, slash) : '';
-                    var name = slash >= 0 ? p.substring(slash + 1) : p;
-                    if (dir) {
-                        FS.createPath('/', dir, true, false);
-                    }
-                    FS.createPreloadedFile('/' + (dir || ''), name, p, true, false);
-                }
-            }],
+            // No preRun preloads — assets are fetched from C++ via
+            // emscripten_fetch after main() starts so imgui can render a
+            // progress UI instead of blocking startup.
             arguments: viewerArgs,
         };
         Module.setStatus('loading ' + bundleBase + '…');
