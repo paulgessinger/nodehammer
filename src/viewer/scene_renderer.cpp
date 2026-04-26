@@ -371,6 +371,10 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         scene_fs_params_t fs_params{};
         std::memcpy(fs_params.base_color, glm::value_ptr(base), sizeof(fs_params.base_color));
         std::memcpy(fs_params.light_dir, glm::value_ptr(light_dir), sizeof(fs_params.light_dir));
+        const glm::vec4 cut_params{flags.angle_cut ? 1.f : 0.f,
+                                   glm::radians(flags.angle_cut_start_deg),
+                                   glm::radians(flags.angle_cut_end_deg), 0.f};
+        std::memcpy(fs_params.cut_params, glm::value_ptr(cut_params), sizeof(fs_params.cut_params));
         sg_apply_uniforms(UB_scene_fs_params, SG_RANGE(fs_params));
 
         sg_bindings bind{};

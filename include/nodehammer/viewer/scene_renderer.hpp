@@ -35,6 +35,9 @@ class SceneRenderer {
     struct RenderFlags {
         bool wireframe{false};
         bool cull_back{false};
+        bool angle_cut{false};
+        float angle_cut_start_deg{0.f};
+        float angle_cut_end_deg{90.f};
     };
 
     /// Submit draw calls for the active scene. Caller must have an active

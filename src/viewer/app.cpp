@@ -19,6 +19,18 @@
 
 namespace nodehammer::viewer {
 
+namespace {
+
+float wrap_degrees(float angle) {
+    angle = std::fmod(angle, 360.f);
+    if (angle < 0.f) {
+        angle += 360.f;
+    }
+    return angle;
+}
+
+} // namespace
+
 struct App::Impl {
     Config cfg;
     bool quit{false};
@@ -36,6 +48,9 @@ struct App::Impl {
     bool window_visible{true};
     bool auto_orbit{false};
     float auto_orbit_speed_deg{15.f};
+    bool angle_cut{false};
+    float angle_cut_start_deg{0.f};
+    float angle_cut_end_deg{90.f};
 
     uint32_t fb_width{0};
     uint32_t fb_height{0};
@@ -46,6 +61,9 @@ struct App::Impl {
     uint64_t frame_count{0};
     uint64_t fps_window_start{0};
     float fps{0.f};
+    double frame_interval_ms{0.0};
+    double render_submit_ms{0.0};
+    double scene_submit_ms{0.0};
 
     explicit Impl(Config c) : cfg(std::move(c)) {}
 
@@ -139,6 +157,9 @@ void App::Impl::update_camera_input() {
 }
 
 void App::Impl::render() {
+    const uint64_t render_submit_start = stm_now();
+    scene_submit_ms = 0.0;
+
     sg_pass pass{};
     pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
     pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
@@ -163,13 +184,19 @@ void App::Impl::render() {
         SceneRenderer::RenderFlags flags;
         flags.wireframe = wireframe;
         flags.cull_back = cull_back;
+        flags.angle_cut = angle_cut;
+        flags.angle_cut_start_deg = angle_cut_start_deg;
+        flags.angle_cut_end_deg = angle_cut_end_deg;
+        const uint64_t scene_submit_start = stm_now();
         scene_renderer.render(camera, fb_width, fb_height, flags);
+        scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
     }
 
     ImGui_ImplSokol_Render();
 
     sg_end_pass();
     sg_commit();
+    render_submit_ms = stm_sec(stm_diff(stm_now(), render_submit_start)) * 1000.0;
 }
 
 void App::Impl::on_frame() {
@@ -185,6 +212,7 @@ void App::Impl::on_frame() {
     fb_height = static_cast<uint32_t>(sapp_height());
 
     delta_seconds = stm_sec(stm_laptime(&last_time));
+    frame_interval_ms = delta_seconds * 1000.0;
 
     // FPS window: rolling once per second so the number is readable.
     ++frame_count;
@@ -246,6 +274,8 @@ void App::Impl::on_frame() {
         ImGui::Text("Renderer: %s", name);
     }
     ImGui::Text("FPS: %.1f", fps);
+    ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", frame_interval_ms,
+                render_submit_ms, scene_submit_ms);
     ImGui::Checkbox("pause when unfocused", &pause_when_unfocused);
     if (scene) {
         ImGui::Separator();
@@ -266,6 +296,19 @@ void App::Impl::on_frame() {
         ImGui::Checkbox("backface cull", &cull_back);
         ImGui::Checkbox("auto orbit", &auto_orbit);
         ImGui::SliderFloat("orbit speed", &auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
+        ImGui::Checkbox("angle cut", &angle_cut);
+        ImGui::SliderFloat("cut start", &angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.f);
+        if (ImGui::InputFloat("##cut_start_input", &angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
+            angle_cut_start_deg = wrap_degrees(angle_cut_start_deg);
+        }
+        ImGui::SliderFloat("cut end", &angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.f);
+        if (ImGui::InputFloat("##cut_end_input", &angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
+            angle_cut_end_deg = wrap_degrees(angle_cut_end_deg);
+        }
         (void)wireframe;
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);

@@ -5,7 +5,8 @@
 //
 // One uniform block per stage — sokol_gfx wants vs and fs uniforms in
 // separate blocks. The vs block carries the camera matrix; the fs block
-// carries the per-draw material colour and the global light direction.
+// carries the per-draw material colour, global light direction, and optional
+// azimuthal cut parameters.
 //
 // Per-instance world matrix lives in vertex attributes inst0..inst3 with
 // step rate "instance". scene_renderer.cpp populates a second vertex buffer
@@ -26,6 +27,7 @@ in vec4 inst2;
 in vec4 inst3;
 
 out vec3 v_normal_world;
+out vec3 v_world_pos;
 
 void main() {
     vec4 world_pos =
@@ -33,6 +35,7 @@ void main() {
         + a_position.y * inst1
         + a_position.z * inst2
         +                inst3;
+    v_world_pos = world_pos.xyz;
     gl_Position = view_proj * world_pos;
 
     v_normal_world =
@@ -46,12 +49,41 @@ void main() {
 layout(binding=1) uniform fs_params {
     vec4 base_color;   // rgb = albedo, a = opacity
     vec4 light_dir;    // xyz = direction TO light, world space
+    vec4 cut_params;   // x = enabled, y/z = start/end phi in radians
 };
 
 in vec3 v_normal_world;
+in vec3 v_world_pos;
 out vec4 frag_color;
 
+bool angle_in_cut(float phi, float start_phi, float end_phi) {
+    const float tau = 6.283185307179586;
+    if (phi < 0.0) {
+        phi += tau;
+    }
+    if (start_phi < 0.0) {
+        start_phi += tau;
+    }
+    if (end_phi < 0.0) {
+        end_phi += tau;
+    }
+    if (abs(start_phi - end_phi) < 0.0001) {
+        return false;
+    }
+    if (start_phi <= end_phi) {
+        return phi >= start_phi && phi <= end_phi;
+    }
+    return phi >= start_phi || phi <= end_phi;
+}
+
 void main() {
+    if (cut_params.x > 0.5) {
+        float phi = atan(v_world_pos.y, v_world_pos.x);
+        if (angle_in_cut(phi, cut_params.y, cut_params.z)) {
+            discard;
+        }
+    }
+
     vec3 n = normalize(v_normal_world);
     // Two-sided shading: detector inner/outer faces should both light up
     // regardless of winding. Mirrors the bgfx fs_scene_lambert behaviour.
