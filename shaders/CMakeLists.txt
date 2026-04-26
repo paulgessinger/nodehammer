@@ -55,10 +55,30 @@ bgfx_compile_shaders(
     AS_HEADERS
 )
 
+bgfx_compile_shaders(
+    TYPE        VERTEX
+    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/vs_scene.sc
+    VARYING_DEF ${NH_SHADER_VARYING}
+    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
+    OUT_FILES_VAR NH_SHADER_VS_SCENE
+    AS_HEADERS
+)
+
+bgfx_compile_shaders(
+    TYPE        FRAGMENT
+    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/fs_scene_lambert.sc
+    VARYING_DEF ${NH_SHADER_VARYING}
+    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
+    OUT_FILES_VAR NH_SHADER_FS_SCENE_LAMBERT
+    AS_HEADERS
+)
+
 # Aggregate dependency target so consumers can add_dependencies() once.
 add_custom_target(nodehammer_shaders DEPENDS
     ${NH_SHADER_VS_SOLID}
     ${NH_SHADER_FS_SOLID}
     ${NH_SHADER_VS_IMGUI}
     ${NH_SHADER_FS_IMGUI}
+    ${NH_SHADER_VS_SCENE}
+    ${NH_SHADER_FS_SCENE_LAMBERT}
 )

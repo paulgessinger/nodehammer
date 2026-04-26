@@ -3,6 +3,10 @@
 #include "imgui_impl_bgfx.hpp"
 #include "sdl_platform.hpp"
 
+#include <nodehammer/ir/render.hpp>
+#include <nodehammer/viewer/camera.hpp>
+#include <nodehammer/viewer/scene_renderer.hpp>
+
 // Suppress renderer profiles we never compile so BGFX_EMBEDDED_SHADER doesn't
 // reference symbols (e.g. `_dx11`, `_dxil`) that the build system never
 // produced. Keep ESSL/GLSL/SPIRV/METAL on their bgfx defaults — those match
@@ -45,6 +49,7 @@
 #include "metal/vs_solid.sc.bin.h"
 #endif
 
+#include <cmath>
 #include <print>
 #include <stdexcept>
 
@@ -88,6 +93,23 @@ struct App::Impl {
     bgfx::VertexBufferHandle vbh = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle ibh = BGFX_INVALID_HANDLE;
 
+    // Stage 3: scene state. When `scene` is non-null we draw it via
+    // `scene_renderer` and skip the demo triangle.
+    std::shared_ptr<const RenderScene> scene;
+    SceneRenderer scene_renderer;
+    Camera camera;
+    bool scene_uploaded{false};
+    bool camera_framed{false};
+
+    // Debug toggles surfaced through the ImGui panel.
+    bool show_debug_stats{false};
+    bool wireframe{false};
+    bool cull_back{false};
+
+    // Mouse state for camera control. Buttons are queried from io.MouseDown.
+    bool mouse_held_left{false};
+    bool mouse_held_middle{false};
+
     uint64_t frame_count{0};
     uint64_t last_fps_tick{0};
     float fps{0.f};
@@ -100,6 +122,7 @@ struct App::Impl {
     void init_geometry();
     void shutdown();
     void poll_events();
+    void update_camera_input();
     void resize_if_needed();
     void render();
     void tick();
@@ -199,6 +222,9 @@ void App::Impl::shutdown() {
     if (bgfx::isValid(ibh)) {
         bgfx::destroy(ibh);
     }
+    // Release scene_renderer's bgfx handles before bgfx::shutdown so they
+    // don't survive into a destructor that runs against a dead context.
+    scene_renderer.release();
     ImGui_Implbgfx_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
@@ -249,7 +275,31 @@ void App::Impl::resize_if_needed() {
 void App::Impl::render() {
     bgfx::touch(k_view_scene);
 
-    // Camera: simple fixed view down the -Z axis.
+    if (scene) {
+        // Lazy upload + frame-bounds: deferred until we have a live bgfx
+        // context (App might be set_scene'd before init completes — although
+        // currently we set_scene after construction, the lazy path is cheap
+        // and robust against future call-order changes).
+        if (!scene_uploaded) {
+            scene_renderer.upload(*scene);
+            scene_uploaded = true;
+        }
+        if (!camera_framed) {
+            glm::vec3 bmin{0.f}, bmax{0.f};
+            if (scene_renderer.world_bounds(bmin, bmax)) {
+                camera.frame_bounds(bmin, bmax);
+                camera_framed = true;
+            }
+        }
+        SceneRenderer::RenderFlags flags;
+        flags.wireframe = wireframe;
+        flags.cull_back = cull_back;
+        scene_renderer.render(k_view_scene, camera, fb_width, fb_height, flags);
+        return;
+    }
+
+    // Fallback: Stage 1 demo triangle. Same path as before — kept for
+    // running the viewer with no scene attached.
     const bgfx::Caps *caps = bgfx::getCaps();
     float view[16];
     float proj[16];
@@ -261,7 +311,6 @@ void App::Impl::render() {
                 100.f, caps->homogeneousDepth);
     bgfx::setViewTransform(k_view_scene, view, proj);
 
-    // Spin the triangle slowly so we can see frames advancing.
     const float t = static_cast<float>(SDL_GetTicks()) * 0.001f;
     float mtx[16];
     bx::mtxRotateY(mtx, t * 0.6f);
@@ -274,6 +323,33 @@ void App::Impl::render() {
     bgfx::submit(k_view_scene, program);
 }
 
+void App::Impl::update_camera_input() {
+    if (!scene) {
+        return;
+    }
+    ImGuiIO &io = ImGui::GetIO();
+    // Don't consume mouse drags that ImGui captured (e.g. dragging the FPS
+    // panel). Wheel always passes through — typical for inspection viewers.
+    if (!io.WantCaptureMouse) {
+        const ImVec2 d = io.MouseDelta;
+        // Left-drag: orbit. Sensitivity tuned by feel; 0.005 rad/px ≈ ~180°
+        // across a 600px window which feels right for inspection.
+        if (io.MouseDown[0]) {
+            camera.orbit(d.x * 0.005f, d.y * 0.005f);
+        }
+        // Middle-drag: pan. Pan speed scales with zoom distance so pixels
+        // map to roughly consistent world-space motion at any range.
+        if (io.MouseDown[2]) {
+            const float scale = camera.distance * 0.001f;
+            camera.pan(-d.x * scale, d.y * scale);
+        }
+    }
+    if (io.MouseWheel != 0.f) {
+        // 1.1^wheel: each notch = 10% closer/further. Matches Blender feel.
+        camera.dolly(std::pow(1.1f, -io.MouseWheel));
+    }
+}
+
 void App::Impl::tick() {
     poll_events();
     resize_if_needed();
@@ -281,6 +357,8 @@ void App::Impl::tick() {
     ImGui_Implbgfx_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+
+    update_camera_input();
 
     {
         // Update FPS roughly once per second.
@@ -298,10 +376,36 @@ void App::Impl::tick() {
     }
 
     ImGui::Begin("nodehammer viewer");
-    ImGui::Text("Stage 1: hello triangle");
     ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
     ImGui::Text("Renderer: %s", bgfx::getRendererName(bgfx::getRendererType()));
     ImGui::Text("FPS: %.1f", fps);
+    if (scene) {
+        ImGui::Separator();
+        ImGui::Text("Meshes: %u", scene_renderer.mesh_asset_count());
+        ImGui::Text("Nodes: %u", scene_renderer.node_count());
+        ImGui::Text("Tris (scene): %llu",
+                    static_cast<unsigned long long>(scene_renderer.triangle_count()));
+        const auto fs = scene_renderer.last_frame_stats();
+        ImGui::Text("Draw calls: %u  Instances: %u  Tris/frame: %llu", fs.draw_calls, fs.instances,
+                    static_cast<unsigned long long>(fs.triangles));
+        if (ImGui::Button("Frame scene")) {
+            glm::vec3 bmin{0.f}, bmax{0.f};
+            if (scene_renderer.world_bounds(bmin, bmax)) {
+                camera.frame_bounds(bmin, bmax);
+            }
+        }
+        ImGui::Separator();
+        if (ImGui::Checkbox("bgfx debug stats", &show_debug_stats)) {
+            bgfx::setDebug(show_debug_stats ? BGFX_DEBUG_STATS : BGFX_DEBUG_NONE);
+        }
+        ImGui::Checkbox("backface cull", &cull_back);
+        (void)wireframe; // wireframe mode currently disabled — see scene_renderer.cpp
+        ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
+                    glm::degrees(camera.pitch), camera.distance);
+        ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
+    } else {
+        ImGui::Text("(no scene loaded — drawing demo triangle)");
+    }
     ImGui::End();
 
     render();
@@ -310,6 +414,12 @@ void App::Impl::tick() {
     ImGui_Implbgfx_RenderDrawData(ImGui::GetDrawData());
 
     bgfx::frame();
+}
+
+void App::set_scene(std::shared_ptr<const RenderScene> scene) {
+    impl_->scene = std::move(scene);
+    impl_->scene_uploaded = false;
+    impl_->camera_framed = false;
 }
 
 App::App(Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {

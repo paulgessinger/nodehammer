@@ -2,6 +2,8 @@ add_library(nodehammer_viewer STATIC
     app.cpp
     sdl_platform.cpp
     imgui_impl_bgfx.cpp
+    camera.cpp
+    scene_renderer.cpp
 )
 
 target_include_directories(nodehammer_viewer PUBLIC
@@ -24,6 +26,9 @@ target_link_libraries(nodehammer_viewer PUBLIC
     SDL3::SDL3-static
     imgui
     glm::glm
+    # Brings in RenderScene/Vertex types and the unordered_dense headers used
+    # by scene_renderer.cpp.
+    nodehammer_lib
 )
 
 # The shader headers are produced by the shaders/ subdirectory; a target-level
