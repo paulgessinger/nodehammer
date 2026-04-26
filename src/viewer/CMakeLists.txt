@@ -12,5 +12,6 @@ set(NH_VIEWER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scene_renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui_backend.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ibl.cpp
     PARENT_SCOPE
 )

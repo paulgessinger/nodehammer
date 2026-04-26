@@ -39,6 +39,8 @@ class SceneRenderer {
         bool shader_angle_cut{true};
         float angle_cut_start_deg{0.f};
         float angle_cut_end_deg{90.f};
+        bool enable_pbr{false};
+        bool enable_ibl{false};
     };
 
     /// Submit draw calls for the active scene. Caller must have an active

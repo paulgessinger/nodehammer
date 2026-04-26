@@ -22,7 +22,7 @@
 
 EM_JS(void, nh_viewer_set_url_state,
       (int cull_back, int pause_when_unfocused, int auto_orbit, float orbit_speed, int angle_cut,
-       int shader_angle_cut, float cut_start, float cut_end),
+       int shader_angle_cut, float cut_start, float cut_end, int enable_pbr, int enable_ibl),
       {
           var url = new URL(window.location.href);
           var p = url.searchParams;
@@ -53,6 +53,8 @@ EM_JS(void, nh_viewer_set_url_state,
           setBool('shaderAngleCut', shader_angle_cut, true);
           setFloat('cutStart', cut_start, 0.0);
           setFloat('cutEnd', cut_end, 90.0);
+          setBool('pbr', enable_pbr, false);
+          setBool('ibl', enable_ibl, false);
 
           history.replaceState(null, "", url);
       });
@@ -221,6 +223,8 @@ void App::Impl::render() {
         flags.shader_angle_cut = cfg.shader_angle_cut;
         flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
         flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
+        flags.enable_pbr = cfg.enable_pbr;
+        flags.enable_ibl = cfg.enable_ibl;
         const uint64_t scene_submit_start = stm_now();
         scene_renderer.render(camera, fb_width, fb_height, flags);
         scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
@@ -237,7 +241,8 @@ void App::Impl::sync_browser_url() const {
 #ifdef __EMSCRIPTEN__
     nh_viewer_set_url_state(cfg.cull_back, cfg.pause_when_unfocused, cfg.auto_orbit,
                             cfg.auto_orbit_speed_deg, cfg.angle_cut, cfg.shader_angle_cut,
-                            cfg.angle_cut_start_deg, cfg.angle_cut_end_deg);
+                            cfg.angle_cut_start_deg, cfg.angle_cut_end_deg, cfg.enable_pbr,
+                            cfg.enable_ibl);
 #endif
 }
 
@@ -359,6 +364,11 @@ void App::Impl::on_frame() {
             cfg.angle_cut_end_deg = wrap_degrees(cfg.angle_cut_end_deg);
         }
         browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::Separator();
+        browser_url_dirty |= ImGui::Checkbox("PBR shading", &cfg.enable_pbr);
+        ImGui::BeginDisabled(!cfg.enable_pbr);
+        browser_url_dirty |= ImGui::Checkbox("image-based lighting", &cfg.enable_ibl);
+        ImGui::EndDisabled();
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);

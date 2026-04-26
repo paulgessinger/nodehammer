@@ -40,6 +40,11 @@ void register_cmd_viewer(CLI::App &app) {
         ->capture_default_str();
     sub->add_option("--cut-end", cfg->angle_cut_end_deg, "Angle cut end in degrees")
         ->capture_default_str();
+    sub->add_flag("--pbr", cfg->enable_pbr, "Start with PBR shading enabled")
+        ->capture_default_str();
+    sub->add_flag("--ibl", cfg->enable_ibl,
+                  "Start with image-based lighting enabled (requires --pbr)")
+        ->capture_default_str();
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (semantic IR)");
     auto *fmtInOpt =

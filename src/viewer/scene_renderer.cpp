@@ -7,6 +7,7 @@
 #include <nodehammer/ir/render.hpp>
 #include <sokol_gfx.h>
 
+#include "ibl.hpp"
 #include "scene.glsl.h"
 
 #include <algorithm>
@@ -178,7 +179,13 @@ struct SceneRenderer::Impl {
     size_t instance_buf_capacity{0}; // bytes
 
     ankerl::unordered_dense::map<MeshAssetId, GpuMesh> meshes;
-    ankerl::unordered_dense::map<RenderMaterialId, glm::vec4> material_colors;
+    struct GpuMaterial {
+        glm::vec4 base_color{0.8f, 0.8f, 0.8f, 1.f};
+        glm::vec4 mr{0.f, 0.5f, 0.f, 0.f}; // x=metallic, y=roughness
+    };
+    ankerl::unordered_dense::map<RenderMaterialId, GpuMaterial> materials;
+
+    IblResources ibl;
 
     struct DrawGroup {
         MeshAssetId mesh;
@@ -255,6 +262,11 @@ void SceneRenderer::Impl::ensure_init() {
     pdesc.cull_mode = SG_CULLMODE_BACK;
     pipeline_back_cull = sg_make_pipeline(&pdesc);
 
+    // IBL textures + samplers — baked once, used every frame regardless of
+    // the IBL toggle (sokol requires bindings to be populated; the shader
+    // simply ignores the samples when mode_flags.y == 0).
+    ibl.create();
+
     initialised = true;
 }
 
@@ -268,7 +280,7 @@ void SceneRenderer::Impl::destroy_gpu() {
         }
     }
     meshes.clear();
-    material_colors.clear();
+    materials.clear();
     groups.clear();
     visible_instances.clear();
     if (instance_buf.id != SG_INVALID_ID) {
@@ -320,6 +332,7 @@ void SceneRenderer::release() {
         sg_destroy_pipeline(impl_->pipeline_back_cull);
         impl_->pipeline_back_cull = sg_pipeline{};
     }
+    impl_->ibl.release();
     if (impl_->shader.id != SG_INVALID_ID) {
         sg_destroy_shader(impl_->shader);
         impl_->shader = sg_shader{};
@@ -370,7 +383,10 @@ void SceneRenderer::upload(const RenderScene &scene) {
     }
 
     for (const auto &[id, mat] : scene.materials) {
-        impl_->material_colors.emplace(id, mat.baseColorFactor);
+        Impl::GpuMaterial gm;
+        gm.base_color = mat.baseColorFactor;
+        gm.mr = glm::vec4{mat.metallicFactor, mat.roughnessFactor, 0.f, 0.f};
+        impl_->materials.emplace(id, gm);
     }
 
     ankerl::unordered_dense::map<InstanceGroupKey, size_t, InstanceGroupKeyHash> group_idx;
@@ -413,7 +429,7 @@ void SceneRenderer::upload(const RenderScene &scene) {
     std::fprintf(stderr,
                  "viewer: scene uploaded — meshes=%zu materials=%zu nodes=%u groups=%zu "
                  "tris=%llu bbox=[%.1f %.1f %.1f .. %.1f %.1f %.1f]\n",
-                 impl_->meshes.size(), impl_->material_colors.size(), impl_->node_count,
+                 impl_->meshes.size(), impl_->materials.size(), impl_->node_count,
                  impl_->groups.size(), static_cast<unsigned long long>(impl_->triangle_count),
                  bmin.x, bmin.y, bmin.z, bmax.x, bmax.y, bmax.z);
 }
@@ -476,7 +492,8 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     std::memcpy(vs_params.view_proj, glm::value_ptr(view_proj), sizeof(vs_params.view_proj));
     sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
 
-    const glm::vec4 light_dir{-0.4f, -0.7f, -0.6f, 0.f};
+    // w = directional light intensity (used by PBR branch only; Lambert ignores).
+    const glm::vec4 light_dir{-0.4f, -0.7f, -0.6f, 3.f};
 
     for (const auto &g : impl_->groups) {
         auto mesh_it = impl_->meshes.find(g.mesh);
@@ -489,13 +506,13 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
             continue;
         }
 
-        auto col_it = impl_->material_colors.find(g.material);
-        const glm::vec4 base = (col_it != impl_->material_colors.end())
-                                   ? col_it->second
-                                   : glm::vec4{0.8f, 0.8f, 0.8f, 1.f};
+        auto mat_it = impl_->materials.find(g.material);
+        const Impl::GpuMaterial gmat =
+            (mat_it != impl_->materials.end()) ? mat_it->second : Impl::GpuMaterial{};
 
         scene_fs_params_t fs_params{};
-        std::memcpy(fs_params.base_color, glm::value_ptr(base), sizeof(fs_params.base_color));
+        std::memcpy(fs_params.base_color, glm::value_ptr(gmat.base_color),
+                    sizeof(fs_params.base_color));
         std::memcpy(fs_params.light_dir, glm::value_ptr(light_dir), sizeof(fs_params.light_dir));
         const float shader_cut_start = glm::radians(flags.angle_cut_start_deg);
         const float shader_cut_end = glm::radians(flags.angle_cut_end_deg);
@@ -509,6 +526,15 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         std::memcpy(fs_params.cut_start, glm::value_ptr(cut_start_vec),
                     sizeof(fs_params.cut_start));
         std::memcpy(fs_params.cut_end, glm::value_ptr(cut_end_vec), sizeof(fs_params.cut_end));
+        std::memcpy(fs_params.material_mr, glm::value_ptr(gmat.mr), sizeof(fs_params.material_mr));
+        const float prefilter_max_lod =
+            std::max(0.f, static_cast<float>(impl_->ibl.prefilter_mip_count - 1));
+        const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, flags.enable_ibl ? 1.f : 0.f,
+                                   prefilter_max_lod, 0.f};
+        std::memcpy(fs_params.mode_flags, glm::value_ptr(mode_flags), sizeof(fs_params.mode_flags));
+        const glm::vec3 eye = camera.eye();
+        const glm::vec4 cam_pos{eye.x, eye.y, eye.z, 0.f};
+        std::memcpy(fs_params.camera_pos, glm::value_ptr(cam_pos), sizeof(fs_params.camera_pos));
         sg_apply_uniforms(UB_scene_fs_params, SG_RANGE(fs_params));
 
         sg_bindings bind{};
@@ -516,6 +542,11 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         bind.vertex_buffers[1] = impl_->instance_buf;
         bind.vertex_buffer_offsets[1] = static_cast<int>(g.visible_byte_offset);
         bind.index_buffer = mesh.ibuf;
+        bind.views[VIEW_scene_tex_irradiance] = impl_->ibl.irradiance_view;
+        bind.views[VIEW_scene_tex_prefilter] = impl_->ibl.prefilter_view;
+        bind.views[VIEW_scene_tex_brdf_lut] = impl_->ibl.brdf_lut_view;
+        bind.samplers[SMP_scene_smp_cube] = impl_->ibl.cube_sampler;
+        bind.samplers[SMP_scene_smp_lut] = impl_->ibl.lut_sampler;
         sg_apply_bindings(&bind);
 
         sg_draw(0, static_cast<int>(mesh.index_count), inst_count);

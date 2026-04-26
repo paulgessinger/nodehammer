@@ -48,15 +48,44 @@ void main() {
 @fs scene_fs
 layout(binding=1) uniform fs_params {
     vec4 base_color;   // rgb = albedo, a = opacity
-    vec4 light_dir;    // xyz = direction TO light, world space
+    vec4 light_dir;    // xyz = direction TO light, world space; w = intensity (PBR only)
     vec4 cut_params;   // x = enabled, y = large cut flag, z/w = unused
     vec4 cut_start;    // xy = unit vector at start phi
     vec4 cut_end;      // xy = unit vector at end phi
+    vec4 material_mr;  // x = metallic, y = roughness, z/w = unused
+    vec4 mode_flags;   // x = pbr_enable, y = ibl_enable, z = prefilter_max_lod, w = unused
+    vec4 camera_pos;   // xyz = world-space camera position
 };
+
+layout(binding=0) uniform textureCube tex_irradiance;
+layout(binding=1) uniform textureCube tex_prefilter;
+layout(binding=2) uniform texture2D   tex_brdf_lut;
+layout(binding=0) uniform sampler     smp_cube;
+layout(binding=1) uniform sampler     smp_lut;
 
 in vec3 v_normal_world;
 in vec3 v_world_pos;
 out vec4 frag_color;
+
+const float PI = 3.14159265358979323846;
+
+float D_GGX(float NdotH, float a2) {
+    float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
+    return a2 / (PI * d * d);
+}
+
+float G_SmithSchlickGGX(float NdotV, float NdotL, float roughness) {
+    float r = roughness + 1.0;
+    float k = (r * r) / 8.0;
+    float gv = NdotV / (NdotV * (1.0 - k) + k);
+    float gl = NdotL / (NdotL * (1.0 - k) + k);
+    return gv * gl;
+}
+
+vec3 F_Schlick(float VdotH, vec3 F0) {
+    float f = pow(1.0 - VdotH, 5.0);
+    return F0 + (1.0 - F0) * f;
+}
 
 void main() {
     if (cut_params.x > 0.5) {
@@ -72,11 +101,70 @@ void main() {
     }
 
     vec3 n = normalize(v_normal_world);
-    // Two-sided shading: detector inner/outer faces should both light up
-    // regardless of winding. Mirrors the bgfx fs_scene_lambert behaviour.
-    float ndl = max(abs(dot(n, -light_dir.xyz)), 0.0);
-    vec3 rgb = base_color.rgb * (0.20 + 0.80 * ndl);
-    frag_color = vec4(rgb, base_color.a);
+
+    if (mode_flags.x < 0.5) {
+        // Lambert (legacy fast path) — preserved byte-for-byte.
+        // Two-sided shading: detector inner/outer faces light regardless of winding.
+        float ndl = max(abs(dot(n, -light_dir.xyz)), 0.0);
+        vec3 rgb = base_color.rgb * (0.20 + 0.80 * ndl);
+        frag_color = vec4(rgb, base_color.a);
+        return;
+    }
+
+    // ---- PBR (glTF 2.0 metallic-roughness) ----
+    vec3 V = normalize(camera_pos.xyz - v_world_pos);
+    // Two-sided: flip the normal if it faces away from the viewer. Mirrors
+    // the abs() in the Lambert branch so inner detector faces still light.
+    if (dot(n, V) < 0.0) {
+        n = -n;
+    }
+    vec3 L = normalize(-light_dir.xyz);
+    vec3 H = normalize(V + L);
+
+    float NdotV = max(dot(n, V), 1e-4);
+    float NdotL = max(dot(n, L), 0.0);
+    float NdotH = max(dot(n, H), 0.0);
+    float VdotH = max(dot(V, H), 0.0);
+
+    float metallic  = clamp(material_mr.x, 0.0, 1.0);
+    float roughness = clamp(material_mr.y, 0.04, 1.0);
+    float a = roughness * roughness;
+    float a2 = a * a;
+
+    vec3 F0 = mix(vec3(0.04), base_color.rgb, metallic);
+
+    vec3 F  = F_Schlick(VdotH, F0);
+    float D = D_GGX(NdotH, a2);
+    float G = G_SmithSchlickGGX(NdotV, NdotL, roughness);
+
+    vec3 specular = (D * G) * F / max(4.0 * NdotV * NdotL, 1e-4);
+    vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
+    vec3 diffuse = kd * base_color.rgb / PI;
+
+    vec3 Lo = (diffuse + specular) * NdotL * light_dir.w;
+
+    // ── Ambient term ────────────────────────────────────────────────────
+    vec3 ambient;
+    if (mode_flags.y >= 0.5) {
+        // Image-based lighting (split-sum approximation).
+        vec3 R = reflect(-V, n);
+        float max_lod = mode_flags.z;
+        vec3 irradiance = texture(samplerCube(tex_irradiance, smp_cube), n).rgb;
+        vec3 prefiltered = textureLod(samplerCube(tex_prefilter, smp_cube), R,
+                                       roughness * max_lod).rgb;
+        vec2 brdf = texture(sampler2D(tex_brdf_lut, smp_lut),
+                            vec2(NdotV, roughness)).rg;
+
+        vec3 diffuse_ibl = irradiance * kd * base_color.rgb;
+        vec3 specular_ibl = prefiltered * (F0 * brdf.x + vec3(brdf.y));
+        ambient = diffuse_ibl + specular_ibl;
+    } else {
+        // Constant fill so PBR-only mode (no IBL) isn't black on the dark side.
+        ambient = vec3(0.15) * base_color.rgb;
+    }
+
+    vec3 color = ambient + Lo;
+    frag_color = vec4(color, base_color.a);
 }
 @end
 
