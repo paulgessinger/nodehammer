@@ -140,7 +140,9 @@ void SceneRenderer::Impl::ensure_init() {
 
     pdesc.index_type = SG_INDEXTYPE_UINT32;
     pdesc.depth.write_enabled = true;
-    pdesc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+    // Reversed-Z: near maps to 1, far maps to 0, so closer fragments have
+    // LARGER depth values. Pair with depth-clear=0 in the pass action.
+    pdesc.depth.compare = SG_COMPAREFUNC_GREATER_EQUAL;
     pdesc.cull_mode = SG_CULLMODE_NONE; // toggleable via render flags
     pdesc.face_winding = SG_FACEWINDING_CCW;
     pipeline = sg_make_pipeline(&pdesc);
@@ -335,7 +337,9 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     const bool homogeneous_depth = (backend == SG_BACKEND_GLCORE) || (backend == SG_BACKEND_GLES3);
     const float aspect = static_cast<float>(fb_width) / static_cast<float>(fb_height);
     const glm::mat4 view = camera.view();
-    const glm::mat4 proj = camera.proj(aspect, homogeneous_depth);
+    // Reversed-Z projection — must match the pipeline's GREATER_EQUAL compare
+    // and the pass action's depth clear of 0.0 in app.cpp.
+    const glm::mat4 proj = camera.proj(aspect, homogeneous_depth, /*reversed_z=*/true);
     const glm::mat4 view_proj = proj * view;
 
     scene_vs_params_t vs_params{};

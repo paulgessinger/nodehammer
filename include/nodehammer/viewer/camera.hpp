@@ -15,13 +15,21 @@ struct Camera {
     float fov_deg{55.f};
     float near_plane{0.05f};
     float far_plane{1000.f};
+    /// Bounding-sphere radius of the framed scene. Set by frame_bounds() and
+    /// used by dolly() to size near/far so they hug the visible geometry.
+    /// Zero means "unknown" — we fall back to the old distance-relative sizing.
+    float scene_radius{0.f};
 
     [[nodiscard]] glm::vec3 eye() const;
     [[nodiscard]] glm::mat4 view() const;
-    /// Builds a projection matrix; `homogeneous_depth` should match
-    /// bgfx::getCaps()->homogeneousDepth so the result is correct for the
-    /// active backend (OpenGL/GLES use [-1, 1], everything else uses [0, 1]).
-    [[nodiscard]] glm::mat4 proj(float aspect, bool homogeneous_depth) const;
+    /// Builds a projection matrix; `homogeneous_depth` should match the
+    /// backend's clip-space convention (OpenGL/GLES use [-1, 1], everything
+    /// else uses [0, 1]). When `reversed_z` is true, near maps to the FAR
+    /// depth value and far maps to the NEAR — this dramatically improves
+    /// depth precision when paired with `GREATER_EQUAL` compare and a depth
+    /// clear of 0.0.
+    [[nodiscard]] glm::mat4 proj(float aspect, bool homogeneous_depth,
+                                 bool reversed_z = false) const;
 
     /// Mouse-driven orbit. Inputs are screen-space deltas in pixels; the
     /// caller's sensitivity multiplier is baked in.

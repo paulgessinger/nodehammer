@@ -125,7 +125,8 @@ void App::Impl::render() {
     pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
     pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
     pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-    pass.action.depth.clear_value = 1.0f;
+    // Reversed-Z: clear to 0 (the "farthest" depth in our convention).
+    pass.action.depth.clear_value = 0.0f;
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
