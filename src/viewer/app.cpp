@@ -17,6 +17,47 @@
 #include <memory>
 #include <utility>
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten/emscripten.h>
+
+EM_JS(void, nh_viewer_set_url_state,
+      (int cull_back, int pause_when_unfocused, int auto_orbit, float orbit_speed, int angle_cut,
+       int shader_angle_cut, float cut_start, float cut_end),
+      {
+          var url = new URL(window.location.href);
+          var p = url.searchParams;
+
+          function setBool(name, value, defaultValue) {
+              var boolValue = !!value;
+              if (boolValue == = defaultValue) {
+                  p.delete(name);
+              } else {
+                  p.set(name, boolValue ? '1' : '0');
+              }
+          }
+
+          function setFloat(name, value, defaultValue) {
+              var numberValue = Number(value);
+              if (Math.abs(numberValue - defaultValue) < 0.0001) {
+                  p.delete(name);
+              } else {
+                  p.set(name, String(Math.round(numberValue * 1000) / 1000));
+              }
+          }
+
+          setBool('cullBack', cull_back, true);
+          setBool('pauseWhenUnfocused', pause_when_unfocused, true);
+          setBool('autoOrbit', auto_orbit, false);
+          setFloat('orbitSpeed', orbit_speed, 15.0);
+          setBool('angleCut', angle_cut, false);
+          setBool('shaderAngleCut', shader_angle_cut, true);
+          setFloat('cutStart', cut_start, 0.0);
+          setFloat('cutEnd', cut_end, 90.0);
+
+          history.replaceState(null, "", url);
+      });
+#endif
+
 namespace nodehammer::viewer {
 
 namespace {
@@ -41,17 +82,8 @@ struct App::Impl {
     bool scene_uploaded{false};
     bool camera_framed{false};
 
-    bool wireframe{false};
-    bool cull_back{true};
-    bool pause_when_unfocused{true};
     bool window_focused{true};
     bool window_visible{true};
-    bool auto_orbit{false};
-    float auto_orbit_speed_deg{15.f};
-    bool angle_cut{false};
-    bool shader_angle_cut{true};
-    float angle_cut_start_deg{0.f};
-    float angle_cut_end_deg{90.f};
 
     uint32_t fb_width{0};
     uint32_t fb_height{0};
@@ -75,6 +107,7 @@ struct App::Impl {
 
     void update_camera_input();
     void render();
+    void sync_browser_url() const;
 
     static void init_cb(void *user) { static_cast<Impl *>(user)->on_init(); }
     static void frame_cb(void *user) { static_cast<Impl *>(user)->on_frame(); }
@@ -183,12 +216,11 @@ void App::Impl::render() {
             }
         }
         SceneRenderer::RenderFlags flags;
-        flags.wireframe = wireframe;
-        flags.cull_back = cull_back;
-        flags.angle_cut = angle_cut;
-        flags.shader_angle_cut = shader_angle_cut;
-        flags.angle_cut_start_deg = angle_cut_start_deg;
-        flags.angle_cut_end_deg = angle_cut_end_deg;
+        flags.cull_back = cfg.cull_back;
+        flags.angle_cut = cfg.angle_cut;
+        flags.shader_angle_cut = cfg.shader_angle_cut;
+        flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
+        flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
         const uint64_t scene_submit_start = stm_now();
         scene_renderer.render(camera, fb_width, fb_height, flags);
         scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
@@ -201,8 +233,16 @@ void App::Impl::render() {
     render_submit_ms = stm_sec(stm_diff(stm_now(), render_submit_start)) * 1000.0;
 }
 
+void App::Impl::sync_browser_url() const {
+#ifdef __EMSCRIPTEN__
+    nh_viewer_set_url_state(cfg.cull_back, cfg.pause_when_unfocused, cfg.auto_orbit,
+                            cfg.auto_orbit_speed_deg, cfg.angle_cut, cfg.shader_angle_cut,
+                            cfg.angle_cut_start_deg, cfg.angle_cut_end_deg);
+#endif
+}
+
 void App::Impl::on_frame() {
-    if (pause_when_unfocused && (!window_focused || !window_visible)) {
+    if (cfg.pause_when_unfocused && (!window_focused || !window_visible)) {
         last_time = stm_now();
         fps_window_start = last_time;
         frame_count = 0;
@@ -235,10 +275,12 @@ void App::Impl::on_frame() {
                              sapp_dpi_scale());
 
     update_camera_input();
-    if (scene && auto_orbit) {
-        camera.orbit(glm::radians(auto_orbit_speed_deg) * static_cast<float>(delta_seconds), 0.f);
+    if (scene && cfg.auto_orbit) {
+        camera.orbit(glm::radians(cfg.auto_orbit_speed_deg) * static_cast<float>(delta_seconds),
+                     0.f);
     }
 
+    bool browser_url_dirty = false;
     ImGui::Begin("nodehammer viewer");
     ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
     {
@@ -278,7 +320,7 @@ void App::Impl::on_frame() {
     ImGui::Text("FPS: %.1f", fps);
     ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", frame_interval_ms,
                 render_submit_ms, scene_submit_ms);
-    ImGui::Checkbox("pause when unfocused", &pause_when_unfocused);
+    browser_url_dirty |= ImGui::Checkbox("pause when unfocused", &cfg.pause_when_unfocused);
     if (scene) {
         ImGui::Separator();
         ImGui::Text("Meshes: %u", scene_renderer.mesh_asset_count());
@@ -295,24 +337,28 @@ void App::Impl::on_frame() {
             }
         }
         ImGui::Separator();
-        ImGui::Checkbox("backface cull", &cull_back);
-        ImGui::Checkbox("auto orbit", &auto_orbit);
-        ImGui::SliderFloat("orbit speed", &auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
-        ImGui::Checkbox("angle cut", &angle_cut);
-        ImGui::Checkbox("shader angle cut", &shader_angle_cut);
-        ImGui::SliderFloat("cut start", &angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
+        browser_url_dirty |= ImGui::Checkbox("backface cull", &cfg.cull_back);
+        browser_url_dirty |= ImGui::Checkbox("auto orbit", &cfg.auto_orbit);
+        ImGui::SliderFloat("orbit speed", &cfg.auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
+        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
+        browser_url_dirty |= ImGui::Checkbox("angle cut", &cfg.angle_cut);
+        browser_url_dirty |= ImGui::Checkbox("shader angle cut", &cfg.shader_angle_cut);
+        ImGui::SliderFloat("cut start", &cfg.angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
+        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
-        if (ImGui::InputFloat("##cut_start_input", &angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
-            angle_cut_start_deg = wrap_degrees(angle_cut_start_deg);
+        if (ImGui::InputFloat("##cut_start_input", &cfg.angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
+            cfg.angle_cut_start_deg = wrap_degrees(cfg.angle_cut_start_deg);
         }
-        ImGui::SliderFloat("cut end", &angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
+        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::SliderFloat("cut end", &cfg.angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
+        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
-        if (ImGui::InputFloat("##cut_end_input", &angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
-            angle_cut_end_deg = wrap_degrees(angle_cut_end_deg);
+        if (ImGui::InputFloat("##cut_end_input", &cfg.angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
+            cfg.angle_cut_end_deg = wrap_degrees(cfg.angle_cut_end_deg);
         }
-        (void)wireframe;
+        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
@@ -320,6 +366,9 @@ void App::Impl::on_frame() {
         ImGui::Text("(no scene loaded)");
     }
     ImGui::End();
+    if (browser_url_dirty) {
+        sync_browser_url();
+    }
 
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.

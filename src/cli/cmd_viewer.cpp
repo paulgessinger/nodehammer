@@ -23,6 +23,23 @@ void register_cmd_viewer(CLI::App &app) {
         ->capture_default_str();
     sub->add_option("--title", cfg->title, "Window title")->capture_default_str();
     sub->add_flag("!--no-vsync", cfg->vsync, "Disable vsync (default: vsync on)");
+    sub->add_flag("!--no-cull-back", cfg->cull_back, "Disable backface culling")
+        ->capture_default_str();
+    sub->add_flag("!--no-pause-when-unfocused", cfg->pause_when_unfocused,
+                  "Keep rendering when the viewer is unfocused")
+        ->capture_default_str();
+    sub->add_flag("--auto-orbit", cfg->auto_orbit, "Start with camera auto-orbit enabled")
+        ->capture_default_str();
+    sub->add_option("--orbit-speed", cfg->auto_orbit_speed_deg, "Auto-orbit speed in degrees/s")
+        ->capture_default_str();
+    sub->add_flag("--angle-cut", cfg->angle_cut, "Start with angle cut enabled")
+        ->capture_default_str();
+    sub->add_flag("!--no-shader-angle-cut", cfg->shader_angle_cut, "Disable shader-side angle cut")
+        ->capture_default_str();
+    sub->add_option("--cut-start", cfg->angle_cut_start_deg, "Angle cut start in degrees")
+        ->capture_default_str();
+    sub->add_option("--cut-end", cfg->angle_cut_end_deg, "Angle cut end in degrees")
+        ->capture_default_str();
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (semantic IR)");
     auto *fmtInOpt =

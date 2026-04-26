@@ -43,6 +43,30 @@
         var inputUrl = params.get('input') || 'scene.nhb.zst';
         var configUrl = params.get('config') || 'scene.toml';
 
+        function queryBool(name) {
+            var value = params.get(name);
+            if (value === null) return null;
+            value = value.toLowerCase();
+            return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
+        }
+
+        function appendBoolArg(args, queryName, trueFlag, falseFlag) {
+            var value = queryBool(queryName);
+            if (value === null) return;
+            if (value && trueFlag) {
+                args.push(trueFlag);
+            } else if (!value && falseFlag) {
+                args.push(falseFlag);
+            }
+        }
+
+        function appendValueArg(args, queryName, flag) {
+            var value = params.get(queryName);
+            if (value !== null && value !== '') {
+                args.push(flag, value);
+            }
+        }
+
         var configIncludes = params.getAll('include');
         if (configIncludes.length === 0) {
             configIncludes = [
@@ -70,6 +94,20 @@
             useWGPU = !!navigator.gpu;
         }
         var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
+
+        var viewerArgs = [
+            'viewer',
+            '--input', '/' + inputUrl,
+            '--config', '/' + configUrl,
+        ];
+        appendBoolArg(viewerArgs, 'cullBack', null, '--no-cull-back');
+        appendBoolArg(viewerArgs, 'pauseWhenUnfocused', null, '--no-pause-when-unfocused');
+        appendBoolArg(viewerArgs, 'autoOrbit', '--auto-orbit', null);
+        appendValueArg(viewerArgs, 'orbitSpeed', '--orbit-speed');
+        appendBoolArg(viewerArgs, 'angleCut', '--angle-cut', null);
+        appendBoolArg(viewerArgs, 'shaderAngleCut', null, '--no-shader-angle-cut');
+        appendValueArg(viewerArgs, 'cutStart', '--cut-start');
+        appendValueArg(viewerArgs, 'cutEnd', '--cut-end');
 
         var statusEl = document.getElementById('status');
         var Module = {
@@ -111,11 +149,7 @@
                     FS.createPreloadedFile('/' + (dir || ''), name, p, true, false);
                 }
             }],
-            arguments: [
-                'viewer',
-                '--input', '/' + inputUrl,
-                '--config', '/' + configUrl,
-            ],
+            arguments: viewerArgs,
         };
         Module.setStatus('loading ' + bundleBase + '…');
         window.onerror = function (msg) {
