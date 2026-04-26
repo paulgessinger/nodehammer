@@ -14,7 +14,6 @@
 #include <sokol_time.h>
 
 #include <cmath>
-#include <cstdio>
 #include <memory>
 #include <utility>
 
@@ -31,7 +30,7 @@ struct App::Impl {
     bool camera_framed{false};
 
     bool wireframe{false};
-    bool cull_back{false};
+    bool cull_back{true};
 
     uint32_t fb_width{0};
     uint32_t fb_height{0};

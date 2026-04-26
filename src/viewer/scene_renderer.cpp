@@ -68,7 +68,8 @@ constexpr int kInstanceVbufSlot = 1;
 struct SceneRenderer::Impl {
     bool initialised{false};
     sg_shader shader{};
-    sg_pipeline pipeline{};
+    sg_pipeline pipeline_no_cull{};
+    sg_pipeline pipeline_back_cull{};
     // Per-group dynamic buffer of mat4 instance transforms. Allocated once
     // at upload() to fit the largest group; reused across frames since the
     // scene is static. Holds GROUPS-worth of data at start of each render().
@@ -143,9 +144,11 @@ void SceneRenderer::Impl::ensure_init() {
     // Reversed-Z: near maps to 1, far maps to 0, so closer fragments have
     // LARGER depth values. Pair with depth-clear=0 in the pass action.
     pdesc.depth.compare = SG_COMPAREFUNC_GREATER_EQUAL;
-    pdesc.cull_mode = SG_CULLMODE_NONE; // toggleable via render flags
     pdesc.face_winding = SG_FACEWINDING_CCW;
-    pipeline = sg_make_pipeline(&pdesc);
+    pdesc.cull_mode = SG_CULLMODE_NONE;
+    pipeline_no_cull = sg_make_pipeline(&pdesc);
+    pdesc.cull_mode = SG_CULLMODE_BACK;
+    pipeline_back_cull = sg_make_pipeline(&pdesc);
 
     initialised = true;
 }
@@ -211,9 +214,13 @@ void SceneRenderer::release() {
         return;
     }
     impl_->destroy_gpu();
-    if (impl_->pipeline.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(impl_->pipeline);
-        impl_->pipeline = sg_pipeline{};
+    if (impl_->pipeline_no_cull.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(impl_->pipeline_no_cull);
+        impl_->pipeline_no_cull = sg_pipeline{};
+    }
+    if (impl_->pipeline_back_cull.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(impl_->pipeline_back_cull);
+        impl_->pipeline_back_cull = sg_pipeline{};
     }
     if (impl_->shader.id != SG_INVALID_ID) {
         sg_destroy_shader(impl_->shader);
@@ -313,20 +320,17 @@ void SceneRenderer::upload(const RenderScene &scene) {
 void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_height,
                            RenderFlags flags) {
     impl_->last_stats = {};
-    if (impl_->groups.empty() || impl_->pipeline.id == SG_INVALID_ID) {
+    const sg_pipeline pipeline =
+        flags.cull_back ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
+    if (impl_->groups.empty() || pipeline.id == SG_INVALID_ID) {
         return;
     }
     if (fb_width == 0 || fb_height == 0) {
         return;
     }
 
-    sg_apply_pipeline(impl_->pipeline);
+    sg_apply_pipeline(pipeline);
 
-    // Cull state is baked into the pipeline at creation, so the only way to
-    // toggle culling per-frame would be to maintain two pipelines or to
-    // recreate. For a debug toggle we cheat by ignoring `cull_back` in this
-    // first cut — todo: add a culled pipeline if it proves useful.
-    (void)flags.cull_back;
     (void)flags.wireframe; // wireframe also pipeline-state; same future work.
 
     // sokol_gfx is depth-range-agnostic at the API level — view_proj must
