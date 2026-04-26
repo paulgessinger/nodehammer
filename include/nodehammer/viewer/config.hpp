@@ -19,7 +19,6 @@ struct Config {
     float angle_cut_start_deg{0.f};
     float angle_cut_end_deg{90.f};
     bool enable_pbr{false};
-    bool enable_ibl{false};
 };
 
 } // namespace nodehammer::viewer

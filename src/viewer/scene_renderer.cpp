@@ -529,8 +529,7 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         std::memcpy(fs_params.material_mr, glm::value_ptr(gmat.mr), sizeof(fs_params.material_mr));
         const float prefilter_max_lod =
             std::max(0.f, static_cast<float>(impl_->ibl.prefilter_mip_count - 1));
-        const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, flags.enable_ibl ? 1.f : 0.f,
-                                   prefilter_max_lod, 0.f};
+        const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, prefilter_max_lod, 0.f, 0.f};
         std::memcpy(fs_params.mode_flags, glm::value_ptr(mode_flags), sizeof(fs_params.mode_flags));
         const glm::vec3 eye = camera.eye();
         const glm::vec4 cam_pos{eye.x, eye.y, eye.z, 0.f};

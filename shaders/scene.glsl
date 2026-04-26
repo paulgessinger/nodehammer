@@ -53,7 +53,7 @@ layout(binding=1) uniform fs_params {
     vec4 cut_start;    // xy = unit vector at start phi
     vec4 cut_end;      // xy = unit vector at end phi
     vec4 material_mr;  // x = metallic, y = roughness, z/w = unused
-    vec4 mode_flags;   // x = pbr_enable, y = ibl_enable, z = prefilter_max_lod, w = unused
+    vec4 mode_flags;   // x = pbr_enable, y = prefilter_max_lod, z/w = unused
     vec4 camera_pos;   // xyz = world-space camera position
 };
 
@@ -143,28 +143,17 @@ void main() {
 
     vec3 Lo = (diffuse + specular) * NdotL * light_dir.w;
 
-    // ── Ambient term ────────────────────────────────────────────────────
-    vec3 ambient;
-    if (mode_flags.y >= 0.5) {
-        // Image-based lighting (split-sum approximation).
-        vec3 R = reflect(-V, n);
-        float max_lod = mode_flags.z;
-        vec3 irradiance = texture(samplerCube(tex_irradiance, smp_cube), n).rgb;
-        vec3 prefiltered = textureLod(samplerCube(tex_prefilter, smp_cube), R,
-                                       roughness * max_lod).rgb;
-        vec2 brdf = texture(sampler2D(tex_brdf_lut, smp_lut),
-                            vec2(NdotV, roughness)).rg;
+    // Image-based lighting (split-sum approximation) — always on in PBR mode.
+    vec3 R = reflect(-V, n);
+    float max_lod = mode_flags.y;
+    vec3 irradiance = texture(samplerCube(tex_irradiance, smp_cube), n).rgb;
+    vec3 prefiltered =
+        textureLod(samplerCube(tex_prefilter, smp_cube), R, roughness * max_lod).rgb;
+    vec2 brdf = texture(sampler2D(tex_brdf_lut, smp_lut), vec2(NdotV, roughness)).rg;
+    vec3 ambient = irradiance * kd * base_color.rgb +
+                   prefiltered * (F0 * brdf.x + vec3(brdf.y));
 
-        vec3 diffuse_ibl = irradiance * kd * base_color.rgb;
-        vec3 specular_ibl = prefiltered * (F0 * brdf.x + vec3(brdf.y));
-        ambient = diffuse_ibl + specular_ibl;
-    } else {
-        // Constant fill so PBR-only mode (no IBL) isn't black on the dark side.
-        ambient = vec3(0.15) * base_color.rgb;
-    }
-
-    vec3 color = ambient + Lo;
-    frag_color = vec4(color, base_color.a);
+    frag_color = vec4(ambient + Lo, base_color.a);
 }
 @end
 
