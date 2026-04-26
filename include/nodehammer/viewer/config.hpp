@@ -1,6 +1,9 @@
 #pragma once
 
+#include <nodehammer/viewer/camera.hpp>
+
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace nodehammer::viewer {
@@ -19,6 +22,7 @@ struct Config {
     float angle_cut_start_deg{0.f};
     float angle_cut_end_deg{90.f};
     bool enable_pbr{false};
+    std::optional<Camera> initial_camera;
 };
 
 } // namespace nodehammer::viewer

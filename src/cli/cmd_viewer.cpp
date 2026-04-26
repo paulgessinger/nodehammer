@@ -18,6 +18,9 @@ void register_cmd_viewer(CLI::App &app) {
     auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
 
     auto cfg = std::make_shared<nodehammer::viewer::Config>();
+    auto initialCamera = std::make_shared<nodehammer::viewer::Camera>();
+    auto cameraYawDeg = std::make_shared<float>(0.f);
+    auto cameraPitchDeg = std::make_shared<float>(0.f);
     sub->add_option("--width", cfg->width, "Initial window width in pixels")->capture_default_str();
     sub->add_option("--height", cfg->height, "Initial window height in pixels")
         ->capture_default_str();
@@ -42,13 +45,48 @@ void register_cmd_viewer(CLI::App &app) {
         ->capture_default_str();
     sub->add_flag("--pbr", cfg->enable_pbr, "Start with PBR/IBL shading enabled")
         ->capture_default_str();
+    auto *cameraTargetXOpt = sub->add_option("--camera-target-x", initialCamera->target.x,
+                                             "Initial camera target X coordinate");
+    auto *cameraTargetYOpt = sub->add_option("--camera-target-y", initialCamera->target.y,
+                                             "Initial camera target Y coordinate");
+    auto *cameraTargetZOpt = sub->add_option("--camera-target-z", initialCamera->target.z,
+                                             "Initial camera target Z coordinate");
+    auto *cameraDistanceOpt = sub->add_option("--camera-distance", initialCamera->distance,
+                                              "Initial camera orbit distance");
+    auto *cameraYawOpt =
+        sub->add_option("--camera-yaw", *cameraYawDeg, "Initial camera yaw in degrees");
+    auto *cameraPitchOpt =
+        sub->add_option("--camera-pitch", *cameraPitchDeg, "Initial camera pitch in degrees");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (semantic IR)");
     auto *fmtInOpt =
         sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
-    sub->callback([cfg, inputOpt, fmtInOpt, configOpt]() {
+    sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cameraTargetXOpt,
+                   cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
+                   cameraPitchOpt, inputOpt, fmtInOpt, configOpt]() {
+        const bool hasCameraOption = *cameraTargetXOpt || *cameraTargetYOpt || *cameraTargetZOpt ||
+                                     *cameraDistanceOpt || *cameraYawOpt || *cameraPitchOpt;
+        const bool hasAllCameraOptions = *cameraTargetXOpt && *cameraTargetYOpt &&
+                                         *cameraTargetZOpt && *cameraDistanceOpt && *cameraYawOpt &&
+                                         *cameraPitchOpt;
+        if (hasCameraOption && !hasAllCameraOptions) {
+            std::println(
+                stderr,
+                "viewer: camera URL restore requires target x/y/z, distance, yaw, and pitch");
+            std::exit(1);
+        }
+        if (hasAllCameraOptions) {
+            if (initialCamera->distance <= 0.f) {
+                std::println(stderr, "viewer: --camera-distance must be positive");
+                std::exit(1);
+            }
+            initialCamera->yaw = glm::radians(*cameraYawDeg);
+            initialCamera->pitch = glm::radians(*cameraPitchDeg);
+            cfg->initial_camera = *initialCamera;
+        }
+
         // Build the scene first (in CPU memory) so the viewer either gets a
         // valid RenderScene or no scene at all (falls back to demo triangle).
         std::shared_ptr<nodehammer::RenderScene> scene;

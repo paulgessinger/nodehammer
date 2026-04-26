@@ -13,51 +13,33 @@
 #include <sokol_log.h>
 #include <sokol_time.h>
 
+#include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <memory>
+#include <sstream>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
 
-EM_JS(void, nh_viewer_set_url_state,
-      (int cull_back, int pause_when_unfocused, int auto_orbit, float orbit_speed, int angle_cut,
-       int shader_angle_cut, float cut_start, float cut_end, int enable_pbr, int enable_ibl),
-      {
-          var url = new URL(window.location.href);
-          var p = url.searchParams;
+EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
+    var url = new URL(window.location.href);
+    var p = url.searchParams;
+    var keys = UTF8ToString(managed_keys).split(',');
+    for (var i = 0; i < keys.length; ++i) {
+        if (keys[i]) {
+            p.delete(keys[i]);
+        }
+    }
 
-          function setBool(name, value, defaultValue) {
-              var boolValue = !!value;
-              if (boolValue == = defaultValue) {
-                  p.delete(name);
-              } else {
-                  p.set(name, boolValue ? '1' : '0');
-              }
-          }
+    var state = new URLSearchParams(UTF8ToString(state_query));
+    state.forEach(function(value, key) { p.set(key, value); });
 
-          function setFloat(name, value, defaultValue) {
-              var numberValue = Number(value);
-              if (Math.abs(numberValue - defaultValue) < 0.0001) {
-                  p.delete(name);
-              } else {
-                  p.set(name, String(Math.round(numberValue * 1000) / 1000));
-              }
-          }
-
-          setBool('cullBack', cull_back, true);
-          setBool('pauseWhenUnfocused', pause_when_unfocused, true);
-          setBool('autoOrbit', auto_orbit, false);
-          setFloat('orbitSpeed', orbit_speed, 15.0);
-          setBool('angleCut', angle_cut, false);
-          setBool('shaderAngleCut', shader_angle_cut, true);
-          setFloat('cutStart', cut_start, 0.0);
-          setFloat('cutEnd', cut_end, 90.0);
-          setBool('pbr', enable_pbr, false);
-          setBool('ibl', enable_ibl, false);
-
-          history.replaceState(null, "", url);
-      });
+    history.replaceState(null, "", url);
+});
 #endif
 
 namespace nodehammer::viewer {
@@ -70,6 +52,40 @@ float wrap_degrees(float angle) {
         angle += 360.f;
     }
     return angle;
+}
+
+std::string format_url_float(float value) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(3) << value;
+    std::string s = out.str();
+    while (s.size() > 1 && s.back() == '0') {
+        s.pop_back();
+    }
+    if (!s.empty() && s.back() == '.') {
+        s.pop_back();
+    }
+    return s == "-0" ? "0" : s;
+}
+
+void append_url_param(std::string &query, std::string_view name, std::string_view value) {
+    if (!query.empty()) {
+        query.push_back('&');
+    }
+    query.append(name);
+    query.push_back('=');
+    query.append(value);
+}
+
+void append_url_bool(std::string &query, std::string_view name, bool value, bool default_value) {
+    if (value != default_value) {
+        append_url_param(query, name, value ? "1" : "0");
+    }
+}
+
+void append_url_float(std::string &query, std::string_view name, float value, float default_value) {
+    if (std::abs(value - default_value) >= 0.0001f) {
+        append_url_param(query, name, format_url_float(value));
+    }
 }
 
 } // namespace
@@ -108,8 +124,10 @@ struct App::Impl {
     void on_cleanup();
 
     void update_camera_input();
+    void apply_initial_camera();
     void render();
     void sync_browser_url() const;
+    [[nodiscard]] std::string browser_url_state_query() const;
 
     static void init_cb(void *user) { static_cast<Impl *>(user)->on_init(); }
     static void frame_cb(void *user) { static_cast<Impl *>(user)->on_frame(); }
@@ -192,6 +210,17 @@ void App::Impl::update_camera_input() {
     }
 }
 
+void App::Impl::apply_initial_camera() {
+    if (!cfg.initial_camera.has_value()) {
+        return;
+    }
+    const float scene_radius = camera.scene_radius;
+    camera = *cfg.initial_camera;
+    camera.scene_radius = scene_radius;
+    camera.pitch = std::clamp(camera.pitch, -1.553343f, 1.553343f);
+    camera.dolly(1.f);
+}
+
 void App::Impl::render() {
     const uint64_t render_submit_start = stm_now();
     scene_submit_ms = 0.0;
@@ -214,6 +243,7 @@ void App::Impl::render() {
             glm::vec3 bmin{0.f}, bmax{0.f};
             if (scene_renderer.world_bounds(bmin, bmax)) {
                 camera.frame_bounds(bmin, bmax);
+                apply_initial_camera();
                 camera_framed = true;
             }
         }
@@ -224,7 +254,6 @@ void App::Impl::render() {
         flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
         flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
         flags.enable_pbr = cfg.enable_pbr;
-        flags.enable_ibl = cfg.enable_ibl;
         const uint64_t scene_submit_start = stm_now();
         scene_renderer.render(camera, fb_width, fb_height, flags);
         scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
@@ -237,12 +266,33 @@ void App::Impl::render() {
     render_submit_ms = stm_sec(stm_diff(stm_now(), render_submit_start)) * 1000.0;
 }
 
+std::string App::Impl::browser_url_state_query() const {
+    std::string query;
+    append_url_bool(query, "cullBack", cfg.cull_back, true);
+    append_url_bool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
+    append_url_bool(query, "autoOrbit", cfg.auto_orbit, false);
+    append_url_float(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
+    append_url_bool(query, "angleCut", cfg.angle_cut, false);
+    append_url_bool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
+    append_url_float(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
+    append_url_float(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
+    append_url_bool(query, "pbr", cfg.enable_pbr, false);
+    append_url_param(query, "cameraTargetX", format_url_float(camera.target.x));
+    append_url_param(query, "cameraTargetY", format_url_float(camera.target.y));
+    append_url_param(query, "cameraTargetZ", format_url_float(camera.target.z));
+    append_url_param(query, "cameraDistance", format_url_float(camera.distance));
+    append_url_param(query, "cameraYaw", format_url_float(glm::degrees(camera.yaw)));
+    append_url_param(query, "cameraPitch", format_url_float(glm::degrees(camera.pitch)));
+    return query;
+}
+
 void App::Impl::sync_browser_url() const {
 #ifdef __EMSCRIPTEN__
-    nh_viewer_set_url_state(cfg.cull_back, cfg.pause_when_unfocused, cfg.auto_orbit,
-                            cfg.auto_orbit_speed_deg, cfg.angle_cut, cfg.shader_angle_cut,
-                            cfg.angle_cut_start_deg, cfg.angle_cut_end_deg, cfg.enable_pbr,
-                            cfg.enable_ibl);
+    const std::string state_query = browser_url_state_query();
+    constexpr const char *managed_keys =
+        "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,cutEnd,"
+        "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
+    nh_viewer_commit_url_state(state_query.c_str(), managed_keys);
 #endif
 }
 
@@ -285,7 +335,6 @@ void App::Impl::on_frame() {
                      0.f);
     }
 
-    bool browser_url_dirty = false;
     ImGui::Begin("nodehammer viewer");
     ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
     {
@@ -325,7 +374,12 @@ void App::Impl::on_frame() {
     ImGui::Text("FPS: %.1f", fps);
     ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", frame_interval_ms,
                 render_submit_ms, scene_submit_ms);
-    browser_url_dirty |= ImGui::Checkbox("pause when unfocused", &cfg.pause_when_unfocused);
+#ifdef __EMSCRIPTEN__
+    if (ImGui::Button("Commit settings to URL")) {
+        sync_browser_url();
+    }
+#endif
+    ImGui::Checkbox("pause when unfocused", &cfg.pause_when_unfocused);
     if (scene) {
         ImGui::Separator();
         ImGui::Text("Meshes: %u", scene_renderer.mesh_asset_count());
@@ -342,33 +396,25 @@ void App::Impl::on_frame() {
             }
         }
         ImGui::Separator();
-        browser_url_dirty |= ImGui::Checkbox("backface cull", &cfg.cull_back);
-        browser_url_dirty |= ImGui::Checkbox("auto orbit", &cfg.auto_orbit);
+        ImGui::Checkbox("backface cull", &cfg.cull_back);
+        ImGui::Checkbox("auto orbit", &cfg.auto_orbit);
         ImGui::SliderFloat("orbit speed", &cfg.auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
-        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
-        browser_url_dirty |= ImGui::Checkbox("angle cut", &cfg.angle_cut);
-        browser_url_dirty |= ImGui::Checkbox("shader angle cut", &cfg.shader_angle_cut);
+        ImGui::Checkbox("angle cut", &cfg.angle_cut);
+        ImGui::Checkbox("shader angle cut", &cfg.shader_angle_cut);
         ImGui::SliderFloat("cut start", &cfg.angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
-        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
         if (ImGui::InputFloat("##cut_start_input", &cfg.angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
             cfg.angle_cut_start_deg = wrap_degrees(cfg.angle_cut_start_deg);
         }
-        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SliderFloat("cut end", &cfg.angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
-        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
         if (ImGui::InputFloat("##cut_end_input", &cfg.angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
             cfg.angle_cut_end_deg = wrap_degrees(cfg.angle_cut_end_deg);
         }
-        browser_url_dirty |= ImGui::IsItemDeactivatedAfterEdit();
         ImGui::Separator();
-        browser_url_dirty |= ImGui::Checkbox("PBR shading", &cfg.enable_pbr);
-        ImGui::BeginDisabled(!cfg.enable_pbr);
-        browser_url_dirty |= ImGui::Checkbox("image-based lighting", &cfg.enable_ibl);
-        ImGui::EndDisabled();
+        ImGui::Checkbox("PBR / IBL", &cfg.enable_pbr);
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
@@ -376,9 +422,6 @@ void App::Impl::on_frame() {
         ImGui::Text("(no scene loaded)");
     }
     ImGui::End();
-    if (browser_url_dirty) {
-        sync_browser_url();
-    }
 
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
