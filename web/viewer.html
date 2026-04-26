@@ -55,15 +55,18 @@
         }
 
         // Backend selection: WebGPU when available, WebGL2 otherwise. Force
-        // a specific backend for A/B testing with ?backend=gles3 or
-        // ?backend=wgpu.
-        var forced = params.get('backend');
+        // a specific backend for A/B testing with ?backend=wgpu/webgpu or
+        // ?backend=gles3/webgl2.
+        var forced = (params.get('backend') || '').toLowerCase();
         var useWGPU;
-        if (forced === 'wgpu') {
+        if (forced === 'wgpu' || forced === 'webgpu') {
             useWGPU = true;
-        } else if (forced === 'gles3') {
+        } else if (forced === 'gles3' || forced === 'webgl2' || forced === 'webgl') {
             useWGPU = false;
         } else {
+            if (forced) {
+                console.warn('unknown backend "' + forced + '", using auto-detect');
+            }
             useWGPU = !!navigator.gpu;
         }
         var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
