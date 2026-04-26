@@ -32,8 +32,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Dependencies.cmake so FetchContent targets inherit it. The matching conan
 # profile flags cover conan-built deps (catch2 etc.) — the two must agree.
 if(EMSCRIPTEN)
-    add_compile_options(-fwasm-exceptions)
-    add_link_options(-fwasm-exceptions)
+    # Native wasm exceptions. -sWASM_LEGACY_EXCEPTIONS=0 forces emscripten to
+    # emit the modern try_table/throw_ref instructions instead of the legacy
+    # try/catch (which browsers warn about as deprecated). The default flips to
+    # 0 in emscripten >= 4.0; setting it explicitly works on older sdks too.
+    add_compile_options(-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0)
+    add_link_options(-fwasm-exceptions -sWASM_LEGACY_EXCEPTIONS=0)
 endif()
 
 # ── Options ───────────────────────────────────────────────────────────────────

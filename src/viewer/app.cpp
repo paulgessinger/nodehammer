@@ -330,8 +330,14 @@ int App::run() {
     // simulate_infinite_loop=1 unwinds main() with an exception so the runtime
     // keeps the wasm instance + GL context alive between frames. Requires
     // -fwasm-exceptions, which is set globally for emscripten builds.
-    emscripten_set_main_loop_arg(&App::Impl::em_tick, impl_.get(), 0, 1);
-    return 0;
+    //
+    // The unwind tears down every local on the way out, including any App
+    // sitting on the caller's stack — so we'd hit a dangling Impl on the next
+    // tick. Detach impl_ so the wasm runtime owns it for the lifetime of the
+    // page; the App destructor then becomes a no-op on the emscripten path.
+    Impl *leaked = impl_.release();
+    emscripten_set_main_loop_arg(&App::Impl::em_tick, leaked, 0, 1);
+    return 0; // unreachable: simulate_infinite_loop=1 throws past this
 #else
     while (!impl_->quit) {
         impl_->tick();

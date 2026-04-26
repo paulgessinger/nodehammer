@@ -208,14 +208,34 @@ if(NODEHAMMER_WITH_VIEWER)
     set(BGFX_INSTALL               OFF CACHE BOOL "" FORCE)
     set(BGFX_OPENGLES_VERSION      30  CACHE STRING "" FORCE)
     # bgfx.cmake itself disables BGFX_CONFIG_MULTITHREADED on emscripten via
-    # cmake_dependent_option — do NOT override it here. Tools (shaderc, bin2c)
-    # are host-only; under cross-compile they must be provided separately.
-    if(CMAKE_CROSSCOMPILING)
-        set(BGFX_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
-    else()
-        set(BGFX_BUILD_TOOLS ON CACHE BOOL "" FORCE)
-    endif()
+    # cmake_dependent_option — do NOT override it here.
+    #
+    # Tools (shaderc, bin2c, ...) are host-only. We always disable them in this
+    # subdirectory and rely on a host-built shaderc supplied via:
+    #   1) Conan tool_requires (bgfx with tools=True, see conanfile.py) — adds
+    #      the binaries to PATH via VirtualBuildEnv. This is the default path.
+    #   2) An explicit shaderc on PATH (find_program in shaders/CMakeLists.txt).
+    set(BGFX_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(bgfx)
+
+    # Locate a host-built shaderc and synthesise an IMPORTED bgfx::shaderc
+    # target BEFORE we include bgfxToolUtils.cmake. The helper script gates
+    # `bgfx_compile_shaders` behind `if(TARGET bgfx::shaderc)`, so the target
+    # has to exist first or the function never gets defined.
+    #
+    # PATH source: typically Conan tool_requires (bgfx with tools=True) — see
+    # conanfile.py's build_requirements(). Conan's CMakeToolchain prepends
+    # build-context tool dirs to CMAKE_PROGRAM_PATH so find_program sees them.
+    # Falls back to a system-installed shaderc if Conan didn't supply one.
+    if(NOT TARGET bgfx::shaderc)
+        find_program(NODEHAMMER_HOST_SHADERC shaderc
+            DOC "Host-built bgfx shaderc (typically supplied via Conan tool_requires)")
+        if(NODEHAMMER_HOST_SHADERC)
+            add_executable(bgfx::shaderc IMPORTED GLOBAL)
+            set_property(TARGET bgfx::shaderc PROPERTY
+                IMPORTED_LOCATION "${NODEHAMMER_HOST_SHADERC}")
+        endif()
+    endif()
 
     # bgfx.cmake exposes bgfxToolUtils.cmake (bgfx_compile_shaders helper).
     # When consuming via add_subdirectory it isn't auto-included; pull it in.
@@ -232,7 +252,7 @@ if(NODEHAMMER_WITH_VIEWER)
     FetchContent_Declare(SDL3
         SYSTEM
         GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG        release-3.2.10
+        GIT_TAG        release-3.2.20
         FIND_PACKAGE_ARGS 3.2
     )
     set(SDL_SHARED  OFF CACHE BOOL "" FORCE)
@@ -274,7 +294,7 @@ if(NODEHAMMER_WITH_VIEWER)
     endif()
 
     # Quiet third-party warnings on bgfx/SDL3 too — same pattern as zstd/manifold.
-    foreach(_t bgfx bx bimg SDL3-static)
+    foreach(_t bgfx bx bimg bimg_decode bimg_encode SDL3-static)
         if(TARGET ${_t})
             if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
                 target_compile_options(${_t} PRIVATE -w)
@@ -283,4 +303,13 @@ if(NODEHAMMER_WITH_VIEWER)
             endif()
         endif()
     endforeach()
+
+    # bgfx.cmake unconditionally defines bimg_encode (offline texture compression
+    # — NVTT, astc_encoder, libsquish, ...). Only the host tool `texturec` links
+    # it, and we have BGFX_BUILD_TOOLS=OFF, so nothing in our build needs it.
+    # Excluding it from the default build sidesteps NVTT's emscripten-incompatible
+    # C99 `restrict` usage without rewriting source.
+    if(TARGET bimg_encode)
+        set_target_properties(bimg_encode PROPERTIES EXCLUDE_FROM_ALL TRUE)
+    endif()
 endif()

@@ -6,29 +6,14 @@
 # (e.g. `vs_solid_essl[]`). bgfx::createEmbeddedShader then dispatches to the
 # right one at runtime via BGFX_PLATFORM_SUPPORTS_* checks.
 #
-# When cross-compiling (emscripten), bgfx::shaderc is not built locally — the
-# user must put a host-built shaderc on PATH first; we then synthesize an
-# IMPORTED bgfx::shaderc target so bgfx_compile_shaders works.
+# bgfx::shaderc is resolved in cmake/Dependencies.cmake (typically via Conan
+# tool_requires); if it isn't defined here something went wrong upstream.
 
 if(NOT TARGET bgfx::shaderc)
-    if(CMAKE_CROSSCOMPILING)
-        find_program(NODEHAMMER_HOST_SHADERC shaderc
-            DOC "Host-built bgfx shaderc (required for cross-compile shader builds)")
-        if(NOT NODEHAMMER_HOST_SHADERC)
-            message(FATAL_ERROR
-                "NODEHAMMER_WITH_VIEWER is ON but bgfx::shaderc is not built and "
-                "no host shaderc was found on PATH. Build the native preset first, "
-                "then add the bgfx shaderc binary to PATH (it lands under "
-                "build/.../_deps/bgfx-build/cmake/bgfx/) before configuring this preset.")
-        endif()
-        add_executable(bgfx::shaderc IMPORTED GLOBAL)
-        set_property(TARGET bgfx::shaderc PROPERTY
-            IMPORTED_LOCATION "${NODEHAMMER_HOST_SHADERC}")
-    else()
-        message(FATAL_ERROR
-            "bgfx::shaderc target is not defined. bgfx.cmake should provide it "
-            "when BGFX_BUILD_TOOLS=ON; check Dependencies.cmake.")
-    endif()
+    message(FATAL_ERROR
+        "NODEHAMMER_WITH_VIEWER is ON but bgfx::shaderc is not defined. Either "
+        "run `conan install . -o '&:viewer=True' ...` so the bgfx tool_requires "
+        "puts shaderc on PATH, or install bgfx's shaderc system-wide.")
 endif()
 
 set(NH_SHADER_VARYING ${CMAKE_CURRENT_SOURCE_DIR}/varying.def.sc)

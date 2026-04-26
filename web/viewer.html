@@ -33,6 +33,21 @@
     <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
     <div id="status">loading…</div>
     <script>
+        // Filter bgfx's WebGL caps-probing chatter. At init bgfx queries every
+        // texture format with getInternalformatParameter(); the browser logs a
+        // warning when a format isn't valid as a renderbuffer, even though the
+        // call returns the right "unsupported" answer. Harmless, just noisy.
+        (function () {
+            var origWarn = console.warn.bind(console);
+            console.warn = function (msg) {
+                if (typeof msg === 'string' &&
+                    (msg.indexOf('getInternalformatParameter') !== -1)) {
+                    return;
+                }
+                origWarn.apply(null, arguments);
+            };
+        })();
+
         var statusEl = document.getElementById('status');
         var Module = {
             canvas: document.getElementById('canvas'),
