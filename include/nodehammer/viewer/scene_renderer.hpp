@@ -11,11 +11,10 @@ namespace nodehammer::viewer {
 
 struct Camera;
 
-/// GPU-side renderer for nodehammer's tessellated RenderScene IR.
-///
-/// Stage 3 first pass: per-mesh-asset static buffers, draw nodes grouped by
-/// (mesh, material) with instancing when the group is large enough and the
-/// backend supports it. Lambertian shading; PBR comes later.
+/// GPU-side renderer for nodehammer's tessellated RenderScene IR using
+/// sokol_gfx. Per-mesh-asset static vertex/index buffers, draws grouped by
+/// (mesh, material) with hardware instancing for the per-node world matrix.
+/// Lambertian shading; PBR comes later.
 class SceneRenderer {
   public:
     SceneRenderer();
@@ -25,12 +24,12 @@ class SceneRenderer {
 
     /// Upload all mesh assets in `scene` to GPU buffers and pre-flatten the
     /// node hierarchy into draw groups. Discards previous scene state. Call
-    /// after bgfx::init.
+    /// after sg_setup.
     void upload(const RenderScene &scene);
 
-    /// Release every bgfx handle the renderer holds. Must be called before
-    /// bgfx::shutdown — the destructor would otherwise attempt to destroy
-    /// handles against a dead context. Idempotent.
+    /// Release every sokol_gfx handle the renderer holds. Must be called
+    /// before sg_shutdown — sokol asserts on outstanding resources at
+    /// shutdown. Idempotent.
     void release();
 
     struct RenderFlags {
@@ -38,11 +37,9 @@ class SceneRenderer {
         bool cull_back{false};
     };
 
-    /// Submit draw calls for the active scene to the given view. Sets the view
-    /// transform from the camera; assumes the view rect was already configured
-    /// for the framebuffer size.
-    void render(uint16_t view_id, const Camera &camera, uint32_t fb_width, uint32_t fb_height,
-                RenderFlags flags);
+    /// Submit draw calls for the active scene. Caller must have an active
+    /// sg_begin_pass / sg_end_pass bracket around the call.
+    void render(const Camera &camera, uint32_t fb_width, uint32_t fb_height, RenderFlags flags);
 
     /// Stats for the most recent render() call. Useful for the perf experiment.
     struct FrameStats {

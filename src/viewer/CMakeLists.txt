@@ -1,38 +1,16 @@
-add_library(nodehammer_viewer STATIC
-    app.cpp
-    sdl_platform.cpp
-    imgui_impl_bgfx.cpp
-    camera.cpp
-    scene_renderer.cpp
+# The viewer is composed of plain C++23 sources that compile against
+# whichever sokol::sokol_<backend> they're linked into. Because sokol_gfx.h
+# / sokol_app.h headers expose backend-dependent struct surfaces, the same
+# .cpp files have to be compiled separately for each backend executable —
+# so we don't build a STATIC library here. Instead, expose the source list
+# (and the include path for the sokol-shdc-generated shader header) up to
+# the parent so the top-level CMakeLists.txt can drop the sources straight
+# onto each viewer executable target.
+
+set(NH_VIEWER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/app.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/scene_renderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/imgui_backend.cpp
+    PARENT_SCOPE
 )
-
-target_include_directories(nodehammer_viewer PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
-)
-
-target_include_directories(nodehammer_viewer PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
-
-# Embedded-shader headers are written under shaders/${CMAKE_BUILD_DIR}/shaders/
-# at configure-time via bgfx_compile_shader_to_header (see shaders/CMakeLists.txt).
-target_include_directories(nodehammer_viewer PRIVATE
-    ${CMAKE_BINARY_DIR}/shaders
-)
-
-target_link_libraries(nodehammer_viewer PUBLIC
-    bgfx
-    bx
-    SDL3::SDL3-static
-    imgui
-    glm::glm
-    # Brings in RenderScene/Vertex types and the unordered_dense headers used
-    # by scene_renderer.cpp.
-    nodehammer_lib
-)
-
-# The shader headers are produced by the shaders/ subdirectory; a target-level
-# dependency keeps the build order correct without baking specific files in.
-add_dependencies(nodehammer_viewer nodehammer_shaders)
-
-nodehammer_set_compiler_options(nodehammer_viewer)

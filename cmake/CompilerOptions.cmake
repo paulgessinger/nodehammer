@@ -67,8 +67,12 @@ endfunction()
 # Apply link options for the browser viewer build (Emscripten only). Use this
 # *instead* of nodehammer_apply_emscripten_exe_options when building the viewer:
 # NODERAWFS is incompatible with browsers, so we deliberately do not set it.
-# WebGL2 + offscreen framebuffer is what bgfx's GLES path expects. The shell
-# file wraps the generated bundle with a canvas + status element.
+# WebGL2 flags are kept for the SOKOL_GLES3 build; the WebGPU build adds
+# -sUSE_WEBGPU=1 separately at its target site.
+#
+# Output is .js + .wasm (no .html). web/viewer.html is served separately as
+# a static page that probes navigator.gpu and dynamically loads the matching
+# nodehammer-{gles3,wgpu}.js — see web/viewer.html and Justfile wasm-serve.
 function(nodehammer_apply_emscripten_viewer_options target)
     if(NOT EMSCRIPTEN)
         return()
@@ -81,8 +85,11 @@ function(nodehammer_apply_emscripten_viewer_options target)
         "-sFULL_ES3=1"
         "-sMIN_WEBGL_VERSION=2"
         "-sMAX_WEBGL_VERSION=2"
-        "-sOFFSCREEN_FRAMEBUFFER=1"
-        "--shell-file=${CMAKE_SOURCE_DIR}/web/viewer.html"
+        # The wasm-exceptions runtime emits JS that calls $stackSave/
+        # $stackRestore, which in turn need the C-level emscripten_stack_*
+        # helpers from libcompiler_rt. Force-include those JS lib funcs;
+        # emcc then auto-pulls the C deps from compiler_rt for us.
+        "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$stackSave,$stackRestore"
     )
-    set_target_properties(${target} PROPERTIES SUFFIX ".html")
+    set_target_properties(${target} PROPERTIES SUFFIX ".js")
 endfunction()

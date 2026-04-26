@@ -1,0 +1,28 @@
+# Per-platform sokol-shdc binaries from floooh/sokol-tools-bin.
+#
+# Bumping the version: pick a commit on floooh/sokol-tools-bin's `master` (the
+# repo lives entirely on master — there are no releases), download each
+# `bin/<platform>/sokol-shdc[.exe]`, sha256 it, and update the entries below.
+# The version string is the upstream commit date in YYYY.MM.DD form for
+# readability; the commit is recorded in the URL.
+sources:
+  "2026.04.25":
+    # commit floooh/sokol-tools-bin@1a9a4e5409 (2026-04-25, "updated (88)")
+    Macos:
+      armv8:
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/osx_arm64/sokol-shdc"
+        sha256: "6aa53965c88c1a0a2e26be274c98e48dcfc982d3398afa445da1529577bb1516"
+      x86_64:
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/osx/sokol-shdc"
+        sha256: "b669677f144d246707d6f70dc99387edea2573d7e392bb52f68a5f5a6caa8d03"
+    Linux:
+      x86_64:
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/linux/sokol-shdc"
+        sha256: "cdf68fe56c8982eefb53a613d2bcf20abb6e038db32cbb0c069b49609c717c90"
+      armv8:
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/linux_arm64/sokol-shdc"
+        sha256: "33032b3863e5fc6cf8cb521661f803b1759acde5438c7b9ef5c66efed8293087"
+    Windows:
+      x86_64:
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/win32/sokol-shdc.exe"
+        sha256: "85af3537cc432a44bac568ad64838821cef09c64cd58098a58e99612ccdc0ab8"

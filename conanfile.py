@@ -33,24 +33,18 @@ class Nodehammer(ConanFile):
         # revision. With the patch applied, manifold's Conan package works
         # for both native and wasm and we can drop the FetchContent fallback.
         self.requires("manifold/3.2.1")
-        # Viewer-only runtime deps. The CCI sdl/3.x recipe silently builds an
-        # empty libSDL3.a on the emscripten host profile — falling back to
-        # FetchContent for wasm. ImGui is intentionally NOT here either: its
-        # backend sources (imgui_impl_sdl3.cpp etc.) live in res/bindings,
-        # which is awkward to wire up vs. add_subdirectory-style FetchContent.
-        if self.options.viewer and self.settings.os != "Emscripten":
-            self.requires("sdl/3.2.20")
+        # No viewer runtime requires: the sokol headers are header-only and
+        # come from FetchContent (cmake/Sokol.cmake); no SDL3 — sokol_app
+        # owns the window/event loop on every platform.
 
     def build_requirements(self):
-        # When the viewer is on, pull bgfx as a TOOL requirement so we get a
-        # native-built shaderc/bin2c on PATH. tool_requires always uses the
-        # build profile, so this works identically for native and emscripten
-        # cross-compiles. The bgfx RUNTIME we link against still comes from
-        # FetchContent (cmake/Dependencies.cmake) — the CCI bgfx recipe is
-        # currently broken on emscripten, but we never link its host-context
-        # output, so that doesn't bite us.
+        # sokol-shdc is the shader compiler: a prebuilt static binary wrapped
+        # by the local recipe under recipes/sokol-shdc. tool_requires resolves
+        # against the build profile, so cross-compiling to Emscripten still
+        # picks the host's binary (verified by Justfile passing `-pr:b default`
+        # to wasm-deps). Re-exported by `just recipes` alongside manifold.
         if self.options.viewer:
-            self.tool_requires("bgfx/1.129.8930-495", options={"tools": True})
+            self.tool_requires("sokol-shdc/2026.04.25")
 
     def configure(self):
         self.settings.compiler.cppstd = "23"

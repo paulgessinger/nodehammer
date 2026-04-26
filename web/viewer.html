@@ -33,35 +33,16 @@
     <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
     <div id="status">loading…</div>
     <script>
-        // Filter bgfx's WebGL caps-probing chatter. At init bgfx queries every
-        // texture format with getInternalformatParameter(); the browser logs a
-        // warning when a format isn't valid as a renderbuffer, even though the
-        // call returns the right "unsupported" answer. Harmless, just noisy.
-        (function () {
-            var origWarn = console.warn.bind(console);
-            console.warn = function (msg) {
-                if (typeof msg === 'string' &&
-                    (msg.indexOf('getInternalformatParameter') !== -1)) {
-                    return;
-                }
-                origWarn.apply(null, arguments);
-            };
-        })();
-
-        // Asset loading via runtime fetch. Top-level entry points have
-        // generic names so the wasm shell isn't tied to a specific detector;
-        // override per-page with ?input=… &config=… &include=a&include=b
-        // (include can repeat). The C++ TOML loader resolves `include = […]`
-        // entries relative to the config's parent dir, so those fragment
-        // paths must match what's in the toml — they keep their real names
-        // even when the entry-point file is renamed to scene.toml.
+        // Asset loading via runtime fetch. Top-level entry points have generic
+        // names so the wasm shell isn't tied to a specific detector; override
+        // per-page with ?input=… &config=… &include=a&include=b (include can
+        // repeat). The C++ TOML loader resolves `include = […]` entries
+        // relative to the config's parent dir, so those fragment paths must
+        // match what's in the toml.
         var params = new URLSearchParams(window.location.search);
         var inputUrl = params.get('input') || 'scene.nhb.zst';
         var configUrl = params.get('config') || 'scene.toml';
 
-        // Transitive toml fragments to fetch. Hard-coded for now since the
-        // include resolver runs in C++ at config-load time, so we can't
-        // introspect from JS. Override via repeated ?include= query params.
         var configIncludes = params.getAll('include');
         if (configIncludes.length === 0) {
             configIncludes = [
@@ -72,6 +53,20 @@
                 'odd/muon.toml',
             ];
         }
+
+        // Backend selection: WebGPU when available, WebGL2 otherwise. Force
+        // a specific backend for A/B testing with ?backend=gles3 or
+        // ?backend=wgpu.
+        var forced = params.get('backend');
+        var useWGPU;
+        if (forced === 'wgpu') {
+            useWGPU = true;
+        } else if (forced === 'gles3') {
+            useWGPU = false;
+        } else {
+            useWGPU = !!navigator.gpu;
+        }
+        var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
 
         var statusEl = document.getElementById('status');
         var Module = {
@@ -86,11 +81,18 @@
                     statusEl.style.display = 'none';
                 }
             },
+            // Tell emscripten where to fetch the .wasm sidecar (the loader
+            // emits its own filename otherwise, which is fine — but with two
+            // bundles in the same dir we want to be explicit).
+            locateFile: function (path) {
+                if (path.endsWith('.wasm')) return bundleBase + '.wasm';
+                return path;
+            },
             preRun: [function () {
-                // FS.createPreloadedFile expects (parent, name, url, canRead, canWrite).
-                // It runs the fetch async; emscripten waits for all preRun work
-                // to settle before invoking main(), so by the time the viewer
-                // subcommand runs, fopen of these paths just works.
+                // FS.createPreloadedFile(parent, name, url, canRead, canWrite).
+                // Async fetch; emscripten waits for all preRun work to settle
+                // before invoking main(), so by the time the viewer subcommand
+                // runs, fopen of these paths just works.
                 Module.setStatus('fetching ' + inputUrl);
                 FS.createPreloadedFile('/', inputUrl, inputUrl, true, false);
                 FS.createPreloadedFile('/', configUrl, configUrl, true, false);
@@ -112,12 +114,19 @@
                 '--config', '/' + configUrl,
             ],
         };
-        Module.setStatus('downloading wasm…');
+        Module.setStatus('loading ' + bundleBase + '…');
         window.onerror = function (msg) {
             Module.setStatus('error — see console');
             console.error(msg);
         };
+
+        // Inject the matching loader script. emscripten's loader picks up
+        // the global `Module` object set above and starts the wasm fetch
+        // (via locateFile) as soon as it executes.
+        var s = document.createElement('script');
+        s.src = bundleBase + '.js';
+        s.async = true;
+        document.body.appendChild(s);
     </script>
-    {{{ SCRIPT }}}
 </body>
 </html>

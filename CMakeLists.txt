@@ -47,7 +47,7 @@ option(NODEHAMMER_WITH_TGEO     "Enable TGeo/ROOT importer"                     
 option(NODEHAMMER_WITH_DD4HEP   "Enable DD4hep importer"                               OFF)
 option(NODEHAMMER_WITH_GEANT4   "Enable GDML/Geant4 importer"                          OFF)
 option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"                             OFF)
-option(NODEHAMMER_WITH_VIEWER   "Build the bgfx/SDL3/Dear ImGui interactive viewer"    OFF)
+option(NODEHAMMER_WITH_VIEWER   "Build the sokol/Dear ImGui interactive viewer"        OFF)
 option(NODEHAMMER_ENABLE_ASAN   "Enable AddressSanitizer"                              OFF)
 option(NODEHAMMER_WERROR        "Treat project warnings as errors"                     OFF)
 option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                           OFF)
@@ -183,24 +183,66 @@ endif()
 target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
 target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 
-# ── Optional viewer (bgfx + SDL3 + Dear ImGui) ────────────────────────────────
+# ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
+# When the viewer is on, we build a per-backend sokol STATIC lib + a viewer
+# executable per backend. Native picks the right backend for the host
+# (Metal on Apple, GLCORE on Linux/Windows). Emscripten builds BOTH GLES3
+# and WGPU executables from a single configure so the wasm shell can pick
+# at runtime via navigator.gpu — see web/viewer.html.
 if(NODEHAMMER_WITH_VIEWER)
+    # Populates NH_VIEWER_SOURCES via PARENT_SCOPE.
     add_subdirectory(src/viewer)
+    # Defines nodehammer_shaders custom target + NH_SHADER_INCLUDE_DIR.
     add_subdirectory(shaders)
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_VIEWER=1)
-endif()
 
-# ── CLI executable ─────────────────────────────────────────────────────────────
-add_executable(nodehammer src/cli/main.cpp)
-target_link_libraries(nodehammer PRIVATE nodehammer_lib)
-if(NODEHAMMER_WITH_VIEWER)
-    target_sources(nodehammer PRIVATE src/cli/cmd_viewer.cpp)
-    target_link_libraries(nodehammer PRIVATE nodehammer_viewer)
-endif()
-nodehammer_set_compiler_options(nodehammer)
-if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
-    nodehammer_apply_emscripten_viewer_options(nodehammer)
+    # Helper: compose one viewer executable from the CLI dispatcher + viewer
+    # sources, linked against a single sokol_<backend> lib.
+    function(nh_add_viewer_exe name sokol_lib)
+        add_executable(${name} src/cli/main.cpp src/cli/cmd_viewer.cpp ${NH_VIEWER_SOURCES})
+        target_link_libraries(${name} PRIVATE nodehammer_lib ${sokol_lib})
+        # Generated shader header lives next to shaders/CMakeLists.txt's binary dir.
+        target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
+        add_dependencies(${name} nodehammer_shaders)
+        nodehammer_set_compiler_options(${name})
+        if(EMSCRIPTEN)
+            nodehammer_apply_emscripten_viewer_options(${name})
+        else()
+            nodehammer_apply_emscripten_exe_options(${name})
+        endif()
+    endfunction()
+
+    if(EMSCRIPTEN)
+        # Two backend libs + two executables from one configure. The viewer
+        # source list is compiled twice — once per executable — because the
+        # sokol headers' visible struct surface depends on the backend define.
+        nh_add_sokol_lib(sokol_gles3 SOKOL_GLES3)
+        nh_add_sokol_lib(sokol_wgpu  SOKOL_WGPU)
+        # WGPU backend needs <webgpu/webgpu.h> at compile time AND the
+        # WebGPU runtime polyfill at link time. --use-port=emdawnwebgpu
+        # covers both (emcc replaced the old -sUSE_WEBGPU=1 flag with this
+        # port). PUBLIC on the lib so the include flag also reaches the
+        # viewer source files compiled into the executable.
+        target_compile_options(sokol_wgpu PUBLIC "--use-port=emdawnwebgpu")
+        nh_add_viewer_exe(nodehammer-gles3 sokol_gles3)
+        nh_add_viewer_exe(nodehammer-wgpu  sokol_wgpu)
+        target_link_options(nodehammer-wgpu PRIVATE "--use-port=emdawnwebgpu")
+    else()
+        if(APPLE)
+            set(_nh_backend SOKOL_METAL)
+        elseif(WIN32)
+            set(_nh_backend SOKOL_D3D11)
+        else()
+            set(_nh_backend SOKOL_GLCORE)
+        endif()
+        nh_add_sokol_lib(sokol_native ${_nh_backend})
+        nh_add_viewer_exe(nodehammer sokol_native)
+    endif()
 else()
+    # Headless build: just the CLI dispatcher, no viewer subcommand.
+    add_executable(nodehammer src/cli/main.cpp)
+    target_link_libraries(nodehammer PRIVATE nodehammer_lib)
+    nodehammer_set_compiler_options(nodehammer)
     nodehammer_apply_emscripten_exe_options(nodehammer)
 endif()
 
@@ -213,17 +255,28 @@ endif()
 # ── Install ────────────────────────────────────────────────────────────────────
 include(GNUInstallDirs)
 
-install(TARGETS nodehammer
+# Native: single nodehammer executable. Emscripten + viewer: per-backend
+# wasm bundles named nodehammer-{gles3,wgpu}.{js,wasm}. Emscripten + no
+# viewer: headless nodehammer (just the .js + .wasm).
+if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
+    set(NH_INSTALL_TARGETS nodehammer-gles3 nodehammer-wgpu)
+else()
+    set(NH_INSTALL_TARGETS nodehammer)
+endif()
+
+install(TARGETS ${NH_INSTALL_TARGETS}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
-# Emscripten produces a sidecar .wasm next to the .js loader; CMake's
-# install(TARGETS RUNTIME) only picks up the primary output, so install the
-# blob explicitly.
+# Emscripten produces a sidecar .wasm next to each .js loader; CMake's
+# install(TARGETS RUNTIME) only picks up the primary output, so install
+# the blobs explicitly.
 if(EMSCRIPTEN)
-    install(FILES "$<TARGET_FILE_DIR:nodehammer>/nodehammer.wasm"
-        DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
+    foreach(_t ${NH_INSTALL_TARGETS})
+        install(FILES "$<TARGET_FILE_DIR:${_t}>/${_t}.wasm"
+            DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endforeach()
 endif()
 
 install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"

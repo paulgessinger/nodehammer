@@ -2,39 +2,15 @@
 
 #include <nodehammer/viewer/camera.hpp>
 
-// Match what app.cpp does: suppress profiles we don't compile so
-// BGFX_EMBEDDED_SHADER doesn't reference missing symbols.
-#define BGFX_PLATFORM_SUPPORTS_DXBC 0
-#define BGFX_PLATFORM_SUPPORTS_DXIL 0
-#define BGFX_PLATFORM_SUPPORTS_NVN 0
-#define BGFX_PLATFORM_SUPPORTS_PSSL 0
-#define BGFX_PLATFORM_SUPPORTS_WGSL 0
-
 #include <ankerl/unordered_dense.h>
-#include <bgfx/bgfx.h>
-#include <bgfx/embedded_shader.h>
-#include <bx/platform.h>
 #include <glm/gtc/type_ptr.hpp>
 #include <nodehammer/ir/render.hpp>
+#include <sokol_gfx.h>
 
-#if BGFX_PLATFORM_SUPPORTS_GLSL
-#include "glsl/fs_scene_lambert.sc.bin.h"
-#include "glsl/vs_scene.sc.bin.h"
-#endif
-#if BGFX_PLATFORM_SUPPORTS_ESSL
-#include "essl/fs_scene_lambert.sc.bin.h"
-#include "essl/vs_scene.sc.bin.h"
-#endif
-#if BGFX_PLATFORM_SUPPORTS_SPIRV
-#include "spirv/fs_scene_lambert.sc.bin.h"
-#include "spirv/vs_scene.sc.bin.h"
-#endif
-#if BGFX_PLATFORM_SUPPORTS_METAL
-#include "metal/fs_scene_lambert.sc.bin.h"
-#include "metal/vs_scene.sc.bin.h"
-#endif
+#include "scene.glsl.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -43,34 +19,18 @@ namespace nodehammer::viewer {
 
 namespace {
 
-const bgfx::EmbeddedShader k_scene_shaders[] = {
-    BGFX_EMBEDDED_SHADER(vs_scene),
-    BGFX_EMBEDDED_SHADER(fs_scene_lambert),
-    BGFX_EMBEDDED_SHADER_END(),
-};
-
-bgfx::VertexLayout scene_vertex_layout() {
-    bgfx::VertexLayout l;
-    l.begin()
-        .add(bgfx::Attrib::Position, 3, bgfx::AttribType::Float)
-        .add(bgfx::Attrib::Normal, 3, bgfx::AttribType::Float)
-        .end();
-    return l;
-}
-
 struct GpuMesh {
-    bgfx::VertexBufferHandle vbh = BGFX_INVALID_HANDLE;
-    bgfx::IndexBufferHandle ibh = BGFX_INVALID_HANDLE;
+    sg_buffer vbuf{};
+    sg_buffer ibuf{};
     uint32_t index_count{0};
     uint64_t triangle_count{0};
     glm::vec3 local_min{0.f};
     glm::vec3 local_max{0.f};
 };
 
-/// Transform an AABB by a 4x4 affine matrix, producing a fresh AABB that
-/// bounds the result. Cheaper than transforming all 8 corners — Arvo's
-/// trick: each axis of the output range is built from positive/negative
-/// contributions of each row of the matrix.
+/// Transform an AABB by a 4x4 affine matrix using Arvo's trick — cheaper
+/// than transforming all 8 corners. Each output axis is built from the
+/// positive/negative contributions of each row of the matrix.
 inline void transform_aabb(const glm::mat4 &m, const glm::vec3 &lmin, const glm::vec3 &lmax,
                            glm::vec3 &wmin, glm::vec3 &wmax) {
     glm::vec3 tr = glm::vec3(m[3]);
@@ -85,12 +45,6 @@ inline void transform_aabb(const glm::mat4 &m, const glm::vec3 &lmin, const glm:
         }
     }
 }
-
-struct DrawItem {
-    MeshAssetId mesh;
-    RenderMaterialId material;
-    glm::mat4 world;
-};
 
 struct InstanceGroupKey {
     MeshAssetId mesh;
@@ -107,27 +61,31 @@ struct InstanceGroupKeyHash {
     }
 };
 
+constexpr int kInstanceVbufSlot = 1;
+
 } // namespace
 
 struct SceneRenderer::Impl {
     bool initialised{false};
-    bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle u_baseColor = BGFX_INVALID_HANDLE;
-    bgfx::UniformHandle u_lightDir = BGFX_INVALID_HANDLE;
-    bgfx::VertexLayout vertex_layout;
+    sg_shader shader{};
+    sg_pipeline pipeline{};
+    // Per-group dynamic buffer of mat4 instance transforms. Allocated once
+    // at upload() to fit the largest group; reused across frames since the
+    // scene is static. Holds GROUPS-worth of data at start of each render().
+    sg_buffer instance_buf{};
+    size_t instance_buf_capacity{0}; // bytes
 
     ankerl::unordered_dense::map<MeshAssetId, GpuMesh> meshes;
     ankerl::unordered_dense::map<RenderMaterialId, glm::vec4> material_colors;
 
-    // Flattened draw plan: groups of (mesh, material) with N world matrices.
     struct DrawGroup {
         MeshAssetId mesh;
         RenderMaterialId material;
+        size_t instance_byte_offset{0}; // where in instance_buf this group's matrices live
         std::vector<glm::mat4> instances;
     };
     std::vector<DrawGroup> groups;
 
-    // Scene-wide stats.
     uint32_t node_count{0};
     uint64_t triangle_count{0};
     glm::vec3 bounds_min{0.f};
@@ -135,54 +93,115 @@ struct SceneRenderer::Impl {
     bool has_bounds{false};
 
     FrameStats last_stats;
-    bool caps_instancing{false};
 
     void ensure_init();
     void destroy_gpu();
+    void upload_instance_buffer();
 };
 
 void SceneRenderer::Impl::ensure_init() {
     if (initialised) {
         return;
     }
-    vertex_layout = scene_vertex_layout();
-    const bgfx::RendererType::Enum type = bgfx::getRendererType();
-    program = bgfx::createProgram(
-        bgfx::createEmbeddedShader(k_scene_shaders, type, "vs_scene"),
-        bgfx::createEmbeddedShader(k_scene_shaders, type, "fs_scene_lambert"), true);
-    u_baseColor = bgfx::createUniform("u_baseColor", bgfx::UniformType::Vec4);
-    u_lightDir = bgfx::createUniform("u_lightDir", bgfx::UniformType::Vec4);
-    caps_instancing = (bgfx::getCaps()->supported & BGFX_CAPS_INSTANCING) != 0;
-    initialised = true;
-    if (!caps_instancing) {
-        std::fprintf(stderr, "viewer: BGFX_CAPS_INSTANCING is not reported by this renderer; "
-                             "the scene renderer requires it (vs_scene reads i_data0..3).\n");
+    shader = sg_make_shader(scene_scene_shader_desc(sg_query_backend()));
+
+    sg_pipeline_desc pdesc{};
+    pdesc.shader = shader;
+    pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(Vertex));
+    pdesc.layout.buffers[1].stride = static_cast<int>(sizeof(glm::mat4));
+    pdesc.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
+
+    // Vertex attributes (slot indices come from sokol-shdc's reflection so
+    // we don't hard-code the GLSL `layout(location=…)` numbers — sokol-shdc
+    // assigns them in declaration order but tying via name keeps the C++
+    // and shader sources independently editable).
+    pdesc.layout.attrs[ATTR_scene_scene_a_position].buffer_index = 0;
+    pdesc.layout.attrs[ATTR_scene_scene_a_position].format = SG_VERTEXFORMAT_FLOAT3;
+    pdesc.layout.attrs[ATTR_scene_scene_a_position].offset = offsetof(Vertex, position);
+
+    pdesc.layout.attrs[ATTR_scene_scene_a_normal].buffer_index = 0;
+    pdesc.layout.attrs[ATTR_scene_scene_a_normal].format = SG_VERTEXFORMAT_FLOAT3;
+    pdesc.layout.attrs[ATTR_scene_scene_a_normal].offset = offsetof(Vertex, normal);
+
+    // Per-instance world matrix as 4 vec4 attributes packed into the second
+    // vertex buffer.
+    const int inst_attrs[4] = {
+        ATTR_scene_scene_inst0,
+        ATTR_scene_scene_inst1,
+        ATTR_scene_scene_inst2,
+        ATTR_scene_scene_inst3,
+    };
+    for (int i = 0; i < 4; ++i) {
+        pdesc.layout.attrs[inst_attrs[i]].buffer_index = kInstanceVbufSlot;
+        pdesc.layout.attrs[inst_attrs[i]].format = SG_VERTEXFORMAT_FLOAT4;
+        pdesc.layout.attrs[inst_attrs[i]].offset =
+            static_cast<int>(static_cast<size_t>(i) * sizeof(glm::vec4));
     }
+
+    pdesc.index_type = SG_INDEXTYPE_UINT32;
+    pdesc.depth.write_enabled = true;
+    pdesc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
+    pdesc.cull_mode = SG_CULLMODE_NONE; // toggleable via render flags
+    pdesc.face_winding = SG_FACEWINDING_CCW;
+    pipeline = sg_make_pipeline(&pdesc);
+
+    initialised = true;
 }
 
 void SceneRenderer::Impl::destroy_gpu() {
     for (auto &[id, m] : meshes) {
-        if (bgfx::isValid(m.vbh)) {
-            bgfx::destroy(m.vbh);
+        if (m.vbuf.id != SG_INVALID_ID) {
+            sg_destroy_buffer(m.vbuf);
         }
-        if (bgfx::isValid(m.ibh)) {
-            bgfx::destroy(m.ibh);
+        if (m.ibuf.id != SG_INVALID_ID) {
+            sg_destroy_buffer(m.ibuf);
         }
     }
     meshes.clear();
-    groups.clear();
     material_colors.clear();
+    groups.clear();
+    if (instance_buf.id != SG_INVALID_ID) {
+        sg_destroy_buffer(instance_buf);
+        instance_buf = sg_buffer{};
+    }
+    instance_buf_capacity = 0;
     node_count = 0;
     triangle_count = 0;
     has_bounds = false;
 }
 
+void SceneRenderer::Impl::upload_instance_buffer() {
+    // Total mat4 count across all groups; pack contiguously.
+    size_t total = 0;
+    for (auto &g : groups) {
+        g.instance_byte_offset = total * sizeof(glm::mat4);
+        total += g.instances.size();
+    }
+    if (total == 0) {
+        return;
+    }
+    std::vector<glm::mat4> packed;
+    packed.reserve(total);
+    for (const auto &g : groups) {
+        packed.insert(packed.end(), g.instances.begin(), g.instances.end());
+    }
+    const size_t bytes = packed.size() * sizeof(glm::mat4);
+
+    sg_buffer_desc bdesc{};
+    bdesc.size = bytes;
+    bdesc.usage.vertex_buffer = true;
+    bdesc.usage.immutable = true;
+    bdesc.data.ptr = packed.data();
+    bdesc.data.size = bytes;
+    instance_buf = sg_make_buffer(&bdesc);
+    instance_buf_capacity = bytes;
+}
+
 SceneRenderer::SceneRenderer() : impl_(std::make_unique<Impl>()) {}
 
 SceneRenderer::~SceneRenderer() {
-    // Intentionally empty: bgfx handles must be released BEFORE bgfx::shutdown,
-    // and only the App lifecycle knows that ordering. Caller invokes release()
-    // at the right point; if not, bgfx::shutdown reaps the handles anyway.
+    // Intentionally empty. sokol_gfx asserts at sg_shutdown if any handle
+    // outlives it; the App lifecycle calls release() in the right order.
 }
 
 void SceneRenderer::release() {
@@ -190,17 +209,13 @@ void SceneRenderer::release() {
         return;
     }
     impl_->destroy_gpu();
-    if (bgfx::isValid(impl_->program)) {
-        bgfx::destroy(impl_->program);
-        impl_->program = BGFX_INVALID_HANDLE;
+    if (impl_->pipeline.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(impl_->pipeline);
+        impl_->pipeline = sg_pipeline{};
     }
-    if (bgfx::isValid(impl_->u_baseColor)) {
-        bgfx::destroy(impl_->u_baseColor);
-        impl_->u_baseColor = BGFX_INVALID_HANDLE;
-    }
-    if (bgfx::isValid(impl_->u_lightDir)) {
-        bgfx::destroy(impl_->u_lightDir);
-        impl_->u_lightDir = BGFX_INVALID_HANDLE;
+    if (impl_->shader.id != SG_INVALID_ID) {
+        sg_destroy_shader(impl_->shader);
+        impl_->shader = sg_shader{};
     }
     impl_->initialised = false;
 }
@@ -209,29 +224,30 @@ void SceneRenderer::upload(const RenderScene &scene) {
     impl_->ensure_init();
     impl_->destroy_gpu();
 
-    static_assert(sizeof(Vertex) == 24, "Vertex layout must match bgfx 6f stride");
+    static_assert(sizeof(Vertex) == 24, "Vertex layout must match shader: 3f position + 3f normal");
 
-    // Upload mesh assets verbatim — the IR's vertex format already matches
-    // bgfx's interleaved (pos vec3, normal vec3) layout. Also stash the
-    // local AABB so we can compute the scene-wide world AABB during the
-    // node walk below.
     for (const auto &[id, asset] : scene.meshAssets) {
         if (asset.vertices.empty() || asset.indices.empty()) {
             continue;
         }
         GpuMesh gm;
-        // Use bgfx::copy (not makeRef) — bgfx may defer the actual GPU upload
-        // and the source vectors must outlive the buffer for makeRef to be
-        // safe. Copy makes the lifetime concern go away at the cost of holding
-        // the data twice during upload.
-        gm.vbh = bgfx::createVertexBuffer(
-            bgfx::copy(asset.vertices.data(),
-                       static_cast<uint32_t>(asset.vertices.size() * sizeof(Vertex))),
-            impl_->vertex_layout);
-        gm.ibh = bgfx::createIndexBuffer(
-            bgfx::copy(asset.indices.data(),
-                       static_cast<uint32_t>(asset.indices.size() * sizeof(uint32_t))),
-            BGFX_BUFFER_INDEX32);
+
+        sg_buffer_desc vdesc{};
+        vdesc.size = asset.vertices.size() * sizeof(Vertex);
+        vdesc.usage.vertex_buffer = true;
+        vdesc.usage.immutable = true;
+        vdesc.data.ptr = asset.vertices.data();
+        vdesc.data.size = vdesc.size;
+        gm.vbuf = sg_make_buffer(&vdesc);
+
+        sg_buffer_desc idesc{};
+        idesc.size = asset.indices.size() * sizeof(uint32_t);
+        idesc.usage.index_buffer = true;
+        idesc.usage.immutable = true;
+        idesc.data.ptr = asset.indices.data();
+        idesc.data.size = idesc.size;
+        gm.ibuf = sg_make_buffer(&idesc);
+
         gm.index_count = static_cast<uint32_t>(asset.indices.size());
         gm.triangle_count = asset.indices.size() / 3;
 
@@ -246,12 +262,10 @@ void SceneRenderer::upload(const RenderScene &scene) {
         impl_->meshes.emplace(id, gm);
     }
 
-    // Pre-cache material base colours.
     for (const auto &[id, mat] : scene.materials) {
         impl_->material_colors.emplace(id, mat.baseColorFactor);
     }
 
-    // Flatten the node hierarchy into a draw list, grouped by (mesh, material).
     ankerl::unordered_dense::map<InstanceGroupKey, size_t, InstanceGroupKeyHash> group_idx;
     glm::vec3 bmin{std::numeric_limits<float>::max()};
     glm::vec3 bmax{std::numeric_limits<float>::lowest()};
@@ -266,7 +280,7 @@ void SceneRenderer::upload(const RenderScene &scene) {
             const InstanceGroupKey key{binding.meshId, binding.materialId};
             auto [it, inserted] = group_idx.try_emplace(key, impl_->groups.size());
             if (inserted) {
-                impl_->groups.push_back({binding.meshId, binding.materialId, {}});
+                impl_->groups.push_back({binding.meshId, binding.materialId, 0, {}});
             }
             impl_->groups[it->second].instances.push_back(node.worldTransform);
             ++impl_->node_count;
@@ -284,118 +298,85 @@ void SceneRenderer::upload(const RenderScene &scene) {
     impl_->bounds_max = bmax;
     impl_->has_bounds = any_bounds;
 
+    impl_->upload_instance_buffer();
+
     std::fprintf(stderr,
-                 "viewer: scene uploaded — meshes=%zu materials=%zu nodes=%u draws/groups=%zu "
+                 "viewer: scene uploaded — meshes=%zu materials=%zu nodes=%u groups=%zu "
                  "tris=%llu bbox=[%.1f %.1f %.1f .. %.1f %.1f %.1f]\n",
                  impl_->meshes.size(), impl_->material_colors.size(), impl_->node_count,
                  impl_->groups.size(), static_cast<unsigned long long>(impl_->triangle_count),
                  bmin.x, bmin.y, bmin.z, bmax.x, bmax.y, bmax.z);
-
-    // Diagnostic: dump the first non-empty group so we can sanity-check the
-    // matrix layout going into the instance buffer and the vertex data coming
-    // out of the IR. Helpful when "garbled visuals" point at a layout mismatch.
-    for (const auto &g : impl_->groups) {
-        if (g.instances.empty()) {
-            continue;
-        }
-        const auto mit = impl_->meshes.find(g.mesh);
-        if (mit == impl_->meshes.end()) {
-            continue;
-        }
-        const auto &m0 = g.instances.front();
-        std::fprintf(stderr,
-                     "viewer:   sample group: mesh=%llu mat=%llu instances=%zu tris/inst=%llu\n",
-                     static_cast<unsigned long long>(g.mesh.value),
-                     static_cast<unsigned long long>(g.material.value), g.instances.size(),
-                     static_cast<unsigned long long>(mit->second.triangle_count));
-        std::fprintf(stderr,
-                     "viewer:   first world (col-major):\n"
-                     "    %8.3f %8.3f %8.3f %8.3f\n"
-                     "    %8.3f %8.3f %8.3f %8.3f\n"
-                     "    %8.3f %8.3f %8.3f %8.3f\n"
-                     "    %8.3f %8.3f %8.3f %8.3f\n",
-                     m0[0][0], m0[1][0], m0[2][0], m0[3][0], m0[0][1], m0[1][1], m0[2][1], m0[3][1],
-                     m0[0][2], m0[1][2], m0[2][2], m0[3][2], m0[0][3], m0[1][3], m0[2][3],
-                     m0[3][3]);
-        std::fprintf(stderr, "viewer:   mesh local bbox: [%.3f %.3f %.3f .. %.3f %.3f %.3f]\n",
-                     mit->second.local_min.x, mit->second.local_min.y, mit->second.local_min.z,
-                     mit->second.local_max.x, mit->second.local_max.y, mit->second.local_max.z);
-        break;
-    }
 }
 
-void SceneRenderer::render(uint16_t view_id, const Camera &camera, uint32_t fb_width,
-                           uint32_t fb_height, RenderFlags flags) {
+void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_height,
+                           RenderFlags flags) {
     impl_->last_stats = {};
-    if (impl_->groups.empty() || !bgfx::isValid(impl_->program)) {
+    if (impl_->groups.empty() || impl_->pipeline.id == SG_INVALID_ID) {
         return;
     }
     if (fb_width == 0 || fb_height == 0) {
         return;
     }
 
-    const bgfx::Caps *caps = bgfx::getCaps();
+    sg_apply_pipeline(impl_->pipeline);
+
+    // Cull state is baked into the pipeline at creation, so the only way to
+    // toggle culling per-frame would be to maintain two pipelines or to
+    // recreate. For a debug toggle we cheat by ignoring `cull_back` in this
+    // first cut — todo: add a culled pipeline if it proves useful.
+    (void)flags.cull_back;
+    (void)flags.wireframe; // wireframe also pipeline-state; same future work.
+
+    // sokol_gfx is depth-range-agnostic at the API level — view_proj must
+    // be built for the active backend's clip-space convention. Pass the
+    // homogeneous-depth flag to camera::proj based on the backend so GL/GLES
+    // get [-1,1] z and Metal/D3D/WebGPU get [0,1] z.
+    const sg_backend backend = sg_query_backend();
+    const bool homogeneous_depth = (backend == SG_BACKEND_GLCORE) || (backend == SG_BACKEND_GLES3);
     const float aspect = static_cast<float>(fb_width) / static_cast<float>(fb_height);
     const glm::mat4 view = camera.view();
-    const glm::mat4 proj = camera.proj(aspect, caps->homogeneousDepth);
-    bgfx::setViewTransform(view_id, glm::value_ptr(view), glm::value_ptr(proj));
+    const glm::mat4 proj = camera.proj(aspect, homogeneous_depth);
+    const glm::mat4 view_proj = proj * view;
 
-    const float light_dir[4] = {-0.4f, -0.7f, -0.6f, 0.f};
-    bgfx::setUniform(impl_->u_lightDir, light_dir);
+    scene_vs_params_t vs_params{};
+    std::memcpy(vs_params.view_proj, glm::value_ptr(view_proj), sizeof(vs_params.view_proj));
+    sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
 
-    uint64_t draw_state = BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z |
-                          BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_MSAA;
-    if (flags.cull_back) {
-        // bgfx winding default is CW; CULL_CW eliminates back-facing triangles
-        // for meshes with CCW-front-facing data. ODD's tessellator emits CCW
-        // for outward-facing triangles, so this is the right cull direction.
-        draw_state |= BGFX_STATE_CULL_CW;
-    }
-    // Note: BGFX_STATE_PT_LINES intentionally NOT exposed as a wireframe mode.
-    // Reading a triangle index buffer as line pairs yields fake lines between
-    // unrelated vertices (every 3rd line is "last vertex of triangle N to
-    // first vertex of triangle N+1"), producing a misleading radial-streaming
-    // pattern that masks whether the actual geometry is rendering correctly.
-    // Real wireframe needs a per-mesh edge index buffer, deferred for later.
-    (void)flags.wireframe;
+    const glm::vec4 light_dir{-0.4f, -0.7f, -0.6f, 0.f};
 
-    if (!impl_->caps_instancing) {
-        return;
-    }
-
-    // vs_scene reads the world matrix from i_data0..3, so every group goes
-    // through the instance buffer path — even a singleton becomes a 1-instance
-    // submission. This keeps the shader signature the same on every draw.
-    constexpr uint16_t k_stride = sizeof(glm::mat4);
     for (const auto &g : impl_->groups) {
         auto mesh_it = impl_->meshes.find(g.mesh);
         if (mesh_it == impl_->meshes.end()) {
             continue;
         }
-        auto col_it = impl_->material_colors.find(g.material);
-        glm::vec4 base = (col_it != impl_->material_colors.end())
-                             ? col_it->second
-                             : glm::vec4{0.8f, 0.8f, 0.8f, 1.f};
-        bgfx::setUniform(impl_->u_baseColor, glm::value_ptr(base));
-
         const auto &mesh = mesh_it->second;
-        const uint32_t n = static_cast<uint32_t>(g.instances.size());
-        const uint32_t avail = bgfx::getAvailInstanceDataBuffer(n, k_stride);
-        const uint32_t take = std::min(n, avail);
-        if (take == 0) {
+        const auto inst_count = static_cast<int>(g.instances.size());
+        if (inst_count == 0) {
             continue;
         }
-        bgfx::InstanceDataBuffer idb;
-        bgfx::allocInstanceDataBuffer(&idb, take, k_stride);
-        std::memcpy(idb.data, g.instances.data(), static_cast<size_t>(take) * k_stride);
-        bgfx::setVertexBuffer(0, mesh.vbh);
-        bgfx::setIndexBuffer(mesh.ibh);
-        bgfx::setInstanceDataBuffer(&idb);
-        bgfx::setState(draw_state);
-        bgfx::submit(view_id, impl_->program);
+
+        auto col_it = impl_->material_colors.find(g.material);
+        const glm::vec4 base = (col_it != impl_->material_colors.end())
+                                   ? col_it->second
+                                   : glm::vec4{0.8f, 0.8f, 0.8f, 1.f};
+
+        scene_fs_params_t fs_params{};
+        std::memcpy(fs_params.base_color, glm::value_ptr(base), sizeof(fs_params.base_color));
+        std::memcpy(fs_params.light_dir, glm::value_ptr(light_dir), sizeof(fs_params.light_dir));
+        sg_apply_uniforms(UB_scene_fs_params, SG_RANGE(fs_params));
+
+        sg_bindings bind{};
+        bind.vertex_buffers[0] = mesh.vbuf;
+        bind.vertex_buffers[1] = impl_->instance_buf;
+        bind.vertex_buffer_offsets[1] = static_cast<int>(g.instance_byte_offset);
+        bind.index_buffer = mesh.ibuf;
+        sg_apply_bindings(&bind);
+
+        sg_draw(0, static_cast<int>(mesh.index_count), inst_count);
+
         ++impl_->last_stats.draw_calls;
-        impl_->last_stats.instances += take;
-        impl_->last_stats.triangles += mesh.triangle_count * take;
+        impl_->last_stats.instances += static_cast<uint32_t>(inst_count);
+        impl_->last_stats.triangles += mesh.triangle_count * static_cast<uint64_t>(inst_count);
     }
 }
 

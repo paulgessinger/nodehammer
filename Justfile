@@ -1,8 +1,11 @@
-# Vendored Conan recipes — currently only manifold, patched to ship its
-# install/export rules under Emscripten. Cheap to re-export every time; conan
-# dedupes by recipe revision.
+# Vendored Conan recipes:
+#   - manifold: patched to ship install/export rules under Emscripten.
+#   - sokol-shdc: wraps the prebuilt shader compiler binary from
+#     floooh/sokol-tools-bin (used as a tool_requires when viewer=True).
+# Cheap to re-export every time; conan dedupes by recipe revision.
 recipes:
     conan export recipes/manifold --version=3.2.1
+    conan export recipes/sokol-shdc --version=2026.04.25
 
 deps: recipes
     conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja -o '&:viewer=True'
@@ -103,19 +106,22 @@ wasm: wasm-deps wasm-configure wasm-build wasm-test
 
 # Serve the wasm viewer locally. Browsers refuse to load .wasm from file://, so
 # we need a real http server. Defaults to port 8000; override with `just
-# wasm-serve 9000`. Open http://localhost:<port>/nodehammer.html.
+# wasm-serve 9000`. Open http://localhost:<port>/viewer.html — that page is a
+# static shell that probes navigator.gpu and dynamically loads either
+# nodehammer-gles3.{js,wasm} (WebGL2) or nodehammer-wgpu.{js,wasm} (WebGPU).
 #
 # Symlinks the input + config tree the viewer needs (odd.nhb.zst and the
-# odd_simple.toml fragment set) into the served directory. The Module.preRun
-# block in viewer.html issues fetch() requests for these paths at startup;
-# without them you'll see "FS.createPreloadedFile failed" in the console.
+# odd_simple.toml fragment set) plus the static viewer.html shell into the
+# served directory. The Module.preRun block in viewer.html issues fetch()
+# requests for these paths at startup; without them you'll see
+# "FS.createPreloadedFile failed" in the console.
 wasm-serve port='8000':
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{justfile_directory()}}"
     dir="$root/build/emscripten/RelWithDebInfo"
-    if [ ! -f "$dir/nodehammer.html" ]; then
-        echo "nodehammer.html not found in $dir — run 'just wasm-build' first." >&2
+    if [ ! -f "$dir/nodehammer-gles3.js" ] && [ ! -f "$dir/nodehammer-wgpu.js" ]; then
+        echo "no nodehammer-{gles3,wgpu}.js bundle in $dir — run 'just wasm-build' first." >&2
         exit 1
     fi
     # Stage data files alongside the wasm. Symlinks rather than copies so an
@@ -124,11 +130,12 @@ wasm-serve port='8000':
     # doesn't bake in the choice of detector — swap which file is symlinked
     # to retarget without rebuilding. Transitive include paths inside the
     # config are hard-coded in the toml, so they keep their original names.
+    ln -sf "$root/web/viewer.html" "$dir/viewer.html"
     ln -sf "$root/odd.nhb.zst" "$dir/scene.nhb.zst"
     ln -sf "$root/fixtures/configs/odd.toml" "$dir/scene.toml"
     mkdir -p "$dir/odd"
     for f in base.toml materials.toml tracker.toml calorimeters.toml muon.toml; do
         ln -sf "$root/fixtures/configs/odd/$f" "$dir/odd/$f"
     done
-    echo "serving $dir at http://localhost:{{port}}/nodehammer.html"
+    echo "serving $dir at http://localhost:{{port}}/viewer.html"
     cd "$dir" && exec python3 -m http.server {{port}}

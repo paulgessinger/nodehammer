@@ -1,84 +1,34 @@
-# Shader build for the viewer (Stage 1: solid + imgui pipelines).
+# Shader build for the sokol viewer.
 #
-# bgfx_compile_shaders is provided by bgfxToolUtils.cmake (included from
-# cmake/Dependencies.cmake when NODEHAMMER_WITH_VIEWER=ON). With AS_HEADERS,
-# it writes <output>/<profile>/<basename>.sc.bin.h files containing C arrays
-# (e.g. `vs_solid_essl[]`). bgfx::createEmbeddedShader then dispatches to the
-# right one at runtime via BGFX_PLATFORM_SUPPORTS_* checks.
+# nh_compile_shader (defined in cmake/Sokol.cmake) drives sokol-shdc on
+# scene.glsl, producing a single C header that contains every requested
+# backend's shader blob wrapped in #if defined(SOKOL_*) guards. Each viewer
+# executable's backend define then selects exactly one variant at compile
+# time — same .glsl input, no runtime cost, no per-target re-invocation.
 #
-# bgfx::shaderc is resolved in cmake/Dependencies.cmake (typically via Conan
-# tool_requires); if it isn't defined here something went wrong upstream.
+# Slang choice:
+#   Emscripten → glsl300es (WebGL2) + wgsl (WebGPU). The runtime-detect
+#                shell loads whichever bundle the browser supports.
+#   Apple      → metal_macos (primary) + glsl430 (fallback if Metal absent).
+#   Linux      → glsl430.
+#   Windows    → hlsl5 (primary) + glsl430.
 
-if(NOT TARGET bgfx::shaderc)
-    message(FATAL_ERROR
-        "NODEHAMMER_WITH_VIEWER is ON but bgfx::shaderc is not defined. Either "
-        "run `conan install . -o '&:viewer=True' ...` so the bgfx tool_requires "
-        "puts shaderc on PATH, or install bgfx's shaderc system-wide.")
+if(EMSCRIPTEN)
+    set(NH_SCENE_SLANGS "glsl300es;wgsl")
+elseif(APPLE)
+    set(NH_SCENE_SLANGS "metal_macos;glsl430")
+elseif(WIN32)
+    set(NH_SCENE_SLANGS "hlsl5;glsl430")
+else()
+    set(NH_SCENE_SLANGS "glsl430")
 endif()
 
-set(NH_SHADER_VARYING ${CMAKE_CURRENT_SOURCE_DIR}/varying.def.sc)
-set(NH_SHADER_OUTPUT ${CMAKE_BINARY_DIR}/shaders)
-
-bgfx_compile_shaders(
-    TYPE        VERTEX
-    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/vs_solid.sc
-    VARYING_DEF ${NH_SHADER_VARYING}
-    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
-    OUT_FILES_VAR NH_SHADER_VS_SOLID
-    AS_HEADERS
+nh_compile_shader(scene.glsl
+    OUT_HEADER       NH_SHADER_SCENE_HEADER
+    SLANGS           ${NH_SCENE_SLANGS}
+    DEPENDS_TARGET   nodehammer_shaders
 )
 
-bgfx_compile_shaders(
-    TYPE        FRAGMENT
-    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/fs_solid.sc
-    VARYING_DEF ${NH_SHADER_VARYING}
-    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
-    OUT_FILES_VAR NH_SHADER_FS_SOLID
-    AS_HEADERS
-)
-
-bgfx_compile_shaders(
-    TYPE        VERTEX
-    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/vs_imgui.sc
-    VARYING_DEF ${NH_SHADER_VARYING}
-    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
-    OUT_FILES_VAR NH_SHADER_VS_IMGUI
-    AS_HEADERS
-)
-
-bgfx_compile_shaders(
-    TYPE        FRAGMENT
-    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/fs_imgui.sc
-    VARYING_DEF ${NH_SHADER_VARYING}
-    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
-    OUT_FILES_VAR NH_SHADER_FS_IMGUI
-    AS_HEADERS
-)
-
-bgfx_compile_shaders(
-    TYPE        VERTEX
-    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/vs_scene.sc
-    VARYING_DEF ${NH_SHADER_VARYING}
-    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
-    OUT_FILES_VAR NH_SHADER_VS_SCENE
-    AS_HEADERS
-)
-
-bgfx_compile_shaders(
-    TYPE        FRAGMENT
-    SHADERS     ${CMAKE_CURRENT_SOURCE_DIR}/fs_scene_lambert.sc
-    VARYING_DEF ${NH_SHADER_VARYING}
-    OUTPUT_DIR  ${NH_SHADER_OUTPUT}
-    OUT_FILES_VAR NH_SHADER_FS_SCENE_LAMBERT
-    AS_HEADERS
-)
-
-# Aggregate dependency target so consumers can add_dependencies() once.
-add_custom_target(nodehammer_shaders DEPENDS
-    ${NH_SHADER_VS_SOLID}
-    ${NH_SHADER_FS_SOLID}
-    ${NH_SHADER_VS_IMGUI}
-    ${NH_SHADER_FS_IMGUI}
-    ${NH_SHADER_VS_SCENE}
-    ${NH_SHADER_FS_SCENE_LAMBERT}
-)
+# Expose the generated header's directory for consumers (the viewer lib).
+set(NH_SHADER_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders"
+    CACHE INTERNAL "Directory containing sokol-shdc-generated headers")
