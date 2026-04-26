@@ -31,6 +31,11 @@ struct App::Impl {
 
     bool wireframe{false};
     bool cull_back{true};
+    bool pause_when_unfocused{true};
+    bool window_focused{true};
+    bool window_visible{true};
+    bool auto_orbit{false};
+    float auto_orbit_speed_deg{15.f};
 
     uint32_t fb_width{0};
     uint32_t fb_height{0};
@@ -90,7 +95,21 @@ void App::Impl::on_init() {
 
 void App::Impl::on_event(const sapp_event *ev) {
     ImGui_ImplSokol_HandleEvent(ev);
-    if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
+    if (ev->type == SAPP_EVENTTYPE_FOCUSED) {
+        window_focused = true;
+        last_time = stm_now();
+        fps_window_start = last_time;
+        frame_count = 0;
+    } else if (ev->type == SAPP_EVENTTYPE_UNFOCUSED) {
+        window_focused = false;
+    } else if (ev->type == SAPP_EVENTTYPE_ICONIFIED || ev->type == SAPP_EVENTTYPE_SUSPENDED) {
+        window_visible = false;
+    } else if (ev->type == SAPP_EVENTTYPE_RESTORED || ev->type == SAPP_EVENTTYPE_RESUMED) {
+        window_visible = true;
+        last_time = stm_now();
+        fps_window_start = last_time;
+        frame_count = 0;
+    } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         quit = true;
     }
 }
@@ -154,6 +173,14 @@ void App::Impl::render() {
 }
 
 void App::Impl::on_frame() {
+    if (pause_when_unfocused && (!window_focused || !window_visible)) {
+        last_time = stm_now();
+        fps_window_start = last_time;
+        frame_count = 0;
+        delta_seconds = 0.0;
+        return;
+    }
+
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
 
@@ -178,6 +205,9 @@ void App::Impl::on_frame() {
                              sapp_dpi_scale());
 
     update_camera_input();
+    if (scene && auto_orbit) {
+        camera.orbit(glm::radians(auto_orbit_speed_deg) * static_cast<float>(delta_seconds), 0.f);
+    }
 
     ImGui::Begin("nodehammer viewer");
     ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
@@ -216,6 +246,7 @@ void App::Impl::on_frame() {
         ImGui::Text("Renderer: %s", name);
     }
     ImGui::Text("FPS: %.1f", fps);
+    ImGui::Checkbox("pause when unfocused", &pause_when_unfocused);
     if (scene) {
         ImGui::Separator();
         ImGui::Text("Meshes: %u", scene_renderer.mesh_asset_count());
@@ -233,6 +264,8 @@ void App::Impl::on_frame() {
         }
         ImGui::Separator();
         ImGui::Checkbox("backface cull", &cull_back);
+        ImGui::Checkbox("auto orbit", &auto_orbit);
+        ImGui::SliderFloat("orbit speed", &auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
         (void)wireframe;
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
