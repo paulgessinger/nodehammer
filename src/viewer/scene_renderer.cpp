@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/scene_renderer.hpp>
+#include "scene_renderer.hpp"
 
 #include <nodehammer/viewer/camera.hpp>
 

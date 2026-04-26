@@ -4,11 +4,59 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 
 namespace nodehammer::viewer {
 
 namespace {
 constexpr float k_pitch_limit = 1.553343f; // ~89° — keep away from gimbal lock at the poles
+constexpr float k_fov_min_deg = 1.f;
+constexpr float k_fov_max_deg = 179.f;
+constexpr float k_min_near = 1e-3f;
+constexpr float k_min_distance = 1e-4f;
+
+// Wrap into (-π, π].
+float wrap_pi(float a) {
+    constexpr float pi = std::numbers::pi_v<float>;
+    constexpr float two_pi = 2.f * pi;
+    if (!std::isfinite(a)) {
+        return 0.f;
+    }
+    a = std::fmod(a + pi, two_pi);
+    if (a <= 0.f) {
+        a += two_pi;
+    }
+    return a - pi;
+}
+
+// Replace non-finite with a fallback; otherwise return v.
+float finite_or(float v, float fallback) { return std::isfinite(v) ? v : fallback; }
+} // namespace
+
+bool Camera::sanitize() {
+    const Camera before = *this;
+
+    target.x = finite_or(target.x, 0.f);
+    target.y = finite_or(target.y, 0.f);
+    target.z = finite_or(target.z, 0.f);
+
+    distance = finite_or(distance, 10.f);
+    distance = std::max(distance, k_min_distance);
+
+    yaw = wrap_pi(yaw);
+    pitch = std::clamp(finite_or(pitch, 0.f), -k_pitch_limit, k_pitch_limit);
+
+    fov_deg = std::clamp(finite_or(fov_deg, 55.f), k_fov_min_deg, k_fov_max_deg);
+
+    near_plane = std::max(finite_or(near_plane, 0.05f), k_min_near);
+    far_plane = finite_or(far_plane, 1000.f);
+    if (far_plane <= near_plane) {
+        far_plane = near_plane * 1000.f;
+    }
+
+    return target != before.target || distance != before.distance || yaw != before.yaw ||
+           pitch != before.pitch || fov_deg != before.fov_deg || near_plane != before.near_plane ||
+           far_plane != before.far_plane;
 }
 
 glm::vec3 Camera::eye() const {
@@ -50,11 +98,11 @@ glm::mat4 Camera::proj(float aspect, bool homogeneous_depth, bool reversed_z) co
 }
 
 void Camera::orbit(float dx_radians, float dy_radians) {
-    yaw -= dx_radians;
+    yaw = wrap_pi(yaw - dx_radians);
     pitch = std::clamp(pitch + dy_radians, -k_pitch_limit, k_pitch_limit);
 }
 
-void Camera::dolly(float factor) {
+void Camera::dolly(float factor, float scene_radius) {
     // factor = 1 means no change; >1 zooms out, <1 zooms in.
     distance *= factor;
     if (scene_radius > 0.f) {
@@ -70,10 +118,10 @@ void Camera::dolly(float factor) {
         // distance-relative pair.
         const float pad = scene_radius * 1.1f;
         near_plane = std::max(distance - pad, distance * 1e-4f);
-        near_plane = std::max(near_plane, 1e-3f);
+        near_plane = std::max(near_plane, k_min_near);
         far_plane = distance + pad;
     } else {
-        near_plane = std::max(distance * 1e-3f, 1e-4f);
+        near_plane = std::max(distance * 1e-3f, k_min_distance);
         far_plane = std::max(far_plane, distance * 100.f);
         distance = std::max(distance, near_plane * 8.f);
     }
@@ -86,7 +134,7 @@ void Camera::pan(float dx_world, float dy_world) {
     target += right * dx_world + up * dy_world;
 }
 
-void Camera::frame_bounds(const glm::vec3 &min, const glm::vec3 &max, float margin) {
+float Camera::frame_bounds(const glm::vec3 &min, const glm::vec3 &max, float margin) {
     const glm::vec3 centre = 0.5f * (min + max);
     const glm::vec3 extent = 0.5f * (max - min);
     const float radius = std::max({extent.x, extent.y, extent.z, 1.f});
@@ -96,11 +144,13 @@ void Camera::frame_bounds(const glm::vec3 &min, const glm::vec3 &max, float marg
     distance = fit * margin;
     // Bounding-sphere radius (use the longest diagonal half-extent so the
     // near/far envelope still encloses corners when the camera orbits).
-    scene_radius = glm::length(extent);
+    const float scene_radius = glm::length(extent);
     const float pad = scene_radius * 1.1f;
     near_plane = std::max(distance - pad, distance * 1e-4f);
-    near_plane = std::max(near_plane, 1e-3f);
+    near_plane = std::max(near_plane, k_min_near);
     far_plane = distance + pad;
+    sanitize();
+    return scene_radius;
 }
 
 } // namespace nodehammer::viewer

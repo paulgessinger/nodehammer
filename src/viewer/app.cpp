@@ -1,10 +1,10 @@
 #include <nodehammer/viewer/app.hpp>
 
 #include "imgui_backend.hpp"
+#include "scene_renderer.hpp"
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/scene_renderer.hpp>
 
 #include <imgui.h>
 #include <sokol_app.h>
@@ -13,7 +13,6 @@
 #include <sokol_log.h>
 #include <sokol_time.h>
 
-#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <memory>
@@ -97,6 +96,10 @@ struct App::Impl {
     std::shared_ptr<const RenderScene> scene;
     SceneRenderer scene_renderer;
     Camera camera;
+    /// Bounding-sphere radius of the loaded scene; live-only state derived
+    /// from the scene geometry, not part of persisted camera state. 0 means
+    /// "no scene framed yet" — `dolly` falls back to distance-relative sizing.
+    float scene_radius{0.f};
     bool scene_uploaded{false};
     bool camera_framed{false};
 
@@ -206,7 +209,7 @@ void App::Impl::update_camera_input() {
     }
     if (io.MouseWheel != 0.f) {
         // 1.1^wheel: each notch = 10% closer/further. Matches Blender feel.
-        camera.dolly(std::pow(1.1f, -io.MouseWheel));
+        camera.dolly(std::pow(1.1f, -io.MouseWheel), scene_radius);
     }
 }
 
@@ -214,11 +217,11 @@ void App::Impl::apply_initial_camera() {
     if (!cfg.initial_camera.has_value()) {
         return;
     }
-    const float scene_radius = camera.scene_radius;
     camera = *cfg.initial_camera;
-    camera.scene_radius = scene_radius;
-    camera.pitch = std::clamp(camera.pitch, -1.553343f, 1.553343f);
-    camera.dolly(1.f);
+    camera.sanitize();
+    // Re-derive near/far/distance clamps against the *current* scene radius,
+    // not whatever was true when the camera state was saved.
+    camera.dolly(1.f, scene_radius);
 }
 
 void App::Impl::render() {
@@ -242,7 +245,7 @@ void App::Impl::render() {
         if (!camera_framed) {
             glm::vec3 bmin{0.f}, bmax{0.f};
             if (scene_renderer.world_bounds(bmin, bmax)) {
-                camera.frame_bounds(bmin, bmax);
+                scene_radius = camera.frame_bounds(bmin, bmax);
                 apply_initial_camera();
                 camera_framed = true;
             }
@@ -392,7 +395,7 @@ void App::Impl::on_frame() {
         if (ImGui::Button("Frame scene")) {
             glm::vec3 bmin{0.f}, bmax{0.f};
             if (scene_renderer.world_bounds(bmin, bmax)) {
-                camera.frame_bounds(bmin, bmax);
+                scene_radius = camera.frame_bounds(bmin, bmax);
             }
         }
         ImGui::Separator();
