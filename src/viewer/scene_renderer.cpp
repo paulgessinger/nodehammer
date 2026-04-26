@@ -10,6 +10,7 @@
 #include "scene.glsl.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -123,6 +124,44 @@ bool aabb_fully_inside_angle_cut(const glm::vec3 &min, const glm::vec3 &max, flo
         }
     }
     return true;
+}
+
+std::array<glm::vec4, 6> frustum_planes(const glm::mat4 &m) {
+    const glm::vec4 row0{m[0][0], m[1][0], m[2][0], m[3][0]};
+    const glm::vec4 row1{m[0][1], m[1][1], m[2][1], m[3][1]};
+    const glm::vec4 row2{m[0][2], m[1][2], m[2][2], m[3][2]};
+    const glm::vec4 row3{m[0][3], m[1][3], m[2][3], m[3][3]};
+
+    std::array<glm::vec4, 6> planes{
+        row3 + row0, // left
+        row3 - row0, // right
+        row3 + row1, // bottom
+        row3 - row1, // top
+        row3 + row2, // near
+        row3 - row2, // far
+    };
+    for (auto &plane : planes) {
+        const float len = glm::length(glm::vec3{plane});
+        if (len > 0.f) {
+            plane /= len;
+        }
+    }
+    return planes;
+}
+
+bool aabb_outside_frustum(const glm::vec3 &min, const glm::vec3 &max,
+                          const std::array<glm::vec4, 6> &planes) {
+    for (const auto &plane : planes) {
+        const glm::vec3 positive{
+            plane.x >= 0.f ? max.x : min.x,
+            plane.y >= 0.f ? max.y : min.y,
+            plane.z >= 0.f ? max.z : min.z,
+        };
+        if (glm::dot(glm::vec3{plane}, positive) + plane.w < 0.f) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -391,27 +430,6 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         return;
     }
 
-    impl_->visible_instances.clear();
-    const float cut_start = glm::radians(flags.angle_cut_start_deg);
-    const float cut_end = glm::radians(flags.angle_cut_end_deg);
-    for (auto &g : impl_->groups) {
-        g.visible_byte_offset = impl_->visible_instances.size() * sizeof(glm::mat4);
-        const size_t start_count = impl_->visible_instances.size();
-        for (size_t i = 0; i < g.instances.size(); ++i) {
-            if (flags.angle_cut &&
-                aabb_fully_inside_angle_cut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
-                continue;
-            }
-            impl_->visible_instances.push_back(g.instances[i]);
-        }
-        g.visible_count = static_cast<uint32_t>(impl_->visible_instances.size() - start_count);
-    }
-    if (impl_->visible_instances.empty()) {
-        return;
-    }
-    const size_t visible_bytes = impl_->visible_instances.size() * sizeof(glm::mat4);
-    sg_update_buffer(impl_->instance_buf, {impl_->visible_instances.data(), visible_bytes});
-
     sg_apply_pipeline(pipeline);
 
     (void)flags.wireframe; // wireframe also pipeline-state; same future work.
@@ -428,6 +446,31 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     // and the pass action's depth clear of 0.0 in app.cpp.
     const glm::mat4 proj = camera.proj(aspect, homogeneous_depth, /*reversed_z=*/true);
     const glm::mat4 view_proj = proj * view;
+    const auto planes = frustum_planes(view_proj);
+
+    impl_->visible_instances.clear();
+    const float cut_start = glm::radians(flags.angle_cut_start_deg);
+    const float cut_end = glm::radians(flags.angle_cut_end_deg);
+    for (auto &g : impl_->groups) {
+        g.visible_byte_offset = impl_->visible_instances.size() * sizeof(glm::mat4);
+        const size_t start_count = impl_->visible_instances.size();
+        for (size_t i = 0; i < g.instances.size(); ++i) {
+            if (aabb_outside_frustum(g.bounds_min[i], g.bounds_max[i], planes)) {
+                continue;
+            }
+            if (flags.angle_cut &&
+                aabb_fully_inside_angle_cut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
+                continue;
+            }
+            impl_->visible_instances.push_back(g.instances[i]);
+        }
+        g.visible_count = static_cast<uint32_t>(impl_->visible_instances.size() - start_count);
+    }
+    if (impl_->visible_instances.empty()) {
+        return;
+    }
+    const size_t visible_bytes = impl_->visible_instances.size() * sizeof(glm::mat4);
+    sg_update_buffer(impl_->instance_buf, {impl_->visible_instances.data(), visible_bytes});
 
     scene_vs_params_t vs_params{};
     std::memcpy(vs_params.view_proj, glm::value_ptr(view_proj), sizeof(vs_params.view_proj));
@@ -454,10 +497,18 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         scene_fs_params_t fs_params{};
         std::memcpy(fs_params.base_color, glm::value_ptr(base), sizeof(fs_params.base_color));
         std::memcpy(fs_params.light_dir, glm::value_ptr(light_dir), sizeof(fs_params.light_dir));
+        const float shader_cut_start = glm::radians(flags.angle_cut_start_deg);
+        const float shader_cut_end = glm::radians(flags.angle_cut_end_deg);
+        const bool large_cut = angle_span(shader_cut_start, shader_cut_end) > 0.5f * kTau;
         const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
-                                   glm::radians(flags.angle_cut_start_deg),
-                                   glm::radians(flags.angle_cut_end_deg), 0.f};
+                                   large_cut ? 1.f : 0.f, 0.f, 0.f};
+        const glm::vec4 cut_start_vec{std::cos(shader_cut_start), std::sin(shader_cut_start), 0.f,
+                                      0.f};
+        const glm::vec4 cut_end_vec{std::cos(shader_cut_end), std::sin(shader_cut_end), 0.f, 0.f};
         std::memcpy(fs_params.cut_params, glm::value_ptr(cut_params), sizeof(fs_params.cut_params));
+        std::memcpy(fs_params.cut_start, glm::value_ptr(cut_start_vec),
+                    sizeof(fs_params.cut_start));
+        std::memcpy(fs_params.cut_end, glm::value_ptr(cut_end_vec), sizeof(fs_params.cut_end));
         sg_apply_uniforms(UB_scene_fs_params, SG_RANGE(fs_params));
 
         sg_bindings bind{};

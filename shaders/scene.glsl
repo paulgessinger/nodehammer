@@ -49,37 +49,24 @@ void main() {
 layout(binding=1) uniform fs_params {
     vec4 base_color;   // rgb = albedo, a = opacity
     vec4 light_dir;    // xyz = direction TO light, world space
-    vec4 cut_params;   // x = enabled, y/z = start/end phi in radians
+    vec4 cut_params;   // x = enabled, y = large cut flag, z/w = unused
+    vec4 cut_start;    // xy = unit vector at start phi
+    vec4 cut_end;      // xy = unit vector at end phi
 };
 
 in vec3 v_normal_world;
 in vec3 v_world_pos;
 out vec4 frag_color;
 
-bool angle_in_cut(float phi, float start_phi, float end_phi) {
-    const float tau = 6.283185307179586;
-    if (phi < 0.0) {
-        phi += tau;
-    }
-    if (start_phi < 0.0) {
-        start_phi += tau;
-    }
-    if (end_phi < 0.0) {
-        end_phi += tau;
-    }
-    if (abs(start_phi - end_phi) < 0.0001) {
-        return false;
-    }
-    if (start_phi <= end_phi) {
-        return phi >= start_phi && phi <= end_phi;
-    }
-    return phi >= start_phi || phi <= end_phi;
-}
-
 void main() {
     if (cut_params.x > 0.5) {
-        float phi = atan(v_world_pos.y, v_world_pos.x);
-        if (angle_in_cut(phi, cut_params.y, cut_params.z)) {
+        vec2 p = v_world_pos.xy;
+        float side_start = cut_start.x * p.y - cut_start.y * p.x;
+        float side_end = cut_end.x * p.y - cut_end.y * p.x;
+        bool in_cut = cut_params.y > 0.5
+            ? (side_start >= 0.0 || side_end <= 0.0)
+            : (side_start >= 0.0 && side_end <= 0.0);
+        if (in_cut) {
             discard;
         }
     }
