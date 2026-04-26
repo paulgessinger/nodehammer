@@ -79,10 +79,10 @@ void App::Impl::on_init() {
     last_time = stm_now();
 
     IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO &io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-    ImGui::StyleColorsDark();
+    // simgui_setup creates the ImGui context, applies the dark style, and
+    // sets ini_filename internally — DO NOT call ImGui::CreateContext or
+    // ImGui::StyleColorsDark here, that would double-init and crash on
+    // simgui_shutdown.
     ImGui_ImplSokol_Init();
 
     fb_width = static_cast<uint32_t>(sapp_width());
@@ -172,9 +172,10 @@ void App::Impl::on_frame() {
         }
     }
 
+    // simgui_new_frame internally calls ImGui::NewFrame after configuring
+    // io display size + delta time. Don't double-call NewFrame.
     ImGui_ImplSokol_NewFrame(static_cast<int>(fb_width), static_cast<int>(fb_height), delta_seconds,
                              sapp_dpi_scale());
-    ImGui::NewFrame();
 
     update_camera_input();
 
@@ -241,14 +242,16 @@ void App::Impl::on_frame() {
     }
     ImGui::End();
 
-    ImGui::Render();
+    // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
+    // internally calls ImGui::Render itself before issuing draws.
     render();
 }
 
 void App::Impl::on_cleanup() {
     scene_renderer.release();
+    // simgui_shutdown destroys the ImGui context — don't call
+    // ImGui::DestroyContext separately (double-free crash on macOS quit).
     ImGui_ImplSokol_Shutdown();
-    ImGui::DestroyContext();
     sg_shutdown();
 }
 
