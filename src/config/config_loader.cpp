@@ -185,6 +185,16 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
         return PredicateExpr{PathGlobPredicate{*pat}};
     }
 
+    if (type == "material_glob") {
+        auto pat = tbl["pattern"].value<std::string>();
+        if (!pat) {
+            diags.error(codes::kErrConfigParse, "material_glob predicate missing 'pattern'",
+                        context);
+            return std::nullopt;
+        }
+        return PredicateExpr{MaterialGlobPredicate{*pat}};
+    }
+
     if (type == "tag") {
         auto key = tbl["key"].value<std::string>();
         if (!key) {

@@ -7,6 +7,7 @@
 void register_cmd_convert(CLI::App &app);
 void register_cmd_inspect(CLI::App &app);
 void register_cmd_validate_config(CLI::App &app);
+void register_cmd_config_flatten(CLI::App &app);
 void register_cmd_dump_semantic(CLI::App &app);
 void register_cmd_dump_render(CLI::App &app);
 #ifdef NH_WITH_VIEWER
@@ -29,6 +30,7 @@ int main(int argc, char **argv) {
     register_cmd_convert(app);
     register_cmd_inspect(app);
     register_cmd_validate_config(app);
+    register_cmd_config_flatten(app);
     register_cmd_dump_semantic(app);
     register_cmd_dump_render(app);
 #ifdef NH_WITH_VIEWER

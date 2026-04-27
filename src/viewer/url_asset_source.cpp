@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/asset_loader.hpp>
+#include <nodehammer/viewer/url_asset_source.hpp>
 
 #include <nodehammer/config/config_loader.hpp>
 
@@ -34,7 +34,6 @@ void make_parent_dirs(const std::string &path) {
             current.push_back(path[i]);
         }
     }
-    // The final segment is the file name itself — don't mkdir it.
 }
 
 bool write_file(const std::string &path, const char *data, size_t size) {
@@ -50,8 +49,8 @@ bool write_file(const std::string &path, const char *data, size_t size) {
 
 // Resolve an `include` entry (relative to the config file) to an absolute
 // MEMFS / URL path. Mirrors the std::filesystem::canonical step the real
-// loader does at config_loader.cpp:86, but lexically only — MEMFS doesn't
-// have a working canonical().
+// loader does, but lexically only — at peek time the include file is not
+// yet on MEMFS, so canonical() would throw.
 std::string resolve_include_url(const std::string &config_url, const std::string &rel) {
     std::filesystem::path base = std::filesystem::path(config_url).parent_path();
     std::filesystem::path joined = (base / rel).lexically_normal();
@@ -62,16 +61,15 @@ std::string resolve_include_url(const std::string &config_url, const std::string
 
 } // namespace
 
-struct AssetLoader::Impl {
+struct UrlAssetSource::Impl {
     LoadState state{LoadState::Idle};
     std::string error;
-    std::string config_url;
-    std::string input_url;
+    std::filesystem::path config_path;
+    std::filesystem::path input_path;
     std::vector<AssetProgress> entries;
     std::unordered_set<std::string> seen;
 
 #ifdef __EMSCRIPTEN__
-    // Per-fetch context: small enough to heap-allocate one per request.
     struct FetchCtx {
         Impl *self;
         size_t index;
@@ -86,15 +84,13 @@ struct AssetLoader::Impl {
     void after_file_landed(size_t index, Kind kind);
     void check_done();
 
-    // We don't track Kind on the entry itself (the user-facing AssetProgress
-    // shouldn't grow that field), so map index → kind here.
     std::vector<Kind> kinds;
 #endif
 };
 
 #ifdef __EMSCRIPTEN__
 
-void AssetLoader::Impl::enqueue(const std::string &url, Kind kind) {
+void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
     if (!seen.insert(url).second) {
         return;
     }
@@ -115,7 +111,7 @@ void AssetLoader::Impl::enqueue(const std::string &url, Kind kind) {
     emscripten_fetch(&attr, url.c_str());
 }
 
-void AssetLoader::Impl::on_progress(emscripten_fetch_t *fetch) {
+void UrlAssetSource::Impl::on_progress(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     if (ctx == nullptr) {
         return;
@@ -125,7 +121,7 @@ void AssetLoader::Impl::on_progress(emscripten_fetch_t *fetch) {
     entry.bytes_total = static_cast<std::uint64_t>(fetch->totalBytes);
 }
 
-void AssetLoader::Impl::on_success(emscripten_fetch_t *fetch) {
+void UrlAssetSource::Impl::on_success(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
     const size_t index = ctx->index;
@@ -153,7 +149,7 @@ void AssetLoader::Impl::on_success(emscripten_fetch_t *fetch) {
     self->check_done();
 }
 
-void AssetLoader::Impl::on_error(emscripten_fetch_t *fetch) {
+void UrlAssetSource::Impl::on_error(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
     const size_t index = ctx->index;
@@ -169,11 +165,10 @@ void AssetLoader::Impl::on_error(emscripten_fetch_t *fetch) {
     delete ctx;
 }
 
-void AssetLoader::Impl::after_file_landed(size_t index, Kind kind) {
+void UrlAssetSource::Impl::after_file_landed(size_t index, Kind kind) {
     if (kind == Kind::Input) {
         return;
     }
-    // Both Config and Include kinds may declare further includes.
     const auto &url = entries[index].url;
     auto includes = ConfigLoader::peekIncludes(url);
     for (const auto &rel : includes) {
@@ -181,15 +176,12 @@ void AssetLoader::Impl::after_file_landed(size_t index, Kind kind) {
     }
 }
 
-void AssetLoader::Impl::check_done() {
+void UrlAssetSource::Impl::check_done() {
     if (state == LoadState::Error) {
         return;
     }
     for (const auto &e : entries) {
-        if (!e.done) {
-            return;
-        }
-        if (e.failed) {
+        if (!e.done || e.failed) {
             return;
         }
     }
@@ -198,36 +190,34 @@ void AssetLoader::Impl::check_done() {
 
 #endif // __EMSCRIPTEN__
 
-AssetLoader::AssetLoader() : impl_(std::make_unique<Impl>()) {}
-AssetLoader::~AssetLoader() = default;
+UrlAssetSource::UrlAssetSource() : impl_(std::make_unique<Impl>()) {}
+UrlAssetSource::~UrlAssetSource() = default;
 
-void AssetLoader::start(std::string config_url, std::string input_url) {
-    impl_->config_url = std::move(config_url);
-    impl_->input_url = std::move(input_url);
+void UrlAssetSource::start(std::string config_url, std::string input_url) {
+    impl_->config_path = config_url;
+    impl_->input_path = input_url;
 
 #ifdef __EMSCRIPTEN__
     impl_->state = LoadState::Fetching;
-    impl_->enqueue(impl_->config_url, Impl::Kind::Config);
-    impl_->enqueue(impl_->input_url, Impl::Kind::Input);
+    impl_->enqueue(config_url, Impl::Kind::Config);
+    impl_->enqueue(input_url, Impl::Kind::Input);
 #else
-    // Native: files already on disk; nothing to fetch. The async path is
-    // emscripten-only by design (see plan).
+    // Native: files already on disk; nothing to fetch. The async URL path
+    // is emscripten-only by design.
     impl_->state = LoadState::Ready;
 #endif
 }
 
-void AssetLoader::poll() {
-    // No-op: web is callback-driven, native resolves synchronously in start().
-}
+void UrlAssetSource::poll() {}
 
-LoadState AssetLoader::state() const { return impl_->state; }
+LoadState UrlAssetSource::state() const { return impl_->state; }
 
-std::span<const AssetProgress> AssetLoader::progress() const {
+std::span<const AssetProgress> UrlAssetSource::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
 }
 
-const std::string &AssetLoader::error_message() const { return impl_->error; }
-const std::string &AssetLoader::config_path() const { return impl_->config_url; }
-const std::string &AssetLoader::input_path() const { return impl_->input_url; }
+const std::string &UrlAssetSource::error_message() const { return impl_->error; }
+const std::filesystem::path &UrlAssetSource::config_path() const { return impl_->config_path; }
+const std::filesystem::path &UrlAssetSource::input_path() const { return impl_->input_path; }
 
 } // namespace nodehammer::viewer

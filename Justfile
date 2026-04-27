@@ -104,18 +104,23 @@ wasm-set *args: _require-emsdk
 
 wasm: wasm-deps wasm-configure wasm-build wasm-test
 
-# Serve the wasm viewer locally. Browsers refuse to load .wasm from file://, so
-# we need a real http server. Defaults to port 8000; override with `just
-# wasm-serve 9000`. Open http://localhost:<port>/viewer.html — that page is a
-# static shell that probes navigator.gpu and dynamically loads either
-# nodehammer-gles3.{js,wasm} (WebGL2) or nodehammer-wgpu.{js,wasm} (WebGPU).
+# Serve the wasm viewer locally. Browsers refuse to load .wasm from file://,
+# so we need a real http server. The static viewer.html shell probes
+# navigator.gpu and dynamically loads either nodehammer-gles3.{js,wasm}
+# (WebGL2) or nodehammer-wgpu.{js,wasm} (WebGPU).
 #
-# Symlinks the input + config tree the viewer needs (odd.nhb.zst and the
-# odd_simple.toml fragment set) plus the static viewer.html shell into the
-# served directory. The Module.preRun block in viewer.html issues fetch()
-# requests for these paths at startup; without them you'll see
-# "FS.createPreloadedFile failed" in the console.
-wasm-serve port='8000':
+# The shell decides between URL-auto-load and upload-only mode by fetching
+# a sibling `nh_manifest.json` at startup:
+#   - If present, its `input` / `config` fields name the scene to load.
+#   - If 404, the viewer comes up empty and accepts drag-and-drop /
+#     file-picker uploads.
+#
+# Usage:
+#   just wasm-serve            # ODD scene, autoload (default)
+#   just wasm-serve odd        # explicit ODD scene, autoload
+#   just wasm-serve none       # no manifest; upload-only deployment
+#   just wasm-serve odd 9000   # ODD scene on a custom port
+wasm-serve scene='odd' port='8000':
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{justfile_directory()}}"
@@ -124,18 +129,41 @@ wasm-serve port='8000':
         echo "no nodehammer-{gles3,wgpu}.js bundle in $dir — run 'just wasm-build' first." >&2
         exit 1
     fi
-    # Stage data files alongside the wasm. Symlinks rather than copies so an
-    # in-place edit on the source side picks up next reload. Top-level entry
-    # points get generic names (scene.nhb.zst / scene.toml) so the wasm shell
-    # doesn't bake in the choice of detector — swap which file is symlinked
-    # to retarget without rebuilding. Transitive include paths inside the
-    # config are hard-coded in the toml, so they keep their original names.
     ln -sf "$root/web/viewer.html" "$dir/viewer.html"
-    ln -sf "$root/odd.nhb.zst" "$dir/scene.nhb.zst"
-    ln -sf "$root/fixtures/configs/odd.toml" "$dir/scene.toml"
-    mkdir -p "$dir/odd"
-    for f in base.toml materials.toml tracker.toml calorimeters.toml muon.toml; do
-        ln -sf "$root/fixtures/configs/odd/$f" "$dir/odd/$f"
-    done
-    echo "serving $dir at http://localhost:{{port}}/viewer.html"
+
+    # Clean any stale manifest from a previous run; we'll re-emit below
+    # only if a scene was requested.
+    rm -f "$dir/nh_manifest.json"
+    # Drop legacy synthetic-name symlinks (scene.nhb.zst / scene.toml) from
+    # earlier versions of this recipe — manifest now references real names.
+    rm -f "$dir/scene.nhb.zst" "$dir/scene.toml"
+
+    case "{{scene}}" in
+        none|'')
+            mode="upload-only (no manifest)"
+            ;;
+        odd)
+            ln -sf "$root/odd.nhb.zst" "$dir/odd.nhb.zst"
+            ln -sf "$root/fixtures/configs/odd.toml" "$dir/odd.toml"
+            mkdir -p "$dir/odd"
+            for f in base.toml materials.toml tracker.toml calorimeters.toml muon.toml; do
+                ln -sf "$root/fixtures/configs/odd/$f" "$dir/odd/$f"
+            done
+            printf '%s\n' \
+                '{' \
+                '  "input": "odd.nhb.zst",' \
+                '  "config": "odd.toml",' \
+                '  "title": "Open Data Detector"' \
+                '}' \
+                > "$dir/nh_manifest.json"
+            mode="autoload (odd)"
+            ;;
+        *)
+            echo "unknown scene '{{scene}}' — known: odd, none" >&2
+            exit 1
+            ;;
+    esac
+
+    echo "serving $dir in $mode at:"
+    echo "  http://localhost:{{port}}/viewer.html"
     cd "$dir" && exec python3 -m http.server {{port}}

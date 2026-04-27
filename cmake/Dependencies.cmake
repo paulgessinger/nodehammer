@@ -229,4 +229,21 @@ if(NODEHAMMER_WITH_VIEWER)
 
     # sokol headers + sokol-shdc resolver + nh_add_sokol_lib + nh_compile_shader.
     include(${CMAKE_SOURCE_DIR}/cmake/Sokol.cmake)
+
+    # ── nativefiledialog-extended ───────────────────────────────────────────
+    # Native-only file picker (NFD::nfd target). The web build uses an
+    # HTML <input type=file> + FileSystemAccess API instead; skip the dep
+    # entirely under emscripten so the wasm binary doesn't grow a useless
+    # AppKit/GTK/win32 stub. NFD_PORTAL=ON makes Linux use xdg-desktop-portal
+    # (works in Wayland/Flatpak without bundling GTK).
+    if(NOT EMSCRIPTEN)
+        set(NFD_PORTAL ON CACHE BOOL "" FORCE)
+        set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(nfd
+            SYSTEM
+            GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
+            GIT_TAG        v1.2.1
+        )
+        FetchContent_MakeAvailable(nfd)
+    endif()
 endif()

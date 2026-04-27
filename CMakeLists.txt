@@ -123,6 +123,7 @@ add_library(nodehammer_lib STATIC
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
     src/cli/cmd_validate_config.cpp
+    src/cli/cmd_config_flatten.cpp
     src/cli/cmd_dump_semantic.cpp
     src/cli/cmd_dump_render.cpp
     src/scene_build.cpp
@@ -210,6 +211,12 @@ if(NODEHAMMER_WITH_VIEWER)
             nodehammer_apply_emscripten_viewer_options(${name})
         else()
             nodehammer_apply_emscripten_exe_options(${name})
+            # Native file picker (NFD-extended). The web build uses an HTML
+            # <input type=file> + FileSystemAccess API, so it never needs
+            # this dep. nfd::nfd is only declared when NOT EMSCRIPTEN — see
+            # cmake/Dependencies.cmake.
+            target_link_libraries(${name} PRIVATE nfd::nfd)
+            target_compile_definitions(${name} PRIVATE NH_HAS_NFD=1)
         endif()
     endfunction()
 

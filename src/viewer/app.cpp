@@ -5,8 +5,13 @@
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
-#include <nodehammer/viewer/asset_loader.hpp>
+#include <nodehammer/viewer/asset_source.hpp>
 #include <nodehammer/viewer/camera.hpp>
+#include <nodehammer/viewer/local_file_asset_source.hpp>
+
+#ifdef NH_HAS_NFD
+#include <nfd.hpp>
+#endif
 
 #include <imgui.h>
 #include <sokol_app.h>
@@ -26,6 +31,7 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten/emscripten.h>
+#include <sys/stat.h>
 
 EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
     var url = new URL(window.location.href);
@@ -41,6 +47,49 @@ EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *ma
     state.forEach(function(value, key) { p.set(key, value); });
 
     history.replaceState(null, "", url);
+});
+
+// Open a transient <input type=file multiple> picker. For each chosen file,
+// read its bytes via FileReader and call back into wasm at
+// `_nh_viewer_deliver_upload(name_ptr, data_ptr, size)`. Filename is
+// UTF-8-encoded via TextEncoder to avoid depending on emscripten's
+// stringToNewUTF8 helper being in EXPORTED_RUNTIME_METHODS.
+EM_JS(void, nh_viewer_open_file_picker, (), {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.toml,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
+    input.style.display = 'none';
+    input.addEventListener(
+        'change', function(ev) {
+            var files = ev.target.files;
+            for (var i = 0; i < files.length; ++i) {
+                (function(f) {
+                    var reader = new FileReader();
+                    reader.onload = function() {
+                        var bytes = new Uint8Array(reader.result);
+                        var size = bytes.length;
+                        var data_ptr = Module._malloc(size);
+                        Module.HEAPU8.set(bytes, data_ptr);
+
+                        var enc = new TextEncoder();
+                        var name_utf8 = enc.encode(f.name);
+                        var name_ptr = Module._malloc(name_utf8.length + 1);
+                        Module.HEAPU8.set(name_utf8, name_ptr);
+                        Module.HEAPU8[name_ptr + name_utf8.length] = 0;
+
+                        Module._nh_viewer_deliver_upload(name_ptr, data_ptr, size);
+
+                        Module._free(name_ptr);
+                        Module._free(data_ptr);
+                    };
+                    reader.readAsArrayBuffer(f);
+                })(files[i]);
+            }
+            document.body.removeChild(input);
+        });
+    document.body.appendChild(input);
+    input.click();
 });
 #else
 void nh_viewer_commit_url_state(const char *state_query, const char *managed_keys);
@@ -106,9 +155,27 @@ struct App::Impl {
     bool quit{false};
 
     std::shared_ptr<const RenderScene> scene;
-    std::unique_ptr<AssetLoader> loader;
+    std::unique_ptr<AssetSource> source;
     SceneRenderer scene_renderer;
     Camera camera;
+
+#ifdef __EMSCRIPTEN__
+    // Web upload glue (file picker EM_JS shim and the drop-bytes fetch
+    // callback) need a way to call back into the App from JS / sokol.
+    // There is exactly one App alive per page lifetime, so a single static
+    // pointer suffices. on_init sets it; on_cleanup clears it.
+    static Impl *active;
+
+    // Materialise an in-memory file into MEMFS at /uploads/<filename>,
+    // then route it through the LocalFileAssetSource. Auto-creates a
+    // LocalFileAssetSource if none is currently set so a fresh page that
+    // started in upload-only mode can still receive a drop.
+    void deliver_upload(const std::string &filename, const std::uint8_t *data, std::size_t size);
+#endif
+
+    // Stashed message after a build failure (so the UI can keep showing it
+    // for more than the one frame the source survives).
+    std::string build_error;
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
     /// "no scene framed yet" — `dolly` falls back to distance-relative sizing.
@@ -179,7 +246,86 @@ void App::Impl::on_init() {
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
+
+#ifdef __EMSCRIPTEN__
+    Impl::active = this;
+#endif
 }
+
+#ifdef __EMSCRIPTEN__
+
+App::Impl *App::Impl::active = nullptr;
+
+namespace {
+
+// Per-fetch context for sokol's async dropped-file byte fetch on web.
+// sokol writes the file's bytes into `buffer` and then invokes the
+// callback once the FileReader resolves; we keep the buffer alive until
+// then by heap-allocating this struct.
+struct WebDropCtx {
+    std::vector<std::uint8_t> buffer;
+    std::string filename;
+    App::Impl *self;
+};
+
+void web_drop_fetch_callback(const sapp_html5_fetch_response *response) {
+    auto *ctx = static_cast<WebDropCtx *>(response->user_data);
+    if (response->succeeded) {
+        ctx->self->deliver_upload(ctx->filename, ctx->buffer.data(),
+                                  static_cast<std::size_t>(response->data.size));
+    } else {
+        std::println(stderr, "viewer: failed to fetch dropped file '{}'", ctx->filename);
+    }
+    delete ctx;
+}
+
+void make_uploads_dir() {
+    // EEXIST is the success case for re-runs.
+    ::mkdir("/uploads", 0755);
+}
+
+} // namespace
+
+void App::Impl::deliver_upload(const std::string &filename, const std::uint8_t *data,
+                               std::size_t size) {
+    if (!source) {
+        source = std::make_unique<LocalFileAssetSource>();
+        scene.reset();
+        scene_uploaded = false;
+        camera_framed = false;
+        build_error.clear();
+    }
+    make_uploads_dir();
+    const std::string path = "/uploads/" + filename;
+    std::FILE *f = std::fopen(path.c_str(), "wb");
+    if (f == nullptr) {
+        std::println(stderr, "viewer: failed to open MEMFS path '{}' for writing", path);
+        return;
+    }
+    const bool ok = std::fwrite(data, 1, size, f) == size;
+    std::fclose(f);
+    if (!ok) {
+        std::println(stderr, "viewer: short write delivering '{}'", path);
+        return;
+    }
+    source->ingest_local_file(std::filesystem::path{path});
+}
+
+#endif // __EMSCRIPTEN__
+
+extern "C" {
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_deliver_upload(const char *filename, const std::uint8_t *data, std::size_t size) {
+    if (App::Impl::active == nullptr || filename == nullptr) {
+        return;
+    }
+    App::Impl::active->deliver_upload(filename, data, size);
+}
+#endif
+
+} // extern "C"
 
 void App::Impl::on_event(const sapp_event *ev) {
     ImGui_ImplSokol_HandleEvent(ev);
@@ -199,6 +345,40 @@ void App::Impl::on_event(const sapp_event *ev) {
         frame_count = 0;
     } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         quit = true;
+    } else if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+        // If no source is currently set, spin one up so the dropped file
+        // has somewhere to land. This handles the "drop a scene to load it"
+        // flow even when the App was started with no CLI args.
+        if (!source) {
+            source = std::make_unique<LocalFileAssetSource>();
+            scene.reset();
+            scene_uploaded = false;
+            camera_framed = false;
+            build_error.clear();
+        }
+        const int n = sapp_get_num_dropped_files();
+        for (int i = 0; i < n; ++i) {
+#ifdef __EMSCRIPTEN__
+            // On web, sapp_get_dropped_file_path returns just the filename
+            // (no real path) and the bytes have to be fetched asynchronously
+            // via FileReader. Allocate a buffer of the right size, kick off
+            // the fetch, and route the bytes through deliver_upload when
+            // the callback fires.
+            const std::uint64_t size = sapp_html5_get_dropped_file_size(i);
+            auto *ctx = new WebDropCtx;
+            ctx->filename = sapp_get_dropped_file_path(i);
+            ctx->buffer.resize(static_cast<std::size_t>(size));
+            ctx->self = this;
+            sapp_html5_fetch_request req{};
+            req.dropped_file_index = i;
+            req.callback = &web_drop_fetch_callback;
+            req.buffer = sapp_range{ctx->buffer.data(), ctx->buffer.size()};
+            req.user_data = ctx;
+            sapp_html5_fetch_dropped_file(&req);
+#else
+            source->ingest_local_file(std::filesystem::path{sapp_get_dropped_file_path(i)});
+#endif
+        }
     }
 }
 
@@ -314,12 +494,19 @@ void App::Impl::sync_browser_url() const {
 }
 
 void App::Impl::on_frame() {
+    // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
+    // entirely. Full pause was visible as "drag-and-drop into a
+    // background viewer feels broken": the drop event fired and the
+    // async source/scene-build state advanced, but no frame rendered the
+    // result until focus returned. 5 Hz keeps drag-over feedback and
+    // load progress visible while still cutting GPU cost ~12x vs. the
+    // active 60 Hz path. The flag's URL/persistence name stays
+    // `pauseWhenUnfocused` for backwards compatibility.
     if (cfg.pause_when_unfocused && (!window_focused || !window_visible)) {
-        last_time = stm_now();
-        fps_window_start = last_time;
-        frame_count = 0;
-        delta_seconds = 0.0;
-        return;
+        constexpr double kIdleFrameInterval = 0.2; // 5 Hz
+        if (stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
+            return;
+        }
     }
 
     fb_width = static_cast<uint32_t>(sapp_width());
@@ -396,18 +583,16 @@ void App::Impl::on_frame() {
             sync_browser_url();
         }
     }
-    ImGui::Checkbox("pause when unfocused", &cfg.pause_when_unfocused);
-    if (loader && !scene) {
+    ImGui::Checkbox("throttle when unfocused", &cfg.pause_when_unfocused);
+    if (source && !scene) {
         ImGui::Separator();
-        loader->poll();
-        const auto state = loader->state();
+        source->poll();
+        const auto state = source->state();
         if (state == LoadState::Error) {
             ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
-            ImGui::TextWrapped("%s", loader->error_message().c_str());
+            ImGui::TextWrapped("%s", source->error_message().c_str());
         } else if (state == LoadState::Ready) {
-            // Run the disk-backed pipeline against MEMFS-resident files. The
-            // diagnostics print to stderr (browser console via Module.printErr).
-            auto built = build_scene_from_paths(loader->config_path(), loader->input_path());
+            auto built = build_scene_from_paths(source->config_path(), source->input_path());
             for (const auto &d : built.diags.items()) {
                 std::println(stderr, "scene_build: {} {}", d.code, d.message);
             }
@@ -418,36 +603,84 @@ void App::Impl::on_frame() {
                 scene = std::move(built.scene);
                 scene_uploaded = false;
                 camera_framed = false;
-                loader.reset();
+                build_error.clear();
+                source.reset();
             } else {
-                // Stash the diagnostic message so the UI shows something
-                // useful next frame instead of an empty Ready state.
-                std::string msg = "scene build failed";
+                build_error = "scene build failed";
                 for (const auto &d : built.diags.items()) {
                     if (d.severity >= DiagnosticSeverity::Error) {
-                        msg = d.message;
+                        build_error = d.message;
                         break;
                     }
                 }
-                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", msg.c_str());
-                loader.reset();
+                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
+                source.reset();
             }
         } else {
-            ImGui::Text("Downloading assets…");
-            for (const auto &p : loader->progress()) {
-                if (p.bytes_total > 0) {
-                    const float frac = static_cast<float>(static_cast<double>(p.bytes_done) /
-                                                          static_cast<double>(p.bytes_total));
-                    ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-                } else {
-                    // Indeterminate — show received bytes only.
-                    ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
-                                       ImVec2(-1.f, 0.f), "");
+            // Idle / Fetching: render a source-shaped placeholder. URL-style
+            // sources will populate `progress()` with active downloads;
+            // accumulator-style sources (drag-and-drop / picker) populate
+            // it with already-collected files.
+            const auto entries = source->progress();
+            if (entries.empty()) {
+                ImGui::Text("Drag a config (.toml) and a geometry file onto the window,");
+                ImGui::Text("or use the Open file button below.");
+            } else {
+                ImGui::Text("Loading…");
+                for (const auto &p : entries) {
+                    if (!p.done && p.bytes_total > 0) {
+                        const float frac = static_cast<float>(static_cast<double>(p.bytes_done) /
+                                                              static_cast<double>(p.bytes_total));
+                        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+                    } else if (!p.done) {
+                        ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
+                                           ImVec2(-1.f, 0.f), "");
+                    } else {
+                        ImGui::TextColored({0.5f, 0.9f, 0.5f, 1.f}, "[ok]");
+                    }
+                    ImGui::SameLine();
+                    ImGui::Text("%s", p.url.c_str());
                 }
-                ImGui::SameLine();
-                ImGui::Text("%s", p.url.c_str());
+            }
+            // Accumulator-source-specific hints: list which slot is still
+            // empty and surface any unrecognised filenames.
+            if (auto *local = dynamic_cast<LocalFileAssetSource *>(source.get())) {
+                if (local->needs_config()) {
+                    ImGui::Text("Still waiting for: a .toml config");
+                }
+                if (local->needs_input()) {
+                    ImGui::Text("Still waiting for: a geometry file (.nhb.zst, .gdml, .gltf, …)");
+                }
+                if (!local->last_unrecognised().empty()) {
+                    ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f}, "Don't know what to do with: %s",
+                                       local->last_unrecognised().c_str());
+                }
+            }
+            if (ImGui::Button("Open file…")) {
+#ifdef NH_HAS_NFD
+                // Native: NFD blocks while the OS modal is up; sokol_app
+                // keeps the event loop alive and re-enters the frame
+                // callback after the dialog closes.
+                NFD::Guard nfd;
+                NFD::UniquePathU8 picked;
+                nfdu8filteritem_t filters[] = {
+                    {"Nodehammer scene", "toml,nhb,zst,gltf,glb,gdml,root,fb,json,xml"},
+                };
+                if (NFD::OpenDialog(picked, filters, 1) == NFD_OKAY) {
+                    source->ingest_local_file(std::filesystem::path{picked.get()});
+                }
+#elif defined(__EMSCRIPTEN__)
+                // Web: kick off a transient <input type=file>; bytes flow
+                // back through nh_viewer_deliver_upload as each FileReader
+                // resolves. Returns immediately; deliveries arrive on later
+                // frames via the JS event queue.
+                nh_viewer_open_file_picker();
+#endif
             }
         }
+    } else if (!scene && !build_error.empty()) {
+        ImGui::Separator();
+        ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
     }
 
     if (scene) {
@@ -488,7 +721,7 @@ void App::Impl::on_frame() {
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
-    } else if (!loader) {
+    } else if (!source) {
         ImGui::Text("(no scene loaded)");
     }
     ImGui::End();
@@ -504,6 +737,9 @@ void App::Impl::on_cleanup() {
     // ImGui::DestroyContext separately (double-free crash on macOS quit).
     ImGui_ImplSokol_Shutdown();
     sg_shutdown();
+#ifdef __EMSCRIPTEN__
+    Impl::active = nullptr;
+#endif
 }
 
 void App::set_scene(std::shared_ptr<const RenderScene> scene) {
@@ -512,7 +748,15 @@ void App::set_scene(std::shared_ptr<const RenderScene> scene) {
     impl_->camera_framed = false;
 }
 
-void App::set_loader(std::unique_ptr<AssetLoader> loader) { impl_->loader = std::move(loader); }
+void App::set_source(std::unique_ptr<AssetSource> source) {
+    impl_->source = std::move(source);
+    // Replacing a source mid-session clears the current scene so the
+    // placeholder UI can take over while the new source resolves.
+    impl_->scene.reset();
+    impl_->scene_uploaded = false;
+    impl_->camera_framed = false;
+    impl_->build_error.clear();
+}
 
 App::App(Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
 
@@ -534,6 +778,12 @@ int App::run() {
     // in web/viewer.html.
     desc.html5.canvas_selector = "#canvas";
     desc.logger.func = slog_func;
+    // Enable drag-and-drop file events. The buffer size needs to be at
+    // least the longest path we'd ever see; 1 KiB is safe for typical
+    // scene+config drops.
+    desc.enable_dragndrop = true;
+    desc.max_dropped_files = 8;
+    desc.max_dropped_file_path_length = 1024;
     // Tell sokol_app it owns the main loop on emscripten too — sapp_run
     // internally calls emscripten_set_main_loop and unwinds the stack via
     // its async exception, mirroring the bgfx App's emscripten_set_main_loop_arg

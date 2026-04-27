@@ -33,116 +33,155 @@
     <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
     <div id="status">loading…</div>
     <script>
-        // Asset loading happens inside wasm via emscripten_fetch — see the
-        // C++ AssetLoader. Top-level entry points have generic names so the
-        // wasm shell isn't tied to a specific detector; override per-page
-        // with ?input=… &config=…. Includes are discovered automatically by
-        // walking the config's `include = [...]` array as each TOML file
-        // arrives, so they don't need to be listed in the URL.
-        var params = new URLSearchParams(window.location.search);
-        var inputUrl = params.get('input') || 'scene.nhb.zst';
-        var configUrl = params.get('config') || 'scene.toml';
+        // Two viewer entry paths share this single shell:
+        //   - URL auto-load: a sibling `nh_manifest.json` names the default
+        //     scene + config + optional defaults. The viewer fetches them
+        //     via emscripten_fetch on startup and shows a progress panel.
+        //   - Upload-only: no manifest is present (404 is treated as
+        //     "deploy didn't pin a default scene"). The viewer comes up
+        //     empty; drag a .toml + a geometry file onto the canvas, or
+        //     use the file picker.
+        // Per-page query params (?input=…&config=…&pbr=1&…) override the
+        // manifest when both are provided.
+        //
+        // Manifest schema (all fields optional):
+        //   {
+        //     "input":   "scene.nhb.zst",
+        //     "config":  "scene.toml",
+        //     "title":   "Open Data Detector",
+        //     "defaults": { "pbr": true, "autoOrbit": false, ... }
+        //   }
+        // `defaults` keys mirror the query-param names parsed below; they
+        // are merged into params before parsing, so query params always win.
+        fetch('nh_manifest.json', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; })
+            .then(function (manifest) { boot(manifest || {}); });
 
-        function queryBool(name) {
-            var value = params.get(name);
-            if (value === null) return null;
-            value = value.toLowerCase();
-            return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
-        }
+        function boot(manifest) {
+            var params = new URLSearchParams(window.location.search);
 
-        function appendBoolArg(args, queryName, trueFlag, falseFlag) {
-            var value = queryBool(queryName);
-            if (value === null) return;
-            if (value && trueFlag) {
-                args.push(trueFlag);
-            } else if (!value && falseFlag) {
-                args.push(falseFlag);
+            // Manifest defaults appear as virtual query params; explicit
+            // URL params still take precedence.
+            if (manifest.defaults) {
+                Object.keys(manifest.defaults).forEach(function (k) {
+                    if (!params.has(k)) {
+                        params.set(k, String(manifest.defaults[k]));
+                    }
+                });
             }
-        }
 
-        function appendValueArg(args, queryName, flag) {
-            var value = params.get(queryName);
-            if (value !== null && value !== '') {
-                args.push(flag, value);
+            var inputUrl = params.get('input') || manifest.input || '';
+            var configUrl = params.get('config') || manifest.config || '';
+
+            if (manifest.title) {
+                document.title = manifest.title;
             }
-        }
 
-        // Backend selection: WebGPU when available, WebGL2 otherwise. Force
-        // a specific backend for A/B testing with ?backend=wgpu/webgpu or
-        // ?backend=gles3/webgl2.
-        var forced = (params.get('backend') || '').toLowerCase();
-        var useWGPU;
-        if (forced === 'wgpu' || forced === 'webgpu') {
-            useWGPU = true;
-        } else if (forced === 'gles3' || forced === 'webgl2' || forced === 'webgl') {
-            useWGPU = false;
-        } else {
-            if (forced) {
-                console.warn('unknown backend "' + forced + '", using auto-detect');
+            function queryBool(name) {
+                var value = params.get(name);
+                if (value === null) return null;
+                value = value.toLowerCase();
+                return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
             }
-            useWGPU = !!navigator.gpu;
-        }
-        var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
 
-        var viewerArgs = [
-            'viewer',
-            '--input', '/' + inputUrl,
-            '--config', '/' + configUrl,
-        ];
-        appendBoolArg(viewerArgs, 'cullBack', null, '--no-cull-back');
-        appendBoolArg(viewerArgs, 'pauseWhenUnfocused', null, '--no-pause-when-unfocused');
-        appendBoolArg(viewerArgs, 'autoOrbit', '--auto-orbit', null);
-        appendValueArg(viewerArgs, 'orbitSpeed', '--orbit-speed');
-        appendBoolArg(viewerArgs, 'angleCut', '--angle-cut', null);
-        appendBoolArg(viewerArgs, 'shaderAngleCut', null, '--no-shader-angle-cut');
-        appendValueArg(viewerArgs, 'cutStart', '--cut-start');
-        appendValueArg(viewerArgs, 'cutEnd', '--cut-end');
-        appendBoolArg(viewerArgs, 'pbr', '--pbr', null);
-        appendValueArg(viewerArgs, 'cameraTargetX', '--camera-target-x');
-        appendValueArg(viewerArgs, 'cameraTargetY', '--camera-target-y');
-        appendValueArg(viewerArgs, 'cameraTargetZ', '--camera-target-z');
-        appendValueArg(viewerArgs, 'cameraDistance', '--camera-distance');
-        appendValueArg(viewerArgs, 'cameraYaw', '--camera-yaw');
-        appendValueArg(viewerArgs, 'cameraPitch', '--camera-pitch');
-
-        var statusEl = document.getElementById('status');
-        var Module = {
-            canvas: document.getElementById('canvas'),
-            print: function (msg) { console.log(msg); },
-            printErr: function (msg) { console.error(msg); },
-            setStatus: function (text) {
-                if (text) {
-                    statusEl.textContent = text;
-                    statusEl.style.display = 'block';
-                } else {
-                    statusEl.style.display = 'none';
+            function appendBoolArg(args, queryName, trueFlag, falseFlag) {
+                var value = queryBool(queryName);
+                if (value === null) return;
+                if (value && trueFlag) {
+                    args.push(trueFlag);
+                } else if (!value && falseFlag) {
+                    args.push(falseFlag);
                 }
-            },
-            // Tell emscripten where to fetch the .wasm sidecar (the loader
-            // emits its own filename otherwise, which is fine — but with two
-            // bundles in the same dir we want to be explicit).
-            locateFile: function (path) {
-                if (path.endsWith('.wasm')) return bundleBase + '.wasm';
-                return path;
-            },
-            // No preRun preloads — assets are fetched from C++ via
-            // emscripten_fetch after main() starts so imgui can render a
-            // progress UI instead of blocking startup.
-            arguments: viewerArgs,
-        };
-        Module.setStatus('loading ' + bundleBase + '…');
-        window.onerror = function (msg) {
-            Module.setStatus('error — see console');
-            console.error(msg);
-        };
+            }
 
-        // Inject the matching loader script. emscripten's loader picks up
-        // the global `Module` object set above and starts the wasm fetch
-        // (via locateFile) as soon as it executes.
-        var s = document.createElement('script');
-        s.src = bundleBase + '.js';
-        s.async = true;
-        document.body.appendChild(s);
+            function appendValueArg(args, queryName, flag) {
+                var value = params.get(queryName);
+                if (value !== null && value !== '') {
+                    args.push(flag, value);
+                }
+            }
+
+            // Backend selection: WebGPU when available, WebGL2 otherwise.
+            // Force a specific backend with ?backend=wgpu/webgpu or
+            // ?backend=gles3/webgl2.
+            var forced = (params.get('backend') || '').toLowerCase();
+            var useWGPU;
+            if (forced === 'wgpu' || forced === 'webgpu') {
+                useWGPU = true;
+            } else if (forced === 'gles3' || forced === 'webgl2' || forced === 'webgl') {
+                useWGPU = false;
+            } else {
+                if (forced) {
+                    console.warn('unknown backend "' + forced + '", using auto-detect');
+                }
+                useWGPU = !!navigator.gpu;
+            }
+            var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
+
+            var viewerArgs = ['viewer'];
+            if (inputUrl) {
+                viewerArgs.push('--input', '/' + inputUrl);
+            }
+            if (configUrl) {
+                viewerArgs.push('--config', '/' + configUrl);
+            }
+            appendBoolArg(viewerArgs, 'cullBack', null, '--no-cull-back');
+            appendBoolArg(viewerArgs, 'pauseWhenUnfocused', null, '--no-pause-when-unfocused');
+            appendBoolArg(viewerArgs, 'autoOrbit', '--auto-orbit', null);
+            appendValueArg(viewerArgs, 'orbitSpeed', '--orbit-speed');
+            appendBoolArg(viewerArgs, 'angleCut', '--angle-cut', null);
+            appendBoolArg(viewerArgs, 'shaderAngleCut', null, '--no-shader-angle-cut');
+            appendValueArg(viewerArgs, 'cutStart', '--cut-start');
+            appendValueArg(viewerArgs, 'cutEnd', '--cut-end');
+            appendBoolArg(viewerArgs, 'pbr', '--pbr', null);
+            appendValueArg(viewerArgs, 'cameraTargetX', '--camera-target-x');
+            appendValueArg(viewerArgs, 'cameraTargetY', '--camera-target-y');
+            appendValueArg(viewerArgs, 'cameraTargetZ', '--camera-target-z');
+            appendValueArg(viewerArgs, 'cameraDistance', '--camera-distance');
+            appendValueArg(viewerArgs, 'cameraYaw', '--camera-yaw');
+            appendValueArg(viewerArgs, 'cameraPitch', '--camera-pitch');
+
+            var statusEl = document.getElementById('status');
+            window.Module = {
+                canvas: document.getElementById('canvas'),
+                print: function (msg) { console.log(msg); },
+                printErr: function (msg) { console.error(msg); },
+                setStatus: function (text) {
+                    if (text) {
+                        statusEl.textContent = text;
+                        statusEl.style.display = 'block';
+                    } else {
+                        statusEl.style.display = 'none';
+                    }
+                },
+                // Tell emscripten where to fetch the .wasm sidecar (the
+                // loader emits its own filename otherwise, which is fine —
+                // but with two bundles in the same dir we want to be
+                // explicit).
+                locateFile: function (path) {
+                    if (path.endsWith('.wasm')) return bundleBase + '.wasm';
+                    return path;
+                },
+                // No preRun preloads — assets are fetched from C++ via
+                // emscripten_fetch after main() starts so imgui can render
+                // a progress UI instead of blocking startup.
+                arguments: viewerArgs,
+            };
+            window.Module.setStatus('loading ' + bundleBase + '…');
+            window.onerror = function (msg) {
+                window.Module.setStatus('error — see console');
+                console.error(msg);
+            };
+
+            // Inject the matching loader script. Emscripten's loader picks
+            // up the global `Module` object set above and starts the wasm
+            // fetch (via locateFile) as soon as it executes.
+            var s = document.createElement('script');
+            s.src = bundleBase + '.js';
+            s.async = true;
+            document.body.appendChild(s);
+        }
     </script>
 </body>
 </html>

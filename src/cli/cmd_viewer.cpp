@@ -4,8 +4,9 @@
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
 #include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/asset_loader.hpp>
 #include <nodehammer/viewer/config.hpp>
+#include <nodehammer/viewer/local_file_asset_source.hpp>
+#include <nodehammer/viewer/url_asset_source.hpp>
 
 #include <memory>
 #include <optional>
@@ -101,19 +102,25 @@ void register_cmd_viewer(CLI::App &app) {
         nodehammer::viewer::App application(*cfg);
 
 #ifdef __EMSCRIPTEN__
-        // Web entry: skip the synchronous build entirely. The App will draw
-        // an imgui progress panel while emscripten_fetch downloads the
-        // config (+ its includes, discovered as each one lands) and the
-        // geometry; on completion it runs build_scene_from_paths against
-        // the MEMFS-resident files and calls set_scene.
+        // Web entry: skip the synchronous build entirely. If both URL params
+        // are present, hand the App a UrlAssetSource that will fetch the
+        // config (+ its transitive includes) and the geometry; on completion
+        // the App runs build_scene_from_paths against the MEMFS-resident
+        // files. If either is missing, fall back to a LocalFileAssetSource
+        // so drag-and-drop / picker still work.
         if (!inputPath.empty() && !configPath.empty()) {
-            auto loader = std::make_unique<nodehammer::viewer::AssetLoader>();
+            auto loader = std::make_unique<nodehammer::viewer::UrlAssetSource>();
             loader->start(configPath, inputPath);
-            application.set_loader(std::move(loader));
+            application.set_source(std::move(loader));
+        } else {
+            application.set_source(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
         }
 #else
-        // Native: load synchronously before the window opens, exactly as
-        // before. Keeps CLI semantics (errors print + exit non-zero).
+        // Native: if --input is supplied, build synchronously before the
+        // window opens (preserves CLI semantics: errors print + exit
+        // non-zero). With no input, hand the App a LocalFileAssetSource so
+        // the user can drag-and-drop or use the file picker to load a
+        // scene from inside the running viewer.
         if (!inputPath.empty()) {
             auto built = nodehammer::build_scene_from_paths(
                 configPath, inputPath,
@@ -127,6 +134,8 @@ void register_cmd_viewer(CLI::App &app) {
                          built.scene->nodes.size(), built.scene->meshAssets.size(),
                          built.scene->materials.size());
             application.set_scene(std::move(built.scene));
+        } else {
+            application.set_source(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
         }
 #endif
 

@@ -90,6 +90,14 @@ function(nodehammer_apply_emscripten_viewer_options target)
         # assets after main() starts, so imgui can render a progress UI
         # instead of blocking startup on FS.createPreloadedFile.
         "-sFETCH=1"
+        # Upload glue: the file-picker EM_JS shim and the drag-and-drop
+        # FileReader path both call back into wasm at Module._nh_viewer_*
+        # with a malloc'd byte buffer. Default emscripten only exports
+        # _main, so opt _malloc / _free in explicitly. HEAPU8 is also
+        # opt-in under modern emscripten and is needed to copy the JS
+        # bytes into the wasm heap before handing off to the C++ side.
+        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_nh_viewer_deliver_upload"
+        "-sEXPORTED_RUNTIME_METHODS=HEAPU8"
         # The wasm-exceptions runtime emits JS that calls $stackSave/
         # $stackRestore, which in turn need the C-level emscripten_stack_*
         # helpers from libcompiler_rt. Force-include those JS lib funcs;

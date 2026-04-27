@@ -247,6 +247,37 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
     return arr;
 }
 
+// Build the `[defaults]` sub-tree: cfg.tessellationDefaults + cfg.extrasDefaults.
+// Returns an empty table when nothing is set, in which case configToToml omits
+// the key entirely. Mirrors the parser at config_loader.cpp:746-771 — those
+// are the only two keys recognised under [defaults].
+toml::table buildDefaultsTable(const NHConfig &cfg) {
+    toml::table out;
+    const auto &td = cfg.tessellationDefaults;
+    const bool any_tess =
+        td.skipGeometry || td.mergeDescendants || td.maxSegmentsCircle || td.fallback;
+    if (any_tess) {
+        toml::table tessTbl;
+        if (td.skipGeometry) {
+            tessTbl.insert("skip_geometry", *td.skipGeometry);
+        }
+        if (td.mergeDescendants) {
+            tessTbl.insert("merge_descendants", *td.mergeDescendants);
+        }
+        if (td.maxSegmentsCircle) {
+            tessTbl.insert("max_segments_circle", static_cast<int64_t>(*td.maxSegmentsCircle));
+        }
+        if (td.fallback) {
+            tessTbl.insert("fallback", std::string{booleanFallbackToString(*td.fallback)});
+        }
+        out.insert("tessellation", std::move(tessTbl));
+    }
+    if (cfg.extrasDefaults) {
+        out.insert("extras", jsonToTomlTable(*cfg.extrasDefaults));
+    }
+    return out;
+}
+
 } // namespace
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -271,6 +302,9 @@ std::string configToToml(const NHConfig &cfg) {
     }
     if (!cfg.rules.empty()) {
         root.insert("rules", buildRulesArray(cfg.rules));
+    }
+    if (auto defaults = buildDefaultsTable(cfg); !defaults.empty()) {
+        root.insert("defaults", std::move(defaults));
     }
 
     std::ostringstream os;
