@@ -176,6 +176,15 @@ struct App::Impl {
     // Stashed message after a build failure (so the UI can keep showing it
     // for more than the one frame the source survives).
     std::string build_error;
+
+    // True when the imgui "Open files…" button was clicked this frame.
+    // The actual NFD modal must run AFTER the imgui frame finishes — it
+    // enters a nested Cocoa runloop that fires sokol's display link while
+    // the modal is up, which would re-enter on_frame and double up
+    // ImGui::NewFrame / ImGui::Begin (corrupting the outer frame's window
+    // stack and crashing in the next ImGui::End). Deferring to after
+    // render() means any re-entries land cleanly between frames.
+    bool open_picker_requested{false};
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
     /// "no scene framed yet" — `dolly` falls back to distance-relative sizing.
@@ -624,7 +633,7 @@ void App::Impl::on_frame() {
             const auto entries = source->progress();
             if (entries.empty()) {
                 ImGui::Text("Drag a config (.toml) and a geometry file onto the window,");
-                ImGui::Text("or use the Open file button below.");
+                ImGui::Text("or use the Open files button below.");
             } else {
                 ImGui::Text("Loading…");
                 for (const auto &p : entries) {
@@ -656,24 +665,17 @@ void App::Impl::on_frame() {
                                        local->last_unrecognised().c_str());
                 }
             }
-            if (ImGui::Button("Open file…")) {
+            if (ImGui::Button("Open files…")) {
 #ifdef NH_HAS_NFD
-                // Native: NFD blocks while the OS modal is up; sokol_app
-                // keeps the event loop alive and re-enters the frame
-                // callback after the dialog closes.
-                NFD::Guard nfd;
-                NFD::UniquePathU8 picked;
-                nfdu8filteritem_t filters[] = {
-                    {"Nodehammer scene", "toml,nhb,zst,gltf,glb,gdml,root,fb,json,xml"},
-                };
-                if (NFD::OpenDialog(picked, filters, 1) == NFD_OKAY) {
-                    source->ingest_local_file(std::filesystem::path{picked.get()});
-                }
+                // Native: defer to after render(). NFD's NSOpenPanel /
+                // GTK / IFileDialog all enter nested event loops; running
+                // them inside an active ImGui frame causes re-entry.
+                open_picker_requested = true;
 #elif defined(__EMSCRIPTEN__)
-                // Web: kick off a transient <input type=file>; bytes flow
-                // back through nh_viewer_deliver_upload as each FileReader
-                // resolves. Returns immediately; deliveries arrive on later
-                // frames via the JS event queue.
+                // Web: the EM_JS shim returns immediately and the
+                // FileReader callback fires later, so it's safe to call
+                // inline (and the browser requires input.click() to run
+                // from the user-gesture stack).
                 nh_viewer_open_file_picker();
 #endif
             }
@@ -729,6 +731,32 @@ void App::Impl::on_frame() {
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
     render();
+
+#ifdef NH_HAS_NFD
+    // Deferred picker — see open_picker_requested above. By the time we
+    // get here, the ImGui frame is fully ended and rendered, sokol's pass
+    // is committed, and any sokol_app frame_cb re-entry from the modal's
+    // nested run loop will run a clean self-contained frame instead of
+    // overlapping with one already in progress.
+    if (open_picker_requested && source) {
+        open_picker_requested = false;
+        NFD::Guard nfd;
+        NFD::UniquePathSet picked;
+        nfdu8filteritem_t filters[] = {
+            {"Nodehammer scene", "toml,nhb,zst,gltf,glb,gdml,root,fb,json,xml"},
+        };
+        if (NFD::OpenDialogMultiple(picked, filters, 1) == NFD_OKAY) {
+            nfdpathsetsize_t count = 0;
+            NFD::PathSet::Count(picked, count);
+            for (nfdpathsetsize_t i = 0; i < count; ++i) {
+                NFD::UniquePathSetPathU8 path;
+                if (NFD::PathSet::GetPath(picked, i, path) == NFD_OKAY) {
+                    source->ingest_local_file(std::filesystem::path{path.get()});
+                }
+            }
+        }
+    }
+#endif
 }
 
 void App::Impl::on_cleanup() {
