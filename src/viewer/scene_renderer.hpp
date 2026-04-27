@@ -10,6 +10,7 @@ struct RenderScene;
 namespace nodehammer::viewer {
 
 struct Camera;
+struct IblBakeData;
 
 /// GPU-side renderer for nodehammer's tessellated RenderScene IR using
 /// sokol_gfx. Per-mesh-asset static vertex/index buffers, draws grouped by
@@ -21,6 +22,16 @@ class SceneRenderer {
     ~SceneRenderer();
     SceneRenderer(const SceneRenderer &) = delete;
     SceneRenderer &operator=(const SceneRenderer &) = delete;
+
+    /// Initialise GPU resources (shader, pipelines, dummy IBL bindings).
+    /// Idempotent. Call once after sg_setup so the renderer can produce a
+    /// frame even before any scene is uploaded.
+    void initialize();
+
+    /// Swap the placeholder IBL bindings for a real baked dataset. Safe to
+    /// call any time after `initialize()`. Idempotent on the dummy state —
+    /// re-installing replaces the previous IBL.
+    void install_ibl(const IblBakeData &data);
 
     /// Upload all mesh assets in `scene` to GPU buffers and pre-flatten the
     /// node hierarchy into draw groups. Discards previous scene state. Call

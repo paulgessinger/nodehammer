@@ -262,10 +262,10 @@ void SceneRenderer::Impl::ensure_init() {
     pdesc.cull_mode = SG_CULLMODE_BACK;
     pipeline_back_cull = sg_make_pipeline(&pdesc);
 
-    // IBL textures + samplers — baked once, used every frame regardless of
-    // the IBL toggle (sokol requires bindings to be populated; the shader
-    // simply ignores the samples when mode_flags.y == 0).
-    ibl.create();
+    // IBL bindings start as 1×1 placeholder textures so the shader always
+    // has something to sample from. The App owns the real bake and calls
+    // `install_ibl` to swap them in once it finishes.
+    ibl.create_dummy();
 
     initialised = true;
 }
@@ -317,6 +317,14 @@ SceneRenderer::SceneRenderer() : impl_(std::make_unique<Impl>()) {}
 SceneRenderer::~SceneRenderer() {
     // Intentionally empty. sokol_gfx asserts at sg_shutdown if any handle
     // outlives it; the App lifecycle calls release() in the right order.
+}
+
+void SceneRenderer::initialize() { impl_->ensure_init(); }
+
+void SceneRenderer::install_ibl(const IblBakeData &data) {
+    impl_->ensure_init();
+    impl_->ibl.release();
+    impl_->ibl.upload(data);
 }
 
 void SceneRenderer::release() {

@@ -1,5 +1,6 @@
 #include <nodehammer/viewer/app.hpp>
 
+#include "ibl.hpp"
 #include "imgui_backend.hpp"
 #include "scene_renderer.hpp"
 
@@ -20,6 +21,7 @@
 #include <sokol_log.h>
 #include <sokol_time.h>
 
+#include <chrono>
 #include <cmath>
 #include <iomanip>
 #include <memory>
@@ -159,6 +161,13 @@ struct App::Impl {
     SceneRenderer scene_renderer;
     Camera camera;
 
+    // Procedural IBL bake. Started right after sg_setup so we don't pay
+    // the cost on first scene-load. Native runs the bake on a worker
+    // thread; web time-slices it on the main thread inside `advance`.
+    IblBakeJob ibl_job;
+    bool ibl_installed{false};
+    std::chrono::steady_clock::time_point ibl_start_time{};
+
 #ifdef __EMSCRIPTEN__
     // Web upload glue (file picker EM_JS shim and the drop-bytes fetch
     // callback) need a way to call back into the App from JS / sokol.
@@ -242,6 +251,14 @@ void App::Impl::on_init() {
     gfx_desc.shader_pool_size = 256;
     gfx_desc.pipeline_pool_size = 256;
     sg_setup(&gfx_desc);
+
+    // Kick off the IBL bake immediately. The renderer is initialised with
+    // 1×1 placeholder IBL textures so it can render before the bake
+    // completes; on_frame swaps in the real result when ibl_job.advance
+    // returns true.
+    scene_renderer.initialize();
+    ibl_start_time = std::chrono::steady_clock::now();
+    ibl_job.start();
 
     stm_setup();
     last_time = stm_now();
@@ -481,7 +498,7 @@ std::string App::Impl::browser_url_state_query() const {
     append_url_bool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
     append_url_float(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
     append_url_float(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
-    append_url_bool(query, "pbr", cfg.enable_pbr, false);
+    append_url_bool(query, "pbr", cfg.enable_pbr, true);
     append_url_param(query, "cameraTargetX", format_url_float(camera.target.x));
     append_url_param(query, "cameraTargetY", format_url_float(camera.target.y));
     append_url_param(query, "cameraTargetZ", format_url_float(camera.target.z));
@@ -503,6 +520,20 @@ void App::Impl::sync_browser_url() const {
 }
 
 void App::Impl::on_frame() {
+    // Drive the procedural IBL bake to completion. On native this is a
+    // single-flag poll (the bake runs on a worker thread); on web this
+    // spends up to ~8 ms doing pixel work on the main thread. We don't
+    // gate this on focus: the bake should finish whether or not the user
+    // is looking at the window.
+    if (!ibl_installed && ibl_job.advance()) {
+        scene_renderer.install_ibl(ibl_job.take());
+        ibl_installed = true;
+        const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+                                    std::chrono::steady_clock::now() - ibl_start_time)
+                                    .count();
+        std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+    }
+
     // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
     // entirely. Full pause was visible as "drag-and-drop into a
     // background viewer feels broken": the drop event fired and the

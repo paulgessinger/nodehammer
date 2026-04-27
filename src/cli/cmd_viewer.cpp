@@ -44,8 +44,7 @@ void register_cmd_viewer(CLI::App &app) {
         ->capture_default_str();
     sub->add_option("--cut-end", cfg->angle_cut_end_deg, "Angle cut end in degrees")
         ->capture_default_str();
-    sub->add_flag("--pbr", cfg->enable_pbr, "Start with PBR/IBL shading enabled")
-        ->capture_default_str();
+    sub->add_flag("!--no-pbr", cfg->enable_pbr, "Disable PBR/IBL shading")->capture_default_str();
     auto *cameraTargetXOpt = sub->add_option("--camera-target-x", initialCamera->target.x,
                                              "Initial camera target X coordinate");
     auto *cameraTargetYOpt = sub->add_option("--camera-target-y", initialCamera->target.y,
