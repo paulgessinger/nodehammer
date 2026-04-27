@@ -86,6 +86,13 @@ class IblBakeJob {
     /// Move out the baked data. Valid only after `advance()` returns true.
     [[nodiscard]] IblBakeData take();
 
+    /// Fraction of the bake completed so far, in [0, 1]. Computed from the
+    /// pixel iterator on web; on native (worker-thread bake) returns 0.0
+    /// while the thread is running and 1.0 once it has signalled done.
+    /// Pixel costs aren't uniform across stages — this is a rough monotonic
+    /// signal for UI feedback, not a precise time estimate.
+    [[nodiscard]] double progress() const;
+
   private:
     bool started_{false};
     bool taken_{false};
@@ -104,7 +111,13 @@ class IblBakeJob {
 #else
     std::thread worker_;
     std::atomic<bool> done_{false};
+    std::atomic<double> progress_{0.0};
     IblBakeData result_;
+
+    // Worker entry point. Mirrors the loop structure of `bake_ibl` but
+    // bumps `progress_` between rows / faces so the UI on native can show
+    // a real-time bar instead of jumping 0% → 100%.
+    void run_native_bake();
 #endif
 };
 

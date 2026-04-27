@@ -499,12 +499,94 @@ void IblBakeJob::start() {
     y_ = 0;
     x_ = 0;
 #else
+    progress_.store(0.0, std::memory_order_relaxed);
     worker_ = std::thread([this] {
-        result_ = bake_ibl();
+        run_native_bake();
         done_.store(true, std::memory_order_release);
     });
 #endif
 }
+
+#ifndef __EMSCRIPTEN__
+
+void IblBakeJob::run_native_bake() {
+    // Same loop layout as `bake_ibl()`, but reports cumulative weighted
+    // progress between rows (BRDF) and per-face-per-mip (cubemaps). Pixel
+    // weights match the formula used by the web-side `progress()` so a
+    // user toggling between platforms sees the same shape of curve.
+    constexpr double kBrdfWeightPerPixel = static_cast<double>(kBrdfSamples);
+    constexpr double kIrradianceWeightPerPixel = static_cast<double>(kIrradianceSamples);
+    constexpr double kPrefilterWeightPerPixel = static_cast<double>(kPrefilterSamples);
+
+    constexpr double brdfTotal =
+        static_cast<double>(kBrdfLutSize) * kBrdfLutSize * kBrdfWeightPerPixel;
+    constexpr double irradianceTotal =
+        static_cast<double>(kIrradianceSize) * kIrradianceSize * 6.0 * kIrradianceWeightPerPixel;
+    double prefilterTotal = 0.0;
+    for (int m = 0; m < kPrefilterMips; ++m) {
+        const double sz = static_cast<double>(std::max(1, kPrefilterSize >> m));
+        prefilterTotal += sz * sz * 6.0 * kPrefilterWeightPerPixel;
+    }
+    const double grandTotal = brdfTotal + irradianceTotal + prefilterTotal;
+
+    double done = 0.0;
+    auto publish = [&]() {
+        progress_.store(std::clamp(done / grandTotal, 0.0, 1.0), std::memory_order_relaxed);
+    };
+
+    IblBakeData data;
+    allocate_bake_buffers(data);
+
+    // BRDF LUT
+    for (int y = 0; y < kBrdfLutSize; ++y) {
+        for (int x = 0; x < kBrdfLutSize; ++x) {
+            const size_t idx = (static_cast<size_t>(y) * kBrdfLutSize + static_cast<size_t>(x)) * 4;
+            bake_brdf_pixel(x, y, &data.brdf_lut[idx]);
+        }
+        done += kBrdfLutSize * kBrdfWeightPerPixel;
+        publish();
+    }
+
+    // Irradiance cubemap
+    const size_t irr_face_sz = irradiance_face_bytes();
+    for (int face = 0; face < 6; ++face) {
+        std::byte *face_ptr = &data.irradiance_combined[static_cast<size_t>(face) * irr_face_sz];
+        for (int y = 0; y < kIrradianceSize; ++y) {
+            for (int x = 0; x < kIrradianceSize; ++x) {
+                const size_t idx =
+                    (static_cast<size_t>(y) * kIrradianceSize + static_cast<size_t>(x)) * 4;
+                bake_irradiance_pixel(face, x, y, &face_ptr[idx]);
+            }
+        }
+        done += static_cast<double>(kIrradianceSize) * kIrradianceSize * kIrradianceWeightPerPixel;
+        publish();
+    }
+
+    // Prefilter cubemap (mipped)
+    for (int mip = 0; mip < kPrefilterMips; ++mip) {
+        const int size = std::max(1, kPrefilterSize >> mip);
+        const size_t face_sz = prefilter_face_bytes(mip);
+        for (int face = 0; face < 6; ++face) {
+            std::byte *face_ptr =
+                &data.prefilter_mips[static_cast<size_t>(mip)][static_cast<size_t>(face) * face_sz];
+            for (int y = 0; y < size; ++y) {
+                for (int x = 0; x < size; ++x) {
+                    const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(size) +
+                                        static_cast<size_t>(x)) *
+                                       4;
+                    bake_prefilter_pixel(mip, face, x, y, &face_ptr[idx]);
+                }
+            }
+            done += static_cast<double>(size) * size * kPrefilterWeightPerPixel;
+            publish();
+        }
+    }
+
+    result_ = std::move(data);
+    progress_.store(1.0, std::memory_order_relaxed);
+}
+
+#endif
 
 #ifdef __EMSCRIPTEN__
 
@@ -626,6 +708,62 @@ bool IblBakeJob::advance(uint64_t /*budget_ns*/) {
 }
 
 #endif
+
+double IblBakeJob::progress() const {
+#ifdef __EMSCRIPTEN__
+    // Weight each stage's pixels by sample count so the bar advances
+    // roughly linearly in time. Sample counts: BRDF/irradiance use
+    // kBrdfSamples/kIrradianceSamples (1024 each); prefilter uses
+    // kPrefilterSamples (256) per pixel.
+    constexpr double kBrdfWeightPerPixel = static_cast<double>(kBrdfSamples);
+    constexpr double kIrradianceWeightPerPixel = static_cast<double>(kIrradianceSamples);
+    constexpr double kPrefilterWeightPerPixel = static_cast<double>(kPrefilterSamples);
+
+    constexpr double brdfTotal =
+        static_cast<double>(kBrdfLutSize) * kBrdfLutSize * kBrdfWeightPerPixel;
+    constexpr double irradianceTotal =
+        static_cast<double>(kIrradianceSize) * kIrradianceSize * 6.0 * kIrradianceWeightPerPixel;
+    auto prefilter_size_at = [](int mip) { return std::max(1, kPrefilterSize >> mip); };
+    double prefilterTotal = 0.0;
+    for (int m = 0; m < kPrefilterMips; ++m) {
+        const double sz = static_cast<double>(prefilter_size_at(m));
+        prefilterTotal += sz * sz * 6.0 * kPrefilterWeightPerPixel;
+    }
+    const double grandTotal = brdfTotal + irradianceTotal + prefilterTotal;
+
+    if (stage_ == Stage::Done) {
+        return 1.0;
+    }
+    if (stage_ == Stage::Idle) {
+        return 0.0;
+    }
+
+    double done = 0.0;
+    if (stage_ == Stage::BrdfLut) {
+        const double pixels = static_cast<double>(y_) * kBrdfLutSize + x_;
+        done = pixels * kBrdfWeightPerPixel;
+    } else if (stage_ == Stage::Irradiance) {
+        done = brdfTotal;
+        const double pixelsThisFace = static_cast<double>(y_) * kIrradianceSize + x_;
+        const double facesDone = static_cast<double>(face_);
+        const double pixels = facesDone * kIrradianceSize * kIrradianceSize + pixelsThisFace;
+        done += pixels * kIrradianceWeightPerPixel;
+    } else { // Prefilter
+        done = brdfTotal + irradianceTotal;
+        for (int m = 0; m < mip_; ++m) {
+            const double sz = static_cast<double>(prefilter_size_at(m));
+            done += sz * sz * 6.0 * kPrefilterWeightPerPixel;
+        }
+        const double sz = static_cast<double>(prefilter_size_at(mip_));
+        const double pixelsThisFace = static_cast<double>(y_) * sz + x_;
+        const double facesDone = static_cast<double>(face_);
+        done += (facesDone * sz * sz + pixelsThisFace) * kPrefilterWeightPerPixel;
+    }
+    return std::clamp(done / grandTotal, 0.0, 1.0);
+#else
+    return progress_.load(std::memory_order_relaxed);
+#endif
+}
 
 IblBakeData IblBakeJob::take() {
     taken_ = true;

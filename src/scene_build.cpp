@@ -11,23 +11,22 @@
 
 namespace nodehammer {
 
-SceneBuildResult build_scene_from_paths(const std::filesystem::path &config_path,
-                                        const std::filesystem::path &input_path,
-                                        std::optional<std::string> input_format) {
-    DiagnosticList diags;
+ScenePrepResult prepare_scene_for_tessellation(const std::filesystem::path &config_path,
+                                               const std::filesystem::path &input_path,
+                                               std::optional<std::string> input_format) {
+    ScenePrepResult prep;
 
-    NHConfig nhcfg;
     if (!config_path.empty()) {
         auto loaded = ConfigLoader::loadFromFile(config_path);
-        diags.append(loaded.diags);
+        prep.diags.append(loaded.diags);
         if (loaded.diags.hasErrors()) {
-            return {nullptr, std::move(diags)};
+            return prep;
         }
-        nhcfg = std::move(loaded.config);
-        auto validDiags = ConfigValidator::validate(nhcfg);
-        diags.append(validDiags);
+        prep.config = std::move(loaded.config);
+        auto validDiags = ConfigValidator::validate(prep.config);
+        prep.diags.append(validDiags);
         if (validDiags.hasErrors()) {
-            return {nullptr, std::move(diags)};
+            return prep;
         }
     }
 
@@ -35,40 +34,54 @@ SceneBuildResult build_scene_from_paths(const std::filesystem::path &config_path
     const std::string fmt = input_format.value_or(std::string{});
     const auto *imp = registry.resolve(input_path.string(), fmt);
     if (imp == nullptr) {
-        diags.error(codes::kErrImportFormatUnknown,
-                    std::string{"cannot determine input format for '"} + input_path.string() + "'",
-                    input_path.string());
-        return {nullptr, std::move(diags)};
+        prep.diags.error(codes::kErrImportFormatUnknown,
+                         std::string{"cannot determine input format for '"} + input_path.string() +
+                             "'",
+                         input_path.string());
+        return prep;
     }
     auto importResult = imp->import(input_path);
-    diags.append(importResult.diags);
+    prep.diags.append(importResult.diags);
     if (importResult.diags.hasErrors()) {
-        return {nullptr, std::move(diags)};
+        return prep;
     }
+    prep.scene = std::move(importResult.scene);
 
-    if (!nhcfg.selection.empty()) {
-        SelectionEngine sel{nhcfg.selection, nhcfg.hoistOrphans};
-        auto selDiags = sel.prune(importResult.scene);
-        diags.append(selDiags);
+    if (!prep.config.selection.empty()) {
+        SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
+        auto selDiags = sel.prune(prep.scene);
+        prep.diags.append(selDiags);
         if (selDiags.hasErrors()) {
-            return {nullptr, std::move(diags)};
+            return prep;
         }
     }
 
-    if (nhcfg.deduplicateShapes) {
-        importResult.scene.deduplicateMaterials();
-        importResult.scene.deduplicateShapes();
-        importResult.scene.deduplicateLogVols();
+    if (prep.config.deduplicateShapes) {
+        prep.scene.deduplicateMaterials();
+        prep.scene.deduplicateShapes();
+        prep.scene.deduplicateLogVols();
     }
 
-    TessellationPass pass{nhcfg};
-    auto tessResult = pass.lower(importResult.scene);
-    diags.append(tessResult.diags);
+    prep.ok = true;
+    return prep;
+}
+
+SceneBuildResult build_scene_from_paths(const std::filesystem::path &config_path,
+                                        const std::filesystem::path &input_path,
+                                        std::optional<std::string> input_format) {
+    auto prep = prepare_scene_for_tessellation(config_path, input_path, std::move(input_format));
+    if (!prep.ok) {
+        return {nullptr, std::move(prep.diags)};
+    }
+
+    TessellationPass pass{prep.config};
+    auto tessResult = pass.lower(prep.scene);
+    prep.diags.append(tessResult.diags);
     if (tessResult.diags.hasErrors()) {
-        return {nullptr, std::move(diags)};
+        return {nullptr, std::move(prep.diags)};
     }
 
-    return {std::make_shared<RenderScene>(std::move(tessResult.scene)), std::move(diags)};
+    return {std::make_shared<RenderScene>(std::move(tessResult.scene)), std::move(prep.diags)};
 }
 
 } // namespace nodehammer

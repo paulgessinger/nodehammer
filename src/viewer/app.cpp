@@ -592,7 +592,7 @@ void App::Impl::on_frame() {
     // active 60 Hz path. The flag's URL/persistence name stays
     // `pauseWhenUnfocused` for backwards compatibility.
     if (cfg.pause_when_unfocused && (!window_focused || !window_visible)) {
-        constexpr double kIdleFrameInterval = 0.2; // 5 Hz
+        constexpr double kIdleFrameInterval = 0.5; // 2 Hz
         if (stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
             return;
         }
@@ -673,6 +673,11 @@ void App::Impl::on_frame() {
         }
     }
     ImGui::Checkbox("throttle when unfocused", &cfg.pause_when_unfocused);
+    if (!ibl_installed) {
+        const auto frac = static_cast<float>(ibl_job.progress());
+        ImGui::Text("IBL bake: %.0f%%", frac * 100.0f);
+        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+    }
     if (source && !scene) {
         ImGui::Separator();
         source->poll();
@@ -689,8 +694,29 @@ void App::Impl::on_frame() {
                 build_job.start(source->config_path(), source->input_path());
                 build_in_progress = true;
             }
-            ImGui::Text("Tessellating…");
-            ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()), ImVec2(-1.f, 0.f), "");
+            switch (build_job.phase()) {
+            case SceneBuildJob::Phase::Preparing:
+                ImGui::Text("Loading config and importing geometry…");
+                break;
+            case SceneBuildJob::Phase::Tessellating: {
+                const auto total = build_job.tessellation_total();
+                const auto processed = build_job.tessellation_processed();
+                if (total > 0) {
+                    ImGui::Text("Tessellating… (%zu / %zu nodes)", processed, total);
+                    const float frac = static_cast<float>(processed) / static_cast<float>(total);
+                    ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+                } else {
+                    ImGui::Text("Tessellating…");
+                }
+                break;
+            }
+            case SceneBuildJob::Phase::Finalizing:
+                ImGui::Text("Finalising scene…");
+                break;
+            case SceneBuildJob::Phase::Idle:
+            case SceneBuildJob::Phase::Done:
+                break;
+            }
         } else {
             // Idle / Fetching: render a source-shaped placeholder. URL-style
             // sources will populate `progress()` with active downloads;

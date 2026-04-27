@@ -125,45 +125,27 @@ wasm-serve scene='odd' port='8000':
     set -euo pipefail
     root="{{justfile_directory()}}"
     dir="$root/build/emscripten/RelWithDebInfo"
-    if [ ! -f "$dir/nodehammer-gles3.js" ] && [ ! -f "$dir/nodehammer-wgpu.js" ]; then
-        echo "no nodehammer-{gles3,wgpu}.js bundle in $dir — run 'just wasm-build' first." >&2
-        exit 1
-    fi
-    ln -sf "$root/web/viewer.html" "$dir/viewer.html"
-
-    # Clean any stale manifest from a previous run; we'll re-emit below
-    # only if a scene was requested.
-    rm -f "$dir/nh_manifest.json"
-    # Drop legacy synthetic-name symlinks (scene.nhb.zst / scene.toml) from
-    # earlier versions of this recipe — manifest now references real names.
-    rm -f "$dir/scene.nhb.zst" "$dir/scene.toml"
-
-    case "{{scene}}" in
-        none|'')
-            mode="upload-only (no manifest)"
-            ;;
-        odd)
-            ln -sf "$root/odd.nhb.zst" "$dir/odd.nhb.zst"
-            ln -sf "$root/fixtures/configs/odd.toml" "$dir/odd.toml"
-            mkdir -p "$dir/odd"
-            for f in base.toml materials.toml tracker.toml calorimeters.toml muon.toml; do
-                ln -sf "$root/fixtures/configs/odd/$f" "$dir/odd/$f"
-            done
-            printf '%s\n' \
-                '{' \
-                '  "input": "odd.nhb.zst",' \
-                '  "config": "odd.toml",' \
-                '  "title": "Open Data Detector"' \
-                '}' \
-                > "$dir/nh_manifest.json"
-            mode="autoload (odd)"
-            ;;
-        *)
-            echo "unknown scene '{{scene}}' — known: odd, none" >&2
-            exit 1
-            ;;
-    esac
+    mapfile -t staged < <("$root/scripts/stage_wasm_viewer.sh" link "{{scene}}" "$dir")
+    mode="${staged[1]}"
 
     echo "serving $dir in $mode at:"
     echo "  http://localhost:{{port}}/viewer.html"
     cd "$dir" && exec python3 -m http.server {{port}}
+
+# Copy the same static viewer payload that `wasm-serve` exposes into a
+# self-contained directory. The target may be relative to the repo root or
+# absolute.
+#
+# Usage:
+#   just wasm-copy                         # copy ODD autoload bundle to build/wasm-viewer
+#   just wasm-copy odd public/viewer       # copy ODD autoload bundle to a custom directory
+#   just wasm-copy none public/viewer      # copy upload-only bundle
+wasm-copy scene='odd' target='build/wasm-viewer':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    mapfile -t staged < <("$root/scripts/stage_wasm_viewer.sh" copy "{{scene}}" "{{target}}")
+    out="${staged[0]}"
+    mode="${staged[1]}"
+
+    echo "copied wasm viewer payload to $out in $mode"
