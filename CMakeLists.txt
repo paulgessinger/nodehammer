@@ -57,7 +57,10 @@ include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
 
 # ── FlatBuffers code generation ──────────────────────────────────────────────
-set(NH_FBS_SCHEMA ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs)
+set(NH_FBS_SCHEMAS
+    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs
+    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/ibl_cache.fbs
+)
 set(NH_FBS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/flatbuffers)
 
 # Conan tool_requires exposes flatbuffers::flatc; FetchContent builds a plain
@@ -71,14 +74,20 @@ else()
     set(NH_FLATC "${NH_FLATC_EXE}")
 endif()
 
-add_custom_command(
-    OUTPUT ${NH_FBS_GENERATED_DIR}/semantic_generated.h
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${NH_FBS_GENERATED_DIR}
-    COMMAND ${NH_FLATC} --cpp -o ${NH_FBS_GENERATED_DIR} ${NH_FBS_SCHEMA}
-    DEPENDS ${NH_FBS_SCHEMA} ${NH_FLATC}
-    COMMENT "Generating FlatBuffers C++ header from semantic.fbs"
-)
-add_custom_target(flatbuffers_generate DEPENDS ${NH_FBS_GENERATED_DIR}/semantic_generated.h)
+set(NH_FBS_GENERATED_HEADERS "")
+foreach(schema ${NH_FBS_SCHEMAS})
+    get_filename_component(stem ${schema} NAME_WE)
+    set(out ${NH_FBS_GENERATED_DIR}/${stem}_generated.h)
+    add_custom_command(
+        OUTPUT ${out}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${NH_FBS_GENERATED_DIR}
+        COMMAND ${NH_FLATC} --cpp -o ${NH_FBS_GENERATED_DIR} ${schema}
+        DEPENDS ${schema} ${NH_FLATC}
+        COMMENT "Generating FlatBuffers C++ header from ${stem}.fbs"
+    )
+    list(APPEND NH_FBS_GENERATED_HEADERS ${out})
+endforeach()
+add_custom_target(flatbuffers_generate DEPENDS ${NH_FBS_GENERATED_HEADERS})
 
 # Profiling flags are additive on top of any build type (Release, RelWithDebInfo,
 # Debug). Same interface across native and wasm; the flags differ per toolchain:
@@ -217,6 +226,12 @@ if(NODEHAMMER_WITH_VIEWER)
             # cmake/Dependencies.cmake.
             target_link_libraries(${name} PRIVATE nfd::nfd)
             target_compile_definitions(${name} PRIVATE NH_HAS_NFD=1)
+            # PlatformFolders resolves the OS cache directory for the IBL
+            # bake cache. Web uses IndexedDB instead, so this dep is native-only.
+            # Conan recipe is `platformfolders`, but it sets cmake_file_name
+            # to `platform_folders` and the target to `sago::platform_folders`.
+            find_package(platform_folders CONFIG REQUIRED)
+            target_link_libraries(${name} PRIVATE sago::platform_folders)
         endif()
     endfunction()
 

@@ -1,6 +1,7 @@
 #include <nodehammer/viewer/app.hpp>
 
 #include "ibl.hpp"
+#include "ibl_cache.hpp"
 #include "imgui_backend.hpp"
 #include "scene_build_job.hpp"
 #include "scene_renderer.hpp"
@@ -169,6 +170,16 @@ struct App::Impl {
     bool ibl_installed{false};
     std::chrono::steady_clock::time_point ibl_start_time{};
 
+    // On startup we first try to load a previously baked IBL from the
+    // platform cache (file on native, IndexedDB on web). If it hits, we
+    // skip the bake entirely; on a miss we kick off `ibl_job`. The native
+    // path resolves the hit/miss decision synchronously inside `start()`;
+    // the web path resolves it asynchronously, which is why this is its
+    // own state machine instead of a plain bool.
+    IblCacheLoad ibl_cache_load;
+    bool ibl_cache_decided{false};
+    bool ibl_cache_hit{false};
+
     // Off-loop scene tessellation. Native runs the build on a worker
     // thread so the UI stays smooth. Web defers the synchronous build by
     // one frame so the previous frame paints a "Tessellating…" message
@@ -261,13 +272,13 @@ void App::Impl::on_init() {
     gfx_desc.pipeline_pool_size = 256;
     sg_setup(&gfx_desc);
 
-    // Kick off the IBL bake immediately. The renderer is initialised with
-    // 1×1 placeholder IBL textures so it can render before the bake
-    // completes; on_frame swaps in the real result when ibl_job.advance
-    // returns true.
+    // Kick off the IBL bake (or cache load) immediately. The renderer is
+    // initialised with 1×1 placeholder IBL textures so it can render before
+    // the bake completes; on_frame swaps in the real result once either
+    // the cache load resolves with a hit, or `ibl_job.advance` returns true.
     scene_renderer.initialize();
     ibl_start_time = std::chrono::steady_clock::now();
-    ibl_job.start();
+    ibl_cache_load.start();
 
     stm_setup();
     last_time = stm_now();
@@ -541,13 +552,41 @@ void App::Impl::on_frame() {
     // spends up to ~8 ms doing pixel work on the main thread. We don't
     // gate this on focus: the bake should finish whether or not the user
     // is looking at the window.
-    if (!ibl_installed && ibl_job.advance()) {
-        scene_renderer.install_ibl(ibl_job.take());
-        ibl_installed = true;
-        const auto elapsed_ms = std::chrono::duration<double, std::milli>(
-                                    std::chrono::steady_clock::now() - ibl_start_time)
-                                    .count();
-        std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+    if (!ibl_installed) {
+        if (!ibl_cache_decided) {
+            // Wait for the cache load to resolve. On native this is true on
+            // the first frame; on web it may take a few frames while the
+            // IndexedDB get round-trips through the JS event loop.
+            if (ibl_cache_load.poll()) {
+                if (auto cached = ibl_cache_load.take()) {
+                    scene_renderer.install_ibl(*cached);
+                    ibl_installed = true;
+                    ibl_cache_hit = true;
+                    const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+                                                std::chrono::steady_clock::now() - ibl_start_time)
+                                                .count();
+                    std::println("viewer: IBL loaded from cache ({:.1f} ms)", elapsed_ms);
+                } else {
+                    // Miss — start the real bake now. ibl_start_time stays
+                    // anchored at the cache attempt so the reported total
+                    // includes both the failed lookup and the bake itself.
+                    ibl_job.start();
+                }
+                ibl_cache_decided = true;
+            }
+        } else if (!ibl_cache_hit && ibl_job.advance()) {
+            auto data = ibl_job.take();
+            // Persist before installing so we don't pay the wait twice if
+            // the user reloads while the bake is technically "live" on GPU
+            // but not yet flushed to disk / IDB.
+            save_ibl_cache(data);
+            scene_renderer.install_ibl(data);
+            ibl_installed = true;
+            const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+                                        std::chrono::steady_clock::now() - ibl_start_time)
+                                        .count();
+            std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+        }
     }
 
     // Drive the off-loop tessellation. On native this is a poll of an
@@ -677,6 +716,12 @@ void App::Impl::on_frame() {
         const auto frac = static_cast<float>(ibl_job.progress());
         ImGui::Text("IBL bake: %.0f%%", frac * 100.0f);
         ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+    }
+    // Developer escape hatch: drop the persisted IBL cache. Doesn't touch
+    // the live GPU IBL — only takes effect on the next page load / launch,
+    // which then re-bakes from scratch.
+    if (ImGui::Button("Clear IBL cache")) {
+        clear_ibl_cache();
     }
     if (source && !scene) {
         ImGui::Separator();

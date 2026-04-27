@@ -13,6 +13,7 @@ set(NH_VIEWER_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/scene_renderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui_backend.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/ibl.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ibl_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scene_build_job.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/url_asset_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/local_file_asset_source.cpp
