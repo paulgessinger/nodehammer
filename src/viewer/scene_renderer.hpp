@@ -33,10 +33,22 @@ class SceneRenderer {
     /// re-installing replaces the previous IBL.
     void install_ibl(const IblBakeData &data);
 
-    /// Upload all mesh assets in `scene` to GPU buffers and pre-flatten the
-    /// node hierarchy into draw groups. Discards previous scene state. Call
-    /// after sg_setup.
-    void upload(const RenderScene &scene);
+    /// Begin a chunked upload of `scene` to the GPU. Discards previous
+    /// scene state. The renderer keeps `scene` alive until the upload
+    /// completes (so the caller's shared_ptr can be released immediately).
+    /// Pair with `advance_upload`.
+    void begin_upload(std::shared_ptr<const RenderScene> scene);
+
+    /// Make progress on a chunked upload started by `begin_upload`. Spends
+    /// up to `budget_ns` creating per-mesh GPU buffers and finalises the
+    /// scene (materials, draw groups, instance buffer) on the call that
+    /// processes the last mesh. Returns true once the upload is fully
+    /// complete; further calls are no-ops until the next `begin_upload`.
+    bool advance_upload(uint64_t budget_ns = 8'000'000);
+
+    /// Whether `advance_upload` would still return false. Useful for UI
+    /// feedback ("Uploading scene to GPU…").
+    [[nodiscard]] bool upload_in_progress() const;
 
     /// Release every sokol_gfx handle the renderer holds. Must be called
     /// before sg_shutdown — sokol asserts on outstanding resources at

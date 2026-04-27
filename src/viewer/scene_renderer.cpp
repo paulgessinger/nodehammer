@@ -10,6 +10,8 @@
 #include "ibl.hpp"
 #include "scene.glsl.h"
 
+#include <sokol_time.h>
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -207,9 +209,21 @@ struct SceneRenderer::Impl {
 
     FrameStats last_stats;
 
+    // Chunked-upload state. `pending_scene` keeps the source data alive
+    // while we walk `pending_mesh_ids` across multiple frames. Once
+    // `next_pending_mesh == pending_mesh_ids.size()`, the finalize step
+    // (materials, groups, bounds, instance buffer) runs in one shot and
+    // the upload is marked complete.
+    std::shared_ptr<const RenderScene> pending_scene;
+    std::vector<MeshAssetId> pending_mesh_ids;
+    size_t next_pending_mesh{0};
+    bool upload_busy{false};
+
     void ensure_init();
     void destroy_gpu();
     void upload_instance_buffer();
+    void upload_one_mesh(MeshAssetId id, const MeshAsset &asset);
+    void finalize_upload();
 };
 
 void SceneRenderer::Impl::ensure_init() {
@@ -291,6 +305,12 @@ void SceneRenderer::Impl::destroy_gpu() {
     node_count = 0;
     triangle_count = 0;
     has_bounds = false;
+    // Drop any in-flight upload state — a fresh begin_upload is the only
+    // way back to a populated scene.
+    pending_scene.reset();
+    pending_mesh_ids.clear();
+    next_pending_mesh = 0;
+    upload_busy = false;
 }
 
 void SceneRenderer::Impl::upload_instance_buffer() {
@@ -348,53 +368,50 @@ void SceneRenderer::release() {
     impl_->initialised = false;
 }
 
-void SceneRenderer::upload(const RenderScene &scene) {
-    impl_->ensure_init();
-    impl_->destroy_gpu();
-
-    static_assert(sizeof(Vertex) == 24, "Vertex layout must match shader: 3f position + 3f normal");
-
-    for (const auto &[id, asset] : scene.meshAssets) {
-        if (asset.vertices.empty() || asset.indices.empty()) {
-            continue;
-        }
-        GpuMesh gm;
-
-        sg_buffer_desc vdesc{};
-        vdesc.size = asset.vertices.size() * sizeof(Vertex);
-        vdesc.usage.vertex_buffer = true;
-        vdesc.usage.immutable = true;
-        vdesc.data.ptr = asset.vertices.data();
-        vdesc.data.size = vdesc.size;
-        gm.vbuf = sg_make_buffer(&vdesc);
-
-        sg_buffer_desc idesc{};
-        idesc.size = asset.indices.size() * sizeof(uint32_t);
-        idesc.usage.index_buffer = true;
-        idesc.usage.immutable = true;
-        idesc.data.ptr = asset.indices.data();
-        idesc.data.size = idesc.size;
-        gm.ibuf = sg_make_buffer(&idesc);
-
-        gm.index_count = static_cast<uint32_t>(asset.indices.size());
-        gm.triangle_count = asset.indices.size() / 3;
-
-        glm::vec3 lmin{std::numeric_limits<float>::max()};
-        glm::vec3 lmax{std::numeric_limits<float>::lowest()};
-        for (const auto &v : asset.vertices) {
-            lmin = glm::min(lmin, v.position);
-            lmax = glm::max(lmax, v.position);
-        }
-        gm.local_min = lmin;
-        gm.local_max = lmax;
-        impl_->meshes.emplace(id, gm);
+void SceneRenderer::Impl::upload_one_mesh(MeshAssetId id, const MeshAsset &asset) {
+    if (asset.vertices.empty() || asset.indices.empty()) {
+        return;
     }
+    GpuMesh gm;
+
+    sg_buffer_desc vdesc{};
+    vdesc.size = asset.vertices.size() * sizeof(Vertex);
+    vdesc.usage.vertex_buffer = true;
+    vdesc.usage.immutable = true;
+    vdesc.data.ptr = asset.vertices.data();
+    vdesc.data.size = vdesc.size;
+    gm.vbuf = sg_make_buffer(&vdesc);
+
+    sg_buffer_desc idesc{};
+    idesc.size = asset.indices.size() * sizeof(uint32_t);
+    idesc.usage.index_buffer = true;
+    idesc.usage.immutable = true;
+    idesc.data.ptr = asset.indices.data();
+    idesc.data.size = idesc.size;
+    gm.ibuf = sg_make_buffer(&idesc);
+
+    gm.index_count = static_cast<uint32_t>(asset.indices.size());
+    gm.triangle_count = asset.indices.size() / 3;
+
+    glm::vec3 lmin{std::numeric_limits<float>::max()};
+    glm::vec3 lmax{std::numeric_limits<float>::lowest()};
+    for (const auto &v : asset.vertices) {
+        lmin = glm::min(lmin, v.position);
+        lmax = glm::max(lmax, v.position);
+    }
+    gm.local_min = lmin;
+    gm.local_max = lmax;
+    meshes.emplace(id, gm);
+}
+
+void SceneRenderer::Impl::finalize_upload() {
+    const RenderScene &scene = *pending_scene;
 
     for (const auto &[id, mat] : scene.materials) {
-        Impl::GpuMaterial gm;
+        GpuMaterial gm;
         gm.base_color = mat.baseColorFactor;
         gm.mr = glm::vec4{mat.metallicFactor, mat.roughnessFactor, 0.f, 0.f};
-        impl_->materials.emplace(id, gm);
+        materials.emplace(id, gm);
     }
 
     ankerl::unordered_dense::map<InstanceGroupKey, size_t, InstanceGroupKeyHash> group_idx;
@@ -404,22 +421,22 @@ void SceneRenderer::upload(const RenderScene &scene) {
 
     for (const auto &[id, node] : scene.nodes) {
         for (const auto &binding : node.meshBindings) {
-            auto mesh_it = impl_->meshes.find(binding.meshId);
-            if (mesh_it == impl_->meshes.end()) {
+            auto mesh_it = meshes.find(binding.meshId);
+            if (mesh_it == meshes.end()) {
                 continue;
             }
             const InstanceGroupKey key{binding.meshId, binding.materialId};
-            auto [it, inserted] = group_idx.try_emplace(key, impl_->groups.size());
+            auto [it, inserted] = group_idx.try_emplace(key, groups.size());
             if (inserted) {
-                impl_->groups.push_back({binding.meshId, binding.materialId, 0, 0, {}, {}, {}});
+                groups.push_back({binding.meshId, binding.materialId, 0, 0, {}, {}, {}});
             }
-            ++impl_->node_count;
-            impl_->triangle_count += mesh_it->second.triangle_count;
+            ++node_count;
+            triangle_count += mesh_it->second.triangle_count;
 
             glm::vec3 wmin, wmax;
             transform_aabb(node.worldTransform, mesh_it->second.local_min,
                            mesh_it->second.local_max, wmin, wmax);
-            auto &group = impl_->groups[it->second];
+            auto &group = groups[it->second];
             group.instances.push_back(node.worldTransform);
             group.bounds_min.push_back(wmin);
             group.bounds_max.push_back(wmax);
@@ -428,19 +445,64 @@ void SceneRenderer::upload(const RenderScene &scene) {
             any_bounds = true;
         }
     }
-    impl_->bounds_min = bmin;
-    impl_->bounds_max = bmax;
-    impl_->has_bounds = any_bounds;
+    bounds_min = bmin;
+    bounds_max = bmax;
+    has_bounds = any_bounds;
 
-    impl_->upload_instance_buffer();
+    upload_instance_buffer();
 
-    std::fprintf(stderr,
-                 "viewer: scene uploaded — meshes=%zu materials=%zu nodes=%u groups=%zu "
-                 "tris=%llu bbox=[%.1f %.1f %.1f .. %.1f %.1f %.1f]\n",
-                 impl_->meshes.size(), impl_->materials.size(), impl_->node_count,
-                 impl_->groups.size(), static_cast<unsigned long long>(impl_->triangle_count),
-                 bmin.x, bmin.y, bmin.z, bmax.x, bmax.y, bmax.z);
+    std::println("viewer: scene uploaded — meshes={} materials={} nodes={} groups={} tris={} "
+                 "bbox=[{:.1f} {:.1f} {:.1f} .. {:.1f} {:.1f} {:.1f}]\n",
+                 meshes.size(), materials.size(), node_count, groups.size(),
+                 static_cast<unsigned long long>(triangle_count), bmin.x, bmin.y, bmin.z, bmax.x,
+                 bmax.y, bmax.z);
+
+    pending_scene.reset();
+    pending_mesh_ids.clear();
+    pending_mesh_ids.shrink_to_fit();
+    next_pending_mesh = 0;
+    upload_busy = false;
 }
+
+void SceneRenderer::begin_upload(std::shared_ptr<const RenderScene> scene) {
+    static_assert(sizeof(Vertex) == 24, "Vertex layout must match shader: 3f position + 3f normal");
+    impl_->ensure_init();
+    impl_->destroy_gpu();
+
+    impl_->pending_scene = std::move(scene);
+    impl_->pending_mesh_ids.clear();
+    if (impl_->pending_scene) {
+        impl_->pending_mesh_ids.reserve(impl_->pending_scene->meshAssets.size());
+        for (const auto &[id, _asset] : impl_->pending_scene->meshAssets) {
+            impl_->pending_mesh_ids.push_back(id);
+        }
+    }
+    impl_->next_pending_mesh = 0;
+    impl_->upload_busy = impl_->pending_scene != nullptr;
+}
+
+bool SceneRenderer::advance_upload(uint64_t budget_ns) {
+    if (!impl_->upload_busy) {
+        return true;
+    }
+    const uint64_t start_ticks = stm_now();
+    while (impl_->next_pending_mesh < impl_->pending_mesh_ids.size()) {
+        const auto id = impl_->pending_mesh_ids[impl_->next_pending_mesh++];
+        const auto it = impl_->pending_scene->meshAssets.find(id);
+        if (it != impl_->pending_scene->meshAssets.end()) {
+            impl_->upload_one_mesh(id, it->second);
+        }
+        if (stm_ns(stm_diff(stm_now(), start_ticks)) >= static_cast<double>(budget_ns)) {
+            // Yield to the next frame; meshes left in the queue resume on
+            // the next advance.
+            return false;
+        }
+    }
+    impl_->finalize_upload();
+    return true;
+}
+
+bool SceneRenderer::upload_in_progress() const { return impl_->upload_busy; }
 
 void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_height,
                            RenderFlags flags) {

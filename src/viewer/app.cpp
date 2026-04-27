@@ -2,6 +2,7 @@
 
 #include "ibl.hpp"
 #include "imgui_backend.hpp"
+#include "scene_build_job.hpp"
 #include "scene_renderer.hpp"
 
 #include <nodehammer/ir/render.hpp>
@@ -167,6 +168,14 @@ struct App::Impl {
     IblBakeJob ibl_job;
     bool ibl_installed{false};
     std::chrono::steady_clock::time_point ibl_start_time{};
+
+    // Off-loop scene tessellation. Native runs the build on a worker
+    // thread so the UI stays smooth. Web defers the synchronous build by
+    // one frame so the previous frame paints a "Tessellating…" message
+    // before the page freezes.
+    SceneBuildJob build_job;
+    bool build_in_progress{false};
+    std::chrono::steady_clock::time_point build_start_time{};
 
 #ifdef __EMSCRIPTEN__
     // Web upload glue (file picker EM_JS shim and the drop-bytes fetch
@@ -447,6 +456,17 @@ void App::Impl::render() {
     const uint64_t render_submit_start = stm_now();
     scene_submit_ms = 0.0;
 
+    // Drive the chunked GPU upload BEFORE sg_begin_pass so any new sokol
+    // buffer creation isn't tangled up with the active swapchain pass.
+    if (scene && !scene_uploaded) {
+        if (!scene_renderer.upload_in_progress()) {
+            scene_renderer.begin_upload(scene);
+        }
+        if (scene_renderer.advance_upload()) {
+            scene_uploaded = true;
+        }
+    }
+
     sg_pass pass{};
     pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
     pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
@@ -456,11 +476,7 @@ void App::Impl::render() {
     pass.swapchain = sglue_swapchain();
     sg_begin_pass(&pass);
 
-    if (scene) {
-        if (!scene_uploaded) {
-            scene_renderer.upload(*scene);
-            scene_uploaded = true;
-        }
+    if (scene && scene_uploaded) {
         if (!camera_framed) {
             glm::vec3 bmin{0.f}, bmax{0.f};
             if (scene_renderer.world_bounds(bmin, bmax)) {
@@ -532,6 +548,39 @@ void App::Impl::on_frame() {
                                     std::chrono::steady_clock::now() - ibl_start_time)
                                     .count();
         std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+    }
+
+    // Drive the off-loop tessellation. On native this is a poll of an
+    // atomic flag set by the worker thread; on web it runs the build
+    // synchronously on the second poll (the first paints a frame).
+    if (build_in_progress && build_job.poll()) {
+        auto built = build_job.take();
+        for (const auto &d : built.diags.items()) {
+            std::println(stderr, "scene_build: {} {}", d.code, d.message);
+        }
+        if (built.scene) {
+            const auto build_ms = std::chrono::duration<double, std::milli>(
+                                      std::chrono::steady_clock::now() - build_start_time)
+                                      .count();
+            std::println("viewer: tessellation complete ({:.1f} ms, {} nodes, {} mesh assets, "
+                         "{} materials)",
+                         build_ms, built.scene->nodes.size(), built.scene->meshAssets.size(),
+                         built.scene->materials.size());
+            scene = std::move(built.scene);
+            scene_uploaded = false;
+            camera_framed = false;
+            build_error.clear();
+        } else {
+            build_error = "scene build failed";
+            for (const auto &d : built.diags.items()) {
+                if (d.severity >= DiagnosticSeverity::Error) {
+                    build_error = d.message;
+                    break;
+                }
+            }
+        }
+        build_in_progress = false;
+        source.reset();
     }
 
     // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
@@ -632,30 +681,16 @@ void App::Impl::on_frame() {
             ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
             ImGui::TextWrapped("%s", source->error_message().c_str());
         } else if (state == LoadState::Ready) {
-            auto built = build_scene_from_paths(source->config_path(), source->input_path());
-            for (const auto &d : built.diags.items()) {
-                std::println(stderr, "scene_build: {} {}", d.code, d.message);
+            // Hand the paths to the build job. Native immediately spawns
+            // a worker thread; web defers the synchronous build by one
+            // poll so this frame's "Tessellating…" UI paints first.
+            if (!build_in_progress) {
+                build_start_time = std::chrono::steady_clock::now();
+                build_job.start(source->config_path(), source->input_path());
+                build_in_progress = true;
             }
-            if (built.scene) {
-                std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
-                             built.scene->nodes.size(), built.scene->meshAssets.size(),
-                             built.scene->materials.size());
-                scene = std::move(built.scene);
-                scene_uploaded = false;
-                camera_framed = false;
-                build_error.clear();
-                source.reset();
-            } else {
-                build_error = "scene build failed";
-                for (const auto &d : built.diags.items()) {
-                    if (d.severity >= DiagnosticSeverity::Error) {
-                        build_error = d.message;
-                        break;
-                    }
-                }
-                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
-                source.reset();
-            }
+            ImGui::Text("Tessellating…");
+            ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()), ImVec2(-1.f, 0.f), "");
         } else {
             // Idle / Fetching: render a source-shaped placeholder. URL-style
             // sources will populate `progress()` with active downloads;
@@ -714,6 +749,10 @@ void App::Impl::on_frame() {
     } else if (!scene && !build_error.empty()) {
         ImGui::Separator();
         ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
+    } else if (scene && !scene_uploaded) {
+        ImGui::Separator();
+        ImGui::Text("Uploading scene to GPU…");
+        ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()), ImVec2(-1.f, 0.f), "");
     }
 
     if (scene) {

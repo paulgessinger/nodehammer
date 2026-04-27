@@ -80,6 +80,12 @@ function(nodehammer_apply_emscripten_viewer_options target)
     target_link_options(${target} PRIVATE
         "-sEXIT_RUNTIME=0"
         "-sALLOW_MEMORY_GROWTH=1"
+        # Pre-allocate enough heap to fit the IBL bake (~16 MB) plus the
+        # MEMFS-resident config/geometry, so the bake doesn't trigger wasm
+        # memory growth while emscripten_fetch callbacks are still writing
+        # files. Heap growth interleaved with MEMFS writes was producing
+        # intermittent "No such file" / short-write failures.
+        "-sINITIAL_MEMORY=64MB"
         "-sFORCE_FILESYSTEM=1"
         "-sUSE_WEBGL2=1"
         "-sFULL_ES3=1"

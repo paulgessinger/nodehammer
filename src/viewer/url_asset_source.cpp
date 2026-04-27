@@ -2,6 +2,7 @@
 
 #include <nodehammer/config/config_loader.hpp>
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -21,30 +22,76 @@ namespace {
 #ifdef __EMSCRIPTEN__
 
 // Walk the parent dirs of `path` (a MEMFS-rooted path like `/odd/base.toml`)
-// and `mkdir` each one. EEXIST is the success case for re-runs.
-void make_parent_dirs(const std::string &path) {
+// and `mkdir` each one. EEXIST is the success case for re-runs; any other
+// errno is logged so silent MEMFS failures stop hiding from us.
+bool make_parent_dirs(const std::string &path) {
     std::string current;
     for (size_t i = 0; i < path.size(); ++i) {
         if (path[i] == '/') {
             if (!current.empty()) {
-                ::mkdir(current.c_str(), 0755);
+                if (::mkdir(current.c_str(), 0755) != 0 && errno != EEXIST) {
+                    std::fprintf(stderr, "url_asset_source: mkdir(%s) failed: %s (errno=%d)\n",
+                                 current.c_str(), std::strerror(errno), errno);
+                    return false;
+                }
             }
             current.push_back('/');
         } else {
             current.push_back(path[i]);
         }
     }
+    return true;
 }
 
 bool write_file(const std::string &path, const char *data, size_t size) {
-    make_parent_dirs(path);
-    std::FILE *f = std::fopen(path.c_str(), "wb");
-    if (f == nullptr) {
+    if (!make_parent_dirs(path)) {
+        std::fprintf(stderr,
+                     "url_asset_source: write_file(%s, size=%zu) aborted: "
+                     "parent dirs missing\n",
+                     path.c_str(), size);
         return false;
     }
-    const bool ok = std::fwrite(data, 1, size, f) == size;
-    std::fclose(f);
-    return ok;
+    std::FILE *f = std::fopen(path.c_str(), "wb");
+    if (f == nullptr) {
+        std::fprintf(stderr, "url_asset_source: fopen(%s, wb) failed: %s (errno=%d)\n",
+                     path.c_str(), std::strerror(errno), errno);
+        return false;
+    }
+    const size_t written = std::fwrite(data, 1, size, f);
+    if (written != size) {
+        std::fprintf(stderr,
+                     "url_asset_source: short write for %s: %zu of %zu bytes "
+                     "(errno=%d: %s)\n",
+                     path.c_str(), written, size, errno, std::strerror(errno));
+    }
+    if (std::fclose(f) != 0) {
+        std::fprintf(stderr, "url_asset_source: fclose(%s) failed: %s (errno=%d)\n", path.c_str(),
+                     std::strerror(errno), errno);
+        return false;
+    }
+    if (written == size) {
+        std::error_code ec;
+        const bool exists_now = std::filesystem::exists(path, ec);
+        const auto size_now = exists_now ? std::filesystem::file_size(path, ec) : 0;
+        std::fprintf(stderr,
+                     "url_asset_source: wrote %s (%zu bytes; post-write exists=%d size=%zu)\n",
+                     path.c_str(), size, exists_now ? 1 : 0, static_cast<size_t>(size_now));
+    }
+    return written == size;
+}
+
+// Force a MEMFS-rooted absolute path. `path("foo").parent_path()` yields an
+// empty path on relative inputs, which then makes `(empty / rel)` come out
+// without the leading slash — different string, breaks the `seen` dedup,
+// and `fopen` writes to the CWD instead of `/`. Normalising up-front keeps
+// every URL canonical so the dedup set actually deduplicates.
+std::string normalize_memfs_path(std::string_view url) {
+    auto p = std::filesystem::path(url).lexically_normal();
+    auto s = p.generic_string();
+    if (s.empty() || s.front() != '/') {
+        s = "/" + s;
+    }
+    return s;
 }
 
 // Resolve an `include` entry (relative to the config file) to an absolute
@@ -54,7 +101,7 @@ bool write_file(const std::string &path, const char *data, size_t size) {
 std::string resolve_include_url(const std::string &config_url, const std::string &rel) {
     std::filesystem::path base = std::filesystem::path(config_url).parent_path();
     std::filesystem::path joined = (base / rel).lexically_normal();
-    return joined.generic_string();
+    return normalize_memfs_path(joined.generic_string());
 }
 
 #endif // __EMSCRIPTEN__
@@ -92,8 +139,10 @@ struct UrlAssetSource::Impl {
 
 void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
     if (!seen.insert(url).second) {
+        std::fprintf(stderr, "url_asset_source: enqueue dedup'd %s\n", url.c_str());
         return;
     }
+    std::fprintf(stderr, "url_asset_source: enqueue %s\n", url.c_str());
     const size_t index = entries.size();
     entries.push_back(AssetProgress{url, 0, 0, false, false});
     kinds.push_back(kind);
@@ -194,6 +243,10 @@ UrlAssetSource::UrlAssetSource() : impl_(std::make_unique<Impl>()) {}
 UrlAssetSource::~UrlAssetSource() = default;
 
 void UrlAssetSource::start(std::string config_url, std::string input_url) {
+#ifdef __EMSCRIPTEN__
+    config_url = normalize_memfs_path(config_url);
+    input_url = normalize_memfs_path(input_url);
+#endif
     impl_->config_path = config_url;
     impl_->input_path = input_url;
 
