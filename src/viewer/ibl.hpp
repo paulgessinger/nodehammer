@@ -3,14 +3,10 @@
 #include <sokol_gfx.h>
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <vector>
-
-#ifndef __EMSCRIPTEN__
-#include <thread>
-#endif
 
 namespace nodehammer::viewer {
 
@@ -70,7 +66,7 @@ struct IblResources {
 /// `budget_ns`.
 class IblBakeJob {
   public:
-    IblBakeJob() = default;
+    IblBakeJob();
     ~IblBakeJob();
     IblBakeJob(const IblBakeJob &) = delete;
     IblBakeJob &operator=(const IblBakeJob &) = delete;
@@ -94,31 +90,8 @@ class IblBakeJob {
     [[nodiscard]] double progress() const;
 
   private:
-    bool started_{false};
-    bool taken_{false};
-
-#ifdef __EMSCRIPTEN__
-    enum class Stage : uint8_t { Idle, BrdfLut, Irradiance, Prefilter, Done };
-    Stage stage_{Stage::Idle};
-    int face_{0};
-    int mip_{0};
-    int y_{0};
-    int x_{0};
-    IblBakeData partial_;
-
-    void bakeOnePixel();
-    void advanceIterator();
-#else
-    std::thread worker_;
-    std::atomic<bool> done_{false};
-    std::atomic<double> progress_{0.0};
-    IblBakeData result_;
-
-    // Worker entry point. Mirrors the loop structure of `bakeIbl` but
-    // bumps `progress_` between rows / faces so the UI on native can show
-    // a real-time bar instead of jumping 0% → 100%.
-    void runNativeBake();
-#endif
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace nodehammer::viewer

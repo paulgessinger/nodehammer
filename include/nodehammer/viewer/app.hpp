@@ -2,7 +2,10 @@
 
 #include <nodehammer/viewer/config.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <string>
 
 namespace nodehammer {
 struct RenderScene;
@@ -15,9 +18,44 @@ class AssetSource;
 /// Top-level viewer lifecycle. Owns the sokol_app window/event loop, the
 /// sokol_gfx render context, and the ImGui state. Native and emscripten
 /// builds share the same App; the only divergence is in run().
+///
+/// Effectively a singleton — sokol_app's `sapp_run` only supports one
+/// window per process, the IBL bake state machine assumes one, etc.
+/// Construction is gated through `App::Handle`, which both enforces the
+/// singleton constraint at runtime and owns the platform-specific
+/// teardown contract. `App::instance()` is the canonical way for platform
+/// glue (the web upload C export, the native picker modal) to reach the
+/// live instance without threading a pointer through static callbacks.
 class App {
+  private:
+    // Passkey tag for the public constructor. Declared private so external
+    // callers can't name it to invoke the ctor. `App::Handle` (also
+    // nested in App) sees it normally and can construct one to forward
+    // through `std::make_unique<App>` without needing to friend the
+    // allocator.
+    struct PrivateTag {};
+
   public:
-    explicit App(Config cfg);
+    /// RAII handle for the singleton App. Constructing one creates the
+    /// App; destroying it tears down on native, but is a no-op on
+    /// emscripten — `sapp_run` returns immediately on web after registering
+    /// the main loop, so the App must outlive the calling scope or
+    /// subsequent frame callbacks would dispatch against freed memory. On
+    /// emscripten the App stays alive in a function-local-static
+    /// `unique_ptr` and is destroyed at program exit.
+    class Handle {
+      public:
+        explicit Handle(Config cfg);
+        ~Handle();
+        Handle(const Handle &) = delete;
+        Handle &operator=(const Handle &) = delete;
+        Handle(Handle &&) = delete;
+        Handle &operator=(Handle &&) = delete;
+
+        [[nodiscard]] App *operator->() const noexcept;
+        [[nodiscard]] App &operator*() const noexcept;
+    };
+
     ~App();
 
     App(const App &) = delete;
@@ -42,11 +80,23 @@ class App {
     /// while the loop continues to fire from the event queue.
     int run();
 
-    // Public so the file-scope upload helpers in app.cpp (the EM_JS shim
-    // callback and sokol's drop fetch callback) can access App::Impl.
-    // Definition lives entirely in the .cpp; nothing else can manipulate
-    // it from this header.
+    /// The live App, or nullptr if no `App::Handle` is currently
+    /// constructed. Safe to call from any thread that is also live during
+    /// the App's lifetime.
+    [[nodiscard]] static App *instance();
+
+    /// Materialise an in-memory file (received from the web file picker /
+    /// drag-drop) into MEMFS at /uploads/<filename> and route it through the
+    /// active asset source. Auto-creates a LocalFileAssetSource if none is
+    /// currently set.
+    void deliverUpload(const std::string &filename, const std::uint8_t *data, std::size_t size);
+
+    // Public so the file-scope upload helpers in app.cpp (sokol's drop
+    // fetch callback) can access App::Impl. Definition lives entirely in
+    // the .cpp; nothing else can manipulate it from this header.
     struct Impl;
+
+    App(PrivateTag, Config cfg);
 
   private:
     std::unique_ptr<Impl> impl_;

@@ -2,24 +2,23 @@
 
 #include <nodehammer/config/config_loader.hpp>
 
+#include <emscripten/fetch.h>
+#include <sys/stat.h>
+
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <span>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
-
-#ifdef __EMSCRIPTEN__
-#include <emscripten/fetch.h>
-#include <sys/stat.h>
-#endif
 
 namespace nodehammer::viewer {
 
 namespace {
-
-#ifdef __EMSCRIPTEN__
 
 // Walk the parent dirs of `path` (a MEMFS-rooted path like `/odd/base.toml`)
 // and `mkdir` each one. EEXIST is the success case for re-runs; any other
@@ -104,8 +103,6 @@ std::string resolveIncludeUrl(const std::string &config_url, const std::string &
     return normalizeMemfsPath(joined.generic_string());
 }
 
-#endif // __EMSCRIPTEN__
-
 } // namespace
 
 struct UrlAssetSource::Impl {
@@ -117,7 +114,6 @@ struct UrlAssetSource::Impl {
     std::vector<AssetProgress> entries;
     std::unordered_set<std::string> seen;
 
-#ifdef __EMSCRIPTEN__
     struct FetchCtx {
         Impl *self;
         size_t index;
@@ -133,10 +129,7 @@ struct UrlAssetSource::Impl {
     void checkDone();
 
     std::vector<Kind> kinds;
-#endif
 };
-
-#ifdef __EMSCRIPTEN__
 
 void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
     if (!seen.insert(url).second) {
@@ -247,13 +240,10 @@ void UrlAssetSource::Impl::checkDone() {
     state = LoadState::Ready;
 }
 
-#endif // __EMSCRIPTEN__
-
 UrlAssetSource::UrlAssetSource() : impl_(std::make_unique<Impl>()) {}
 UrlAssetSource::~UrlAssetSource() = default;
 
 void UrlAssetSource::start(std::string config_url, std::string input_url, std::string asset_base) {
-#ifdef __EMSCRIPTEN__
     config_url = normalizeMemfsPath(config_url);
     input_url = normalizeMemfsPath(input_url);
     // Strip a trailing slash so `asset_base + url` doesn't double up the
@@ -261,22 +251,13 @@ void UrlAssetSource::start(std::string config_url, std::string input_url, std::s
     while (!asset_base.empty() && asset_base.back() == '/') {
         asset_base.pop_back();
     }
-#else
-    (void)asset_base;
-#endif
     impl_->config_path = config_url;
     impl_->input_path = input_url;
 
-#ifdef __EMSCRIPTEN__
     impl_->asset_base = std::move(asset_base);
     impl_->state = LoadState::Fetching;
     impl_->enqueue(config_url, Impl::Kind::Config);
     impl_->enqueue(input_url, Impl::Kind::Input);
-#else
-    // Native: files already on disk; nothing to fetch. The async URL path
-    // is emscripten-only by design.
-    impl_->state = LoadState::Ready;
-#endif
 }
 
 void UrlAssetSource::poll() {}

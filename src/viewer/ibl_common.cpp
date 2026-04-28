@@ -1,28 +1,19 @@
 #include "ibl.hpp"
 
+#include "ibl_bake_internal.hpp"
+
 #include <glm/glm.hpp>
 #include <glm/gtc/constants.hpp>
-#include <sokol_time.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
-#include <vector>
 
 namespace nodehammer::viewer {
 
 namespace {
-
-constexpr int kIrradianceSize = IblBakeData::kIrradianceSize;
-constexpr int kPrefilterSize = IblBakeData::kPrefilterSize;
-constexpr int kPrefilterMips = IblBakeData::kPrefilterMips;
-constexpr int kBrdfLutSize = IblBakeData::kBrdfLutSize;
-constexpr int kIrradianceSamples = 1024;
-constexpr int kPrefilterSamples = 256;
-constexpr int kBrdfSamples = 1024;
 
 constexpr glm::vec3 kZenithColor{0.55f, 0.65f, 0.85f};  // soft daylight blue
 constexpr glm::vec3 kHorizonColor{0.85f, 0.80f, 0.72f}; // warm haze
@@ -115,9 +106,11 @@ float geometrySmithIbl(float ndotv, float ndotl, float roughness) {
     return gv * gl;
 }
 
-// ── Per-pixel bake routines ──────────────────────────────────────────────────
-// Each writes 4 RGBA8 bytes at `dst`. They are the atomic unit of work used
-// by both the synchronous `bakeIbl()` and the chunked `IblBakeJob` driver.
+constexpr size_t brdfLutByteSize() { return static_cast<size_t>(kBrdfLutSize) * kBrdfLutSize * 4; }
+
+} // namespace
+
+// ── Per-pixel bake routines (shared between bakeIbl + IblBakeJob) ───────────
 
 void bakeBrdfPixel(int x, int y, std::byte *dst) {
     const float roughness = (static_cast<float>(y) + 0.5f) / kBrdfLutSize;
@@ -209,13 +202,9 @@ void bakePrefilterPixel(int mip, int face, int x, int y, std::byte *dst) {
 
 // ── Buffer sizing helpers ────────────────────────────────────────────────────
 
-constexpr size_t brdfLutByteSize() { return static_cast<size_t>(kBrdfLutSize) * kBrdfLutSize * 4; }
+size_t irradianceFaceBytes() { return static_cast<size_t>(kIrradianceSize) * kIrradianceSize * 4; }
 
-constexpr size_t irradianceFaceBytes() {
-    return static_cast<size_t>(kIrradianceSize) * kIrradianceSize * 4;
-}
-
-constexpr size_t prefilterFaceBytes(int mip) {
+size_t prefilterFaceBytes(int mip) {
     const int size = (kPrefilterSize >> mip) > 1 ? (kPrefilterSize >> mip) : 1;
     return static_cast<size_t>(size) * static_cast<size_t>(size) * 4;
 }
@@ -227,8 +216,6 @@ void allocateBakeBuffers(IblBakeData &data) {
         data.prefilter_mips[m].assign(prefilterFaceBytes(static_cast<int>(m)) * 6, std::byte{0});
     }
 }
-
-} // namespace
 
 IblBakeData bakeIbl() {
     IblBakeData data;
@@ -471,305 +458,6 @@ void IblResources::release() {
         lut_sampler = sg_sampler{};
     }
     prefilter_mip_count = 0;
-}
-
-// ── IblBakeJob ───────────────────────────────────────────────────────────────
-
-IblBakeJob::~IblBakeJob() {
-#ifndef __EMSCRIPTEN__
-    if (worker_.joinable()) {
-        worker_.join();
-    }
-#endif
-}
-
-void IblBakeJob::start() {
-    if (started_) {
-        return;
-    }
-    started_ = true;
-
-#ifdef __EMSCRIPTEN__
-    allocateBakeBuffers(partial_);
-    stage_ = Stage::BrdfLut;
-    face_ = 0;
-    mip_ = 0;
-    y_ = 0;
-    x_ = 0;
-#else
-    progress_.store(0.0, std::memory_order_relaxed);
-    worker_ = std::thread([this] {
-        runNativeBake();
-        done_.store(true, std::memory_order_release);
-    });
-#endif
-}
-
-#ifndef __EMSCRIPTEN__
-
-void IblBakeJob::runNativeBake() {
-    // Same loop layout as `bakeIbl()`, but reports cumulative weighted
-    // progress between rows (BRDF) and per-face-per-mip (cubemaps). Pixel
-    // weights match the formula used by the web-side `progress()` so a
-    // user toggling between platforms sees the same shape of curve.
-    constexpr double kBrdfWeightPerPixel = static_cast<double>(kBrdfSamples);
-    constexpr double kIrradianceWeightPerPixel = static_cast<double>(kIrradianceSamples);
-    constexpr double kPrefilterWeightPerPixel = static_cast<double>(kPrefilterSamples);
-
-    constexpr double brdfTotal =
-        static_cast<double>(kBrdfLutSize) * kBrdfLutSize * kBrdfWeightPerPixel;
-    constexpr double irradianceTotal =
-        static_cast<double>(kIrradianceSize) * kIrradianceSize * 6.0 * kIrradianceWeightPerPixel;
-    double prefilterTotal = 0.0;
-    for (int m = 0; m < kPrefilterMips; ++m) {
-        const double sz = static_cast<double>(std::max(1, kPrefilterSize >> m));
-        prefilterTotal += sz * sz * 6.0 * kPrefilterWeightPerPixel;
-    }
-    const double grandTotal = brdfTotal + irradianceTotal + prefilterTotal;
-
-    double done = 0.0;
-    auto publish = [&]() {
-        progress_.store(std::clamp(done / grandTotal, 0.0, 1.0), std::memory_order_relaxed);
-    };
-
-    IblBakeData data;
-    allocateBakeBuffers(data);
-
-    // BRDF LUT
-    for (int y = 0; y < kBrdfLutSize; ++y) {
-        for (int x = 0; x < kBrdfLutSize; ++x) {
-            const size_t idx = (static_cast<size_t>(y) * kBrdfLutSize + static_cast<size_t>(x)) * 4;
-            bakeBrdfPixel(x, y, &data.brdf_lut[idx]);
-        }
-        done += kBrdfLutSize * kBrdfWeightPerPixel;
-        publish();
-    }
-
-    // Irradiance cubemap
-    const size_t irr_face_sz = irradianceFaceBytes();
-    for (int face = 0; face < 6; ++face) {
-        std::byte *face_ptr = &data.irradiance_combined[static_cast<size_t>(face) * irr_face_sz];
-        for (int y = 0; y < kIrradianceSize; ++y) {
-            for (int x = 0; x < kIrradianceSize; ++x) {
-                const size_t idx =
-                    (static_cast<size_t>(y) * kIrradianceSize + static_cast<size_t>(x)) * 4;
-                bakeIrradiancePixel(face, x, y, &face_ptr[idx]);
-            }
-        }
-        done += static_cast<double>(kIrradianceSize) * kIrradianceSize * kIrradianceWeightPerPixel;
-        publish();
-    }
-
-    // Prefilter cubemap (mipped)
-    for (int mip = 0; mip < kPrefilterMips; ++mip) {
-        const int size = std::max(1, kPrefilterSize >> mip);
-        const size_t face_sz = prefilterFaceBytes(mip);
-        for (int face = 0; face < 6; ++face) {
-            std::byte *face_ptr =
-                &data.prefilter_mips[static_cast<size_t>(mip)][static_cast<size_t>(face) * face_sz];
-            for (int y = 0; y < size; ++y) {
-                for (int x = 0; x < size; ++x) {
-                    const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(size) +
-                                        static_cast<size_t>(x)) *
-                                       4;
-                    bakePrefilterPixel(mip, face, x, y, &face_ptr[idx]);
-                }
-            }
-            done += static_cast<double>(size) * size * kPrefilterWeightPerPixel;
-            publish();
-        }
-    }
-
-    result_ = std::move(data);
-    progress_.store(1.0, std::memory_order_relaxed);
-}
-
-#endif
-
-#ifdef __EMSCRIPTEN__
-
-void IblBakeJob::bakeOnePixel() {
-    switch (stage_) {
-    case Stage::BrdfLut: {
-        const size_t idx = (static_cast<size_t>(y_) * kBrdfLutSize + static_cast<size_t>(x_)) * 4;
-        bakeBrdfPixel(x_, y_, &partial_.brdf_lut[idx]);
-        break;
-    }
-    case Stage::Irradiance: {
-        const size_t face_off = static_cast<size_t>(face_) * irradianceFaceBytes();
-        const size_t idx =
-            face_off + (static_cast<size_t>(y_) * kIrradianceSize + static_cast<size_t>(x_)) * 4;
-        bakeIrradiancePixel(face_, x_, y_, &partial_.irradiance_combined[idx]);
-        break;
-    }
-    case Stage::Prefilter: {
-        const int size = std::max(1, kPrefilterSize >> mip_);
-        const size_t face_off = static_cast<size_t>(face_) * prefilterFaceBytes(mip_);
-        const size_t idx =
-            face_off +
-            (static_cast<size_t>(y_) * static_cast<size_t>(size) + static_cast<size_t>(x_)) * 4;
-        bakePrefilterPixel(mip_, face_, x_, y_,
-                           &partial_.prefilter_mips[static_cast<size_t>(mip_)][idx]);
-        break;
-    }
-    case Stage::Idle:
-    case Stage::Done:
-        break;
-    }
-}
-
-void IblBakeJob::advanceIterator() {
-    switch (stage_) {
-    case Stage::BrdfLut:
-        if (++x_ >= kBrdfLutSize) {
-            x_ = 0;
-            if (++y_ >= kBrdfLutSize) {
-                y_ = 0;
-                stage_ = Stage::Irradiance;
-            }
-        }
-        break;
-    case Stage::Irradiance:
-        if (++x_ >= kIrradianceSize) {
-            x_ = 0;
-            if (++y_ >= kIrradianceSize) {
-                y_ = 0;
-                if (++face_ >= 6) {
-                    face_ = 0;
-                    stage_ = Stage::Prefilter;
-                }
-            }
-        }
-        break;
-    case Stage::Prefilter: {
-        const int size = std::max(1, kPrefilterSize >> mip_);
-        if (++x_ >= size) {
-            x_ = 0;
-            if (++y_ >= size) {
-                y_ = 0;
-                if (++face_ >= 6) {
-                    face_ = 0;
-                    if (++mip_ >= kPrefilterMips) {
-                        mip_ = 0;
-                        stage_ = Stage::Done;
-                    }
-                }
-            }
-        }
-        break;
-    }
-    case Stage::Idle:
-    case Stage::Done:
-        break;
-    }
-}
-
-bool IblBakeJob::advance(uint64_t budget_ns) {
-    if (!started_) {
-        start();
-    }
-    if (stage_ == Stage::Done) {
-        return true;
-    }
-    // Check the clock every N pixels rather than on every iteration so the
-    // stm_now() / stm_diff() cost doesn't dominate cheap pixels (e.g. small
-    // prefilter mips).
-    constexpr int kPixelsPerClockCheck = 8;
-    const uint64_t start_ticks = stm_now();
-    int since_check = 0;
-    while (stage_ != Stage::Done) {
-        bakeOnePixel();
-        advanceIterator();
-        if (++since_check >= kPixelsPerClockCheck) {
-            since_check = 0;
-            if (stm_ns(stm_diff(stm_now(), start_ticks)) >= static_cast<double>(budget_ns)) {
-                break;
-            }
-        }
-    }
-    return stage_ == Stage::Done;
-}
-
-#else
-
-bool IblBakeJob::advance(uint64_t /*budget_ns*/) {
-    if (!started_) {
-        start();
-    }
-    if (done_.load(std::memory_order_acquire)) {
-        if (worker_.joinable()) {
-            worker_.join();
-        }
-        return true;
-    }
-    return false;
-}
-
-#endif
-
-double IblBakeJob::progress() const {
-#ifdef __EMSCRIPTEN__
-    // Weight each stage's pixels by sample count so the bar advances
-    // roughly linearly in time. Sample counts: BRDF/irradiance use
-    // kBrdfSamples/kIrradianceSamples (1024 each); prefilter uses
-    // kPrefilterSamples (256) per pixel.
-    constexpr double kBrdfWeightPerPixel = static_cast<double>(kBrdfSamples);
-    constexpr double kIrradianceWeightPerPixel = static_cast<double>(kIrradianceSamples);
-    constexpr double kPrefilterWeightPerPixel = static_cast<double>(kPrefilterSamples);
-
-    constexpr double brdfTotal =
-        static_cast<double>(kBrdfLutSize) * kBrdfLutSize * kBrdfWeightPerPixel;
-    constexpr double irradianceTotal =
-        static_cast<double>(kIrradianceSize) * kIrradianceSize * 6.0 * kIrradianceWeightPerPixel;
-    auto prefilter_size_at = [](int mip) { return std::max(1, kPrefilterSize >> mip); };
-    double prefilterTotal = 0.0;
-    for (int m = 0; m < kPrefilterMips; ++m) {
-        const double sz = static_cast<double>(prefilter_size_at(m));
-        prefilterTotal += sz * sz * 6.0 * kPrefilterWeightPerPixel;
-    }
-    const double grandTotal = brdfTotal + irradianceTotal + prefilterTotal;
-
-    if (stage_ == Stage::Done) {
-        return 1.0;
-    }
-    if (stage_ == Stage::Idle) {
-        return 0.0;
-    }
-
-    double done = 0.0;
-    if (stage_ == Stage::BrdfLut) {
-        const double pixels = static_cast<double>(y_) * kBrdfLutSize + x_;
-        done = pixels * kBrdfWeightPerPixel;
-    } else if (stage_ == Stage::Irradiance) {
-        done = brdfTotal;
-        const double pixelsThisFace = static_cast<double>(y_) * kIrradianceSize + x_;
-        const double facesDone = static_cast<double>(face_);
-        const double pixels = facesDone * kIrradianceSize * kIrradianceSize + pixelsThisFace;
-        done += pixels * kIrradianceWeightPerPixel;
-    } else { // Prefilter
-        done = brdfTotal + irradianceTotal;
-        for (int m = 0; m < mip_; ++m) {
-            const double sz = static_cast<double>(prefilter_size_at(m));
-            done += sz * sz * 6.0 * kPrefilterWeightPerPixel;
-        }
-        const double sz = static_cast<double>(prefilter_size_at(mip_));
-        const double pixelsThisFace = static_cast<double>(y_) * sz + x_;
-        const double facesDone = static_cast<double>(face_);
-        done += (facesDone * sz * sz + pixelsThisFace) * kPrefilterWeightPerPixel;
-    }
-    return std::clamp(done / grandTotal, 0.0, 1.0);
-#else
-    return progress_.load(std::memory_order_relaxed);
-#endif
-}
-
-IblBakeData IblBakeJob::take() {
-    taken_ = true;
-#ifdef __EMSCRIPTEN__
-    return std::move(partial_);
-#else
-    return std::move(result_);
-#endif
 }
 
 } // namespace nodehammer::viewer

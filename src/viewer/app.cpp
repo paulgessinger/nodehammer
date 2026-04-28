@@ -5,16 +5,13 @@
 #include "imgui_backend.hpp"
 #include "scene_build_job.hpp"
 #include "scene_renderer.hpp"
+#include <nodehammer/viewer/platform.hpp>
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
 #include <nodehammer/viewer/asset_source.hpp>
 #include <nodehammer/viewer/camera.hpp>
 #include <nodehammer/viewer/local_file_asset_source.hpp>
-
-#ifdef NH_HAS_NFD
-#include <nfd.hpp>
-#endif
 
 #include <imgui.h>
 #include <sokol_app.h>
@@ -34,81 +31,12 @@
 #include <utility>
 
 #ifdef __EMSCRIPTEN__
-#include <emscripten/emscripten.h>
 #include <sys/stat.h>
-
-EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
-    var url = new URL(window.location.href);
-    var p = url.searchParams;
-    var keys = UTF8ToString(managed_keys).split(',');
-    for (var i = 0; i < keys.length; ++i) {
-        if (keys[i]) {
-            p.delete(keys[i]);
-        }
-    }
-
-    var state = new URLSearchParams(UTF8ToString(state_query));
-    state.forEach(function(value, key) { p.set(key, value); });
-
-    history.replaceState(null, "", url);
-});
-
-// Open a transient <input type=file multiple> picker. For each chosen file,
-// read its bytes via FileReader and call back into wasm at
-// `_nh_viewer_deliver_upload(name_ptr, data_ptr, size)`. Filename is
-// UTF-8-encoded via TextEncoder to avoid depending on emscripten's
-// stringToNewUTF8 helper being in EXPORTED_RUNTIME_METHODS.
-EM_JS(void, nh_viewer_open_file_picker, (), {
-    var input = document.createElement('input');
-    input.type = 'file';
-    input.multiple = true;
-    input.accept = '.toml,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
-    input.style.display = 'none';
-    input.addEventListener(
-        'change', function(ev) {
-            var files = ev.target.files;
-            for (var i = 0; i < files.length; ++i) {
-                (function(f) {
-                    var reader = new FileReader();
-                    reader.onload = function() {
-                        var bytes = new Uint8Array(reader.result);
-                        var size = bytes.length;
-                        var data_ptr = Module._malloc(size);
-                        Module.HEAPU8.set(bytes, data_ptr);
-
-                        var enc = new TextEncoder();
-                        var name_utf8 = enc.encode(f.name);
-                        var name_ptr = Module._malloc(name_utf8.length + 1);
-                        Module.HEAPU8.set(name_utf8, name_ptr);
-                        Module.HEAPU8[name_ptr + name_utf8.length] = 0;
-
-                        Module._nh_viewer_deliver_upload(name_ptr, data_ptr, size);
-
-                        Module._free(name_ptr);
-                        Module._free(data_ptr);
-                    };
-                    reader.readAsArrayBuffer(f);
-                })(files[i]);
-            }
-            document.body.removeChild(input);
-        });
-    document.body.appendChild(input);
-    input.click();
-});
-#else
-void nh_viewer_commit_url_state(const char *state_query, const char *managed_keys);
 #endif
 
 namespace nodehammer::viewer {
 
 namespace {
-
-static constexpr bool kIsEmscripten =
-#ifdef __EMSCRIPTEN__
-    true;
-#else
-    false;
-#endif
 
 float wrapDegrees(float angle) {
     angle = std::fmod(angle, 360.f);
@@ -188,32 +116,26 @@ struct App::Impl {
     bool build_in_progress{false};
     std::chrono::steady_clock::time_point build_start_time{};
 
-#ifdef __EMSCRIPTEN__
-    // Web upload glue (file picker EM_JS shim and the drop-bytes fetch
-    // callback) need a way to call back into the App from JS / sokol.
-    // There is exactly one App alive per page lifetime, so a single static
-    // pointer suffices. onInit sets it; onCleanup clears it.
-    static Impl *active;
-
     // Materialise an in-memory file into MEMFS at /uploads/<filename>,
-    // then route it through the LocalFileAssetSource. Auto-creates a
-    // LocalFileAssetSource if none is currently set so a fresh page that
-    // started in upload-only mode can still receive a drop.
+    // then route it through the LocalFileAssetSource. Invoked from the web
+    // upload C export via App::deliverUpload (which forwards here).
+    // Auto-creates a LocalFileAssetSource if none is currently set so a
+    // fresh page that started in upload-only mode can still receive a drop.
     void deliverUpload(const std::string &filename, const std::uint8_t *data, std::size_t size);
-#endif
+
+    // Set from inside the imgui frame on native when the user clicks
+    // "Open files…"; drained at end of frame to run NFD modally. NFD
+    // enters nested event loops that would re-enter the active ImGui
+    // frame, so the open-and-drain split is required. Always present but
+    // only meaningful on native — the web picker dispatches inline (the
+    // browser requires `input.click()` from the gesture stack) and never
+    // touches this flag.
+    bool picker_requested{false};
 
     // Stashed message after a build failure (so the UI can keep showing it
     // for more than the one frame the source survives).
     std::string build_error;
 
-    // True when the imgui "Open files…" button was clicked this frame.
-    // The actual NFD modal must run AFTER the imgui frame finishes — it
-    // enters a nested Cocoa runloop that fires sokol's display link while
-    // the modal is up, which would re-enter onFrame and double up
-    // ImGui::NewFrame / ImGui::Begin (corrupting the outer frame's window
-    // stack and crashing in the next ImGui::End). Deferring to after
-    // render() means any re-entries land cleanly between frames.
-    bool open_picker_requested{false};
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
     /// "no scene framed yet" — `dolly` falls back to distance-relative sizing.
@@ -292,15 +214,9 @@ void App::Impl::onInit() {
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
-
-#ifdef __EMSCRIPTEN__
-    Impl::active = this;
-#endif
 }
 
 #ifdef __EMSCRIPTEN__
-
-App::Impl *App::Impl::active = nullptr;
 
 namespace {
 
@@ -325,23 +241,20 @@ void webDropFetchCallback(const sapp_html5_fetch_response *response) {
     delete ctx;
 }
 
-void makeUploadsDir() {
-    // EEXIST is the success case for re-runs.
-    ::mkdir("/uploads", 0755);
-}
-
 } // namespace
+
+#endif // __EMSCRIPTEN__
 
 void App::Impl::deliverUpload(const std::string &filename, const std::uint8_t *data,
                               std::size_t size) {
-    if (!source) {
-        source = std::make_unique<LocalFileAssetSource>();
-        scene.reset();
-        scene_uploaded = false;
-        camera_framed = false;
-        build_error.clear();
-    }
-    makeUploadsDir();
+    // Only ever invoked on web — the native upload paths land directly
+    // through LocalFileAssetSource::ingestLocalFile. The MEMFS path /
+    // mkdir below is meaningless on native, but the dead branch costs
+    // nothing and keeps the function ifdef-free aside from the include.
+#ifdef __EMSCRIPTEN__
+    // EEXIST is the success case for re-runs.
+    ::mkdir("/uploads", 0755);
+#endif
     const std::string path = "/uploads/" + filename;
     std::FILE *f = std::fopen(path.c_str(), "wb");
     if (f == nullptr) {
@@ -356,22 +269,6 @@ void App::Impl::deliverUpload(const std::string &filename, const std::uint8_t *d
     }
     source->ingestLocalFile(std::filesystem::path{path});
 }
-
-#endif // __EMSCRIPTEN__
-
-extern "C" {
-
-#ifdef __EMSCRIPTEN__
-EMSCRIPTEN_KEEPALIVE
-void nh_viewer_deliver_upload(const char *filename, const std::uint8_t *data, std::size_t size) {
-    if (App::Impl::active == nullptr || filename == nullptr) {
-        return;
-    }
-    App::Impl::active->deliverUpload(filename, data, size);
-}
-#endif
-
-} // extern "C"
 
 void App::Impl::onEvent(const sapp_event *ev) {
     ImGui_ImplSokol_HandleEvent(ev);
@@ -392,16 +289,6 @@ void App::Impl::onEvent(const sapp_event *ev) {
     } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         quit = true;
     } else if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
-        // If no source is currently set, spin one up so the dropped file
-        // has somewhere to land. This handles the "drop a scene to load it"
-        // flow even when the App was started with no CLI args.
-        if (!source) {
-            source = std::make_unique<LocalFileAssetSource>();
-            scene.reset();
-            scene_uploaded = false;
-            camera_framed = false;
-            build_error.clear();
-        }
         const int n = sapp_get_num_dropped_files();
         for (int i = 0; i < n; ++i) {
 #ifdef __EMSCRIPTEN__
@@ -536,13 +423,13 @@ std::string App::Impl::browserUrlStateQuery() const {
 }
 
 void App::Impl::syncBrowserUrl() const {
-    if constexpr (kIsEmscripten) {
+    if constexpr (platform::kIsWeb) {
         const std::string state_query = browserUrlStateQuery();
-        constexpr const char *managed_keys =
+        constexpr const char *kManagedKeys =
             "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
             "cutEnd,"
             "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
-        nh_viewer_commit_url_state(state_query.c_str(), managed_keys);
+        platform::commitUrlState(state_query, kManagedKeys);
     }
 }
 
@@ -619,7 +506,12 @@ void App::Impl::onFrame() {
             }
         }
         build_in_progress = false;
-        source.reset();
+        // Recreate (don't null) so subsequent drops/picker/upload always
+        // have a source to ingest into. The just-finished source — whether
+        // a UrlAssetSource that resolved or a LocalFileAssetSource that
+        // accumulated enough — has done its job; the fresh accumulator
+        // takes over for any future user-initiated loads.
+        source = std::make_unique<LocalFileAssetSource>();
     }
 
     // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
@@ -706,7 +598,7 @@ void App::Impl::onFrame() {
     ImGui::Text("FPS: %.1f", fps);
     ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", frame_interval_ms,
                 render_submit_ms, scene_submit_ms);
-    if constexpr (kIsEmscripten) {
+    if constexpr (platform::kIsWeb) {
         if (ImGui::Button("Commit settings to URL")) {
             syncBrowserUrl();
         }
@@ -803,18 +695,17 @@ void App::Impl::onFrame() {
                 }
             }
             if (ImGui::Button("Open files…")) {
-#ifdef NH_HAS_NFD
-                // Native: defer to after render(). NFD's NSOpenPanel /
-                // GTK / IFileDialog all enter nested event loops; running
-                // them inside an active ImGui frame causes re-entry.
-                open_picker_requested = true;
-#elif defined(__EMSCRIPTEN__)
-                // Web: the EM_JS shim returns immediately and the
-                // FileReader callback fires later, so it's safe to call
-                // inline (and the browser requires input.click() to run
-                // from the user-gesture stack).
-                nh_viewer_open_file_picker();
-#endif
+                if constexpr (platform::kIsWeb) {
+                    // Browser requires input.click() in the user-gesture
+                    // stack; the EM_JS shim returns synchronously and
+                    // bytes arrive later via the C upload export →
+                    // App::deliverUpload.
+                    platform::dispatchWebFilePicker();
+                } else {
+                    // Latch — drained at end of frame so NFD's nested
+                    // event loop doesn't re-enter the active ImGui frame.
+                    picker_requested = true;
+                }
             }
         }
     } else if (!scene && !build_error.empty()) {
@@ -864,8 +755,6 @@ void App::Impl::onFrame() {
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
-    } else if (!source) {
-        ImGui::Text("(no scene loaded)");
     }
     ImGui::End();
 
@@ -873,31 +762,19 @@ void App::Impl::onFrame() {
     // internally calls ImGui::Render itself before issuing draws.
     render();
 
-#ifdef NH_HAS_NFD
-    // Deferred picker — see open_picker_requested above. By the time we
-    // get here, the ImGui frame is fully ended and rendered, sokol's pass
-    // is committed, and any sokol_app frame_cb re-entry from the modal's
-    // nested run loop will run a clean self-contained frame instead of
-    // overlapping with one already in progress.
-    if (open_picker_requested && source) {
-        open_picker_requested = false;
-        NFD::Guard nfd;
-        NFD::UniquePathSet picked;
-        nfdu8filteritem_t filters[] = {
-            {"Nodehammer scene", "toml,nhb,zst,gltf,glb,gdml,root,fb,json,xml"},
-        };
-        if (NFD::OpenDialogMultiple(picked, filters, 1) == NFD_OKAY) {
-            nfdpathsetsize_t count = 0;
-            NFD::PathSet::Count(picked, count);
-            for (nfdpathsetsize_t i = 0; i < count; ++i) {
-                NFD::UniquePathSetPathU8 path;
-                if (NFD::PathSet::GetPath(picked, i, path) == NFD_OKAY) {
-                    source->ingestLocalFile(std::filesystem::path{path.get()});
-                }
-            }
+    // Drain a pending native file picker. The ImGui frame is fully ended
+    // and rendered by this point, sokol's pass is committed, and any
+    // sokol_app frame_cb re-entry from the modal's nested run loop will
+    // hit a clean self-contained frame instead of overlapping with one
+    // already in progress. Web's picker dispatched inline at click-time;
+    // there's nothing to drain here.
+    if constexpr (!platform::kIsWeb) {
+        if (picker_requested) {
+            picker_requested = false;
+            platform::runNativeFilePicker(
+                [this](const std::filesystem::path &path) { source->ingestLocalFile(path); });
         }
     }
-#endif
 }
 
 void App::Impl::onCleanup() {
@@ -906,9 +783,6 @@ void App::Impl::onCleanup() {
     // ImGui::DestroyContext separately (double-free crash on macOS quit).
     ImGui_ImplSokol_Shutdown();
     sg_shutdown();
-#ifdef __EMSCRIPTEN__
-    Impl::active = nullptr;
-#endif
 }
 
 void App::setScene(std::shared_ptr<const RenderScene> scene) {
@@ -919,17 +793,56 @@ void App::setScene(std::shared_ptr<const RenderScene> scene) {
 
 void App::setSource(std::unique_ptr<AssetSource> source) {
     impl_->source = std::move(source);
-    // Replacing a source mid-session clears the current scene so the
-    // placeholder UI can take over while the new source resolves.
-    impl_->scene.reset();
-    impl_->scene_uploaded = false;
-    impl_->camera_framed = false;
-    impl_->build_error.clear();
+    // The previously-displayed scene (if any) stays on screen; the new
+    // source's `Idle → Ready` transition will trigger a fresh build that
+    // swaps the scene atomically when ready. cmd_viewer's `--input` path
+    // calls setScene + setSource at launch in either order; clearing
+    // scene state here would race with that.
 }
 
-App::App(Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
+namespace {
+// Function-local-static slot that owns the singleton App. `App::Handle`
+// constructs into the slot; on native its dtor resets the slot, on web
+// it leaves the App in place so sokol's frame callbacks (which fire from
+// the JS event queue after main returns) keep dispatching against a live
+// instance. Either way the static unique_ptr's own destructor runs at
+// program exit and is the eventual teardown.
+std::unique_ptr<App> &slot() {
+    static std::unique_ptr<App> p;
+    return p;
+}
+} // namespace
+
+App *App::instance() { return slot().get(); }
+
+void App::deliverUpload(const std::string &filename, const std::uint8_t *data, std::size_t size) {
+    impl_->deliverUpload(filename, data, size);
+}
+
+App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
 
 App::~App() = default;
+
+App::Handle::Handle(Config cfg) {
+    if (slot()) {
+        throw std::logic_error("App::Handle constructed while another is alive");
+    }
+    slot() = std::make_unique<App>(App::PrivateTag{}, std::move(cfg));
+}
+
+App::Handle::~Handle() {
+    if constexpr (!platform::kIsWeb) {
+        slot().reset();
+    }
+    // Web: leave the App alive in the slot. The static unique_ptr's own
+    // dtor (program exit) is the eventual teardown — necessary because
+    // sapp_run returned immediately after registering the main loop and
+    // sokol will keep firing frame callbacks against impl_ from the JS
+    // event queue.
+}
+
+App *App::Handle::operator->() const noexcept { return slot().get(); }
+App &App::Handle::operator*() const noexcept { return *slot(); }
 
 int App::run() {
     sapp_desc desc{};
@@ -958,7 +871,7 @@ int App::run() {
     // its async exception, mirroring the bgfx App's emscripten_set_main_loop_arg
     // call. The Impl pointer must outlive that unwind, so detach it: the
     // wasm runtime takes ownership for the page lifetime.
-    if constexpr (kIsEmscripten) {
+    if constexpr (platform::kIsWeb) {
         impl_.release();
     }
     sapp_run(&desc);

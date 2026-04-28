@@ -3,6 +3,7 @@
 #include "ibl.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <vector>
@@ -47,7 +48,7 @@ inline constexpr uint32_t kIblCacheVersion = 1;
 /// later `poll()`.
 class IblCacheLoad {
   public:
-    IblCacheLoad() = default;
+    IblCacheLoad();
     ~IblCacheLoad();
     IblCacheLoad(const IblCacheLoad &) = delete;
     IblCacheLoad &operator=(const IblCacheLoad &) = delete;
@@ -64,15 +65,8 @@ class IblCacheLoad {
     [[nodiscard]] std::optional<IblBakeData> take();
 
   private:
-    enum class State : uint8_t { Idle, Pending, Hit, Miss };
-    State state_{State::Idle};
-    std::optional<IblBakeData> data_;
-
-#ifdef __EMSCRIPTEN__
-    // Static C-style callbacks dispatch back to the instance via user_data.
-    static void onLoad(void *user_data, void *bytes, int size);
-    static void onError(void *user_data);
-#endif
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 /// Persist the bake to the platform cache. Best-effort: errors are logged

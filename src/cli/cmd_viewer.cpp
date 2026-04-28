@@ -6,6 +6,7 @@
 #include <nodehammer/viewer/app.hpp>
 #include <nodehammer/viewer/config.hpp>
 #include <nodehammer/viewer/local_file_asset_source.hpp>
+#include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/url_asset_source.hpp>
 
 #include <memory>
@@ -105,47 +106,48 @@ void registerCmdViewer(CLI::App &app) {
             assetBaseOpt->results(assetBase);
         }
 
-        nodehammer::viewer::App application(*cfg);
+        nodehammer::viewer::App::Handle application(*cfg);
 
-#ifdef __EMSCRIPTEN__
-        // Web entry: skip the synchronous build entirely. If both URL params
-        // are present, hand the App a UrlAssetSource that will fetch the
-        // config (+ its transitive includes) and the geometry; on completion
-        // the App runs buildSceneFromPaths against the MEMFS-resident
-        // files. If either is missing, fall back to a LocalFileAssetSource
-        // so drag-and-drop / picker still work.
-        if (!inputPath.empty() && !configPath.empty()) {
-            auto loader = std::make_unique<nodehammer::viewer::UrlAssetSource>();
-            loader->start(configPath, inputPath, assetBase);
-            application.setSource(std::move(loader));
-        } else {
-            application.setSource(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
-        }
-#else
-        // Native: if --input is supplied, build synchronously before the
-        // window opens (preserves CLI semantics: errors print + exit
-        // non-zero). With no input, hand the App a LocalFileAssetSource so
-        // the user can drag-and-drop or use the file picker to load a
-        // scene from inside the running viewer.
-        if (!inputPath.empty()) {
-            auto built = nodehammer::buildSceneFromPaths(
-                configPath, inputPath,
-                inputFmt.empty() ? std::nullopt : std::optional<std::string>(inputFmt));
-            printDiags(built.diags);
-            if (!built.scene) {
-                std::println(stderr, "viewer: scene build failed");
-                std::exit(1);
+        if constexpr (nodehammer::viewer::platform::kIsWeb) {
+            // Web entry: skip the synchronous build entirely. If both URL
+            // params are present, hand the App a UrlAssetSource that will
+            // fetch the config (+ its transitive includes) and the geometry;
+            // on completion the App runs buildSceneFromPaths against the
+            // MEMFS-resident files. If either is missing, fall back to a
+            // LocalFileAssetSource so drag-and-drop / picker still work.
+            if (!inputPath.empty() && !configPath.empty()) {
+                auto loader = std::make_unique<nodehammer::viewer::UrlAssetSource>();
+                loader->start(configPath, inputPath, assetBase);
+                application->setSource(std::move(loader));
+            } else {
+                application->setSource(
+                    std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
             }
-            std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
-                         built.scene->nodes.size(), built.scene->meshAssets.size(),
-                         built.scene->materials.size());
-            application.setScene(std::move(built.scene));
         } else {
-            application.setSource(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
+            // Native: if --input is supplied, build synchronously before
+            // the window opens (preserves CLI semantics: errors print +
+            // exit non-zero). Always hand the App a LocalFileAssetSource
+            // afterwards so subsequent drag-and-drop / picker actions have
+            // somewhere to land — the App's invariant is that `source` is
+            // always non-null.
+            if (!inputPath.empty()) {
+                auto built = nodehammer::buildSceneFromPaths(
+                    configPath, inputPath,
+                    inputFmt.empty() ? std::nullopt : std::optional<std::string>(inputFmt));
+                printDiags(built.diags);
+                if (!built.scene) {
+                    std::println(stderr, "viewer: scene build failed");
+                    std::exit(1);
+                }
+                std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
+                             built.scene->nodes.size(), built.scene->meshAssets.size(),
+                             built.scene->materials.size());
+                application->setScene(std::move(built.scene));
+            }
+            application->setSource(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
         }
-#endif
 
-        const int rc = application.run();
+        const int rc = application->run();
         if (rc != 0) {
             std::println(stderr, "viewer exited with code {}", rc);
         }

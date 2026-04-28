@@ -1,15 +1,10 @@
 #pragma once
 
 #include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/tessellation_job.hpp>
 
-#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
-
-#ifndef __EMSCRIPTEN__
-#include <thread>
-#endif
 
 namespace nodehammer::viewer {
 
@@ -23,7 +18,7 @@ namespace nodehammer::viewer {
 /// rendering during tessellation.
 class SceneBuildJob {
   public:
-    SceneBuildJob() = default;
+    SceneBuildJob();
     ~SceneBuildJob();
     SceneBuildJob(const SceneBuildJob &) = delete;
     SceneBuildJob &operator=(const SceneBuildJob &) = delete;
@@ -58,33 +53,8 @@ class SceneBuildJob {
     [[nodiscard]] Phase phase() const;
 
   private:
-#ifdef __EMSCRIPTEN__
-    enum class State : uint8_t {
-        Idle,
-        Queued,       // start() called, first poll will paint a "Tessellating…" frame
-        PrepPending,  // run upstream stages (config, import, select, dedup) on next poll
-        Tessellating, // drive TessellationJob iterator
-        Finalizing,   // package result on next poll
-        Done,
-    };
-    State state_{State::Idle};
-#else
-    enum class State : uint8_t { Idle, Running, Done };
-    State state_{State::Idle};
-    std::thread worker_;
-    std::atomic<bool> done_{false};
-#endif
-
-    // The scene/prep state and tessellation job exist on both platforms so
-    // the UI can read `tess_job_.{total,processed}_nodes` for a progress
-    // bar regardless of build flavor. On native the worker thread owns
-    // them while running; the main thread reads only the atomics.
-    ::nodehammer::ScenePrepResult prep_;
-    ::nodehammer::TessellationJob tess_job_;
-
-    std::string config_path_;
-    std::string input_path_;
-    ::nodehammer::SceneBuildResult result_;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
 };
 
 } // namespace nodehammer::viewer
