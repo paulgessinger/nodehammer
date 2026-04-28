@@ -62,6 +62,11 @@ class ProjectFs {
     virtual std::span<const ProjectProgress> progress() const = 0;
     virtual const std::string &errorMessage() const = 0;
 
+    /// Short human-readable backend identifier for debug UI ("bag",
+    /// "url", future "archive"/"watched"/"overlay"). No leading caps —
+    /// the UI capitalises on render if it cares.
+    virtual std::string_view name() const = 0;
+
     /// Build trigger: filesystem paths the App passes to SceneBuildJob.
     /// Valid once status() == Ready. May be empty until then. Stage 2 will
     /// replace these with byte-span resolution through `resolve(key)`.

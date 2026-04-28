@@ -115,7 +115,7 @@ struct App::Impl {
     // Paths that fed the most recent build attempt. The frame loop only
     // (re)triggers a build when the project's current root paths differ
     // from these — otherwise a long-lived Ready project would re-fire
-    // every frame after the user clicked Clear scene.
+    // every frame after the project's own internal state stops changing.
     std::filesystem::path last_built_config;
     std::filesystem::path last_built_input;
 
@@ -482,6 +482,7 @@ void App::Impl::onFrame() {
                      0.f);
     }
 
+    ImGui::SetNextWindowSize({500, 1000}, ImGuiCond_FirstUseEver);
     ImGui::Begin("nodehammer viewer");
     ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
     {
@@ -676,11 +677,18 @@ void App::Impl::onFrame() {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button("Clear scene")) {
+        if (ImGui::Button("Close project")) {
+            // Drop everything: the rendered scene, any accumulated bag
+            // contents, any in-flight URL backend. Re-allocating a fresh
+            // BagProjectFs gets us back to the App's startup shape, so the
+            // user's next drop / pick starts a clean accumulation. Reset
+            // the build-trigger gate too — the new bag's empty paths
+            // shouldn't compare equal to anything we built before.
             scene_renderer.clearScene();
             scene.reset();
-            // Project stays — user's accumulated drops survive a clear.
-            // Use a different gesture (or restart) to wipe the bag.
+            project_ = std::make_unique<BagProjectFs>();
+            last_built_config.clear();
+            last_built_input.clear();
             scene_uploaded = false;
             camera_framed = false;
             scene_radius = 0.f;
@@ -709,6 +717,49 @@ void App::Impl::onFrame() {
         ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
+    }
+    // Project debug — outside the scene-gated block so it stays visible
+    // before any scene loads (e.g. after Close project, while the user is
+    // still dropping files into a fresh bag).
+    if (project_) {
+        ImGui::Separator();
+        if (ImGui::CollapsingHeader("Project", ImGuiTreeNodeFlags_DefaultOpen)) {
+            const char *status_label = "?";
+            switch (project_->status()) {
+            case ProjectFsStatus::Idle:
+                status_label = "idle";
+                break;
+            case ProjectFsStatus::Fetching:
+                status_label = "fetching";
+                break;
+            case ProjectFsStatus::Ready:
+                status_label = "ready";
+                break;
+            case ProjectFsStatus::Error:
+                status_label = "error";
+                break;
+            }
+            const auto bname = project_->name();
+            ImGui::Text("backend: %.*s", static_cast<int>(bname.size()), bname.data());
+            ImGui::Text("status: %s", status_label);
+            const auto entries = project_->progress();
+            ImGui::Text("files (%zu):", entries.size());
+            ImGui::Indent();
+            if (entries.empty()) {
+                ImGui::TextDisabled("(none)");
+            } else {
+                for (const auto &e : entries) {
+                    if (e.failed) {
+                        ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", e.url.c_str());
+                    } else if (e.done) {
+                        ImGui::Text("%s", e.url.c_str());
+                    } else {
+                        ImGui::TextDisabled("%s (loading)", e.url.c_str());
+                    }
+                }
+            }
+            ImGui::Unindent();
+        }
     }
     ImGui::End();
 
@@ -823,14 +874,13 @@ int App::run() {
     desc.enable_dragndrop = true;
     desc.max_dropped_files = 8;
     desc.max_dropped_file_path_length = 1024;
-    // Tell sokol_app it owns the main loop on emscripten too — sapp_run
-    // internally calls emscripten_set_main_loop and unwinds the stack via
-    // its async exception, mirroring the bgfx App's emscripten_set_main_loop_arg
-    // call. The Impl pointer must outlive that unwind, so detach it: the
-    // wasm runtime takes ownership for the page lifetime.
-    if constexpr (platform::kIsWeb) {
-        impl_.release();
-    }
+    // sapp_run on emscripten registers the main loop and returns (older
+    // sokol versions did a stack-unwind, current ones don't). The Impl
+    // outlives the unwind anyway because App lives in the static slot()
+    // and impl_ is its member — both heap-resident, both survive stack
+    // unwinding. Don't release impl_ here: doing so leaves
+    // App::project() / App::setProject() (which dereference impl_)
+    // pointing at a null unique_ptr, which silently returns 0 on web.
     sapp_run(&desc);
     return 0;
 }

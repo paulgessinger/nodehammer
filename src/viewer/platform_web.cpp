@@ -106,16 +106,20 @@ struct WebDropCtx {
 
 void webDropFetchCallback(const sapp_html5_fetch_response *response) {
     std::unique_ptr<WebDropCtx> ctx{static_cast<WebDropCtx *>(response->user_data)};
+    std::println(stderr, "[viewer] drop callback: file='{}' succeeded={} size={}", ctx->filename,
+                 response->succeeded, static_cast<std::size_t>(response->data.size));
     if (!response->succeeded) {
         std::println(stderr, "viewer: failed to fetch dropped file '{}'", ctx->filename);
         return;
     }
     auto *app = App::instance();
     if (app == nullptr) {
+        std::println(stderr, "[viewer] drop callback: App::instance() is null");
         return;
     }
     auto *project = app->project();
     if (project == nullptr) {
+        std::println(stderr, "[viewer] drop callback: app->project() is null");
         return;
     }
     project->addBytes(ctx->filename,
@@ -127,6 +131,7 @@ void webDropFetchCallback(const sapp_html5_fetch_response *response) {
 
 void dispatchDroppedFiles(App & /*app*/) {
     const int n = sapp_get_num_dropped_files();
+    std::println(stderr, "[viewer] dispatchDroppedFiles: n={}", n);
     if (n == 0) {
         return;
     }
@@ -164,15 +169,19 @@ void *nh_viewer_begin_upload_batch() { return static_cast<void *>(&nh_picker_han
 EMSCRIPTEN_KEEPALIVE
 void nh_viewer_add_upload(void * /*handle*/, const char *filename, const std::uint8_t *data,
                           std::size_t size) {
+    std::println(stderr, "[viewer] nh_viewer_add_upload: filename='{}' size={}",
+                 filename != nullptr ? filename : "(null)", size);
     if (filename == nullptr) {
         return;
     }
     auto *app = nodehammer::viewer::App::instance();
     if (app == nullptr) {
+        std::println(stderr, "[viewer] nh_viewer_add_upload: App::instance() is null");
         return;
     }
     auto *project = app->project();
     if (project == nullptr) {
+        std::println(stderr, "[viewer] nh_viewer_add_upload: app->project() is null");
         return;
     }
     project->addBytes(filename, std::as_bytes(std::span{data, size}));
