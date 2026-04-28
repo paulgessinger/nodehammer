@@ -504,6 +504,13 @@ bool SceneRenderer::advanceUpload(uint64_t budget_ns) {
 
 bool SceneRenderer::uploadInProgress() const { return impl_->upload_busy; }
 
+void SceneRenderer::clearScene() {
+    if (!impl_ || !impl_->initialised) {
+        return;
+    }
+    impl_->destroyGpu();
+}
+
 void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_height,
                            RenderFlags flags) {
     impl_->last_stats = {};

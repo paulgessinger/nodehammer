@@ -1,11 +1,9 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string>
-#include <string_view>
 
 namespace nodehammer::viewer {
 
@@ -54,17 +52,18 @@ class AssetSource {
     virtual const std::filesystem::path &configPath() const = 0;
     virtual const std::filesystem::path &inputPath() const = 0;
 
-    /// Optional hook: hand a freshly-acquired local file (from drag-and-drop
-    /// or a file picker) to the source. Sources that don't accept user
-    /// uploads ignore this. Used by the App to plumb sokol's FILES_DROPPED
-    /// event and the NFD picker into the same code path.
-    virtual void ingestLocalFile(const std::filesystem::path & /*path*/) {}
+    /// Human-readable descriptions of files this source is still waiting
+    /// on (e.g. "a .toml config", "a geometry file"). Empty when the
+    /// source is satisfied or has no concept of missing slots — URL-style
+    /// fetchers, builds in progress, etc. Strings only, no UI assumptions.
+    virtual std::span<const std::string> waitingFor() const { return {}; }
 
-    /// Optional hook: hand the source a file's bytes plus its original
-    /// filename. The web build uses this for the async sokol drop-fetch and
-    /// the JS `<input type=file>` picker; native sources never call it.
-    /// Sources that don't accept uploads ignore it.
-    virtual void ingestBytes(std::string_view /*filename*/, std::span<const std::byte> /*bytes*/) {}
+    /// The most recent file the source was offered but didn't recognise,
+    /// or empty. Same UI-agnostic contract as `waitingFor`.
+    virtual const std::string &unrecognised() const {
+        static const std::string empty;
+        return empty;
+    }
 };
 
 } // namespace nodehammer::viewer

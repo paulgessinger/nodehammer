@@ -50,6 +50,11 @@ class SceneRenderer {
     /// feedback ("Uploading scene to GPU…").
     [[nodiscard]] bool uploadInProgress() const;
 
+    /// Drop the currently-uploaded scene (per-mesh buffers, materials, draw
+    /// groups, instance buffer). Keeps shaders / pipelines / IBL alive so
+    /// the next `beginUpload` doesn't pay re-init cost. Idempotent.
+    void clearScene();
+
     /// Release every sokol_gfx handle the renderer holds. Must be called
     /// before sg_shutdown — sokol asserts on outstanding resources at
     /// shutdown. Idempotent.

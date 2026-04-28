@@ -1,11 +1,13 @@
 #include <nodehammer/viewer/platform.hpp>
 
-#include <nodehammer/viewer/asset_source.hpp>
+#include <nodehammer/viewer/app.hpp>
+#include <nodehammer/viewer/drop_asset_source.hpp>
 
 #include <nfd.hpp>
 #include <sokol_app.h>
 
 #include <filesystem>
+#include <memory>
 
 namespace nodehammer::viewer::platform {
 
@@ -18,11 +20,16 @@ void dispatchWebFilePicker() {
     // apply.
 }
 
-void dispatchDroppedFiles(AssetSource &source) {
+void dispatchDroppedFiles(App &app) {
     const int n = sapp_get_num_dropped_files();
-    for (int i = 0; i < n; ++i) {
-        source.ingestLocalFile(std::filesystem::path{sapp_get_dropped_file_path(i)});
+    if (n == 0) {
+        return;
     }
+    auto source = std::make_unique<DropAssetSource>();
+    for (int i = 0; i < n; ++i) {
+        source->addPath(std::filesystem::path{sapp_get_dropped_file_path(i)});
+    }
+    app.setSource(std::move(source));
 }
 
 void runNativeFilePicker(const NativeFilePathHandler &handler) {

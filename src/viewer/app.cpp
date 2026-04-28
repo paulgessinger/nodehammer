@@ -11,7 +11,7 @@
 #include <nodehammer/scene_build.hpp>
 #include <nodehammer/viewer/asset_source.hpp>
 #include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/local_file_asset_source.hpp>
+#include <nodehammer/viewer/drop_asset_source.hpp>
 
 #include <imgui.h>
 #include <sokol_app.h>
@@ -224,12 +224,12 @@ void App::Impl::onEvent(const sapp_event *ev) {
     } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         quit = true;
     } else if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
-        // The native and web variants of "drain dropped files into the
-        // current source" diverge enough (sync paths vs. async byte fetch)
-        // that they live in platform_native.cpp / platform_web.cpp. The
-        // App just needs a source to ingest into.
-        if (source) {
-            platform::dispatchDroppedFiles(*source);
+        // Platform code allocates a fresh DropAssetSource for the gesture
+        // and installs it on the App when fully populated (synchronously
+        // on native, on the last fetch callback on web). Lives in
+        // platform-specific code.
+        if (auto *app = App::instance()) {
+            platform::dispatchDroppedFiles(*app);
         }
     }
 }
@@ -425,12 +425,10 @@ void App::Impl::onFrame() {
             }
         }
         build_in_progress = false;
-        // Recreate (don't null) so subsequent drops/picker/upload always
-        // have a source to ingest into. The just-finished source — whether
-        // a UrlAssetSource that resolved or a LocalFileAssetSource that
-        // accumulated enough — has done its job; the fresh accumulator
-        // takes over for any future user-initiated loads.
-        source = std::make_unique<LocalFileAssetSource>();
+        // The source (UrlAssetSource that resolved, or DropAssetSource
+        // from a gesture) has done its job; drop it. The next gesture
+        // creates a fresh one — no need for a placeholder.
+        source.reset();
     }
 
     // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
@@ -534,102 +532,110 @@ void App::Impl::onFrame() {
     if (ImGui::Button("Clear IBL cache")) {
         clearIblCache();
     }
-    if (source && !scene) {
+    if (!scene) {
         ImGui::Separator();
-        source->poll();
-        const auto state = source->state();
-        if (state == LoadState::Error) {
-            ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
-            ImGui::TextWrapped("%s", source->errorMessage().c_str());
-        } else if (state == LoadState::Ready) {
-            // Hand the paths to the build job. Native immediately spawns
-            // a worker thread; web defers the synchronous build by one
-            // poll so this frame's "Tessellating…" UI paints first.
-            if (!build_in_progress) {
-                build_start_time = std::chrono::steady_clock::now();
-                build_job.start(source->configPath(), source->inputPath());
-                build_in_progress = true;
-            }
-            switch (build_job.phase()) {
-            case SceneBuildJob::Phase::Preparing:
-                ImGui::Text("Loading config and importing geometry…");
-                break;
-            case SceneBuildJob::Phase::Tessellating: {
-                const auto total = build_job.tessellationTotal();
-                const auto processed = build_job.tessellationProcessed();
-                if (total > 0) {
-                    ImGui::Text("Tessellating… (%zu / %zu nodes)", processed, total);
-                    const float frac = static_cast<float>(processed) / static_cast<float>(total);
-                    ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-                } else {
-                    ImGui::Text("Tessellating…");
+        // `show_drag_hint` flips off whenever the source has something
+        // concrete to say (loading progress, ready/build status, or a
+        // hard error) — otherwise we encourage the user to drop files.
+        bool show_drag_hint = true;
+        if (source) {
+            source->poll();
+            const auto state = source->state();
+            if (state == LoadState::Error) {
+                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
+                ImGui::TextWrapped("%s", source->errorMessage().c_str());
+                show_drag_hint = false;
+            } else if (state == LoadState::Ready) {
+                // Hand the paths to the build job. Native immediately spawns
+                // a worker thread; web defers the synchronous build by one
+                // poll so this frame's "Tessellating…" UI paints first.
+                if (!build_in_progress) {
+                    build_start_time = std::chrono::steady_clock::now();
+                    build_job.start(source->configPath(), source->inputPath());
+                    build_in_progress = true;
                 }
-                break;
-            }
-            case SceneBuildJob::Phase::Finalizing:
-                ImGui::Text("Finalising scene…");
-                break;
-            case SceneBuildJob::Phase::Idle:
-            case SceneBuildJob::Phase::Done:
-                break;
-            }
-        } else {
-            // Idle / Fetching: render a source-shaped placeholder. URL-style
-            // sources will populate `progress()` with active downloads;
-            // accumulator-style sources (drag-and-drop / picker) populate
-            // it with already-collected files.
-            const auto entries = source->progress();
-            if (entries.empty()) {
-                ImGui::Text("Drag a config (.toml) and a geometry file onto the window,");
-                ImGui::Text("or use the Open files button below.");
-            } else {
-                ImGui::Text("Loading…");
-                for (const auto &p : entries) {
-                    if (!p.done && p.bytes_total > 0) {
-                        const float frac = static_cast<float>(static_cast<double>(p.bytes_done) /
-                                                              static_cast<double>(p.bytes_total));
+                switch (build_job.phase()) {
+                case SceneBuildJob::Phase::Preparing:
+                    ImGui::Text("Loading config and importing geometry…");
+                    break;
+                case SceneBuildJob::Phase::Tessellating: {
+                    const auto total = build_job.tessellationTotal();
+                    const auto processed = build_job.tessellationProcessed();
+                    if (total > 0) {
+                        ImGui::Text("Tessellating… (%zu / %zu nodes)", processed, total);
+                        const float frac =
+                            static_cast<float>(processed) / static_cast<float>(total);
                         ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-                    } else if (!p.done) {
-                        ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
-                                           ImVec2(-1.f, 0.f), "");
                     } else {
-                        ImGui::TextColored({0.5f, 0.9f, 0.5f, 1.f}, "[ok]");
+                        ImGui::Text("Tessellating…");
                     }
-                    ImGui::SameLine();
-                    ImGui::Text("%s", p.url.c_str());
+                    break;
+                }
+                case SceneBuildJob::Phase::Finalizing:
+                    ImGui::Text("Finalising scene…");
+                    break;
+                case SceneBuildJob::Phase::Idle:
+                case SceneBuildJob::Phase::Done:
+                    break;
+                }
+                show_drag_hint = false;
+            } else {
+                // Idle / Fetching: render a source-shaped progress block.
+                // URL-style sources populate `progress()` with active
+                // downloads; drop sources populate it with already-collected
+                // files. Empty progress = no concrete state to show, fall
+                // through to the drag hint below.
+                const auto entries = source->progress();
+                if (!entries.empty()) {
+                    show_drag_hint = false;
+                    ImGui::Text("Loading…");
+                    for (const auto &p : entries) {
+                        if (!p.done && p.bytes_total > 0) {
+                            const float frac =
+                                static_cast<float>(static_cast<double>(p.bytes_done) /
+                                                   static_cast<double>(p.bytes_total));
+                            ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+                        } else if (!p.done) {
+                            ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
+                                               ImVec2(-1.f, 0.f), "");
+                        } else {
+                            ImGui::TextColored({0.5f, 0.9f, 0.5f, 1.f}, "[ok]");
+                        }
+                        ImGui::SameLine();
+                        ImGui::Text("%s", p.url.c_str());
+                    }
                 }
             }
-            // Accumulator-source-specific hints: list which slot is still
-            // empty and surface any unrecognised filenames.
-            if (auto *local = dynamic_cast<LocalFileAssetSource *>(source.get())) {
-                if (local->needsConfig()) {
-                    ImGui::Text("Still waiting for: a .toml config");
-                }
-                if (local->needsInput()) {
-                    ImGui::Text("Still waiting for: a geometry file (.nhb.zst, .gdml, .gltf, …)");
-                }
-                if (!local->lastUnrecognised().empty()) {
-                    ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f}, "Don't know what to do with: %s",
-                                       local->lastUnrecognised().c_str());
-                }
+            // Slot hints — the latest drop/pick gesture didn't include
+            // one of the required files; nudge the user to include both
+            // next time. Source-agnostic: any source can populate these.
+            for (const auto &msg : source->waitingFor()) {
+                ImGui::Text("Still waiting for: %s", msg.c_str());
             }
-            if (ImGui::Button("Open files…")) {
-                if constexpr (platform::kIsWeb) {
-                    // Browser requires input.click() in the user-gesture
-                    // stack; the EM_JS shim returns synchronously and
-                    // bytes arrive later via the C upload export →
-                    // App::ingestUpload.
-                    platform::dispatchWebFilePicker();
-                } else {
-                    // Latch — drained at end of frame so NFD's nested
-                    // event loop doesn't re-enter the active ImGui frame.
-                    picker_requested = true;
-                }
+            if (const auto &u = source->unrecognised(); !u.empty()) {
+                ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f}, "Don't know what to do with: %s",
+                                   u.c_str());
             }
         }
-    } else if (!scene && !build_error.empty()) {
-        ImGui::Separator();
-        ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
+        if (!build_error.empty()) {
+            ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
+        }
+        if (show_drag_hint) {
+            ImGui::Text("Drag a config (.toml) and a geometry file onto the window,");
+            ImGui::Text("or use the Open files button below.");
+        }
+        if (ImGui::Button("Open files…")) {
+            if constexpr (platform::kIsWeb) {
+                // Browser requires input.click() in the user-gesture stack;
+                // the EM_JS shim returns synchronously and bytes arrive
+                // later via the upload-batch C exports.
+                platform::dispatchWebFilePicker();
+            } else {
+                // Latch — drained at end of frame so NFD's nested event
+                // loop doesn't re-enter the active ImGui frame.
+                picker_requested = true;
+            }
+        }
     } else if (scene && !scene_uploaded) {
         ImGui::Separator();
         ImGui::Text("Uploading scene to GPU…");
@@ -650,6 +656,16 @@ void App::Impl::onFrame() {
             if (scene_renderer.worldBounds(bmin, bmax)) {
                 scene_radius = camera.frameBounds(bmin, bmax);
             }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear scene")) {
+            scene_renderer.clearScene();
+            scene.reset();
+            source.reset();
+            scene_uploaded = false;
+            camera_framed = false;
+            scene_radius = 0.f;
+            build_error.clear();
         }
         ImGui::Separator();
         ImGui::Checkbox("backface cull", &cfg.cull_back);
@@ -690,8 +706,14 @@ void App::Impl::onFrame() {
     if constexpr (!platform::kIsWeb) {
         if (picker_requested) {
             picker_requested = false;
+            // Per-gesture source: NFD's modal returns synchronously after
+            // the user confirms, so we accumulate paths into a fresh
+            // DropAssetSource and install it once the picker closes.
+            auto fresh = std::make_unique<DropAssetSource>();
+            auto *fresh_ptr = fresh.get();
             platform::runNativeFilePicker(
-                [this](const std::filesystem::path &path) { source->ingestLocalFile(path); });
+                [fresh_ptr](const std::filesystem::path &path) { fresh_ptr->addPath(path); });
+            source = std::move(fresh);
         }
     }
 }
@@ -733,8 +755,6 @@ std::unique_ptr<App> &slot() {
 } // namespace
 
 App *App::instance() { return slot().get(); }
-
-AssetSource *App::source() const { return impl_->source.get(); }
 
 App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
 

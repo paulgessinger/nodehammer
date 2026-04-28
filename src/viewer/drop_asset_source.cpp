@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/local_file_asset_source.hpp>
+#include <nodehammer/viewer/drop_asset_source.hpp>
 
 #include <nodehammer/ir/semantic/importer.hpp>
 
@@ -31,13 +31,16 @@ bool extEquals(const std::filesystem::path &p, std::string_view want) {
 
 } // namespace
 
-struct LocalFileAssetSource::Impl {
+struct DropAssetSource::Impl {
     LoadState state{LoadState::Idle};
     std::string error;
     std::filesystem::path config_path;
     std::filesystem::path input_path;
     std::vector<AssetProgress> entries;
-    std::string lastUnrecognised;
+    std::string last_unrecognised;
+    // Cached "what's missing" strings, recomputed alongside `state`.
+    // Stored so `waitingFor()` can return a span without allocating.
+    std::vector<std::string> waiting;
 
     // Cached importer registry for extension probing. Constructing it once
     // avoids re-registering every importer on each dropped file.
@@ -57,6 +60,13 @@ struct LocalFileAssetSource::Impl {
         } else {
             state = LoadState::Idle;
         }
+        waiting.clear();
+        if (!hasConfig()) {
+            waiting.emplace_back("a .toml config");
+        }
+        if (!hasInput()) {
+            waiting.emplace_back("a geometry file (.nhb.zst, .gdml, .gltf, …)");
+        }
     }
 
     void recordEntry(const std::filesystem::path &path) {
@@ -72,29 +82,28 @@ struct LocalFileAssetSource::Impl {
     }
 };
 
-LocalFileAssetSource::LocalFileAssetSource() : impl_(std::make_unique<Impl>()) {}
-LocalFileAssetSource::~LocalFileAssetSource() = default;
+DropAssetSource::DropAssetSource() : impl_(std::make_unique<Impl>()) {}
+DropAssetSource::~DropAssetSource() = default;
 
-bool LocalFileAssetSource::needsConfig() const { return !impl_->hasConfig(); }
-bool LocalFileAssetSource::needsInput() const { return !impl_->hasInput(); }
-const std::string &LocalFileAssetSource::lastUnrecognised() const {
-    return impl_->lastUnrecognised;
-}
+void DropAssetSource::poll() {}
 
-void LocalFileAssetSource::poll() {}
+LoadState DropAssetSource::state() const { return impl_->state; }
 
-LoadState LocalFileAssetSource::state() const { return impl_->state; }
-
-std::span<const AssetProgress> LocalFileAssetSource::progress() const {
+std::span<const AssetProgress> DropAssetSource::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
 }
 
-const std::string &LocalFileAssetSource::errorMessage() const { return impl_->error; }
-const std::filesystem::path &LocalFileAssetSource::configPath() const { return impl_->config_path; }
-const std::filesystem::path &LocalFileAssetSource::inputPath() const { return impl_->input_path; }
+const std::string &DropAssetSource::errorMessage() const { return impl_->error; }
+const std::filesystem::path &DropAssetSource::configPath() const { return impl_->config_path; }
+const std::filesystem::path &DropAssetSource::inputPath() const { return impl_->input_path; }
 
-void LocalFileAssetSource::ingestBytes(std::string_view filename,
-                                       std::span<const std::byte> bytes) {
+std::span<const std::string> DropAssetSource::waitingFor() const {
+    return {impl_->waiting.data(), impl_->waiting.size()};
+}
+
+const std::string &DropAssetSource::unrecognised() const { return impl_->last_unrecognised; }
+
+void DropAssetSource::addBytes(std::string_view filename, std::span<const std::byte> bytes) {
     if (filename.empty()) {
         return;
     }
@@ -128,10 +137,10 @@ void LocalFileAssetSource::ingestBytes(std::string_view filename,
     // Now that the bytes live at a real path, run the same role-recognition
     // path as a native drop / NFD pick — single source of truth for which
     // extensions land in which slot.
-    ingestLocalFile(path);
+    addPath(path);
 }
 
-void LocalFileAssetSource::ingestLocalFile(const std::filesystem::path &path) {
+void DropAssetSource::addPath(const std::filesystem::path &path) {
     if (path.empty()) {
         return;
     }
@@ -139,7 +148,7 @@ void LocalFileAssetSource::ingestLocalFile(const std::filesystem::path &path) {
     // 1) Config: any .toml file fills the config slot.
     if (extEquals(path, "toml")) {
         impl_->config_path = path;
-        impl_->lastUnrecognised.clear();
+        impl_->last_unrecognised.clear();
         impl_->recordEntry(path);
         impl_->recomputeState();
         return;
@@ -150,14 +159,14 @@ void LocalFileAssetSource::ingestLocalFile(const std::filesystem::path &path) {
     //    a new geometry format is purely an importer change.
     if (impl_->registry.resolve(path, {}) != nullptr) {
         impl_->input_path = path;
-        impl_->lastUnrecognised.clear();
+        impl_->last_unrecognised.clear();
         impl_->recordEntry(path);
         impl_->recomputeState();
         return;
     }
 
     // 3) Unrecognised: stash the filename so the UI can hint at it.
-    impl_->lastUnrecognised = path.filename().string();
+    impl_->last_unrecognised = path.filename().string();
 }
 
 } // namespace nodehammer::viewer

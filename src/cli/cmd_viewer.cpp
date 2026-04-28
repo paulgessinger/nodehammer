@@ -5,7 +5,6 @@
 #include <nodehammer/scene_build.hpp>
 #include <nodehammer/viewer/app.hpp>
 #include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/local_file_asset_source.hpp>
 
 #include <memory>
 #include <optional>
@@ -101,9 +100,8 @@ void registerCmdViewer(CLI::App &app) {
 
         // Native flow: if --input is supplied, build synchronously before
         // the window opens (preserves CLI semantics: errors print + exit
-        // non-zero). Always hand the App a LocalFileAssetSource afterwards
-        // so subsequent drag-and-drop / picker actions have somewhere to
-        // land — the App's invariant is that `source` is always non-null.
+        // non-zero). Otherwise the App starts with no source — the user's
+        // first drop / Open-files gesture creates one.
         // The web flow lives in src/web/viewer_main.cpp.
         if (!inputPath.empty()) {
             auto built = nodehammer::buildSceneFromPaths(
@@ -119,7 +117,6 @@ void registerCmdViewer(CLI::App &app) {
                          built.scene->materials.size());
             application->setScene(std::move(built.scene));
         }
-        application->setSource(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
 
         const int rc = application->run();
         if (rc != 0) {

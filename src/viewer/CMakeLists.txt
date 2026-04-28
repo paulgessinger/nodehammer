@@ -46,7 +46,7 @@ function(nh_add_viewer_lib name sokol_lib)
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_asset_source_web.cpp,>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,${_dir}/platform_native.cpp>
-        ${_dir}/local_file_asset_source.cpp
+        ${_dir}/drop_asset_source.cpp
     )
     target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib})
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})

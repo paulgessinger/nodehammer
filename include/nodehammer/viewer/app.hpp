@@ -69,8 +69,9 @@ class App {
     /// Fetching it draws a progress / placeholder panel, and on Ready it
     /// builds the scene from the source's resolved paths and drops the
     /// source. Replacing an in-flight source clears the current scene.
-    /// Drag-and-drop and the file picker route through whichever source is
-    /// currently set, via AssetSource::ingestLocalFile.
+    /// Drag-and-drop and the file picker each create a fresh
+    /// DropAssetSource and install it via this method, replacing whatever
+    /// was previously set.
     void setSource(std::unique_ptr<AssetSource> source);
 
     /// Native: blocks until the window closes; returns the exit code.
@@ -82,12 +83,6 @@ class App {
     /// constructed. Safe to call from any thread that is also live during
     /// the App's lifetime.
     [[nodiscard]] static App *instance();
-
-    /// The currently-installed AssetSource, or nullptr if none. Same
-    /// reach-the-live-instance escape hatch as `instance()` — used by the
-    /// web upload C export to push browser-fed bytes straight at the
-    /// source without an App-level forwarder.
-    [[nodiscard]] AssetSource *source() const;
 
     // Public so the file-scope upload helpers in app.cpp (sokol's drop
     // fetch callback) can access App::Impl. Definition lives entirely in

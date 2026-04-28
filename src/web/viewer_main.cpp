@@ -12,8 +12,9 @@
 //      initial_camera.
 //   3. If both `config` and `input` URL-style paths are supplied, the App
 //      gets a UrlAssetSource that fetches them via emscripten_fetch and
-//      builds the scene once they land. Otherwise it gets a
-//      LocalFileAssetSource so drag-drop / file picker still work.
+//      builds the scene once they land. Otherwise it starts sourceless;
+//      drag-drop or the file picker creates a DropAssetSource on the
+//      first user gesture.
 //   4. `App::run()` registers the sokol main loop with emscripten and
 //      unwinds; subsequent frame callbacks fire from the event queue.
 //
@@ -23,7 +24,6 @@
 
 #include <nodehammer/viewer/app.hpp>
 #include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/local_file_asset_source.hpp>
 #include <nodehammer/viewer/url_asset_source.hpp>
 
 #include <glm/glm.hpp>
@@ -155,9 +155,9 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
         auto loader = std::make_unique<nodehammer::viewer::UrlAssetSource>();
         loader->start(configPath, inputPath, assetBase);
         application->setSource(std::move(loader));
-    } else {
-        application->setSource(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
     }
+    // Otherwise leave the App sourceless — the user's first drop or
+    // Open-files gesture creates a DropAssetSource and installs it.
 
     application->run();
     return 0;

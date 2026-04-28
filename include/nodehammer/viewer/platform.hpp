@@ -5,7 +5,7 @@
 #include <string>
 
 namespace nodehammer::viewer {
-class AssetSource;
+class App;
 } // namespace nodehammer::viewer
 
 namespace nodehammer::viewer::platform {
@@ -16,14 +16,14 @@ inline constexpr bool kIsWeb = true;
 inline constexpr bool kIsWeb = false;
 #endif
 
-/// Route the current sokol_app FILES_DROPPED batch into `source`. On native
-/// each dropped file is a real filesystem path (handed to
-/// `AssetSource::ingestLocalFile` synchronously). On web the bytes have to
-/// be fetched asynchronously from the browser; the platform impl owns each
-/// fetch's lifetime and calls `AssetSource::ingestBytes` once the bytes
-/// arrive. Caller is responsible for ensuring `source` outlives any
-/// outstanding async fetches.
-void dispatchDroppedFiles(AssetSource &source);
+/// Allocate a fresh `DropAssetSource`, populate it from the current
+/// sokol_app FILES_DROPPED batch, and install it on `app`. Each gesture
+/// owns its own source; the previous source is replaced. On native this
+/// is fully synchronous. On web the bytes arrive via async fetches, so
+/// the platform impl keeps the new source alive in a refcounted batch
+/// context until every file's bytes have landed, then calls
+/// `app.setSource(...)` once.
+void dispatchDroppedFiles(App &app);
 
 /// Push the viewer's persisted state into the browser URL's query string,
 /// replacing any keys named in `managed_keys` (comma-separated). No-op on
@@ -33,8 +33,8 @@ void commitUrlState(const std::string &state_query, const std::string &managed_k
 /// Open the browser's transient `<input type=file multiple>` picker
 /// inline. The browser requires `input.click()` to run from the user-
 /// gesture stack, so this dispatches synchronously; selected files arrive
-/// later via the C upload export, which routes them to
-/// `App::instance()->deliverUpload`. No-op on native.
+/// later via the `nh_viewer_*_upload_batch` C exports, which build a
+/// fresh DropAssetSource and install it on the App. No-op on native.
 void dispatchWebFilePicker();
 
 /// Run the native (NFD) file picker modally and invoke `handler` for each
