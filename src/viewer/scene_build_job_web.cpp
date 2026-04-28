@@ -7,8 +7,8 @@
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
-#include <string>
 #include <utility>
 
 namespace nodehammer::viewer {
@@ -27,15 +27,15 @@ struct SceneBuildJob::Impl {
     ::nodehammer::ScenePrepResult prep;
     ::nodehammer::TessellationJob tess_job;
 
-    std::string config_path;
-    std::string input_path;
+    std::filesystem::path config_path;
+    std::filesystem::path input_path;
     ::nodehammer::SceneBuildResult result;
 };
 
 SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
 SceneBuildJob::~SceneBuildJob() = default;
 
-void SceneBuildJob::start(std::string config_path, std::string input_path) {
+void SceneBuildJob::start(std::filesystem::path config_path, std::filesystem::path input_path) {
     impl_->config_path = std::move(config_path);
     impl_->input_path = std::move(input_path);
     impl_->result = {};

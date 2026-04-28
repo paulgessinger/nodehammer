@@ -3,8 +3,8 @@
 #include <nodehammer/scene_build.hpp>
 
 #include <cstdint>
+#include <filesystem>
 #include <memory>
-#include <string>
 
 namespace nodehammer::viewer {
 
@@ -26,7 +26,7 @@ class SceneBuildJob {
     /// Begin a build. Idempotent — calling `start` a second time before
     /// `take` is invalid; the App is expected to drive a single in-flight
     /// build at a time.
-    void start(std::string config_path, std::string input_path);
+    void start(std::filesystem::path config_path, std::filesystem::path input_path);
 
     /// Drive progress. Returns true once the build has finished (either
     /// with a scene or with diagnostics describing a failure). Until then

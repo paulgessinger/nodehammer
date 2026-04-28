@@ -1,6 +1,6 @@
 #pragma once
 
-#include <string>
+#include <filesystem>
 
 namespace nodehammer::viewer {
 
@@ -9,6 +9,6 @@ namespace nodehammer::viewer {
 // sizes), and on failure walks the parent dirs to surface what actually
 // landed there. Used to debug MEMFS sync issues on web and missing-file
 // reports on native.
-void logPreBuild(const std::string &config_path, const std::string &input_path);
+void logPreBuild(const std::filesystem::path &config_path, const std::filesystem::path &input_path);
 
 } // namespace nodehammer::viewer

@@ -22,6 +22,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <fstream>
 #include <iomanip>
 #include <memory>
 #include <print>
@@ -255,19 +256,18 @@ void App::Impl::deliverUpload(const std::string &filename, const std::uint8_t *d
     // EEXIST is the success case for re-runs.
     ::mkdir("/uploads", 0755);
 #endif
-    const std::string path = "/uploads/" + filename;
-    std::FILE *f = std::fopen(path.c_str(), "wb");
-    if (f == nullptr) {
-        std::println(stderr, "viewer: failed to open MEMFS path '{}' for writing", path);
+    const std::filesystem::path path = std::filesystem::path{"/uploads"} / filename;
+    std::ofstream f(path, std::ios::binary);
+    if (!f) {
+        std::println(stderr, "viewer: failed to open MEMFS path '{}' for writing", path.string());
         return;
     }
-    const bool ok = std::fwrite(data, 1, size, f) == size;
-    std::fclose(f);
-    if (!ok) {
-        std::println(stderr, "viewer: short write delivering '{}'", path);
+    f.write(reinterpret_cast<const char *>(data), static_cast<std::streamsize>(size));
+    if (!f) {
+        std::println(stderr, "viewer: short write delivering '{}'", path.string());
         return;
     }
-    source->ingestLocalFile(std::filesystem::path{path});
+    source->ingestLocalFile(path);
 }
 
 void App::Impl::onEvent(const sapp_event *ev) {
