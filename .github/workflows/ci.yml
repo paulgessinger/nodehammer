@@ -66,7 +66,7 @@ jobs:
         if: matrix.kind == 'wasm'
         uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         with:
-          version: 3.1.74
+          version: 4.0.10
           actions-cache-folder: emsdk-cache
 
       - name: Stabilize emsdk path
