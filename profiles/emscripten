@@ -22,7 +22,7 @@ os=Emscripten
 arch=wasm
 build_type=Release
 compiler=clang
-compiler.version=19
+compiler.version=23
 compiler.libcxx=libc++
 compiler.cppstd=23
 
