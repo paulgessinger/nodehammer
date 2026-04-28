@@ -45,6 +45,7 @@ esac
 case "$cmd" in
   conan-install)
     conan export recipes/manifold --version=3.2.1
+    conan export recipes/sokol-shdc --version=2026.04.25
     conan install . --build=missing "${conan_args[@]}" "$@"
     ;;
   configure)
