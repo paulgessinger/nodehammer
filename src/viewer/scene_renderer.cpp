@@ -18,6 +18,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <print>
 #include <vector>
 
 namespace nodehammer::viewer {
