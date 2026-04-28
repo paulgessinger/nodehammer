@@ -39,9 +39,9 @@ tools.cmake.cmaketoolchain:generator=Ninja
 # Enable native WebAssembly exceptions everywhere (compile + link, all deps).
 # Without this, C++ `throw` compiles to abort() under emscripten, which breaks
 # CLI11, catch2, and anything that uses exceptions.
-tools.build:cxxflags=["-fwasm-exceptions", "-sWASM_LEGACY_EXCEPTIONS=0"]
-tools.build:exelinkflags=["-fwasm-exceptions", "-sWASM_LEGACY_EXCEPTIONS=0"]
-tools.build:sharedlinkflags=["-fwasm-exceptions", "-sWASM_LEGACY_EXCEPTIONS=0"]
+tools.build:cxxflags=["-fwasm-exceptions"]
+tools.build:exelinkflags=["-fwasm-exceptions"]
+tools.build:sharedlinkflags=["-fwasm-exceptions"]
 # manifold's CMake defaults MANIFOLD_JSBIND=ON under EMSCRIPTEN, but the JS
 # bindings need a .d.ts source file that isn't present in a plain source
 # checkout. Upstream uses cmake_dependent_option (no FORCE), so a cache

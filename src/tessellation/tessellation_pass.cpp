@@ -12,6 +12,7 @@
 #include <ankerl/unordered_dense.h>
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstdint>
