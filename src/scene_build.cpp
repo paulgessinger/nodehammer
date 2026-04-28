@@ -11,9 +11,9 @@
 
 namespace nodehammer {
 
-ScenePrepResult prepare_scene_for_tessellation(const std::filesystem::path &config_path,
-                                               const std::filesystem::path &input_path,
-                                               std::optional<std::string> input_format) {
+ScenePrepResult prepareSceneForTessellation(const std::filesystem::path &config_path,
+                                            const std::filesystem::path &input_path,
+                                            const std::optional<std::string> &input_format) {
     ScenePrepResult prep;
 
     if (!config_path.empty()) {
@@ -66,10 +66,10 @@ ScenePrepResult prepare_scene_for_tessellation(const std::filesystem::path &conf
     return prep;
 }
 
-SceneBuildResult build_scene_from_paths(const std::filesystem::path &config_path,
-                                        const std::filesystem::path &input_path,
-                                        std::optional<std::string> input_format) {
-    auto prep = prepare_scene_for_tessellation(config_path, input_path, std::move(input_format));
+SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
+                                     const std::filesystem::path &input_path,
+                                     const std::optional<std::string> &input_format) {
+    auto prep = prepareSceneForTessellation(config_path, input_path, input_format);
     if (!prep.ok) {
         return {nullptr, std::move(prep.diags)};
     }

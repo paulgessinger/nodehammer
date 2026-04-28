@@ -11,7 +11,7 @@
 #include <print>
 #include <string>
 
-void register_cmd_dump_render(CLI::App &app) {
+void registerCmdDumpRender(CLI::App &app) {
     auto *sub = app.add_subcommand("dump-render", "Dump the render IR of a geometry as JSON");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");

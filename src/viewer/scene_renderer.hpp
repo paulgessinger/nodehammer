@@ -31,24 +31,24 @@ class SceneRenderer {
     /// Swap the placeholder IBL bindings for a real baked dataset. Safe to
     /// call any time after `initialize()`. Idempotent on the dummy state —
     /// re-installing replaces the previous IBL.
-    void install_ibl(const IblBakeData &data);
+    void installIbl(const IblBakeData &data);
 
     /// Begin a chunked upload of `scene` to the GPU. Discards previous
     /// scene state. The renderer keeps `scene` alive until the upload
     /// completes (so the caller's shared_ptr can be released immediately).
-    /// Pair with `advance_upload`.
-    void begin_upload(std::shared_ptr<const RenderScene> scene);
+    /// Pair with `advanceUpload`.
+    void beginUpload(std::shared_ptr<const RenderScene> scene);
 
-    /// Make progress on a chunked upload started by `begin_upload`. Spends
+    /// Make progress on a chunked upload started by `beginUpload`. Spends
     /// up to `budget_ns` creating per-mesh GPU buffers and finalises the
     /// scene (materials, draw groups, instance buffer) on the call that
     /// processes the last mesh. Returns true once the upload is fully
-    /// complete; further calls are no-ops until the next `begin_upload`.
-    bool advance_upload(uint64_t budget_ns = 8'000'000);
+    /// complete; further calls are no-ops until the next `beginUpload`.
+    bool advanceUpload(uint64_t budget_ns = 8'000'000);
 
-    /// Whether `advance_upload` would still return false. Useful for UI
+    /// Whether `advanceUpload` would still return false. Useful for UI
     /// feedback ("Uploading scene to GPU…").
-    [[nodiscard]] bool upload_in_progress() const;
+    [[nodiscard]] bool uploadInProgress() const;
 
     /// Release every sokol_gfx handle the renderer holds. Must be called
     /// before sg_shutdown — sokol asserts on outstanding resources at
@@ -75,14 +75,14 @@ class SceneRenderer {
         uint32_t instances{0};
         uint64_t triangles{0};
     };
-    [[nodiscard]] FrameStats last_frame_stats() const;
+    [[nodiscard]] FrameStats lastFrameStats() const;
 
     /// World-space AABB of the loaded scene. Returns false if no scene is loaded.
-    [[nodiscard]] bool world_bounds(glm::vec3 &min, glm::vec3 &max) const;
+    [[nodiscard]] bool worldBounds(glm::vec3 &min, glm::vec3 &max) const;
 
-    [[nodiscard]] uint32_t mesh_asset_count() const;
-    [[nodiscard]] uint32_t node_count() const;
-    [[nodiscard]] uint64_t triangle_count() const;
+    [[nodiscard]] uint32_t meshAssetCount() const;
+    [[nodiscard]] uint32_t nodeCount() const;
+    [[nodiscard]] uint64_t triangleCount() const;
 
   private:
     struct Impl;

@@ -70,7 +70,7 @@ void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidate
 
 } // namespace
 
-void register_cmd_convert(CLI::App &app) {
+void registerCmdConvert(CLI::App &app) {
     auto *sub = app.add_subcommand("convert", "Convert a geometry file to a render format");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file")->required();

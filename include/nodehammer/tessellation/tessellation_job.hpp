@@ -44,8 +44,8 @@ class TessellationJob {
     /// Progress reporting for UI feedback. `total` is the count of
     /// semantic nodes reachable from the root (set after `start`);
     /// `processed` grows as `advance` runs.
-    [[nodiscard]] size_t total_nodes() const;
-    [[nodiscard]] size_t processed_nodes() const;
+    [[nodiscard]] size_t totalNodes() const;
+    [[nodiscard]] size_t processedNodes() const;
 
   private:
     struct Impl;

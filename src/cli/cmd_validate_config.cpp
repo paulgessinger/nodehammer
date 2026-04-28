@@ -6,7 +6,7 @@
 #include <print>
 #include <string>
 
-void register_cmd_validate_config(CLI::App &app) {
+void registerCmdValidateConfig(CLI::App &app) {
     auto *sub = app.add_subcommand("validate-config", "Validate a TOML config file");
 
     auto *configOpt = sub->add_option("-c,--config", "TOML config file")->required();

@@ -13,7 +13,7 @@
 
 namespace nodehammer::viewer {
 
-/// Runs `build_scene_from_paths` off the main loop, with the tessellation
+/// Runs `buildSceneFromPaths` off the main loop, with the tessellation
 /// stage broken into cooperative chunks so a long pass doesn't freeze the
 /// frame. On native the whole build executes on a worker `std::thread` and
 /// `poll` is just a flag check. On web (no pthreads) `poll` runs the
@@ -46,8 +46,8 @@ class SceneBuildJob {
 
     /// Tessellation progress for UI feedback. Both return 0 until the
     /// tessellation phase is reached; on completion, `processed == total`.
-    [[nodiscard]] size_t tessellation_total() const;
-    [[nodiscard]] size_t tessellation_processed() const;
+    [[nodiscard]] size_t tessellationTotal() const;
+    [[nodiscard]] size_t tessellationProcessed() const;
 
     /// High-level phase the job is in, so UI can describe what's going on
     /// instead of falling back to an indeterminate animated bar.

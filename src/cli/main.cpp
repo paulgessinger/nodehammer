@@ -4,14 +4,14 @@
 #include <print>
 
 // Forward declarations — each command is implemented in its own translation unit.
-void register_cmd_convert(CLI::App &app);
-void register_cmd_inspect(CLI::App &app);
-void register_cmd_validate_config(CLI::App &app);
-void register_cmd_config_flatten(CLI::App &app);
-void register_cmd_dump_semantic(CLI::App &app);
-void register_cmd_dump_render(CLI::App &app);
+void registerCmdConvert(CLI::App &app);
+void registerCmdInspect(CLI::App &app);
+void registerCmdValidateConfig(CLI::App &app);
+void registerCmdConfigFlatten(CLI::App &app);
+void registerCmdDumpSemantic(CLI::App &app);
+void registerCmdDumpRender(CLI::App &app);
 #ifdef NH_WITH_VIEWER
-void register_cmd_viewer(CLI::App &app);
+void registerCmdViewer(CLI::App &app);
 #endif
 
 int main(int argc, char **argv) {
@@ -27,14 +27,14 @@ int main(int argc, char **argv) {
         },
         "Print version and exit");
 
-    register_cmd_convert(app);
-    register_cmd_inspect(app);
-    register_cmd_validate_config(app);
-    register_cmd_config_flatten(app);
-    register_cmd_dump_semantic(app);
-    register_cmd_dump_render(app);
+    registerCmdConvert(app);
+    registerCmdInspect(app);
+    registerCmdValidateConfig(app);
+    registerCmdConfigFlatten(app);
+    registerCmdDumpSemantic(app);
+    registerCmdDumpRender(app);
 #ifdef NH_WITH_VIEWER
-    register_cmd_viewer(app);
+    registerCmdViewer(app);
 #endif
 
     CLI11_PARSE(app, argc, argv);

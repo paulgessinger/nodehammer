@@ -32,7 +32,7 @@ struct IblBakeData {
 /// Synchronous full bake. Pure CPU; no sokol calls. Used directly on
 /// platforms that bake on a worker thread; `IblBakeJob` drives a chunked
 /// version of the same work on platforms without threads.
-[[nodiscard]] IblBakeData bake_ibl();
+[[nodiscard]] IblBakeData bakeIbl();
 
 /// Pre-baked image-based lighting resources for the procedural sky
 /// environment.
@@ -53,7 +53,7 @@ struct IblResources {
     /// Create 1x1 placeholder textures + samplers so rendering can proceed
     /// before the real bake finishes. Caller must `release()` first to
     /// swap.
-    void create_dummy();
+    void createDummy();
 
     /// Upload a baked dataset to the GPU. Caller must `release()` first to
     /// swap an existing set out.
@@ -106,18 +106,18 @@ class IblBakeJob {
     int x_{0};
     IblBakeData partial_;
 
-    void bake_one_pixel();
-    void advance_iterator();
+    void bakeOnePixel();
+    void advanceIterator();
 #else
     std::thread worker_;
     std::atomic<bool> done_{false};
     std::atomic<double> progress_{0.0};
     IblBakeData result_;
 
-    // Worker entry point. Mirrors the loop structure of `bake_ibl` but
+    // Worker entry point. Mirrors the loop structure of `bakeIbl` but
     // bumps `progress_` between rows / faces so the UI on native can show
     // a real-time bar instead of jumping 0% → 100%.
-    void run_native_bake();
+    void runNativeBake();
 #endif
 };
 

@@ -24,7 +24,7 @@ namespace {
 // Walk the parent dirs of `path` (a MEMFS-rooted path like `/odd/base.toml`)
 // and `mkdir` each one. EEXIST is the success case for re-runs; any other
 // errno is logged so silent MEMFS failures stop hiding from us.
-bool make_parent_dirs(const std::string &path) {
+bool makeParentDirs(const std::string &path) {
     std::string current;
     for (size_t i = 0; i < path.size(); ++i) {
         if (path[i] == '/') {
@@ -43,10 +43,10 @@ bool make_parent_dirs(const std::string &path) {
     return true;
 }
 
-bool write_file(const std::string &path, const char *data, size_t size) {
-    if (!make_parent_dirs(path)) {
+bool writeFile(const std::string &path, const char *data, size_t size) {
+    if (!makeParentDirs(path)) {
         std::fprintf(stderr,
-                     "url_asset_source: write_file(%s, size=%zu) aborted: "
+                     "url_asset_source: writeFile(%s, size=%zu) aborted: "
                      "parent dirs missing\n",
                      path.c_str(), size);
         return false;
@@ -85,7 +85,7 @@ bool write_file(const std::string &path, const char *data, size_t size) {
 // without the leading slash — different string, breaks the `seen` dedup,
 // and `fopen` writes to the CWD instead of `/`. Normalising up-front keeps
 // every URL canonical so the dedup set actually deduplicates.
-std::string normalize_memfs_path(std::string_view url) {
+std::string normalizeMemfsPath(std::string_view url) {
     auto p = std::filesystem::path(url).lexically_normal();
     auto s = p.generic_string();
     if (s.empty() || s.front() != '/') {
@@ -98,10 +98,10 @@ std::string normalize_memfs_path(std::string_view url) {
 // MEMFS / URL path. Mirrors the std::filesystem::canonical step the real
 // loader does, but lexically only — at peek time the include file is not
 // yet on MEMFS, so canonical() would throw.
-std::string resolve_include_url(const std::string &config_url, const std::string &rel) {
+std::string resolveIncludeUrl(const std::string &config_url, const std::string &rel) {
     std::filesystem::path base = std::filesystem::path(config_url).parent_path();
     std::filesystem::path joined = (base / rel).lexically_normal();
-    return normalize_memfs_path(joined.generic_string());
+    return normalizeMemfsPath(joined.generic_string());
 }
 
 #endif // __EMSCRIPTEN__
@@ -126,11 +126,11 @@ struct UrlAssetSource::Impl {
     enum class Kind { Config, Include, Input };
 
     void enqueue(const std::string &url, Kind kind);
-    static void on_success(emscripten_fetch_t *fetch);
-    static void on_error(emscripten_fetch_t *fetch);
-    static void on_progress(emscripten_fetch_t *fetch);
-    void after_file_landed(size_t index, Kind kind);
-    void check_done();
+    static void onSuccess(emscripten_fetch_t *fetch);
+    static void onError(emscripten_fetch_t *fetch);
+    static void onProgress(emscripten_fetch_t *fetch);
+    void afterFileLanded(size_t index, Kind kind);
+    void checkDone();
 
     std::vector<Kind> kinds;
 #endif
@@ -159,14 +159,14 @@ void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
     emscripten_fetch_attr_init(&attr);
     std::strcpy(attr.requestMethod, "GET");
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.onsuccess = &Impl::on_success;
-    attr.onerror = &Impl::on_error;
-    attr.onprogress = &Impl::on_progress;
+    attr.onsuccess = &Impl::onSuccess;
+    attr.onerror = &Impl::onError;
+    attr.onprogress = &Impl::onProgress;
     attr.userData = ctx;
     emscripten_fetch(&attr, fetch_url.c_str());
 }
 
-void UrlAssetSource::Impl::on_progress(emscripten_fetch_t *fetch) {
+void UrlAssetSource::Impl::onProgress(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     if (ctx == nullptr) {
         return;
@@ -176,14 +176,14 @@ void UrlAssetSource::Impl::on_progress(emscripten_fetch_t *fetch) {
     entry.bytes_total = static_cast<std::uint64_t>(fetch->totalBytes);
 }
 
-void UrlAssetSource::Impl::on_success(emscripten_fetch_t *fetch) {
+void UrlAssetSource::Impl::onSuccess(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
     const size_t index = ctx->index;
     const Kind kind = self->kinds[index];
 
     auto &entry = self->entries[index];
-    const bool wrote = write_file(entry.url, fetch->data, static_cast<size_t>(fetch->numBytes));
+    const bool wrote = writeFile(entry.url, fetch->data, static_cast<size_t>(fetch->numBytes));
     entry.bytes_done = static_cast<std::uint64_t>(fetch->numBytes);
     if (entry.bytes_total == 0) {
         entry.bytes_total = entry.bytes_done;
@@ -200,11 +200,11 @@ void UrlAssetSource::Impl::on_success(emscripten_fetch_t *fetch) {
         return;
     }
 
-    self->after_file_landed(index, kind);
-    self->check_done();
+    self->afterFileLanded(index, kind);
+    self->checkDone();
 }
 
-void UrlAssetSource::Impl::on_error(emscripten_fetch_t *fetch) {
+void UrlAssetSource::Impl::onError(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
     const size_t index = ctx->index;
@@ -220,7 +220,7 @@ void UrlAssetSource::Impl::on_error(emscripten_fetch_t *fetch) {
     delete ctx;
 }
 
-void UrlAssetSource::Impl::after_file_landed(size_t index, Kind kind) {
+void UrlAssetSource::Impl::afterFileLanded(size_t index, Kind kind) {
     if (kind == Kind::Input) {
         return;
     }
@@ -231,11 +231,11 @@ void UrlAssetSource::Impl::after_file_landed(size_t index, Kind kind) {
     const std::string url = entries[index].url;
     auto includes = ConfigLoader::peekIncludes(url);
     for (const auto &rel : includes) {
-        enqueue(resolve_include_url(url, rel), Kind::Include);
+        enqueue(resolveIncludeUrl(url, rel), Kind::Include);
     }
 }
 
-void UrlAssetSource::Impl::check_done() {
+void UrlAssetSource::Impl::checkDone() {
     if (state == LoadState::Error) {
         return;
     }
@@ -254,8 +254,8 @@ UrlAssetSource::~UrlAssetSource() = default;
 
 void UrlAssetSource::start(std::string config_url, std::string input_url, std::string asset_base) {
 #ifdef __EMSCRIPTEN__
-    config_url = normalize_memfs_path(config_url);
-    input_url = normalize_memfs_path(input_url);
+    config_url = normalizeMemfsPath(config_url);
+    input_url = normalizeMemfsPath(input_url);
     // Strip a trailing slash so `asset_base + url` doesn't double up the
     // separator (url already starts with `/`).
     while (!asset_base.empty() && asset_base.back() == '/') {
@@ -287,8 +287,8 @@ std::span<const AssetProgress> UrlAssetSource::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
 }
 
-const std::string &UrlAssetSource::error_message() const { return impl_->error; }
-const std::filesystem::path &UrlAssetSource::config_path() const { return impl_->config_path; }
-const std::filesystem::path &UrlAssetSource::input_path() const { return impl_->input_path; }
+const std::string &UrlAssetSource::errorMessage() const { return impl_->error; }
+const std::filesystem::path &UrlAssetSource::configPath() const { return impl_->config_path; }
+const std::filesystem::path &UrlAssetSource::inputPath() const { return impl_->input_path; }
 
 } // namespace nodehammer::viewer

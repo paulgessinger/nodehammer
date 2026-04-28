@@ -51,7 +51,7 @@ glm::vec3 sky(const glm::vec3 &dir_in) {
 /// Direction (un-normalized) for face/uv on a standard sokol cubemap.
 /// Face order matches sokol_gfx's documented cubemap layout:
 /// 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
-glm::vec3 cube_dir(int face, float u, float v) {
+glm::vec3 cubeDir(int face, float u, float v) {
     // u, v ∈ [-1, 1]
     switch (face) {
     case 0:
@@ -83,7 +83,7 @@ glm::vec2 hammersley(uint32_t i, uint32_t n) {
 }
 
 /// Sample a half-vector from the GGX distribution using importance sampling.
-glm::vec3 importance_sample_ggx(const glm::vec2 &xi, const glm::vec3 &n, float roughness) {
+glm::vec3 importanceSampleGgx(const glm::vec2 &xi, const glm::vec3 &n, float roughness) {
     const float a = roughness * roughness;
     const float phi = 2.f * glm::pi<float>() * xi.x;
     const float cos_theta = std::sqrt((1.f - xi.y) / (1.f + (a * a - 1.f) * xi.y));
@@ -96,19 +96,19 @@ glm::vec3 importance_sample_ggx(const glm::vec2 &xi, const glm::vec3 &n, float r
     return glm::normalize(tangent * h_tangent.x + bitangent * h_tangent.y + n * h_tangent.z);
 }
 
-std::byte to_u8(float x) {
+std::byte toU8(float x) {
     const float c = glm::clamp(x, 0.f, 1.f);
     return static_cast<std::byte>(std::lround(c * 255.f));
 }
 
-void encode_rgba8(std::byte *dst, const glm::vec3 &rgb) {
-    dst[0] = to_u8(rgb.r);
-    dst[1] = to_u8(rgb.g);
-    dst[2] = to_u8(rgb.b);
+void encodeRgba8(std::byte *dst, const glm::vec3 &rgb) {
+    dst[0] = toU8(rgb.r);
+    dst[1] = toU8(rgb.g);
+    dst[2] = toU8(rgb.b);
     dst[3] = std::byte{255};
 }
 
-float geometry_smith_ibl(float ndotv, float ndotl, float roughness) {
+float geometrySmithIbl(float ndotv, float ndotl, float roughness) {
     const float k = (roughness * roughness) / 2.f;
     const float gv = ndotv / (ndotv * (1.f - k) + k);
     const float gl = ndotl / (ndotl * (1.f - k) + k);
@@ -117,9 +117,9 @@ float geometry_smith_ibl(float ndotv, float ndotl, float roughness) {
 
 // ── Per-pixel bake routines ──────────────────────────────────────────────────
 // Each writes 4 RGBA8 bytes at `dst`. They are the atomic unit of work used
-// by both the synchronous `bake_ibl()` and the chunked `IblBakeJob` driver.
+// by both the synchronous `bakeIbl()` and the chunked `IblBakeJob` driver.
 
-void bake_brdf_pixel(int x, int y, std::byte *dst) {
+void bakeBrdfPixel(int x, int y, std::byte *dst) {
     const float roughness = (static_cast<float>(y) + 0.5f) / kBrdfLutSize;
     const float ndotv = (static_cast<float>(x) + 0.5f) / kBrdfLutSize;
     const glm::vec3 v{std::sqrt(1.f - ndotv * ndotv), 0.f, ndotv};
@@ -130,7 +130,7 @@ void bake_brdf_pixel(int x, int y, std::byte *dst) {
     for (int i = 0; i < kBrdfSamples; ++i) {
         const glm::vec2 xi =
             hammersley(static_cast<uint32_t>(i), static_cast<uint32_t>(kBrdfSamples));
-        const glm::vec3 h = importance_sample_ggx(xi, n, roughness);
+        const glm::vec3 h = importanceSampleGgx(xi, n, roughness);
         const glm::vec3 l = glm::normalize(2.f * glm::dot(v, h) * h - v);
 
         const float ndotl = std::max(l.z, 0.f);
@@ -138,7 +138,7 @@ void bake_brdf_pixel(int x, int y, std::byte *dst) {
         const float vdoth = std::max(glm::dot(v, h), 0.f);
 
         if (ndotl > 0.f) {
-            const float g = geometry_smith_ibl(ndotv, ndotl, roughness);
+            const float g = geometrySmithIbl(ndotv, ndotl, roughness);
             const float g_vis = (g * vdoth) / std::max(ndoth * ndotv, 1e-6f);
             const float fc = std::pow(1.f - vdoth, 5.f);
             scale += (1.f - fc) * g_vis;
@@ -147,16 +147,16 @@ void bake_brdf_pixel(int x, int y, std::byte *dst) {
     }
     scale /= static_cast<float>(kBrdfSamples);
     bias /= static_cast<float>(kBrdfSamples);
-    dst[0] = to_u8(scale);
-    dst[1] = to_u8(bias);
+    dst[0] = toU8(scale);
+    dst[1] = toU8(bias);
     dst[2] = std::byte{0};
     dst[3] = std::byte{255};
 }
 
-void bake_irradiance_pixel(int face, int x, int y, std::byte *dst) {
+void bakeIrradiancePixel(int face, int x, int y, std::byte *dst) {
     const float u = (static_cast<float>(x) + 0.5f) / kIrradianceSize * 2.f - 1.f;
     const float v = (static_cast<float>(y) + 0.5f) / kIrradianceSize * 2.f - 1.f;
-    const glm::vec3 n = glm::normalize(cube_dir(face, u, v));
+    const glm::vec3 n = glm::normalize(cubeDir(face, u, v));
 
     // Cosine-weighted hemisphere sampling around n.
     const glm::vec3 up = std::abs(n.z) < 0.999f ? glm::vec3{0, 0, 1} : glm::vec3{1, 0, 0};
@@ -177,16 +177,16 @@ void bake_irradiance_pixel(int face, int x, int y, std::byte *dst) {
     // Cosine-weighted Monte Carlo integral with PDF = cosθ/π already
     // produces the irradiance directly.
     acc /= static_cast<float>(kIrradianceSamples);
-    encode_rgba8(dst, acc);
+    encodeRgba8(dst, acc);
 }
 
-void bake_prefilter_pixel(int mip, int face, int x, int y, std::byte *dst) {
+void bakePrefilterPixel(int mip, int face, int x, int y, std::byte *dst) {
     const int size = std::max(1, kPrefilterSize >> mip);
     const float roughness = static_cast<float>(mip) / static_cast<float>(kPrefilterMips - 1);
     const float fsize = static_cast<float>(size);
     const float u = (static_cast<float>(x) + 0.5f) / fsize * 2.f - 1.f;
     const float v = (static_cast<float>(y) + 0.5f) / fsize * 2.f - 1.f;
-    const glm::vec3 r = glm::normalize(cube_dir(face, u, v));
+    const glm::vec3 r = glm::normalize(cubeDir(face, u, v));
     const glm::vec3 n = r;
     const glm::vec3 view = r;
 
@@ -195,7 +195,7 @@ void bake_prefilter_pixel(int mip, int face, int x, int y, std::byte *dst) {
     for (int i = 0; i < kPrefilterSamples; ++i) {
         const glm::vec2 xi =
             hammersley(static_cast<uint32_t>(i), static_cast<uint32_t>(kPrefilterSamples));
-        const glm::vec3 h = importance_sample_ggx(xi, n, roughness);
+        const glm::vec3 h = importanceSampleGgx(xi, n, roughness);
         const glm::vec3 l = glm::normalize(2.f * glm::dot(view, h) * h - view);
         const float ndotl = std::max(glm::dot(n, l), 0.f);
         if (ndotl > 0.f) {
@@ -204,55 +204,53 @@ void bake_prefilter_pixel(int mip, int face, int x, int y, std::byte *dst) {
         }
     }
     const glm::vec3 colour = weight_sum > 0.f ? acc / weight_sum : glm::vec3{0.f};
-    encode_rgba8(dst, colour);
+    encodeRgba8(dst, colour);
 }
 
 // ── Buffer sizing helpers ────────────────────────────────────────────────────
 
-constexpr size_t brdf_lut_byte_size() {
-    return static_cast<size_t>(kBrdfLutSize) * kBrdfLutSize * 4;
-}
+constexpr size_t brdfLutByteSize() { return static_cast<size_t>(kBrdfLutSize) * kBrdfLutSize * 4; }
 
-constexpr size_t irradiance_face_bytes() {
+constexpr size_t irradianceFaceBytes() {
     return static_cast<size_t>(kIrradianceSize) * kIrradianceSize * 4;
 }
 
-constexpr size_t prefilter_face_bytes(int mip) {
+constexpr size_t prefilterFaceBytes(int mip) {
     const int size = (kPrefilterSize >> mip) > 1 ? (kPrefilterSize >> mip) : 1;
     return static_cast<size_t>(size) * static_cast<size_t>(size) * 4;
 }
 
-void allocate_bake_buffers(IblBakeData &data) {
-    data.brdf_lut.assign(brdf_lut_byte_size(), std::byte{0});
-    data.irradiance_combined.assign(irradiance_face_bytes() * 6, std::byte{0});
+void allocateBakeBuffers(IblBakeData &data) {
+    data.brdf_lut.assign(brdfLutByteSize(), std::byte{0});
+    data.irradiance_combined.assign(irradianceFaceBytes() * 6, std::byte{0});
     for (size_t m = 0; m < kPrefilterMips; ++m) {
-        data.prefilter_mips[m].assign(prefilter_face_bytes(static_cast<int>(m)) * 6, std::byte{0});
+        data.prefilter_mips[m].assign(prefilterFaceBytes(static_cast<int>(m)) * 6, std::byte{0});
     }
 }
 
 } // namespace
 
-IblBakeData bake_ibl() {
+IblBakeData bakeIbl() {
     IblBakeData data;
-    allocate_bake_buffers(data);
+    allocateBakeBuffers(data);
 
     // BRDF LUT
     for (int y = 0; y < kBrdfLutSize; ++y) {
         for (int x = 0; x < kBrdfLutSize; ++x) {
             const size_t idx = (static_cast<size_t>(y) * kBrdfLutSize + static_cast<size_t>(x)) * 4;
-            bake_brdf_pixel(x, y, &data.brdf_lut[idx]);
+            bakeBrdfPixel(x, y, &data.brdf_lut[idx]);
         }
     }
 
     // Irradiance cubemap (6 faces, packed in [+X, -X, +Y, -Y, +Z, -Z] order).
-    const size_t irr_face_sz = irradiance_face_bytes();
+    const size_t irr_face_sz = irradianceFaceBytes();
     for (int face = 0; face < 6; ++face) {
         std::byte *face_ptr = &data.irradiance_combined[static_cast<size_t>(face) * irr_face_sz];
         for (int y = 0; y < kIrradianceSize; ++y) {
             for (int x = 0; x < kIrradianceSize; ++x) {
                 const size_t idx =
                     (static_cast<size_t>(y) * kIrradianceSize + static_cast<size_t>(x)) * 4;
-                bake_irradiance_pixel(face, x, y, &face_ptr[idx]);
+                bakeIrradiancePixel(face, x, y, &face_ptr[idx]);
             }
         }
     }
@@ -260,7 +258,7 @@ IblBakeData bake_ibl() {
     // Prefiltered specular cubemap (mipped).
     for (int mip = 0; mip < kPrefilterMips; ++mip) {
         const int size = std::max(1, kPrefilterSize >> mip);
-        const size_t face_sz = prefilter_face_bytes(mip);
+        const size_t face_sz = prefilterFaceBytes(mip);
         for (int face = 0; face < 6; ++face) {
             std::byte *face_ptr =
                 &data.prefilter_mips[static_cast<size_t>(mip)][static_cast<size_t>(face) * face_sz];
@@ -269,7 +267,7 @@ IblBakeData bake_ibl() {
                     const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(size) +
                                         static_cast<size_t>(x)) *
                                        4;
-                    bake_prefilter_pixel(mip, face, x, y, &face_ptr[idx]);
+                    bakePrefilterPixel(mip, face, x, y, &face_ptr[idx]);
                 }
             }
         }
@@ -277,7 +275,7 @@ IblBakeData bake_ibl() {
     return data;
 }
 
-void IblResources::create_dummy() {
+void IblResources::createDummy() {
     // 1x1 placeholder textures so sg_bindings always have something to
     // sample from. The shader gates IBL contributions on mode_flags.y, so
     // these values are only visible when the user toggles PBR on before
@@ -492,7 +490,7 @@ void IblBakeJob::start() {
     started_ = true;
 
 #ifdef __EMSCRIPTEN__
-    allocate_bake_buffers(partial_);
+    allocateBakeBuffers(partial_);
     stage_ = Stage::BrdfLut;
     face_ = 0;
     mip_ = 0;
@@ -501,7 +499,7 @@ void IblBakeJob::start() {
 #else
     progress_.store(0.0, std::memory_order_relaxed);
     worker_ = std::thread([this] {
-        run_native_bake();
+        runNativeBake();
         done_.store(true, std::memory_order_release);
     });
 #endif
@@ -509,8 +507,8 @@ void IblBakeJob::start() {
 
 #ifndef __EMSCRIPTEN__
 
-void IblBakeJob::run_native_bake() {
-    // Same loop layout as `bake_ibl()`, but reports cumulative weighted
+void IblBakeJob::runNativeBake() {
+    // Same loop layout as `bakeIbl()`, but reports cumulative weighted
     // progress between rows (BRDF) and per-face-per-mip (cubemaps). Pixel
     // weights match the formula used by the web-side `progress()` so a
     // user toggling between platforms sees the same shape of curve.
@@ -535,27 +533,27 @@ void IblBakeJob::run_native_bake() {
     };
 
     IblBakeData data;
-    allocate_bake_buffers(data);
+    allocateBakeBuffers(data);
 
     // BRDF LUT
     for (int y = 0; y < kBrdfLutSize; ++y) {
         for (int x = 0; x < kBrdfLutSize; ++x) {
             const size_t idx = (static_cast<size_t>(y) * kBrdfLutSize + static_cast<size_t>(x)) * 4;
-            bake_brdf_pixel(x, y, &data.brdf_lut[idx]);
+            bakeBrdfPixel(x, y, &data.brdf_lut[idx]);
         }
         done += kBrdfLutSize * kBrdfWeightPerPixel;
         publish();
     }
 
     // Irradiance cubemap
-    const size_t irr_face_sz = irradiance_face_bytes();
+    const size_t irr_face_sz = irradianceFaceBytes();
     for (int face = 0; face < 6; ++face) {
         std::byte *face_ptr = &data.irradiance_combined[static_cast<size_t>(face) * irr_face_sz];
         for (int y = 0; y < kIrradianceSize; ++y) {
             for (int x = 0; x < kIrradianceSize; ++x) {
                 const size_t idx =
                     (static_cast<size_t>(y) * kIrradianceSize + static_cast<size_t>(x)) * 4;
-                bake_irradiance_pixel(face, x, y, &face_ptr[idx]);
+                bakeIrradiancePixel(face, x, y, &face_ptr[idx]);
             }
         }
         done += static_cast<double>(kIrradianceSize) * kIrradianceSize * kIrradianceWeightPerPixel;
@@ -565,7 +563,7 @@ void IblBakeJob::run_native_bake() {
     // Prefilter cubemap (mipped)
     for (int mip = 0; mip < kPrefilterMips; ++mip) {
         const int size = std::max(1, kPrefilterSize >> mip);
-        const size_t face_sz = prefilter_face_bytes(mip);
+        const size_t face_sz = prefilterFaceBytes(mip);
         for (int face = 0; face < 6; ++face) {
             std::byte *face_ptr =
                 &data.prefilter_mips[static_cast<size_t>(mip)][static_cast<size_t>(face) * face_sz];
@@ -574,7 +572,7 @@ void IblBakeJob::run_native_bake() {
                     const size_t idx = (static_cast<size_t>(y) * static_cast<size_t>(size) +
                                         static_cast<size_t>(x)) *
                                        4;
-                    bake_prefilter_pixel(mip, face, x, y, &face_ptr[idx]);
+                    bakePrefilterPixel(mip, face, x, y, &face_ptr[idx]);
                 }
             }
             done += static_cast<double>(size) * size * kPrefilterWeightPerPixel;
@@ -590,28 +588,28 @@ void IblBakeJob::run_native_bake() {
 
 #ifdef __EMSCRIPTEN__
 
-void IblBakeJob::bake_one_pixel() {
+void IblBakeJob::bakeOnePixel() {
     switch (stage_) {
     case Stage::BrdfLut: {
         const size_t idx = (static_cast<size_t>(y_) * kBrdfLutSize + static_cast<size_t>(x_)) * 4;
-        bake_brdf_pixel(x_, y_, &partial_.brdf_lut[idx]);
+        bakeBrdfPixel(x_, y_, &partial_.brdf_lut[idx]);
         break;
     }
     case Stage::Irradiance: {
-        const size_t face_off = static_cast<size_t>(face_) * irradiance_face_bytes();
+        const size_t face_off = static_cast<size_t>(face_) * irradianceFaceBytes();
         const size_t idx =
             face_off + (static_cast<size_t>(y_) * kIrradianceSize + static_cast<size_t>(x_)) * 4;
-        bake_irradiance_pixel(face_, x_, y_, &partial_.irradiance_combined[idx]);
+        bakeIrradiancePixel(face_, x_, y_, &partial_.irradiance_combined[idx]);
         break;
     }
     case Stage::Prefilter: {
         const int size = std::max(1, kPrefilterSize >> mip_);
-        const size_t face_off = static_cast<size_t>(face_) * prefilter_face_bytes(mip_);
+        const size_t face_off = static_cast<size_t>(face_) * prefilterFaceBytes(mip_);
         const size_t idx =
             face_off +
             (static_cast<size_t>(y_) * static_cast<size_t>(size) + static_cast<size_t>(x_)) * 4;
-        bake_prefilter_pixel(mip_, face_, x_, y_,
-                             &partial_.prefilter_mips[static_cast<size_t>(mip_)][idx]);
+        bakePrefilterPixel(mip_, face_, x_, y_,
+                           &partial_.prefilter_mips[static_cast<size_t>(mip_)][idx]);
         break;
     }
     case Stage::Idle:
@@ -620,7 +618,7 @@ void IblBakeJob::bake_one_pixel() {
     }
 }
 
-void IblBakeJob::advance_iterator() {
+void IblBakeJob::advanceIterator() {
     switch (stage_) {
     case Stage::BrdfLut:
         if (++x_ >= kBrdfLutSize) {
@@ -680,8 +678,8 @@ bool IblBakeJob::advance(uint64_t budget_ns) {
     const uint64_t start_ticks = stm_now();
     int since_check = 0;
     while (stage_ != Stage::Done) {
-        bake_one_pixel();
-        advance_iterator();
+        bakeOnePixel();
+        advanceIterator();
         if (++since_check >= kPixelsPerClockCheck) {
             since_check = 0;
             if (stm_ns(stm_diff(stm_now(), start_ticks)) >= static_cast<double>(budget_ns)) {

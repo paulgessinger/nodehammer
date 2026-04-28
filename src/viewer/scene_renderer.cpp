@@ -36,8 +36,8 @@ struct GpuMesh {
 /// Transform an AABB by a 4x4 affine matrix using Arvo's trick — cheaper
 /// than transforming all 8 corners. Each output axis is built from the
 /// positive/negative contributions of each row of the matrix.
-inline void transform_aabb(const glm::mat4 &m, const glm::vec3 &lmin, const glm::vec3 &lmax,
-                           glm::vec3 &wmin, glm::vec3 &wmax) {
+inline void transformAabb(const glm::mat4 &m, const glm::vec3 &lmin, const glm::vec3 &lmax,
+                          glm::vec3 &wmin, glm::vec3 &wmax) {
     glm::vec3 tr = glm::vec3(m[3]);
     wmin = tr;
     wmax = tr;
@@ -69,7 +69,7 @@ struct InstanceGroupKeyHash {
 constexpr int kInstanceVbufSlot = 1;
 constexpr float kTau = 6.28318530717958647692f;
 
-float normalize_angle(float angle) {
+float normalizeAngle(float angle) {
     angle = std::fmod(angle, kTau);
     if (angle < 0.f) {
         angle += kTau;
@@ -77,15 +77,15 @@ float normalize_angle(float angle) {
     return angle;
 }
 
-float angle_span(float start, float end) {
-    const float span = normalize_angle(end) - normalize_angle(start);
+float angleSpan(float start, float end) {
+    const float span = normalizeAngle(end) - normalizeAngle(start);
     return span >= 0.f ? span : span + kTau;
 }
 
-bool angle_in_range(float angle, float start, float end) {
-    angle = normalize_angle(angle);
-    start = normalize_angle(start);
-    end = normalize_angle(end);
+bool angleInRange(float angle, float start, float end) {
+    angle = normalizeAngle(angle);
+    start = normalizeAngle(start);
+    end = normalizeAngle(end);
     if (std::abs(start - end) < 0.0001f) {
         return false;
     }
@@ -95,16 +95,15 @@ bool angle_in_range(float angle, float start, float end) {
     return angle >= start || angle <= end;
 }
 
-bool aabb_fully_inside_angle_cut(const glm::vec3 &min, const glm::vec3 &max, float start,
-                                 float end) {
-    if (std::abs(normalize_angle(start) - normalize_angle(end)) < 0.0001f) {
+bool aabbFullyInsideAngleCut(const glm::vec3 &min, const glm::vec3 &max, float start, float end) {
+    if (std::abs(normalizeAngle(start) - normalizeAngle(end)) < 0.0001f) {
         return false;
     }
     if (min.x <= 0.f && max.x >= 0.f && min.y <= 0.f && max.y >= 0.f) {
         return false;
     }
 
-    const float cut_width = angle_span(start, end);
+    const float cut_width = angleSpan(start, end);
     const bool test_kept_sector = cut_width > 0.5f * kTau;
     const float test_start = test_kept_sector ? end : start;
     const float test_end = test_kept_sector ? start : end;
@@ -117,7 +116,7 @@ bool aabb_fully_inside_angle_cut(const glm::vec3 &min, const glm::vec3 &max, flo
     };
     for (const auto &corner : corners) {
         const bool in_test_sector =
-            angle_in_range(std::atan2(corner.y, corner.x), test_start, test_end);
+            angleInRange(std::atan2(corner.y, corner.x), test_start, test_end);
         if (test_kept_sector) {
             if (in_test_sector) {
                 return false;
@@ -129,7 +128,7 @@ bool aabb_fully_inside_angle_cut(const glm::vec3 &min, const glm::vec3 &max, flo
     return true;
 }
 
-std::array<glm::vec4, 6> frustum_planes(const glm::mat4 &m) {
+std::array<glm::vec4, 6> frustumPlanes(const glm::mat4 &m) {
     const glm::vec4 row0{m[0][0], m[1][0], m[2][0], m[3][0]};
     const glm::vec4 row1{m[0][1], m[1][1], m[2][1], m[3][1]};
     const glm::vec4 row2{m[0][2], m[1][2], m[2][2], m[3][2]};
@@ -152,8 +151,8 @@ std::array<glm::vec4, 6> frustum_planes(const glm::mat4 &m) {
     return planes;
 }
 
-bool aabb_outside_frustum(const glm::vec3 &min, const glm::vec3 &max,
-                          const std::array<glm::vec4, 6> &planes) {
+bool aabbOutsideFrustum(const glm::vec3 &min, const glm::vec3 &max,
+                        const std::array<glm::vec4, 6> &planes) {
     for (const auto &plane : planes) {
         const glm::vec3 positive{
             plane.x >= 0.f ? max.x : min.x,
@@ -219,14 +218,14 @@ struct SceneRenderer::Impl {
     size_t next_pending_mesh{0};
     bool upload_busy{false};
 
-    void ensure_init();
-    void destroy_gpu();
-    void upload_instance_buffer();
-    void upload_one_mesh(MeshAssetId id, const MeshAsset &asset);
-    void finalize_upload();
+    void ensureInit();
+    void destroyGpu();
+    void uploadInstanceBuffer();
+    void uploadOneMesh(MeshAssetId id, const MeshAsset &asset);
+    void finalizeUpload();
 };
 
-void SceneRenderer::Impl::ensure_init() {
+void SceneRenderer::Impl::ensureInit() {
     if (initialised) {
         return;
     }
@@ -278,13 +277,13 @@ void SceneRenderer::Impl::ensure_init() {
 
     // IBL bindings start as 1×1 placeholder textures so the shader always
     // has something to sample from. The App owns the real bake and calls
-    // `install_ibl` to swap them in once it finishes.
-    ibl.create_dummy();
+    // `installIbl` to swap them in once it finishes.
+    ibl.createDummy();
 
     initialised = true;
 }
 
-void SceneRenderer::Impl::destroy_gpu() {
+void SceneRenderer::Impl::destroyGpu() {
     for (auto &[id, m] : meshes) {
         if (m.vbuf.id != SG_INVALID_ID) {
             sg_destroy_buffer(m.vbuf);
@@ -305,7 +304,7 @@ void SceneRenderer::Impl::destroy_gpu() {
     node_count = 0;
     triangle_count = 0;
     has_bounds = false;
-    // Drop any in-flight upload state — a fresh begin_upload is the only
+    // Drop any in-flight upload state — a fresh beginUpload is the only
     // way back to a populated scene.
     pending_scene.reset();
     pending_mesh_ids.clear();
@@ -313,7 +312,7 @@ void SceneRenderer::Impl::destroy_gpu() {
     upload_busy = false;
 }
 
-void SceneRenderer::Impl::upload_instance_buffer() {
+void SceneRenderer::Impl::uploadInstanceBuffer() {
     size_t total = 0;
     for (const auto &g : groups) {
         total += g.instances.size();
@@ -339,10 +338,10 @@ SceneRenderer::~SceneRenderer() {
     // outlives it; the App lifecycle calls release() in the right order.
 }
 
-void SceneRenderer::initialize() { impl_->ensure_init(); }
+void SceneRenderer::initialize() { impl_->ensureInit(); }
 
-void SceneRenderer::install_ibl(const IblBakeData &data) {
-    impl_->ensure_init();
+void SceneRenderer::installIbl(const IblBakeData &data) {
+    impl_->ensureInit();
     impl_->ibl.release();
     impl_->ibl.upload(data);
 }
@@ -351,7 +350,7 @@ void SceneRenderer::release() {
     if (!impl_ || !impl_->initialised) {
         return;
     }
-    impl_->destroy_gpu();
+    impl_->destroyGpu();
     if (impl_->pipeline_no_cull.id != SG_INVALID_ID) {
         sg_destroy_pipeline(impl_->pipeline_no_cull);
         impl_->pipeline_no_cull = sg_pipeline{};
@@ -368,7 +367,7 @@ void SceneRenderer::release() {
     impl_->initialised = false;
 }
 
-void SceneRenderer::Impl::upload_one_mesh(MeshAssetId id, const MeshAsset &asset) {
+void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const MeshAsset &asset) {
     if (asset.vertices.empty() || asset.indices.empty()) {
         return;
     }
@@ -404,7 +403,7 @@ void SceneRenderer::Impl::upload_one_mesh(MeshAssetId id, const MeshAsset &asset
     meshes.emplace(id, gm);
 }
 
-void SceneRenderer::Impl::finalize_upload() {
+void SceneRenderer::Impl::finalizeUpload() {
     const RenderScene &scene = *pending_scene;
 
     for (const auto &[id, mat] : scene.materials) {
@@ -434,8 +433,8 @@ void SceneRenderer::Impl::finalize_upload() {
             triangle_count += mesh_it->second.triangle_count;
 
             glm::vec3 wmin, wmax;
-            transform_aabb(node.worldTransform, mesh_it->second.local_min,
-                           mesh_it->second.local_max, wmin, wmax);
+            transformAabb(node.worldTransform, mesh_it->second.local_min, mesh_it->second.local_max,
+                          wmin, wmax);
             auto &group = groups[it->second];
             group.instances.push_back(node.worldTransform);
             group.bounds_min.push_back(wmin);
@@ -449,7 +448,7 @@ void SceneRenderer::Impl::finalize_upload() {
     bounds_max = bmax;
     has_bounds = any_bounds;
 
-    upload_instance_buffer();
+    uploadInstanceBuffer();
 
     std::println("viewer: scene uploaded — meshes={} materials={} nodes={} groups={} tris={} "
                  "bbox=[{:.1f} {:.1f} {:.1f} .. {:.1f} {:.1f} {:.1f}]\n",
@@ -464,10 +463,10 @@ void SceneRenderer::Impl::finalize_upload() {
     upload_busy = false;
 }
 
-void SceneRenderer::begin_upload(std::shared_ptr<const RenderScene> scene) {
+void SceneRenderer::beginUpload(std::shared_ptr<const RenderScene> scene) {
     static_assert(sizeof(Vertex) == 24, "Vertex layout must match shader: 3f position + 3f normal");
-    impl_->ensure_init();
-    impl_->destroy_gpu();
+    impl_->ensureInit();
+    impl_->destroyGpu();
 
     impl_->pending_scene = std::move(scene);
     impl_->pending_mesh_ids.clear();
@@ -481,7 +480,7 @@ void SceneRenderer::begin_upload(std::shared_ptr<const RenderScene> scene) {
     impl_->upload_busy = impl_->pending_scene != nullptr;
 }
 
-bool SceneRenderer::advance_upload(uint64_t budget_ns) {
+bool SceneRenderer::advanceUpload(uint64_t budget_ns) {
     if (!impl_->upload_busy) {
         return true;
     }
@@ -490,7 +489,7 @@ bool SceneRenderer::advance_upload(uint64_t budget_ns) {
         const auto id = impl_->pending_mesh_ids[impl_->next_pending_mesh++];
         const auto it = impl_->pending_scene->meshAssets.find(id);
         if (it != impl_->pending_scene->meshAssets.end()) {
-            impl_->upload_one_mesh(id, it->second);
+            impl_->uploadOneMesh(id, it->second);
         }
         if (stm_ns(stm_diff(stm_now(), start_ticks)) >= static_cast<double>(budget_ns)) {
             // Yield to the next frame; meshes left in the queue resume on
@@ -498,11 +497,11 @@ bool SceneRenderer::advance_upload(uint64_t budget_ns) {
             return false;
         }
     }
-    impl_->finalize_upload();
+    impl_->finalizeUpload();
     return true;
 }
 
-bool SceneRenderer::upload_in_progress() const { return impl_->upload_busy; }
+bool SceneRenderer::uploadInProgress() const { return impl_->upload_busy; }
 
 void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_height,
                            RenderFlags flags) {
@@ -532,7 +531,7 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     // and the pass action's depth clear of 0.0 in app.cpp.
     const glm::mat4 proj = camera.proj(aspect, homogeneous_depth, /*reversed_z=*/true);
     const glm::mat4 view_proj = proj * view;
-    const auto planes = frustum_planes(view_proj);
+    const auto planes = frustumPlanes(view_proj);
 
     impl_->visible_instances.clear();
     const float cut_start = glm::radians(flags.angle_cut_start_deg);
@@ -541,11 +540,11 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         g.visible_byte_offset = impl_->visible_instances.size() * sizeof(glm::mat4);
         const size_t start_count = impl_->visible_instances.size();
         for (size_t i = 0; i < g.instances.size(); ++i) {
-            if (aabb_outside_frustum(g.bounds_min[i], g.bounds_max[i], planes)) {
+            if (aabbOutsideFrustum(g.bounds_min[i], g.bounds_max[i], planes)) {
                 continue;
             }
             if (flags.angle_cut &&
-                aabb_fully_inside_angle_cut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
+                aabbFullyInsideAngleCut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
                 continue;
             }
             impl_->visible_instances.push_back(g.instances[i]);
@@ -586,7 +585,7 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         std::memcpy(fs_params.light_dir, glm::value_ptr(light_dir), sizeof(fs_params.light_dir));
         const float shader_cut_start = glm::radians(flags.angle_cut_start_deg);
         const float shader_cut_end = glm::radians(flags.angle_cut_end_deg);
-        const bool large_cut = angle_span(shader_cut_start, shader_cut_end) > 0.5f * kTau;
+        const bool large_cut = angleSpan(shader_cut_start, shader_cut_end) > 0.5f * kTau;
         const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
                                    large_cut ? 1.f : 0.f, 0.f, 0.f};
         const glm::vec4 cut_start_vec{std::cos(shader_cut_start), std::sin(shader_cut_start), 0.f,
@@ -626,9 +625,9 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     }
 }
 
-SceneRenderer::FrameStats SceneRenderer::last_frame_stats() const { return impl_->last_stats; }
+SceneRenderer::FrameStats SceneRenderer::lastFrameStats() const { return impl_->last_stats; }
 
-bool SceneRenderer::world_bounds(glm::vec3 &min, glm::vec3 &max) const {
+bool SceneRenderer::worldBounds(glm::vec3 &min, glm::vec3 &max) const {
     if (!impl_->has_bounds) {
         return false;
     }
@@ -637,10 +636,10 @@ bool SceneRenderer::world_bounds(glm::vec3 &min, glm::vec3 &max) const {
     return true;
 }
 
-uint32_t SceneRenderer::mesh_asset_count() const {
+uint32_t SceneRenderer::meshAssetCount() const {
     return static_cast<uint32_t>(impl_->meshes.size());
 }
-uint32_t SceneRenderer::node_count() const { return impl_->node_count; }
-uint64_t SceneRenderer::triangle_count() const { return impl_->triangle_count; }
+uint32_t SceneRenderer::nodeCount() const { return impl_->node_count; }
+uint64_t SceneRenderer::triangleCount() const { return impl_->triangle_count; }
 
 } // namespace nodehammer::viewer

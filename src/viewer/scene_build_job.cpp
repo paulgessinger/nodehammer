@@ -13,7 +13,7 @@ namespace nodehammer::viewer {
 
 namespace {
 
-void log_pre_build(const std::string &config_path, const std::string &input_path) {
+void logPreBuild(const std::string &config_path, const std::string &input_path) {
     std::error_code ec;
     const bool config_exists = std::filesystem::exists(config_path, ec);
     const auto config_size = config_exists ? std::filesystem::file_size(config_path, ec) : 0;
@@ -66,9 +66,9 @@ void SceneBuildJob::start(std::string config_path, std::string input_path) {
 #else
     done_.store(false, std::memory_order_release);
     state_ = State::Running;
-    log_pre_build(config_path_, input_path_);
+    logPreBuild(config_path_, input_path_);
     worker_ = std::thread([this] {
-        prep_ = ::nodehammer::prepare_scene_for_tessellation(config_path_, input_path_);
+        prep_ = ::nodehammer::prepareSceneForTessellation(config_path_, input_path_);
         if (!prep_.ok) {
             result_.scene = nullptr;
             result_.diags = std::move(prep_.diags);
@@ -77,7 +77,7 @@ void SceneBuildJob::start(std::string config_path, std::string input_path) {
         }
         tess_job_.start(prep_.config, prep_.scene);
         // Run the iterator straight through — the thread isn't budget-
-        // driven, but `total_nodes` / `processed_nodes` get updated as we
+        // driven, but `totalNodes` / `processedNodes` get updated as we
         // go, so the main-thread UI can show a real-time bar.
         while (!tess_job_.advance(std::numeric_limits<uint64_t>::max())) {
         }
@@ -107,8 +107,8 @@ bool SceneBuildJob::poll(uint64_t budget_ns) {
         state_ = State::PrepPending;
         return false;
     case State::PrepPending: {
-        log_pre_build(config_path_, input_path_);
-        prep_ = ::nodehammer::prepare_scene_for_tessellation(config_path_, input_path_);
+        logPreBuild(config_path_, input_path_);
+        prep_ = ::nodehammer::prepareSceneForTessellation(config_path_, input_path_);
         if (!prep_.ok) {
             // Upstream stage failed — package the diags and finish.
             result_.scene = nullptr;
@@ -175,8 +175,8 @@ SceneBuildResult SceneBuildJob::take() {
     return out;
 }
 
-size_t SceneBuildJob::tessellation_total() const { return tess_job_.total_nodes(); }
-size_t SceneBuildJob::tessellation_processed() const { return tess_job_.processed_nodes(); }
+size_t SceneBuildJob::tessellationTotal() const { return tess_job_.totalNodes(); }
+size_t SceneBuildJob::tessellationProcessed() const { return tess_job_.processedNodes(); }
 
 SceneBuildJob::Phase SceneBuildJob::phase() const {
 #ifdef __EMSCRIPTEN__

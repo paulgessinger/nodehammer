@@ -15,12 +15,12 @@ namespace nodehammer::viewer {
 /// To force a cache rebuild for all users:
 ///   1. Increment this constant by one.
 ///   2. That's it — no need to touch the IDB key or on-disk filename. The
-///      version field is checked inside `deserialize_ibl_cache`; old caches
+///      version field is checked inside `deserializeIblCache`; old caches
 ///      fail verification and `IblCacheLoad` reports a miss, which causes
 ///      the viewer to re-bake and overwrite the stale entry on save.
 ///
 /// Bump triggers (non-exhaustive):
-///   - Any change to the math in `bake_ibl()` / `IblBakeJob` (sample counts,
+///   - Any change to the math in `bakeIbl()` / `IblBakeJob` (sample counts,
 ///     sky function, importance sampling, tone-mapping of the output).
 ///   - Any change to the `IblBakeData` constants (`kIrradianceSize`,
 ///     `kPrefilterSize`, `kPrefilterMips`, `kBrdfLutSize`) or the byte layout
@@ -32,14 +32,14 @@ namespace nodehammer::viewer {
 inline constexpr uint32_t kIblCacheVersion = 1;
 
 /// Serialize a baked IBL dataset to a self-contained FlatBuffer (with the
-/// "NHIB" file_identifier). Round-trip via `deserialize_ibl_cache`.
-[[nodiscard]] std::vector<std::byte> serialize_ibl_cache(const IblBakeData &data);
+/// "NHIB" file_identifier). Round-trip via `deserializeIblCache`.
+[[nodiscard]] std::vector<std::byte> serializeIblCache(const IblBakeData &data);
 
-/// Verify and decode a buffer previously produced by `serialize_ibl_cache`.
+/// Verify and decode a buffer previously produced by `serializeIblCache`.
 /// Returns nullopt if the buffer fails verification, has the wrong version,
 /// or any byte slice has an unexpected size for the current `IblBakeData`
 /// layout.
-[[nodiscard]] std::optional<IblBakeData> deserialize_ibl_cache(std::span<const std::byte> buf);
+[[nodiscard]] std::optional<IblBakeData> deserializeIblCache(std::span<const std::byte> buf);
 
 /// Async helper: try to load a previously baked IBL from the platform
 /// cache. On native this resolves synchronously inside `start()`; on web
@@ -70,8 +70,8 @@ class IblCacheLoad {
 
 #ifdef __EMSCRIPTEN__
     // Static C-style callbacks dispatch back to the instance via user_data.
-    static void on_load(void *user_data, void *bytes, int size);
-    static void on_error(void *user_data);
+    static void onLoad(void *user_data, void *bytes, int size);
+    static void onError(void *user_data);
 #endif
 };
 
@@ -79,7 +79,7 @@ class IblCacheLoad {
 /// but never thrown — a failed save just means the next launch re-bakes.
 /// On web this dispatches `emscripten_idb_async_store` and returns
 /// immediately; the store completes asynchronously on the JS side.
-void save_ibl_cache(const IblBakeData &data);
+void saveIblCache(const IblBakeData &data);
 
 /// Delete any cached IBL bake. Best-effort: a missing entry is not an
 /// error. Native: removes the cache file. Web: dispatches
@@ -87,6 +87,6 @@ void save_ibl_cache(const IblBakeData &data);
 /// affected — only the on-disk / IDB copy is cleared. Useful as a
 /// developer escape hatch if the bake is suspected to be stale and the
 /// version bump in `kIblCacheVersion` was forgotten.
-void clear_ibl_cache();
+void clearIblCache();
 
 } // namespace nodehammer::viewer

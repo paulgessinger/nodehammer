@@ -17,22 +17,22 @@ class LocalFileAssetSource final : public AssetSource {
     ~LocalFileAssetSource() override;
 
     /// True if the source is still waiting on a config file (.toml).
-    bool needs_config() const;
+    bool needsConfig() const;
     /// True if the source is still waiting on a geometry input.
-    bool needs_input() const;
+    bool needsInput() const;
 
     /// Last filename ignored for not matching a known role, if any. Cleared
     /// once a recognised file arrives. Used by the App to surface a "don't
     /// know what to do with foo.bar" hint in the placeholder UI.
-    const std::string &last_unrecognised() const;
+    const std::string &lastUnrecognised() const;
 
     void poll() override;
     LoadState state() const override;
     std::span<const AssetProgress> progress() const override;
-    const std::string &error_message() const override;
-    const std::filesystem::path &config_path() const override;
-    const std::filesystem::path &input_path() const override;
-    void ingest_local_file(const std::filesystem::path &path) override;
+    const std::string &errorMessage() const override;
+    const std::filesystem::path &configPath() const override;
+    const std::filesystem::path &inputPath() const override;
+    void ingestLocalFile(const std::filesystem::path &path) override;
 
   private:
     struct Impl;

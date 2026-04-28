@@ -19,7 +19,7 @@ namespace nodehammer::viewer {
 ///
 /// Note: scene framing radius is *not* part of Camera state — it's derived
 /// from the loaded scene and supplied to `dolly()` / returned by
-/// `frame_bounds()`. This keeps Camera = pure user-facing state that round-
+/// `frameBounds()`. This keeps Camera = pure user-facing state that round-
 /// trips cleanly through persistence, with no stale geometry-derived values.
 struct Camera {
     glm::vec3 target{0.f, 0.f, 0.f};
@@ -61,7 +61,7 @@ struct Camera {
     /// the bbox in view at the current FOV with a small margin. Returns the
     /// scene framing radius (bounding-sphere half-diagonal) so the caller
     /// can stash it for subsequent `dolly()` calls.
-    float frame_bounds(const glm::vec3 &min, const glm::vec3 &max, float margin = 1.2f);
+    float frameBounds(const glm::vec3 &min, const glm::vec3 &max, float margin = 1.2f);
 };
 
 } // namespace nodehammer::viewer

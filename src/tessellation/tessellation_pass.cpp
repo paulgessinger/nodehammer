@@ -424,7 +424,7 @@ TessellationPass::TessellationPass(const NHConfig &config) : config_(config) {}
 
 // ── TessellationJob ──────────────────────────────────────────────────────────
 //
-// The body of the BFS walk lives on `Impl::step_one_node`, mirroring the
+// The body of the BFS walk lives on `Impl::stepOneNode`, mirroring the
 // inline implementation that used to live in `TessellationPass::lower`.
 // `lower` is now a thin run-to-completion driver around a `TessellationJob`.
 
@@ -489,9 +489,9 @@ struct TessellationJob::Impl {
     // Process one outer-BFS iteration. Returns false if the queue became
     // empty (no more nodes to process) OR if the pass has already aborted
     // due to an error. After the queue drains, `done` is set.
-    bool step_one_node();
+    bool stepOneNode();
 
-    // Count the number of nodes that the outer BFS in `step_one_node`
+    // Count the number of nodes that the outer BFS in `stepOneNode`
     // will actually process. Mirrors that loop's children-skip rules so
     // `processedNodes / totalNodes` reaches 100% at the end:
     //
@@ -504,8 +504,8 @@ struct TessellationJob::Impl {
     // We do *not* try to predict BooleanFallback::Fail aborts — those
     // stop the pass mid-walk, and accepting a slightly-overshoot total
     // in that error path is fine.
-    size_t count_effective_nodes() const {
-        if (!scene || !scene->nodes.contains(scene->rootId)) {
+    size_t countEffectiveNodes() const {
+        if (scene == nullptr || !scene->nodes.contains(scene->rootId)) {
             return 0;
         }
         size_t n = 0;
@@ -593,7 +593,7 @@ RenderMaterialId TessellationJob::Impl::resolveRenderMaterial(SemanticMaterialId
     return rmId;
 }
 
-bool TessellationJob::Impl::step_one_node() {
+bool TessellationJob::Impl::stepOneNode() {
     if (q.empty()) {
         done = true;
         return false;
@@ -1008,9 +1008,9 @@ void TessellationJob::start(const NHConfig &config, const SemanticScene &scene) 
     // call. The resolve* helpers each iterate every rule for every node, so
     // compiling per-call dominated the tessellation profile.
     impl_->compiledRules = compileRulePredicates(config.rules);
-    // count_effective_nodes uses compiledRules + config + scene set above,
+    // countEffectiveNodes uses compiledRules + config + scene set above,
     // so it must run after those are wired in.
-    impl_->totalNodes.store(impl_->count_effective_nodes(), std::memory_order_relaxed);
+    impl_->totalNodes.store(impl_->countEffectiveNodes(), std::memory_order_relaxed);
     if (!scene.nodes.empty() && scene.nodes.contains(scene.rootId)) {
         impl_->q.push(scene.rootId);
     } else {
@@ -1029,8 +1029,8 @@ bool TessellationJob::advance(uint64_t budget_ns) {
     }
     const auto start_time = std::chrono::steady_clock::now();
     while (!impl_->q.empty() && !impl_->done) {
-        if (!impl_->step_one_node()) {
-            // step_one_node returned false: queue popped a stale id (no-op
+        if (!impl_->stepOneNode()) {
+            // stepOneNode returned false: queue popped a stale id (no-op
             // iteration) or the pass aborted with done=true. Either way,
             // fall through to the loop condition.
             continue;
@@ -1058,10 +1058,10 @@ TessellationPassResult TessellationJob::take() {
     return std::move(impl_->result);
 }
 
-size_t TessellationJob::total_nodes() const {
+size_t TessellationJob::totalNodes() const {
     return impl_->totalNodes.load(std::memory_order_relaxed);
 }
-size_t TessellationJob::processed_nodes() const {
+size_t TessellationJob::processedNodes() const {
     return impl_->processedNodes.load(std::memory_order_relaxed);
 }
 

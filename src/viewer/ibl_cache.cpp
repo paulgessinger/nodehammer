@@ -27,32 +27,32 @@ constexpr const char *kIdbKey = "ibl_cache_v1";
 #endif
 
 // Per-mip face count × bytes-per-pixel — mip dimension comes from
-// IblBakeData::kPrefilterSize >> mip_index, kept in lockstep with bake_ibl().
+// IblBakeData::kPrefilterSize >> mip_index, kept in lockstep with bakeIbl().
 constexpr size_t kFaces = 6;
 constexpr size_t kBpp = 4;
 
-constexpr size_t expected_brdf_bytes() {
+constexpr size_t expectedBrdfBytes() {
     return static_cast<size_t>(IblBakeData::kBrdfLutSize) *
            static_cast<size_t>(IblBakeData::kBrdfLutSize) * kBpp;
 }
-constexpr size_t expected_irradiance_bytes() {
+constexpr size_t expectedIrradianceBytes() {
     return static_cast<size_t>(IblBakeData::kIrradianceSize) *
            static_cast<size_t>(IblBakeData::kIrradianceSize) * kFaces * kBpp;
 }
-constexpr size_t expected_prefilter_mip_bytes(int mip) {
+constexpr size_t expectedPrefilterMipBytes(int mip) {
     const size_t sz = static_cast<size_t>(IblBakeData::kPrefilterSize) >> static_cast<size_t>(mip);
     return sz * sz * kFaces * kBpp;
 }
 
 #ifndef __EMSCRIPTEN__
-std::filesystem::path cache_path() {
+std::filesystem::path cachePath() {
     return std::filesystem::path{sago::getCacheDir()} / "nodehammer" / "ibl.fb";
 }
 #endif
 
 } // namespace
 
-std::vector<std::byte> serialize_ibl_cache(const IblBakeData &data) {
+std::vector<std::byte> serializeIblCache(const IblBakeData &data) {
     flatbuffers::FlatBufferBuilder builder{1 << 20};
 
     auto brdf = builder.CreateVector(reinterpret_cast<const uint8_t *>(data.brdf_lut.data()),
@@ -79,7 +79,7 @@ std::vector<std::byte> serialize_ibl_cache(const IblBakeData &data) {
     return std::vector<std::byte>(span.begin(), span.end());
 }
 
-std::optional<IblBakeData> deserialize_ibl_cache(std::span<const std::byte> buf) {
+std::optional<IblBakeData> deserializeIblCache(std::span<const std::byte> buf) {
     if (buf.empty()) {
         return std::nullopt;
     }
@@ -99,7 +99,7 @@ std::optional<IblBakeData> deserialize_ibl_cache(std::span<const std::byte> buf)
     if (brdf == nullptr || irr == nullptr || mips == nullptr) {
         return std::nullopt;
     }
-    if (brdf->size() != expected_brdf_bytes() || irr->size() != expected_irradiance_bytes() ||
+    if (brdf->size() != expectedBrdfBytes() || irr->size() != expectedIrradianceBytes() ||
         mips->size() != IblBakeData::kPrefilterMips) {
         return std::nullopt;
     }
@@ -114,7 +114,7 @@ std::optional<IblBakeData> deserialize_ibl_cache(std::span<const std::byte> buf)
     for (int m = 0; m < IblBakeData::kPrefilterMips; ++m) {
         const auto *mip = mips->Get(static_cast<flatbuffers::uoffset_t>(m));
         if (mip == nullptr || mip->data() == nullptr ||
-            mip->data()->size() != expected_prefilter_mip_bytes(m)) {
+            mip->data()->size() != expectedPrefilterMipBytes(m)) {
             return std::nullopt;
         }
         out.prefilter_mips[static_cast<size_t>(m)] = to_bytes(*mip->data());
@@ -134,30 +134,30 @@ void IblCacheLoad::start() {
     }
     state_ = State::Pending;
     std::println("viewer: looking up IBL cache in IndexedDB ({}/{})", kIdbDbName, kIdbKey);
-    emscripten_idb_async_load(kIdbDbName, kIdbKey, this, &IblCacheLoad::on_load,
-                              &IblCacheLoad::on_error);
+    emscripten_idb_async_load(kIdbDbName, kIdbKey, this, &IblCacheLoad::onLoad,
+                              &IblCacheLoad::onError);
 }
 
 bool IblCacheLoad::poll() { return state_ == State::Hit || state_ == State::Miss; }
 
-void IblCacheLoad::on_load(void *user_data, void *bytes, int size) {
+void IblCacheLoad::onLoad(void *user_data, void *bytes, int size) {
     auto *self = static_cast<IblCacheLoad *>(user_data);
     if (size <= 0 || bytes == nullptr) {
         self->state_ = State::Miss;
         return;
     }
     auto span = std::span{static_cast<const std::byte *>(bytes), static_cast<size_t>(size)};
-    self->data_ = deserialize_ibl_cache(span);
+    self->data_ = deserializeIblCache(span);
     self->state_ = self->data_.has_value() ? State::Hit : State::Miss;
 }
 
-void IblCacheLoad::on_error(void *user_data) {
+void IblCacheLoad::onError(void *user_data) {
     auto *self = static_cast<IblCacheLoad *>(user_data);
     self->state_ = State::Miss;
 }
 
-void save_ibl_cache(const IblBakeData &data) {
-    auto bytes = serialize_ibl_cache(data);
+void saveIblCache(const IblBakeData &data) {
+    auto bytes = serializeIblCache(data);
     std::println("viewer: saving IBL cache to IndexedDB ({}/{}, {} bytes)", kIdbDbName, kIdbKey,
                  bytes.size());
     // emscripten_idb_async_store copies the buffer into JS heap before
@@ -169,7 +169,7 @@ void save_ibl_cache(const IblBakeData &data) {
                                /*onerror=*/nullptr);
 }
 
-void clear_ibl_cache() {
+void clearIblCache() {
     std::println("viewer: clearing IBL cache from IndexedDB ({}/{})", kIdbDbName, kIdbKey);
     emscripten_idb_async_delete(kIdbDbName, kIdbKey,
                                 /*arg=*/nullptr, /*ondelete=*/nullptr,
@@ -183,7 +183,7 @@ void IblCacheLoad::start() {
         return;
     }
     state_ = State::Pending;
-    const auto path = cache_path();
+    const auto path = cachePath();
     std::println("viewer: looking up IBL cache at {}", path.string());
     std::error_code ec;
     if (!std::filesystem::exists(path, ec)) {
@@ -209,14 +209,14 @@ void IblCacheLoad::start() {
         state_ = State::Miss;
         return;
     }
-    data_ = deserialize_ibl_cache(buf);
+    data_ = deserializeIblCache(buf);
     state_ = data_.has_value() ? State::Hit : State::Miss;
 }
 
 bool IblCacheLoad::poll() { return state_ == State::Hit || state_ == State::Miss; }
 
-void save_ibl_cache(const IblBakeData &data) {
-    const auto path = cache_path();
+void saveIblCache(const IblBakeData &data) {
+    const auto path = cachePath();
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     if (ec) {
@@ -224,7 +224,7 @@ void save_ibl_cache(const IblBakeData &data) {
                      ec.message());
         return;
     }
-    auto bytes = serialize_ibl_cache(data);
+    auto bytes = serializeIblCache(data);
     std::println("viewer: saving IBL cache to {} ({} bytes)", path.string(), bytes.size());
     std::ofstream out{path, std::ios::binary | std::ios::trunc};
     if (!out) {
@@ -235,8 +235,8 @@ void save_ibl_cache(const IblBakeData &data) {
               static_cast<std::streamsize>(bytes.size()));
 }
 
-void clear_ibl_cache() {
-    const auto path = cache_path();
+void clearIblCache() {
+    const auto path = cachePath();
     std::error_code ec;
     if (std::filesystem::remove(path, ec)) {
         std::println("viewer: cleared IBL cache at {}", path.string());

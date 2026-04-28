@@ -41,22 +41,22 @@ class AssetSource {
 
     virtual LoadState state() const = 0;
     virtual std::span<const AssetProgress> progress() const = 0;
-    virtual const std::string &error_message() const = 0;
+    virtual const std::string &errorMessage() const = 0;
 
     /// Valid once state() == Ready. Filesystem paths the App should hand to
-    /// build_scene_from_paths. On web these live in MEMFS; on native they
+    /// buildSceneFromPaths. On web these live in MEMFS; on native they
     /// point into the real filesystem (or MEMFS-equivalent for ingested
     /// uploads). May be empty if the source has not yet identified a file
     /// of that role (e.g. accumulator sources waiting on more user input —
     /// in which case state() will not be Ready).
-    virtual const std::filesystem::path &config_path() const = 0;
-    virtual const std::filesystem::path &input_path() const = 0;
+    virtual const std::filesystem::path &configPath() const = 0;
+    virtual const std::filesystem::path &inputPath() const = 0;
 
     /// Optional hook: hand a freshly-acquired local file (from drag-and-drop
     /// or a file picker) to the source. Sources that don't accept user
     /// uploads ignore this. Used by the App to plumb sokol's FILES_DROPPED
     /// event and the NFD picker into the same code path.
-    virtual void ingest_local_file(const std::filesystem::path & /*path*/) {}
+    virtual void ingestLocalFile(const std::filesystem::path & /*path*/) {}
 };
 
 } // namespace nodehammer::viewer

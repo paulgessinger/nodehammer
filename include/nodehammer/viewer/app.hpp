@@ -27,15 +27,15 @@ class App {
     /// reference; safe to drop the local copy afterwards. Pass nullptr to
     /// clear (revert to demo geometry). May be called before or after run();
     /// scene_renderer uploads lazily on the next frame.
-    void set_scene(std::shared_ptr<const RenderScene> scene);
+    void setScene(std::shared_ptr<const RenderScene> scene);
 
     /// Hand the viewer an asset source. Each frame the App polls it; while
     /// Fetching it draws a progress / placeholder panel, and on Ready it
     /// builds the scene from the source's resolved paths and drops the
     /// source. Replacing an in-flight source clears the current scene.
     /// Drag-and-drop and the file picker route through whichever source is
-    /// currently set, via AssetSource::ingest_local_file.
-    void set_source(std::unique_ptr<AssetSource> source);
+    /// currently set, via AssetSource::ingestLocalFile.
+    void setSource(std::unique_ptr<AssetSource> source);
 
     /// Native: blocks until the window closes; returns the exit code.
     /// Emscripten: registers the main loop with the runtime and returns 0

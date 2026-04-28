@@ -15,7 +15,7 @@
 
 using nodehammer::cli::printDiags;
 
-void register_cmd_viewer(CLI::App &app) {
+void registerCmdViewer(CLI::App &app) {
     auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
 
     auto cfg = std::make_shared<nodehammer::viewer::Config>();
@@ -111,15 +111,15 @@ void register_cmd_viewer(CLI::App &app) {
         // Web entry: skip the synchronous build entirely. If both URL params
         // are present, hand the App a UrlAssetSource that will fetch the
         // config (+ its transitive includes) and the geometry; on completion
-        // the App runs build_scene_from_paths against the MEMFS-resident
+        // the App runs buildSceneFromPaths against the MEMFS-resident
         // files. If either is missing, fall back to a LocalFileAssetSource
         // so drag-and-drop / picker still work.
         if (!inputPath.empty() && !configPath.empty()) {
             auto loader = std::make_unique<nodehammer::viewer::UrlAssetSource>();
             loader->start(configPath, inputPath, assetBase);
-            application.set_source(std::move(loader));
+            application.setSource(std::move(loader));
         } else {
-            application.set_source(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
+            application.setSource(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
         }
 #else
         // Native: if --input is supplied, build synchronously before the
@@ -128,7 +128,7 @@ void register_cmd_viewer(CLI::App &app) {
         // the user can drag-and-drop or use the file picker to load a
         // scene from inside the running viewer.
         if (!inputPath.empty()) {
-            auto built = nodehammer::build_scene_from_paths(
+            auto built = nodehammer::buildSceneFromPaths(
                 configPath, inputPath,
                 inputFmt.empty() ? std::nullopt : std::optional<std::string>(inputFmt));
             printDiags(built.diags);
@@ -139,9 +139,9 @@ void register_cmd_viewer(CLI::App &app) {
             std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
                          built.scene->nodes.size(), built.scene->meshAssets.size(),
                          built.scene->materials.size());
-            application.set_scene(std::move(built.scene));
+            application.setScene(std::move(built.scene));
         } else {
-            application.set_source(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
+            application.setSource(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());
         }
 #endif
 

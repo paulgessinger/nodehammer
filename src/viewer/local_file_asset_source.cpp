@@ -12,15 +12,15 @@ namespace {
 // Lowercase ASCII compare for extension recognition. Real path extension
 // comparison should be case-insensitive (a user-dropped FOO.TOML is still
 // a config). Cheap homemade variant — std::tolower depends on locale.
-char ascii_lower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
+char asciiLower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
 
-bool ext_equals(const std::filesystem::path &p, std::string_view want) {
+bool extEquals(const std::filesystem::path &p, std::string_view want) {
     const auto ext = p.extension().string();
     if (ext.size() != want.size() + 1 || ext[0] != '.') {
         return false;
     }
     for (size_t i = 0; i < want.size(); ++i) {
-        if (ascii_lower(ext[i + 1]) != want[i]) {
+        if (asciiLower(ext[i + 1]) != want[i]) {
             return false;
         }
     }
@@ -35,29 +35,29 @@ struct LocalFileAssetSource::Impl {
     std::filesystem::path config_path;
     std::filesystem::path input_path;
     std::vector<AssetProgress> entries;
-    std::string last_unrecognised;
+    std::string lastUnrecognised;
 
     // Cached importer registry for extension probing. Constructing it once
     // avoids re-registering every importer on each dropped file.
     ImporterRegistry registry{ImporterRegistry::makeDefault()};
 
-    bool has_config() const { return !config_path.empty(); }
-    bool has_input() const { return !input_path.empty(); }
+    bool hasConfig() const { return !config_path.empty(); }
+    bool hasInput() const { return !input_path.empty(); }
 
-    void recompute_state() {
+    void recomputeState() {
         if (state == LoadState::Error) {
             return;
         }
-        if (has_config() && has_input()) {
+        if (hasConfig() && hasInput()) {
             state = LoadState::Ready;
-        } else if (has_config() || has_input()) {
+        } else if (hasConfig() || hasInput()) {
             state = LoadState::Fetching; // "still accumulating"
         } else {
             state = LoadState::Idle;
         }
     }
 
-    void record_entry(const std::filesystem::path &path) {
+    void recordEntry(const std::filesystem::path &path) {
         // bytes_total / bytes_done left at 0 — local files are effectively
         // instant; the UI just shows the filename. If we ever want to read
         // them through a streaming layer we can fill these in.
@@ -73,10 +73,10 @@ struct LocalFileAssetSource::Impl {
 LocalFileAssetSource::LocalFileAssetSource() : impl_(std::make_unique<Impl>()) {}
 LocalFileAssetSource::~LocalFileAssetSource() = default;
 
-bool LocalFileAssetSource::needs_config() const { return !impl_->has_config(); }
-bool LocalFileAssetSource::needs_input() const { return !impl_->has_input(); }
-const std::string &LocalFileAssetSource::last_unrecognised() const {
-    return impl_->last_unrecognised;
+bool LocalFileAssetSource::needsConfig() const { return !impl_->hasConfig(); }
+bool LocalFileAssetSource::needsInput() const { return !impl_->hasInput(); }
+const std::string &LocalFileAssetSource::lastUnrecognised() const {
+    return impl_->lastUnrecognised;
 }
 
 void LocalFileAssetSource::poll() {}
@@ -87,23 +87,21 @@ std::span<const AssetProgress> LocalFileAssetSource::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
 }
 
-const std::string &LocalFileAssetSource::error_message() const { return impl_->error; }
-const std::filesystem::path &LocalFileAssetSource::config_path() const {
-    return impl_->config_path;
-}
-const std::filesystem::path &LocalFileAssetSource::input_path() const { return impl_->input_path; }
+const std::string &LocalFileAssetSource::errorMessage() const { return impl_->error; }
+const std::filesystem::path &LocalFileAssetSource::configPath() const { return impl_->config_path; }
+const std::filesystem::path &LocalFileAssetSource::inputPath() const { return impl_->input_path; }
 
-void LocalFileAssetSource::ingest_local_file(const std::filesystem::path &path) {
+void LocalFileAssetSource::ingestLocalFile(const std::filesystem::path &path) {
     if (path.empty()) {
         return;
     }
 
     // 1) Config: any .toml file fills the config slot.
-    if (ext_equals(path, "toml")) {
+    if (extEquals(path, "toml")) {
         impl_->config_path = path;
-        impl_->last_unrecognised.clear();
-        impl_->record_entry(path);
-        impl_->recompute_state();
+        impl_->lastUnrecognised.clear();
+        impl_->recordEntry(path);
+        impl_->recomputeState();
         return;
     }
 
@@ -112,14 +110,14 @@ void LocalFileAssetSource::ingest_local_file(const std::filesystem::path &path) 
     //    a new geometry format is purely an importer change.
     if (impl_->registry.resolve(path, {}) != nullptr) {
         impl_->input_path = path;
-        impl_->last_unrecognised.clear();
-        impl_->record_entry(path);
-        impl_->recompute_state();
+        impl_->lastUnrecognised.clear();
+        impl_->recordEntry(path);
+        impl_->recomputeState();
         return;
     }
 
     // 3) Unrecognised: stash the filename so the UI can hint at it.
-    impl_->last_unrecognised = path.filename().string();
+    impl_->lastUnrecognised = path.filename().string();
 }
 
 } // namespace nodehammer::viewer

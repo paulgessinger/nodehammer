@@ -10,7 +10,7 @@
 #include <print>
 #include <string>
 
-void register_cmd_config_flatten(CLI::App &app) {
+void registerCmdConfigFlatten(CLI::App &app) {
     auto *sub = app.add_subcommand(
         "config-flatten", "Inline all `include = [...]` references into a single self-contained "
                           "TOML file. Output is round-trippable through ConfigLoader.");

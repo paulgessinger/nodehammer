@@ -16,7 +16,7 @@ constexpr float k_min_near = 1e-3f;
 constexpr float k_min_distance = 1e-4f;
 
 // Wrap into (-π, π].
-float wrap_pi(float a) {
+float wrapPi(float a) {
     constexpr float pi = std::numbers::pi_v<float>;
     constexpr float two_pi = 2.f * pi;
     if (!std::isfinite(a)) {
@@ -30,26 +30,26 @@ float wrap_pi(float a) {
 }
 
 // Replace non-finite with a fallback; otherwise return v.
-float finite_or(float v, float fallback) { return std::isfinite(v) ? v : fallback; }
+float finiteOr(float v, float fallback) { return std::isfinite(v) ? v : fallback; }
 } // namespace
 
 bool Camera::sanitize() {
     const Camera before = *this;
 
-    target.x = finite_or(target.x, 0.f);
-    target.y = finite_or(target.y, 0.f);
-    target.z = finite_or(target.z, 0.f);
+    target.x = finiteOr(target.x, 0.f);
+    target.y = finiteOr(target.y, 0.f);
+    target.z = finiteOr(target.z, 0.f);
 
-    distance = finite_or(distance, 10.f);
+    distance = finiteOr(distance, 10.f);
     distance = std::max(distance, k_min_distance);
 
-    yaw = wrap_pi(yaw);
-    pitch = std::clamp(finite_or(pitch, 0.f), -k_pitch_limit, k_pitch_limit);
+    yaw = wrapPi(yaw);
+    pitch = std::clamp(finiteOr(pitch, 0.f), -k_pitch_limit, k_pitch_limit);
 
-    fov_deg = std::clamp(finite_or(fov_deg, 55.f), k_fov_min_deg, k_fov_max_deg);
+    fov_deg = std::clamp(finiteOr(fov_deg, 55.f), k_fov_min_deg, k_fov_max_deg);
 
-    near_plane = std::max(finite_or(near_plane, 0.05f), k_min_near);
-    far_plane = finite_or(far_plane, 1000.f);
+    near_plane = std::max(finiteOr(near_plane, 0.05f), k_min_near);
+    far_plane = finiteOr(far_plane, 1000.f);
     if (far_plane <= near_plane) {
         far_plane = near_plane * 1000.f;
     }
@@ -98,7 +98,7 @@ glm::mat4 Camera::proj(float aspect, bool homogeneous_depth, bool reversed_z) co
 }
 
 void Camera::orbit(float dx_radians, float dy_radians) {
-    yaw = wrap_pi(yaw - dx_radians);
+    yaw = wrapPi(yaw - dx_radians);
     pitch = std::clamp(pitch + dy_radians, -k_pitch_limit, k_pitch_limit);
 }
 
@@ -134,7 +134,7 @@ void Camera::pan(float dx_world, float dy_world) {
     target += right * dx_world + up * dy_world;
 }
 
-float Camera::frame_bounds(const glm::vec3 &min, const glm::vec3 &max, float margin) {
+float Camera::frameBounds(const glm::vec3 &min, const glm::vec3 &max, float margin) {
     const glm::vec3 centre = 0.5f * (min + max);
     const glm::vec3 extent = 0.5f * (max - min);
     const float radius = std::max({extent.x, extent.y, extent.z, 1.f});

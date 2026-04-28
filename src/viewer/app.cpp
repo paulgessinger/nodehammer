@@ -110,7 +110,7 @@ static constexpr bool kIsEmscripten =
     false;
 #endif
 
-float wrap_degrees(float angle) {
+float wrapDegrees(float angle) {
     angle = std::fmod(angle, 360.f);
     if (angle < 0.f) {
         angle += 360.f;
@@ -118,7 +118,7 @@ float wrap_degrees(float angle) {
     return angle;
 }
 
-std::string format_url_float(float value) {
+std::string formatUrlFloat(float value) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(3) << value;
     std::string s = out.str();
@@ -131,7 +131,7 @@ std::string format_url_float(float value) {
     return s == "-0" ? "0" : s;
 }
 
-void append_url_param(std::string &query, std::string_view name, std::string_view value) {
+void appendUrlParam(std::string &query, std::string_view name, std::string_view value) {
     if (!query.empty()) {
         query.push_back('&');
     }
@@ -140,15 +140,15 @@ void append_url_param(std::string &query, std::string_view name, std::string_vie
     query.append(value);
 }
 
-void append_url_bool(std::string &query, std::string_view name, bool value, bool default_value) {
+void appendUrlBool(std::string &query, std::string_view name, bool value, bool default_value) {
     if (value != default_value) {
-        append_url_param(query, name, value ? "1" : "0");
+        appendUrlParam(query, name, value ? "1" : "0");
     }
 }
 
-void append_url_float(std::string &query, std::string_view name, float value, float default_value) {
+void appendUrlFloat(std::string &query, std::string_view name, float value, float default_value) {
     if (std::abs(value - default_value) >= 0.0001f) {
-        append_url_param(query, name, format_url_float(value));
+        appendUrlParam(query, name, formatUrlFloat(value));
     }
 }
 
@@ -192,14 +192,14 @@ struct App::Impl {
     // Web upload glue (file picker EM_JS shim and the drop-bytes fetch
     // callback) need a way to call back into the App from JS / sokol.
     // There is exactly one App alive per page lifetime, so a single static
-    // pointer suffices. on_init sets it; on_cleanup clears it.
+    // pointer suffices. onInit sets it; onCleanup clears it.
     static Impl *active;
 
     // Materialise an in-memory file into MEMFS at /uploads/<filename>,
     // then route it through the LocalFileAssetSource. Auto-creates a
     // LocalFileAssetSource if none is currently set so a fresh page that
     // started in upload-only mode can still receive a drop.
-    void deliver_upload(const std::string &filename, const std::uint8_t *data, std::size_t size);
+    void deliverUpload(const std::string &filename, const std::uint8_t *data, std::size_t size);
 #endif
 
     // Stashed message after a build failure (so the UI can keep showing it
@@ -209,7 +209,7 @@ struct App::Impl {
     // True when the imgui "Open files…" button was clicked this frame.
     // The actual NFD modal must run AFTER the imgui frame finishes — it
     // enters a nested Cocoa runloop that fires sokol's display link while
-    // the modal is up, which would re-enter on_frame and double up
+    // the modal is up, which would re-enter onFrame and double up
     // ImGui::NewFrame / ImGui::Begin (corrupting the outer frame's window
     // stack and crashing in the next ImGui::End). Deferring to after
     // render() means any re-entries land cleanly between frames.
@@ -239,26 +239,26 @@ struct App::Impl {
 
     explicit Impl(Config c) : cfg(std::move(c)) {}
 
-    void on_init();
-    void on_frame();
-    void on_event(const sapp_event *ev);
-    void on_cleanup();
+    void onInit();
+    void onFrame();
+    void onEvent(const sapp_event *ev);
+    void onCleanup();
 
-    void update_camera_input();
-    void apply_initial_camera();
+    void updateCameraInput();
+    void applyInitialCamera();
     void render();
-    void sync_browser_url() const;
-    [[nodiscard]] std::string browser_url_state_query() const;
+    void syncBrowserUrl() const;
+    [[nodiscard]] std::string browserUrlStateQuery() const;
 
-    static void init_cb(void *user) { static_cast<Impl *>(user)->on_init(); }
-    static void frame_cb(void *user) { static_cast<Impl *>(user)->on_frame(); }
-    static void event_cb(const sapp_event *ev, void *user) {
-        static_cast<Impl *>(user)->on_event(ev);
+    static void initCb(void *user) { static_cast<Impl *>(user)->onInit(); }
+    static void frameCb(void *user) { static_cast<Impl *>(user)->onFrame(); }
+    static void eventCb(const sapp_event *ev, void *user) {
+        static_cast<Impl *>(user)->onEvent(ev);
     }
-    static void cleanup_cb(void *user) { static_cast<Impl *>(user)->on_cleanup(); }
+    static void cleanupCb(void *user) { static_cast<Impl *>(user)->onCleanup(); }
 };
 
-void App::Impl::on_init() {
+void App::Impl::onInit() {
     sg_desc gfx_desc{};
     gfx_desc.environment = sglue_environment();
     gfx_desc.logger.func = slog_func;
@@ -274,7 +274,7 @@ void App::Impl::on_init() {
 
     // Kick off the IBL bake (or cache load) immediately. The renderer is
     // initialised with 1×1 placeholder IBL textures so it can render before
-    // the bake completes; on_frame swaps in the real result once either
+    // the bake completes; onFrame swaps in the real result once either
     // the cache load resolves with a hit, or `ibl_job.advance` returns true.
     scene_renderer.initialize();
     ibl_start_time = std::chrono::steady_clock::now();
@@ -314,26 +314,26 @@ struct WebDropCtx {
     App::Impl *self;
 };
 
-void web_drop_fetch_callback(const sapp_html5_fetch_response *response) {
+void webDropFetchCallback(const sapp_html5_fetch_response *response) {
     auto *ctx = static_cast<WebDropCtx *>(response->user_data);
     if (response->succeeded) {
-        ctx->self->deliver_upload(ctx->filename, ctx->buffer.data(),
-                                  static_cast<std::size_t>(response->data.size));
+        ctx->self->deliverUpload(ctx->filename, ctx->buffer.data(),
+                                 static_cast<std::size_t>(response->data.size));
     } else {
         std::println(stderr, "viewer: failed to fetch dropped file '{}'", ctx->filename);
     }
     delete ctx;
 }
 
-void make_uploads_dir() {
+void makeUploadsDir() {
     // EEXIST is the success case for re-runs.
     ::mkdir("/uploads", 0755);
 }
 
 } // namespace
 
-void App::Impl::deliver_upload(const std::string &filename, const std::uint8_t *data,
-                               std::size_t size) {
+void App::Impl::deliverUpload(const std::string &filename, const std::uint8_t *data,
+                              std::size_t size) {
     if (!source) {
         source = std::make_unique<LocalFileAssetSource>();
         scene.reset();
@@ -341,7 +341,7 @@ void App::Impl::deliver_upload(const std::string &filename, const std::uint8_t *
         camera_framed = false;
         build_error.clear();
     }
-    make_uploads_dir();
+    makeUploadsDir();
     const std::string path = "/uploads/" + filename;
     std::FILE *f = std::fopen(path.c_str(), "wb");
     if (f == nullptr) {
@@ -354,7 +354,7 @@ void App::Impl::deliver_upload(const std::string &filename, const std::uint8_t *
         std::println(stderr, "viewer: short write delivering '{}'", path);
         return;
     }
-    source->ingest_local_file(std::filesystem::path{path});
+    source->ingestLocalFile(std::filesystem::path{path});
 }
 
 #endif // __EMSCRIPTEN__
@@ -367,13 +367,13 @@ void nh_viewer_deliver_upload(const char *filename, const std::uint8_t *data, st
     if (App::Impl::active == nullptr || filename == nullptr) {
         return;
     }
-    App::Impl::active->deliver_upload(filename, data, size);
+    App::Impl::active->deliverUpload(filename, data, size);
 }
 #endif
 
 } // extern "C"
 
-void App::Impl::on_event(const sapp_event *ev) {
+void App::Impl::onEvent(const sapp_event *ev) {
     ImGui_ImplSokol_HandleEvent(ev);
     if (ev->type == SAPP_EVENTTYPE_FOCUSED) {
         window_focused = true;
@@ -408,7 +408,7 @@ void App::Impl::on_event(const sapp_event *ev) {
             // On web, sapp_get_dropped_file_path returns just the filename
             // (no real path) and the bytes have to be fetched asynchronously
             // via FileReader. Allocate a buffer of the right size, kick off
-            // the fetch, and route the bytes through deliver_upload when
+            // the fetch, and route the bytes through deliverUpload when
             // the callback fires.
             const std::uint64_t size = sapp_html5_get_dropped_file_size(i);
             auto *ctx = new WebDropCtx;
@@ -417,18 +417,18 @@ void App::Impl::on_event(const sapp_event *ev) {
             ctx->self = this;
             sapp_html5_fetch_request req{};
             req.dropped_file_index = i;
-            req.callback = &web_drop_fetch_callback;
+            req.callback = &webDropFetchCallback;
             req.buffer = sapp_range{ctx->buffer.data(), ctx->buffer.size()};
             req.user_data = ctx;
             sapp_html5_fetch_dropped_file(&req);
 #else
-            source->ingest_local_file(std::filesystem::path{sapp_get_dropped_file_path(i)});
+            source->ingestLocalFile(std::filesystem::path{sapp_get_dropped_file_path(i)});
 #endif
         }
     }
 }
 
-void App::Impl::update_camera_input() {
+void App::Impl::updateCameraInput() {
     if (!scene) {
         return;
     }
@@ -452,7 +452,7 @@ void App::Impl::update_camera_input() {
     }
 }
 
-void App::Impl::apply_initial_camera() {
+void App::Impl::applyInitialCamera() {
     if (!cfg.initial_camera.has_value()) {
         return;
     }
@@ -470,10 +470,10 @@ void App::Impl::render() {
     // Drive the chunked GPU upload BEFORE sg_begin_pass so any new sokol
     // buffer creation isn't tangled up with the active swapchain pass.
     if (scene && !scene_uploaded) {
-        if (!scene_renderer.upload_in_progress()) {
-            scene_renderer.begin_upload(scene);
+        if (!scene_renderer.uploadInProgress()) {
+            scene_renderer.beginUpload(scene);
         }
-        if (scene_renderer.advance_upload()) {
+        if (scene_renderer.advanceUpload()) {
             scene_uploaded = true;
         }
     }
@@ -490,9 +490,9 @@ void App::Impl::render() {
     if (scene && scene_uploaded) {
         if (!camera_framed) {
             glm::vec3 bmin{0.f}, bmax{0.f};
-            if (scene_renderer.world_bounds(bmin, bmax)) {
-                scene_radius = camera.frame_bounds(bmin, bmax);
-                apply_initial_camera();
+            if (scene_renderer.worldBounds(bmin, bmax)) {
+                scene_radius = camera.frameBounds(bmin, bmax);
+                applyInitialCamera();
                 camera_framed = true;
             }
         }
@@ -515,29 +515,29 @@ void App::Impl::render() {
     render_submit_ms = stm_sec(stm_diff(stm_now(), render_submit_start)) * 1000.0;
 }
 
-std::string App::Impl::browser_url_state_query() const {
+std::string App::Impl::browserUrlStateQuery() const {
     std::string query;
-    append_url_bool(query, "cullBack", cfg.cull_back, true);
-    append_url_bool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
-    append_url_bool(query, "autoOrbit", cfg.auto_orbit, false);
-    append_url_float(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
-    append_url_bool(query, "angleCut", cfg.angle_cut, false);
-    append_url_bool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
-    append_url_float(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
-    append_url_float(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
-    append_url_bool(query, "pbr", cfg.enable_pbr, true);
-    append_url_param(query, "cameraTargetX", format_url_float(camera.target.x));
-    append_url_param(query, "cameraTargetY", format_url_float(camera.target.y));
-    append_url_param(query, "cameraTargetZ", format_url_float(camera.target.z));
-    append_url_param(query, "cameraDistance", format_url_float(camera.distance));
-    append_url_param(query, "cameraYaw", format_url_float(glm::degrees(camera.yaw)));
-    append_url_param(query, "cameraPitch", format_url_float(glm::degrees(camera.pitch)));
+    appendUrlBool(query, "cullBack", cfg.cull_back, true);
+    appendUrlBool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
+    appendUrlBool(query, "autoOrbit", cfg.auto_orbit, false);
+    appendUrlFloat(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
+    appendUrlBool(query, "angleCut", cfg.angle_cut, false);
+    appendUrlBool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
+    appendUrlFloat(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
+    appendUrlFloat(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
+    appendUrlBool(query, "pbr", cfg.enable_pbr, true);
+    appendUrlParam(query, "cameraTargetX", formatUrlFloat(camera.target.x));
+    appendUrlParam(query, "cameraTargetY", formatUrlFloat(camera.target.y));
+    appendUrlParam(query, "cameraTargetZ", formatUrlFloat(camera.target.z));
+    appendUrlParam(query, "cameraDistance", formatUrlFloat(camera.distance));
+    appendUrlParam(query, "cameraYaw", formatUrlFloat(glm::degrees(camera.yaw)));
+    appendUrlParam(query, "cameraPitch", formatUrlFloat(glm::degrees(camera.pitch)));
     return query;
 }
 
-void App::Impl::sync_browser_url() const {
+void App::Impl::syncBrowserUrl() const {
     if constexpr (kIsEmscripten) {
-        const std::string state_query = browser_url_state_query();
+        const std::string state_query = browserUrlStateQuery();
         constexpr const char *managed_keys =
             "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
             "cutEnd,"
@@ -546,7 +546,7 @@ void App::Impl::sync_browser_url() const {
     }
 }
 
-void App::Impl::on_frame() {
+void App::Impl::onFrame() {
     // Drive the procedural IBL bake to completion. On native this is a
     // single-flag poll (the bake runs on a worker thread); on web this
     // spends up to ~8 ms doing pixel work on the main thread. We don't
@@ -559,7 +559,7 @@ void App::Impl::on_frame() {
             // IndexedDB get round-trips through the JS event loop.
             if (ibl_cache_load.poll()) {
                 if (auto cached = ibl_cache_load.take()) {
-                    scene_renderer.install_ibl(*cached);
+                    scene_renderer.installIbl(*cached);
                     ibl_installed = true;
                     ibl_cache_hit = true;
                     const auto elapsed_ms = std::chrono::duration<double, std::milli>(
@@ -579,8 +579,8 @@ void App::Impl::on_frame() {
             // Persist before installing so we don't pay the wait twice if
             // the user reloads while the bake is technically "live" on GPU
             // but not yet flushed to disk / IDB.
-            save_ibl_cache(data);
-            scene_renderer.install_ibl(data);
+            saveIblCache(data);
+            scene_renderer.installIbl(data);
             ibl_installed = true;
             const auto elapsed_ms = std::chrono::duration<double, std::milli>(
                                         std::chrono::steady_clock::now() - ibl_start_time)
@@ -661,7 +661,7 @@ void App::Impl::on_frame() {
     ImGui_ImplSokol_NewFrame(static_cast<int>(fb_width), static_cast<int>(fb_height), delta_seconds,
                              sapp_dpi_scale());
 
-    update_camera_input();
+    updateCameraInput();
     if (scene && cfg.auto_orbit) {
         camera.orbit(glm::radians(cfg.auto_orbit_speed_deg) * static_cast<float>(delta_seconds),
                      0.f);
@@ -708,7 +708,7 @@ void App::Impl::on_frame() {
                 render_submit_ms, scene_submit_ms);
     if constexpr (kIsEmscripten) {
         if (ImGui::Button("Commit settings to URL")) {
-            sync_browser_url();
+            syncBrowserUrl();
         }
     }
     ImGui::Checkbox("throttle when unfocused", &cfg.pause_when_unfocused);
@@ -721,7 +721,7 @@ void App::Impl::on_frame() {
     // the live GPU IBL — only takes effect on the next page load / launch,
     // which then re-bakes from scratch.
     if (ImGui::Button("Clear IBL cache")) {
-        clear_ibl_cache();
+        clearIblCache();
     }
     if (source && !scene) {
         ImGui::Separator();
@@ -729,14 +729,14 @@ void App::Impl::on_frame() {
         const auto state = source->state();
         if (state == LoadState::Error) {
             ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
-            ImGui::TextWrapped("%s", source->error_message().c_str());
+            ImGui::TextWrapped("%s", source->errorMessage().c_str());
         } else if (state == LoadState::Ready) {
             // Hand the paths to the build job. Native immediately spawns
             // a worker thread; web defers the synchronous build by one
             // poll so this frame's "Tessellating…" UI paints first.
             if (!build_in_progress) {
                 build_start_time = std::chrono::steady_clock::now();
-                build_job.start(source->config_path(), source->input_path());
+                build_job.start(source->configPath(), source->inputPath());
                 build_in_progress = true;
             }
             switch (build_job.phase()) {
@@ -744,8 +744,8 @@ void App::Impl::on_frame() {
                 ImGui::Text("Loading config and importing geometry…");
                 break;
             case SceneBuildJob::Phase::Tessellating: {
-                const auto total = build_job.tessellation_total();
-                const auto processed = build_job.tessellation_processed();
+                const auto total = build_job.tessellationTotal();
+                const auto processed = build_job.tessellationProcessed();
                 if (total > 0) {
                     ImGui::Text("Tessellating… (%zu / %zu nodes)", processed, total);
                     const float frac = static_cast<float>(processed) / static_cast<float>(total);
@@ -791,15 +791,15 @@ void App::Impl::on_frame() {
             // Accumulator-source-specific hints: list which slot is still
             // empty and surface any unrecognised filenames.
             if (auto *local = dynamic_cast<LocalFileAssetSource *>(source.get())) {
-                if (local->needs_config()) {
+                if (local->needsConfig()) {
                     ImGui::Text("Still waiting for: a .toml config");
                 }
-                if (local->needs_input()) {
+                if (local->needsInput()) {
                     ImGui::Text("Still waiting for: a geometry file (.nhb.zst, .gdml, .gltf, …)");
                 }
-                if (!local->last_unrecognised().empty()) {
+                if (!local->lastUnrecognised().empty()) {
                     ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f}, "Don't know what to do with: %s",
-                                       local->last_unrecognised().c_str());
+                                       local->lastUnrecognised().c_str());
                 }
             }
             if (ImGui::Button("Open files…")) {
@@ -828,17 +828,17 @@ void App::Impl::on_frame() {
 
     if (scene) {
         ImGui::Separator();
-        ImGui::Text("Meshes: %u", scene_renderer.mesh_asset_count());
-        ImGui::Text("Nodes: %u", scene_renderer.node_count());
+        ImGui::Text("Meshes: %u", scene_renderer.meshAssetCount());
+        ImGui::Text("Nodes: %u", scene_renderer.nodeCount());
         ImGui::Text("Tris (scene): %llu",
-                    static_cast<unsigned long long>(scene_renderer.triangle_count()));
-        const auto fs = scene_renderer.last_frame_stats();
+                    static_cast<unsigned long long>(scene_renderer.triangleCount()));
+        const auto fs = scene_renderer.lastFrameStats();
         ImGui::Text("Draw calls: %u  Instances: %u  Tris/frame: %llu", fs.draw_calls, fs.instances,
                     static_cast<unsigned long long>(fs.triangles));
         if (ImGui::Button("Frame scene")) {
             glm::vec3 bmin{0.f}, bmax{0.f};
-            if (scene_renderer.world_bounds(bmin, bmax)) {
-                scene_radius = camera.frame_bounds(bmin, bmax);
+            if (scene_renderer.worldBounds(bmin, bmax)) {
+                scene_radius = camera.frameBounds(bmin, bmax);
             }
         }
         ImGui::Separator();
@@ -851,13 +851,13 @@ void App::Impl::on_frame() {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
         if (ImGui::InputFloat("##cut_start_input", &cfg.angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
-            cfg.angle_cut_start_deg = wrap_degrees(cfg.angle_cut_start_deg);
+            cfg.angle_cut_start_deg = wrapDegrees(cfg.angle_cut_start_deg);
         }
         ImGui::SliderFloat("cut end", &cfg.angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(80.f);
         if (ImGui::InputFloat("##cut_end_input", &cfg.angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
-            cfg.angle_cut_end_deg = wrap_degrees(cfg.angle_cut_end_deg);
+            cfg.angle_cut_end_deg = wrapDegrees(cfg.angle_cut_end_deg);
         }
         ImGui::Separator();
         ImGui::Checkbox("PBR / IBL", &cfg.enable_pbr);
@@ -892,7 +892,7 @@ void App::Impl::on_frame() {
             for (nfdpathsetsize_t i = 0; i < count; ++i) {
                 NFD::UniquePathSetPathU8 path;
                 if (NFD::PathSet::GetPath(picked, i, path) == NFD_OKAY) {
-                    source->ingest_local_file(std::filesystem::path{path.get()});
+                    source->ingestLocalFile(std::filesystem::path{path.get()});
                 }
             }
         }
@@ -900,7 +900,7 @@ void App::Impl::on_frame() {
 #endif
 }
 
-void App::Impl::on_cleanup() {
+void App::Impl::onCleanup() {
     scene_renderer.release();
     // simgui_shutdown destroys the ImGui context — don't call
     // ImGui::DestroyContext separately (double-free crash on macOS quit).
@@ -911,13 +911,13 @@ void App::Impl::on_cleanup() {
 #endif
 }
 
-void App::set_scene(std::shared_ptr<const RenderScene> scene) {
+void App::setScene(std::shared_ptr<const RenderScene> scene) {
     impl_->scene = std::move(scene);
     impl_->scene_uploaded = false;
     impl_->camera_framed = false;
 }
 
-void App::set_source(std::unique_ptr<AssetSource> source) {
+void App::setSource(std::unique_ptr<AssetSource> source) {
     impl_->source = std::move(source);
     // Replacing a source mid-session clears the current scene so the
     // placeholder UI can take over while the new source resolves.
@@ -934,10 +934,10 @@ App::~App() = default;
 int App::run() {
     sapp_desc desc{};
     desc.user_data = impl_.get();
-    desc.init_userdata_cb = &Impl::init_cb;
-    desc.frame_userdata_cb = &Impl::frame_cb;
-    desc.event_userdata_cb = &Impl::event_cb;
-    desc.cleanup_userdata_cb = &Impl::cleanup_cb;
+    desc.init_userdata_cb = &Impl::initCb;
+    desc.frame_userdata_cb = &Impl::frameCb;
+    desc.event_userdata_cb = &Impl::eventCb;
+    desc.cleanup_userdata_cb = &Impl::cleanupCb;
     desc.width = static_cast<int>(impl_->cfg.width);
     desc.height = static_cast<int>(impl_->cfg.height);
     desc.window_title = impl_->cfg.title.c_str();

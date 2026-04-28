@@ -186,7 +186,7 @@ void printRichTree(const nodehammer::SemanticScene &scene, int maxDepth, const s
 
 } // namespace
 
-void register_cmd_dump_semantic(CLI::App &app) {
+void registerCmdDumpSemantic(CLI::App &app) {
     auto *sub = app.add_subcommand("dump-semantic", "Dump the semantic IR of a geometry");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");

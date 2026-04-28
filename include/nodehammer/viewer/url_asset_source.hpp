@@ -34,9 +34,9 @@ class UrlAssetSource final : public AssetSource {
     void poll() override;
     LoadState state() const override;
     std::span<const AssetProgress> progress() const override;
-    const std::string &error_message() const override;
-    const std::filesystem::path &config_path() const override;
-    const std::filesystem::path &input_path() const override;
+    const std::string &errorMessage() const override;
+    const std::filesystem::path &configPath() const override;
+    const std::filesystem::path &inputPath() const override;
 
   private:
     struct Impl;
