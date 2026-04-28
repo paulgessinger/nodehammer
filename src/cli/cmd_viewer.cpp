@@ -62,10 +62,14 @@ void register_cmd_viewer(CLI::App &app) {
     auto *fmtInOpt =
         sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
+    auto *assetBaseOpt = sub->add_option(
+        "--asset-base", "URL prefix prepended to --input/--config when fetching (web only). "
+                        "Set this when the viewer is hosted under a sub-path so MEMFS paths "
+                        "stay rooted but downloads resolve under the document directory.");
 
     sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, inputOpt, fmtInOpt, configOpt]() {
+                   cameraPitchOpt, inputOpt, fmtInOpt, configOpt, assetBaseOpt]() {
         const bool hasCameraOption = *cameraTargetXOpt || *cameraTargetYOpt || *cameraTargetZOpt ||
                                      *cameraDistanceOpt || *cameraYawOpt || *cameraPitchOpt;
         const bool hasAllCameraOptions = *cameraTargetXOpt && *cameraTargetYOpt &&
@@ -87,7 +91,7 @@ void register_cmd_viewer(CLI::App &app) {
             cfg->initial_camera = *initialCamera;
         }
 
-        std::string inputPath, configPath, inputFmt;
+        std::string inputPath, configPath, inputFmt, assetBase;
         if (*inputOpt) {
             inputOpt->results(inputPath);
         }
@@ -96,6 +100,9 @@ void register_cmd_viewer(CLI::App &app) {
         }
         if (fmtInOpt != nullptr && *fmtInOpt) {
             fmtInOpt->results(inputFmt);
+        }
+        if (assetBaseOpt != nullptr && *assetBaseOpt) {
+            assetBaseOpt->results(assetBase);
         }
 
         nodehammer::viewer::App application(*cfg);
@@ -109,7 +116,7 @@ void register_cmd_viewer(CLI::App &app) {
         // so drag-and-drop / picker still work.
         if (!inputPath.empty() && !configPath.empty()) {
             auto loader = std::make_unique<nodehammer::viewer::UrlAssetSource>();
-            loader->start(configPath, inputPath);
+            loader->start(configPath, inputPath, assetBase);
             application.set_source(std::move(loader));
         } else {
             application.set_source(std::make_unique<nodehammer::viewer::LocalFileAssetSource>());

@@ -35,8 +35,10 @@ class Nodehammer(ConanFile):
         self.requires("manifold/3.2.1")
         # Viewer-only runtime deps. PlatformFolders is used by the IBL cache
         # to resolve the OS-appropriate cache directory on native; not needed
-        # on web (IndexedDB) and not needed for the CLI build.
-        if self.options.viewer:
+        # on web (IndexedDB) and not needed for the CLI build. Skip under
+        # Emscripten — the wasm viewer never links it and the package fails
+        # to build for that target anyway.
+        if self.options.viewer and self.settings.os != "Emscripten":
             self.requires("platformfolders/4.3.0")
         # The sokol headers are header-only and come from FetchContent
         # (cmake/Sokol.cmake); no SDL3 — sokol_app owns the window/event loop

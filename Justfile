@@ -104,6 +104,29 @@ wasm-set *args: _require-emsdk
 
 wasm: wasm-deps wasm-configure wasm-build wasm-test
 
+# Release wasm build: -Oz + LTO + closure + assertions stripped. Slower link,
+# smaller .wasm/.js, harder-to-read browser stack traces. Use for shipping.
+wasm-deps-release: _require-emsdk recipes
+    conan install . \
+        -pr:h profiles/emscripten \
+        -pr:b default \
+        -s build_type=Release \
+        -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
+        --build=missing \
+        -o '&:viewer=True'
+
+wasm-configure-release *args: _require-emsdk
+    cmake --preset conan-emscripten-release --fresh \
+        -GNinja \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DNODEHAMMER_WITH_VIEWER=ON \
+        -DNODEHAMMER_BUILD_TESTS=ON {{args}}
+
+wasm-build-release: _require-emsdk
+    cmake --build --preset conan-emscripten-release
+
+wasm-release: wasm-deps-release wasm-configure-release wasm-build-release
+
 # Serve the wasm viewer locally. Browsers refuse to load .wasm from file://,
 # so we need a real http server. The static viewer.html shell probes
 # navigator.gpu and dynamically loads either nodehammer-gles3.{js,wasm}
@@ -133,8 +156,9 @@ wasm-serve scene='odd' port='8000':
     cd "$dir" && exec python3 -m http.server {{port}}
 
 # Copy the same static viewer payload that `wasm-serve` exposes into a
-# self-contained directory. The target may be relative to the repo root or
-# absolute.
+# self-contained directory, sourced from the Release wasm build. The target
+# may be relative to the repo root or absolute. Build the Release wasm first
+# with `just wasm-release`.
 #
 # Usage:
 #   just wasm-copy                         # copy ODD autoload bundle to build/wasm-viewer
@@ -144,7 +168,8 @@ wasm-copy scene='odd' target='build/wasm-viewer':
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{justfile_directory()}}"
-    mapfile -t staged < <("$root/scripts/stage_wasm_viewer.sh" copy "{{scene}}" "{{target}}")
+    src="$root/build/emscripten/Release"
+    mapfile -t staged < <("$root/scripts/stage_wasm_viewer.sh" copy "{{scene}}" "{{target}}" "$src")
     out="${staged[0]}"
     mode="${staged[1]}"
 

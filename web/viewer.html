@@ -53,7 +53,16 @@
         //   }
         // `defaults` keys mirror the query-param names parsed below; they
         // are merged into params before parsing, so query params always win.
-        fetch('nh_manifest.json', { cache: 'no-store' })
+        // Directory of the current document, including trailing slash. Used
+        // for the manifest fetch (browser-relative) and stripped of its
+        // trailing slash to form `--asset-base` for the C++ side, which
+        // prepends it to MEMFS paths at fetch time only. This lets the
+        // viewer host under arbitrary sub-paths (e.g. /foo/bar/) while the
+        // MEMFS layout (and config-include resolution) stays rooted at /.
+        var basePath = window.location.pathname.replace(/[^/]*$/, '');
+        var assetBase = basePath.replace(/\/$/, '');
+
+        fetch(basePath + 'nh_manifest.json', { cache: 'no-store' })
             .then(function (r) { return r.ok ? r.json() : null; })
             .catch(function () { return null; })
             .then(function (manifest) { boot(manifest || {}); });
@@ -119,12 +128,24 @@
             }
             var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
 
+            // Asset paths use the legacy server-absolute form ("/foo.toml")
+            // because they double as MEMFS paths in the C++ side; the
+            // sub-path-aware URL prefix is passed separately as
+            // --asset-base and applied at fetch time only.
+            function memfsPath(ref) {
+                if (!ref) return ref;
+                return ref.charAt(0) === '/' ? ref : '/' + ref;
+            }
+
             var viewerArgs = ['viewer'];
             if (inputUrl) {
-                viewerArgs.push('--input', '/' + inputUrl);
+                viewerArgs.push('--input', memfsPath(inputUrl));
             }
             if (configUrl) {
-                viewerArgs.push('--config', '/' + configUrl);
+                viewerArgs.push('--config', memfsPath(configUrl));
+            }
+            if (assetBase) {
+                viewerArgs.push('--asset-base', assetBase);
             }
             appendBoolArg(viewerArgs, 'cullBack', null, '--no-cull-back');
             appendBoolArg(viewerArgs, 'pauseWhenUnfocused', null, '--no-pause-when-unfocused');

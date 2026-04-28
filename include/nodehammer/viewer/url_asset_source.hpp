@@ -20,9 +20,16 @@ class UrlAssetSource final : public AssetSource {
     UrlAssetSource();
     ~UrlAssetSource() override;
 
-    /// Begin fetching `config_url` and `input_url`. Both must be paths the
-    /// browser can resolve (typically root-relative, e.g. `/scene.toml`).
-    void start(std::string config_url, std::string input_url);
+    /// Begin fetching `config_url` and `input_url`. Both are MEMFS-style
+    /// paths (typically root-relative, e.g. `/scene.toml`) and double as
+    /// the on-disk locations the asset is written to.
+    ///
+    /// `asset_base` is an optional URL prefix prepended to the MEMFS path
+    /// at fetch time only (so the file lands at `/scene.toml` in MEMFS but
+    /// is downloaded from `<asset_base>/scene.toml`). Empty for root-served
+    /// deployments; set to the document directory (e.g. `/foo/bar`) for
+    /// sub-path deployments. Must not end in a trailing slash.
+    void start(std::string config_url, std::string input_url, std::string asset_base = {});
 
     void poll() override;
     LoadState state() const override;

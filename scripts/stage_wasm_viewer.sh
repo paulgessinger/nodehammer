@@ -3,10 +3,10 @@ set -euo pipefail
 shopt -s nullglob
 
 usage() {
-    echo "usage: $0 <link|copy> <odd|none> <target-dir>" >&2
+    echo "usage: $0 <link|copy> <odd|none> <target-dir> [src-dir]" >&2
 }
 
-if [ "$#" -ne 3 ]; then
+if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
     usage
     exit 2
 fi
@@ -14,6 +14,7 @@ fi
 mode="$1"
 scene="$2"
 target="$3"
+src_override="${4:-}"
 
 case "$mode" in
     link|copy) ;;
@@ -24,7 +25,11 @@ case "$mode" in
 esac
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-src="$root/build/emscripten/RelWithDebInfo"
+if [ -n "$src_override" ]; then
+    src="$src_override"
+else
+    src="$root/build/emscripten/RelWithDebInfo"
+fi
 out="$target"
 case "$out" in
     /*) ;;

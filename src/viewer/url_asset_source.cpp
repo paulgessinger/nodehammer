@@ -113,6 +113,7 @@ struct UrlAssetSource::Impl {
     std::string error;
     std::filesystem::path config_path;
     std::filesystem::path input_path;
+    std::string asset_base;
     std::vector<AssetProgress> entries;
     std::unordered_set<std::string> seen;
 
@@ -142,7 +143,12 @@ void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
         std::fprintf(stderr, "url_asset_source: enqueue dedup'd %s\n", url.c_str());
         return;
     }
-    std::fprintf(stderr, "url_asset_source: enqueue %s\n", url.c_str());
+    // url is the MEMFS path (always rooted at `/`). The fetch URL is the
+    // same path prefixed by asset_base for sub-path deployments; leaving
+    // asset_base empty keeps the legacy server-root behaviour.
+    const std::string fetch_url = asset_base + url;
+    std::fprintf(stderr, "url_asset_source: enqueue %s (fetch %s)\n", url.c_str(),
+                 fetch_url.c_str());
     const size_t index = entries.size();
     entries.push_back(AssetProgress{url, 0, 0, false, false});
     kinds.push_back(kind);
@@ -157,7 +163,7 @@ void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
     attr.onerror = &Impl::on_error;
     attr.onprogress = &Impl::on_progress;
     attr.userData = ctx;
-    emscripten_fetch(&attr, url.c_str());
+    emscripten_fetch(&attr, fetch_url.c_str());
 }
 
 void UrlAssetSource::Impl::on_progress(emscripten_fetch_t *fetch) {
@@ -218,7 +224,11 @@ void UrlAssetSource::Impl::after_file_landed(size_t index, Kind kind) {
     if (kind == Kind::Input) {
         return;
     }
-    const auto &url = entries[index].url;
+    // Copy the URL by value: enqueue() below push_backs into `entries`,
+    // which can reallocate and invalidate any reference into the vector.
+    // Reading a dangling reference on the next iteration shows up as
+    // garbled UTF-8 in the fetch URL.
+    const std::string url = entries[index].url;
     auto includes = ConfigLoader::peekIncludes(url);
     for (const auto &rel : includes) {
         enqueue(resolve_include_url(url, rel), Kind::Include);
@@ -242,15 +252,23 @@ void UrlAssetSource::Impl::check_done() {
 UrlAssetSource::UrlAssetSource() : impl_(std::make_unique<Impl>()) {}
 UrlAssetSource::~UrlAssetSource() = default;
 
-void UrlAssetSource::start(std::string config_url, std::string input_url) {
+void UrlAssetSource::start(std::string config_url, std::string input_url, std::string asset_base) {
 #ifdef __EMSCRIPTEN__
     config_url = normalize_memfs_path(config_url);
     input_url = normalize_memfs_path(input_url);
+    // Strip a trailing slash so `asset_base + url` doesn't double up the
+    // separator (url already starts with `/`).
+    while (!asset_base.empty() && asset_base.back() == '/') {
+        asset_base.pop_back();
+    }
+#else
+    (void)asset_base;
 #endif
     impl_->config_path = config_url;
     impl_->input_path = input_url;
 
 #ifdef __EMSCRIPTEN__
+    impl_->asset_base = std::move(asset_base);
     impl_->state = LoadState::Fetching;
     impl_->enqueue(config_url, Impl::Kind::Config);
     impl_->enqueue(input_url, Impl::Kind::Input);

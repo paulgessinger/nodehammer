@@ -110,5 +110,18 @@ function(nodehammer_apply_emscripten_viewer_options target)
         # emcc then auto-pulls the C deps from compiler_rt for us.
         "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$stackSave,$stackRestore"
     )
+    # Size-focused flags for Release wasm only. RelWithDebInfo keeps assertions
+    # and debug info so browser stack traces stay readable; Release strips
+    # everything and runs Closure on the JS glue. Pair with -Oz / LTO compile
+    # flags applied below.
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(${target} PRIVATE -Oz -flto)
+        target_link_options(${target} PRIVATE
+            "-Oz"
+            "-flto"
+            "-sASSERTIONS=0"
+            "--closure=1"
+        )
+    endif()
     set_target_properties(${target} PROPERTIES SUFFIX ".js")
 endfunction()
