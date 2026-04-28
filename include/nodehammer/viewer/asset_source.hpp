@@ -1,9 +1,11 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace nodehammer::viewer {
 
@@ -57,6 +59,12 @@ class AssetSource {
     /// uploads ignore this. Used by the App to plumb sokol's FILES_DROPPED
     /// event and the NFD picker into the same code path.
     virtual void ingestLocalFile(const std::filesystem::path & /*path*/) {}
+
+    /// Optional hook: hand the source a file's bytes plus its original
+    /// filename. The web build uses this for the async sokol drop-fetch and
+    /// the JS `<input type=file>` picker; native sources never call it.
+    /// Sources that don't accept uploads ignore it.
+    virtual void ingestBytes(std::string_view /*filename*/, std::span<const std::byte> /*bytes*/) {}
 };
 
 } // namespace nodehammer::viewer

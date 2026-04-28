@@ -1,10 +1,18 @@
 #include <nodehammer/viewer/app.hpp>
+#include <nodehammer/viewer/asset_source.hpp>
 #include <nodehammer/viewer/platform.hpp>
 
 #include <emscripten/emscripten.h>
+#include <sokol_app.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <memory>
+#include <print>
+#include <span>
+#include <string>
+#include <vector>
 
 EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
     var url = new URL(window.location.href);
@@ -78,6 +86,51 @@ void runNativeFilePicker(const NativeFilePathHandler & /*handler*/) {
     // dispatchWebFilePicker and bytes arrive through the C upload export.
 }
 
+namespace {
+
+// Per-fetch context for sokol's async dropped-file byte fetch on web. sokol
+// writes the file's bytes into `buffer` and then invokes the callback once
+// the FileReader resolves; we keep the buffer alive in the meantime by
+// transferring ownership to the request via `release()` and reclaiming it
+// in the callback through a fresh unique_ptr.
+struct WebDropCtx {
+    std::vector<std::byte> buffer;
+    std::string filename;
+    AssetSource *source{nullptr};
+};
+
+void webDropFetchCallback(const sapp_html5_fetch_response *response) {
+    std::unique_ptr<WebDropCtx> ctx{static_cast<WebDropCtx *>(response->user_data)};
+    if (response->succeeded) {
+        ctx->source->ingestBytes(
+            ctx->filename, std::span<const std::byte>{
+                               ctx->buffer.data(), static_cast<std::size_t>(response->data.size)});
+    } else {
+        std::println(stderr, "viewer: failed to fetch dropped file '{}'", ctx->filename);
+    }
+}
+
+} // namespace
+
+void dispatchDroppedFiles(AssetSource &source) {
+    const int n = sapp_get_num_dropped_files();
+    for (int i = 0; i < n; ++i) {
+        const auto size = sapp_html5_get_dropped_file_size(i);
+        auto ctx = std::make_unique<WebDropCtx>();
+        ctx->filename = sapp_get_dropped_file_path(i);
+        ctx->buffer.resize(static_cast<std::size_t>(size));
+        ctx->source = &source;
+        sapp_html5_fetch_request req{};
+        req.dropped_file_index = i;
+        req.callback = &webDropFetchCallback;
+        req.buffer = sapp_range{ctx->buffer.data(), ctx->buffer.size()};
+        // Ownership transfers to the callback via user_data; callback
+        // reclaims with a unique_ptr on the receiving end.
+        req.user_data = ctx.release();
+        sapp_html5_fetch_dropped_file(&req);
+    }
+}
+
 } // namespace nodehammer::viewer::platform
 
 extern "C" {
@@ -87,9 +140,15 @@ void nh_viewer_deliver_upload(const char *filename, const std::uint8_t *data, st
     if (filename == nullptr) {
         return;
     }
-    if (auto *app = nodehammer::viewer::App::instance()) {
-        app->deliverUpload(filename, data, size);
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr) {
+        return;
     }
+    auto *source = app->source();
+    if (source == nullptr) {
+        return;
+    }
+    source->ingestBytes(filename, std::as_bytes(std::span{data, size}));
 }
 
 } // extern "C"

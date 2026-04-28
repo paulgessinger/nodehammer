@@ -1,6 +1,9 @@
 #include <nodehammer/viewer/platform.hpp>
 
+#include <nodehammer/viewer/asset_source.hpp>
+
 #include <nfd.hpp>
+#include <sokol_app.h>
 
 #include <filesystem>
 
@@ -13,6 +16,13 @@ void commitUrlState(const std::string & /*state_query*/, const std::string & /*m
 void dispatchWebFilePicker() {
     // Native uses runNativeFilePicker; the web inline-dispatch path doesn't
     // apply.
+}
+
+void dispatchDroppedFiles(AssetSource &source) {
+    const int n = sapp_get_num_dropped_files();
+    for (int i = 0; i < n; ++i) {
+        source.ingestLocalFile(std::filesystem::path{sapp_get_dropped_file_path(i)});
+    }
 }
 
 void runNativeFilePicker(const NativeFilePathHandler &handler) {

@@ -22,7 +22,6 @@
 
 #include <chrono>
 #include <cmath>
-#include <fstream>
 #include <iomanip>
 #include <memory>
 #include <print>
@@ -30,10 +29,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-
-#ifdef __EMSCRIPTEN__
-#include <sys/stat.h>
-#endif
 
 namespace nodehammer::viewer {
 
@@ -116,13 +111,6 @@ struct App::Impl {
     SceneBuildJob build_job;
     bool build_in_progress{false};
     std::chrono::steady_clock::time_point build_start_time{};
-
-    // Materialise an in-memory file into MEMFS at /uploads/<filename>,
-    // then route it through the LocalFileAssetSource. Invoked from the web
-    // upload C export via App::deliverUpload (which forwards here).
-    // Auto-creates a LocalFileAssetSource if none is currently set so a
-    // fresh page that started in upload-only mode can still receive a drop.
-    void deliverUpload(const std::string &filename, const std::uint8_t *data, std::size_t size);
 
     // Set from inside the imgui frame on native when the user clicks
     // "Open files…"; drained at end of frame to run NFD modally. NFD
@@ -217,59 +205,6 @@ void App::Impl::onInit() {
     fb_height = static_cast<uint32_t>(sapp_height());
 }
 
-#ifdef __EMSCRIPTEN__
-
-namespace {
-
-// Per-fetch context for sokol's async dropped-file byte fetch on web.
-// sokol writes the file's bytes into `buffer` and then invokes the
-// callback once the FileReader resolves; we keep the buffer alive until
-// then by heap-allocating this struct.
-struct WebDropCtx {
-    std::vector<std::uint8_t> buffer;
-    std::string filename;
-    App::Impl *self;
-};
-
-void webDropFetchCallback(const sapp_html5_fetch_response *response) {
-    auto *ctx = static_cast<WebDropCtx *>(response->user_data);
-    if (response->succeeded) {
-        ctx->self->deliverUpload(ctx->filename, ctx->buffer.data(),
-                                 static_cast<std::size_t>(response->data.size));
-    } else {
-        std::println(stderr, "viewer: failed to fetch dropped file '{}'", ctx->filename);
-    }
-    delete ctx;
-}
-
-} // namespace
-
-#endif // __EMSCRIPTEN__
-
-void App::Impl::deliverUpload(const std::string &filename, const std::uint8_t *data,
-                              std::size_t size) {
-    // Only ever invoked on web — the native upload paths land directly
-    // through LocalFileAssetSource::ingestLocalFile. The MEMFS path /
-    // mkdir below is meaningless on native, but the dead branch costs
-    // nothing and keeps the function ifdef-free aside from the include.
-#ifdef __EMSCRIPTEN__
-    // EEXIST is the success case for re-runs.
-    ::mkdir("/uploads", 0755);
-#endif
-    const std::filesystem::path path = std::filesystem::path{"/uploads"} / filename;
-    std::ofstream f(path, std::ios::binary);
-    if (!f) {
-        std::println(stderr, "viewer: failed to open MEMFS path '{}' for writing", path.string());
-        return;
-    }
-    f.write(reinterpret_cast<const char *>(data), static_cast<std::streamsize>(size));
-    if (!f) {
-        std::println(stderr, "viewer: short write delivering '{}'", path.string());
-        return;
-    }
-    source->ingestLocalFile(path);
-}
-
 void App::Impl::onEvent(const sapp_event *ev) {
     ImGui_ImplSokol_HandleEvent(ev);
     if (ev->type == SAPP_EVENTTYPE_FOCUSED) {
@@ -289,28 +224,12 @@ void App::Impl::onEvent(const sapp_event *ev) {
     } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         quit = true;
     } else if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
-        const int n = sapp_get_num_dropped_files();
-        for (int i = 0; i < n; ++i) {
-#ifdef __EMSCRIPTEN__
-            // On web, sapp_get_dropped_file_path returns just the filename
-            // (no real path) and the bytes have to be fetched asynchronously
-            // via FileReader. Allocate a buffer of the right size, kick off
-            // the fetch, and route the bytes through deliverUpload when
-            // the callback fires.
-            const std::uint64_t size = sapp_html5_get_dropped_file_size(i);
-            auto *ctx = new WebDropCtx;
-            ctx->filename = sapp_get_dropped_file_path(i);
-            ctx->buffer.resize(static_cast<std::size_t>(size));
-            ctx->self = this;
-            sapp_html5_fetch_request req{};
-            req.dropped_file_index = i;
-            req.callback = &webDropFetchCallback;
-            req.buffer = sapp_range{ctx->buffer.data(), ctx->buffer.size()};
-            req.user_data = ctx;
-            sapp_html5_fetch_dropped_file(&req);
-#else
-            source->ingestLocalFile(std::filesystem::path{sapp_get_dropped_file_path(i)});
-#endif
+        // The native and web variants of "drain dropped files into the
+        // current source" diverge enough (sync paths vs. async byte fetch)
+        // that they live in platform_native.cpp / platform_web.cpp. The
+        // App just needs a source to ingest into.
+        if (source) {
+            platform::dispatchDroppedFiles(*source);
         }
     }
 }
@@ -699,7 +618,7 @@ void App::Impl::onFrame() {
                     // Browser requires input.click() in the user-gesture
                     // stack; the EM_JS shim returns synchronously and
                     // bytes arrive later via the C upload export →
-                    // App::deliverUpload.
+                    // App::ingestUpload.
                     platform::dispatchWebFilePicker();
                 } else {
                     // Latch — drained at end of frame so NFD's nested
@@ -815,9 +734,7 @@ std::unique_ptr<App> &slot() {
 
 App *App::instance() { return slot().get(); }
 
-void App::deliverUpload(const std::string &filename, const std::uint8_t *data, std::size_t size) {
-    impl_->deliverUpload(filename, data, size);
-}
+AssetSource *App::source() const { return impl_->source.get(); }
 
 App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
 

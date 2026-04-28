@@ -3,9 +3,7 @@
 #include <nodehammer/viewer/config.hpp>
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
-#include <string>
 
 namespace nodehammer {
 struct RenderScene;
@@ -85,11 +83,11 @@ class App {
     /// the App's lifetime.
     [[nodiscard]] static App *instance();
 
-    /// Materialise an in-memory file (received from the web file picker /
-    /// drag-drop) into MEMFS at /uploads/<filename> and route it through the
-    /// active asset source. Auto-creates a LocalFileAssetSource if none is
-    /// currently set.
-    void deliverUpload(const std::string &filename, const std::uint8_t *data, std::size_t size);
+    /// The currently-installed AssetSource, or nullptr if none. Same
+    /// reach-the-live-instance escape hatch as `instance()` — used by the
+    /// web upload C export to push browser-fed bytes straight at the
+    /// source without an App-level forwarder.
+    [[nodiscard]] AssetSource *source() const;
 
     // Public so the file-scope upload helpers in app.cpp (sokol's drop
     // fetch callback) can access App::Impl. Definition lives entirely in

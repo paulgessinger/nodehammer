@@ -4,6 +4,10 @@
 #include <functional>
 #include <string>
 
+namespace nodehammer::viewer {
+class AssetSource;
+} // namespace nodehammer::viewer
+
 namespace nodehammer::viewer::platform {
 
 #ifdef __EMSCRIPTEN__
@@ -11,6 +15,15 @@ inline constexpr bool kIsWeb = true;
 #else
 inline constexpr bool kIsWeb = false;
 #endif
+
+/// Route the current sokol_app FILES_DROPPED batch into `source`. On native
+/// each dropped file is a real filesystem path (handed to
+/// `AssetSource::ingestLocalFile` synchronously). On web the bytes have to
+/// be fetched asynchronously from the browser; the platform impl owns each
+/// fetch's lifetime and calls `AssetSource::ingestBytes` once the bytes
+/// arrive. Caller is responsible for ensuring `source` outlives any
+/// outstanding async fetches.
+void dispatchDroppedFiles(AssetSource &source);
 
 /// Push the viewer's persisted state into the browser URL's query string,
 /// replacing any keys named in `managed_keys` (comma-separated). No-op on

@@ -2,6 +2,8 @@
 
 #include <nodehammer/ir/semantic/importer.hpp>
 
+#include <fstream>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -90,6 +92,44 @@ std::span<const AssetProgress> LocalFileAssetSource::progress() const {
 const std::string &LocalFileAssetSource::errorMessage() const { return impl_->error; }
 const std::filesystem::path &LocalFileAssetSource::configPath() const { return impl_->config_path; }
 const std::filesystem::path &LocalFileAssetSource::inputPath() const { return impl_->input_path; }
+
+void LocalFileAssetSource::ingestBytes(std::string_view filename,
+                                       std::span<const std::byte> bytes) {
+    if (filename.empty()) {
+        return;
+    }
+    // Stage uploads under the OS temp dir so the rest of the build pipeline
+    // (which expects paths) can read them back like any other file. Under
+    // Emscripten temp_directory_path resolves to "/tmp" in MEMFS, so this
+    // works on both targets without ifdefs.
+    std::error_code ec;
+    const auto staging = std::filesystem::temp_directory_path(ec) / "nodehammer-uploads";
+    if (ec) {
+        impl_->error = "failed to resolve temp dir for upload staging: " + ec.message();
+        impl_->state = LoadState::Error;
+        return;
+    }
+    std::filesystem::create_directories(staging, ec);
+    const auto path = staging / std::filesystem::path{filename}.filename();
+    std::ofstream out(path, std::ios::binary);
+    if (!out) {
+        impl_->error = "failed to stage upload at " + path.string();
+        impl_->state = LoadState::Error;
+        return;
+    }
+    out.write(reinterpret_cast<const char *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    if (!out) {
+        impl_->error = "short write while staging upload at " + path.string();
+        impl_->state = LoadState::Error;
+        return;
+    }
+    out.close();
+    // Now that the bytes live at a real path, run the same role-recognition
+    // path as a native drop / NFD pick — single source of truth for which
+    // extensions land in which slot.
+    ingestLocalFile(path);
+}
 
 void LocalFileAssetSource::ingestLocalFile(const std::filesystem::path &path) {
     if (path.empty()) {

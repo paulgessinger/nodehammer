@@ -33,6 +33,7 @@ class LocalFileAssetSource final : public AssetSource {
     const std::filesystem::path &configPath() const override;
     const std::filesystem::path &inputPath() const override;
     void ingestLocalFile(const std::filesystem::path &path) override;
+    void ingestBytes(std::string_view filename, std::span<const std::byte> bytes) override;
 
   private:
     struct Impl;
