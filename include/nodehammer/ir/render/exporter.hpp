@@ -40,6 +40,32 @@ struct ExportConfig {
         }
         return 1.0;
     }
+
+    /// Map a path extension or explicit format hint ("glb"/"gltf"/"obj") to a
+    /// Format. The hint wins when it matches a known name; otherwise the path
+    /// extension is consulted. Falls back to GLB when neither is recognised
+    /// — callers that need strict matching should validate via the exporter
+    /// registry first.
+    [[nodiscard]] static Format formatFromExtension(const std::filesystem::path &path,
+                                                    std::string_view formatHint = {}) noexcept {
+        if (formatHint == "glb") {
+            return Format::GLB;
+        }
+        if (formatHint == "gltf") {
+            return Format::GLTF;
+        }
+        if (formatHint == "obj") {
+            return Format::OBJ;
+        }
+        const auto ext = path.extension().string();
+        if (ext == ".gltf") {
+            return Format::GLTF;
+        }
+        if (ext == ".obj") {
+            return Format::OBJ;
+        }
+        return Format::GLB;
+    }
 };
 
 // ── ExportResult ──────────────────────────────────────────────────────────────

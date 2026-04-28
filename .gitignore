@@ -10,3 +10,4 @@
 *.nhb
 *.nhb.zst
 !/odd.nhb.zst
+CMakeUserPresets.json

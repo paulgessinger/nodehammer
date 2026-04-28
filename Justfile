@@ -1,18 +1,22 @@
-# Vendored Conan recipes — currently only manifold, patched to ship its
-# install/export rules under Emscripten. Cheap to re-export every time; conan
-# dedupes by recipe revision.
+# Vendored Conan recipes:
+#   - manifold: patched to ship install/export rules under Emscripten.
+#   - sokol-shdc: wraps the prebuilt shader compiler binary from
+#     floooh/sokol-tools-bin (used as a tool_requires when viewer=True).
+# Cheap to re-export every time; conan dedupes by recipe revision.
 recipes:
     conan export recipes/manifold --version=3.2.1
+    conan export recipes/sokol-shdc --version=2026.04.25
 
 deps: recipes
-    conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja
+    conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja -o '&:viewer=True'
 
 configure:
     cmake --preset conan-relwithdebinfo --fresh \
         -GNinja \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
         -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-        -DNODEHAMMER_BUILD_TESTS=ON
+        -DNODEHAMMER_BUILD_TESTS=ON \
+        -DNODEHAMMER_WITH_VIEWER=ON
 
 build:
     cmake --build --preset conan-relwithdebinfo
@@ -75,12 +79,14 @@ wasm-deps: _require-emsdk recipes
         -pr:b default \
         -s build_type=RelWithDebInfo \
         -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
-        --build=missing
+        --build=missing \
+        -o '&:viewer=True'
 
 wasm-configure *args: _require-emsdk
     cmake --preset conan-emscripten-relwithdebinfo --fresh \
         -GNinja \
         -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DNODEHAMMER_WITH_VIEWER=ON \
         -DNODEHAMMER_BUILD_TESTS=ON {{args}}
 
 wasm-build: _require-emsdk
@@ -97,3 +103,74 @@ wasm-set *args: _require-emsdk
     cmake --preset conan-emscripten-relwithdebinfo {{args}}
 
 wasm: wasm-deps wasm-configure wasm-build wasm-test
+
+# Release wasm build: -Oz + LTO + closure + assertions stripped. Slower link,
+# smaller .wasm/.js, harder-to-read browser stack traces. Use for shipping.
+wasm-deps-release: _require-emsdk recipes
+    conan install . \
+        -pr:h profiles/emscripten \
+        -pr:b default \
+        -s build_type=Release \
+        -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
+        --build=missing \
+        -o '&:viewer=True'
+
+wasm-configure-release *args: _require-emsdk
+    cmake --preset conan-emscripten-release --fresh \
+        -GNinja \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DNODEHAMMER_WITH_VIEWER=ON \
+        -DNODEHAMMER_BUILD_TESTS=ON {{args}}
+
+wasm-build-release: _require-emsdk
+    cmake --build --preset conan-emscripten-release
+
+wasm-release: wasm-deps-release wasm-configure-release wasm-build-release
+
+# Serve the wasm viewer locally. Browsers refuse to load .wasm from file://,
+# so we need a real http server. The static viewer.html shell probes
+# navigator.gpu and dynamically loads either nodehammer-gles3.{js,wasm}
+# (WebGL2) or nodehammer-wgpu.{js,wasm} (WebGPU).
+#
+# The shell decides between URL-auto-load and upload-only mode by fetching
+# a sibling `nh_manifest.json` at startup:
+#   - If present, its `input` / `config` fields name the scene to load.
+#   - If 404, the viewer comes up empty and accepts drag-and-drop /
+#     file-picker uploads.
+#
+# Usage:
+#   just wasm-serve            # ODD scene, autoload (default)
+#   just wasm-serve odd        # explicit ODD scene, autoload
+#   just wasm-serve none       # no manifest; upload-only deployment
+#   just wasm-serve odd 9000   # ODD scene on a custom port
+wasm-serve scene='odd' port='8000':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    dir="$root/build/emscripten/RelWithDebInfo"
+    mapfile -t staged < <("$root/scripts/stage_wasm_viewer.sh" link "{{scene}}" "$dir")
+    mode="${staged[1]}"
+
+    echo "serving $dir in $mode at:"
+    echo "  http://localhost:{{port}}/viewer.html"
+    cd "$dir" && exec python3 -m http.server {{port}}
+
+# Copy the same static viewer payload that `wasm-serve` exposes into a
+# self-contained directory, sourced from the Release wasm build. The target
+# may be relative to the repo root or absolute. Build the Release wasm first
+# with `just wasm-release`.
+#
+# Usage:
+#   just wasm-copy                         # copy ODD autoload bundle to build/wasm-viewer
+#   just wasm-copy odd public/viewer       # copy ODD autoload bundle to a custom directory
+#   just wasm-copy none public/viewer      # copy upload-only bundle
+wasm-copy scene='odd' target='build/wasm-viewer':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    src="$root/build/emscripten/Release"
+    mapfile -t staged < <("$root/scripts/stage_wasm_viewer.sh" copy "{{scene}}" "{{target}}" "$src")
+    out="${staged[0]}"
+    mode="${staged[1]}"
+
+    echo "copied wasm viewer payload to $out in $mode"

@@ -11,6 +11,9 @@ class Nodehammer(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     generators = "CMakeDeps", "CMakeToolchain"
 
+    options = {"viewer": [True, False]}
+    default_options = {"viewer": False}
+
     tool_requires = ("flatbuffers/25.9.23",)
 
     def requirements(self):
@@ -30,6 +33,25 @@ class Nodehammer(ConanFile):
         # revision. With the patch applied, manifold's Conan package works
         # for both native and wasm and we can drop the FetchContent fallback.
         self.requires("manifold/3.2.1")
+        # Viewer-only runtime deps. PlatformFolders is used by the IBL cache
+        # to resolve the OS-appropriate cache directory on native; not needed
+        # on web (IndexedDB) and not needed for the CLI build. Skip under
+        # Emscripten — the wasm viewer never links it and the package fails
+        # to build for that target anyway.
+        if self.options.viewer and self.settings.os != "Emscripten":
+            self.requires("platformfolders/4.3.0")
+        # The sokol headers are header-only and come from FetchContent
+        # (cmake/Sokol.cmake); no SDL3 — sokol_app owns the window/event loop
+        # on every platform.
+
+    def build_requirements(self):
+        # sokol-shdc is the shader compiler: a prebuilt static binary wrapped
+        # by the local recipe under recipes/sokol-shdc. tool_requires resolves
+        # against the build profile, so cross-compiling to Emscripten still
+        # picks the host's binary (verified by Justfile passing `-pr:b default`
+        # to wasm-deps). Re-exported by `just recipes` alongside manifold.
+        if self.options.viewer:
+            self.tool_requires("sokol-shdc/2026.04.25")
 
     def configure(self):
         self.settings.compiler.cppstd = "23"
@@ -60,7 +82,8 @@ class Nodehammer(ConanFile):
             copy(self, "*", str(src), str(dst))
             files = sorted(
                 str(p.relative_to(dst)).replace("\\", "/")
-                for p in dst.rglob("*") if p.is_file()
+                for p in dst.rglob("*")
+                if p.is_file()
             )
             if not files:
                 continue
@@ -69,13 +92,15 @@ class Nodehammer(ConanFile):
                 license_str = " OR ".join(str(x) for x in raw_license)
             else:
                 license_str = str(raw_license) if raw_license else ""
-            manifest.append({
-                "name": dep.ref.name,
-                "version": str(dep.ref.version),
-                "license": license_str,
-                "dir": slot,
-                "files": files,
-            })
+            manifest.append(
+                {
+                    "name": dep.ref.name,
+                    "version": str(dep.ref.version),
+                    "license": license_str,
+                    "dir": slot,
+                    "files": files,
+                }
+            )
 
         manifest.sort(key=lambda e: e["name"])
         (licenses_root / "manifest.json").write_text(

@@ -240,7 +240,7 @@ void printTags(const nodehammer::SemanticScene &scene, const nodehammer::detail:
 
 } // namespace
 
-void register_cmd_inspect(CLI::App &app) {
+void registerCmdInspect(CLI::App &app) {
     auto *sub = app.add_subcommand("inspect", "Inspect a geometry file")->require_subcommand(1);
 
     // Shared options on the parent.

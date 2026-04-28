@@ -5,7 +5,7 @@
 # kind → conan/cmake-preset mapping lives in one place.
 #
 # Usage:
-#   ci/build.sh conan-install <kind>
+#   ci/build.sh conan-install <kind> [extra conan args...]
 #   ci/build.sh configure     <kind> [extra cmake args...]
 #   ci/build.sh build         <kind>
 #   ci/build.sh test          <kind> [extra ctest args...]
@@ -45,7 +45,8 @@ esac
 case "$cmd" in
   conan-install)
     conan export recipes/manifold --version=3.2.1
-    conan install . --build=missing "${conan_args[@]}"
+    conan export recipes/sokol-shdc --version=2026.04.25
+    conan install . --build=missing "${conan_args[@]}" "$@"
     ;;
   configure)
     cmake --preset "$preset" \

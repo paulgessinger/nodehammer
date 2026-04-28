@@ -121,6 +121,24 @@ TEST_CASE("ConfigWriter: selection rule with drop_if round-trip", "[config][writ
     REQUIRE(std::holds_alternative<PathGlobPredicate>(rt.selection[0].predicate.data));
 }
 
+TEST_CASE("ConfigWriter: selection rule with material_glob round-trip", "[config][writer]") {
+    // Regression: configToToml emits `type = 'material_glob'` but earlier
+    // versions of parsePredicate didn't recognise that type, so a flatten
+    // round-trip on any config using material(...) predicates would fail
+    // with "unknown predicate type 'material_glob'". This test pins the
+    // structured-table form on both sides.
+    NHConfig cfg;
+    SelectionRule rule;
+    rule.action = SelectionAction::KeepIf;
+    rule.predicate = PredicateExpr{MaterialGlobPredicate{"steel*"}};
+    cfg.selection.push_back(rule);
+
+    auto rt = roundTrip(cfg);
+    REQUIRE(rt.selection.size() == 1);
+    REQUIRE(std::holds_alternative<MaterialGlobPredicate>(rt.selection[0].predicate.data));
+    REQUIRE(std::get<MaterialGlobPredicate>(rt.selection[0].predicate.data).pattern == "steel*");
+}
+
 // ── Rules ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("ConfigWriter: rule with material round-trip", "[config][writer]") {
@@ -155,6 +173,31 @@ TEST_CASE("ConfigWriter: rule with tessellation round-trip", "[config][writer]")
     REQUIRE(t.mergeDescendants == false);
     REQUIRE(t.maxSegmentsCircle == 64);
     REQUIRE(t.fallback == BooleanFallback::BBox);
+}
+
+TEST_CASE("ConfigWriter: defaults.tessellation round-trip", "[config][writer]") {
+    // Regression: configToToml previously emitted nothing for
+    // cfg.tessellationDefaults, so config-flatten of a TOML with
+    // [defaults.tessellation] produced a file that loaded with the loader's
+    // hard-coded defaults — visibly ~3.5x more triangles for the ODD scene
+    // because max_segments_circle defaulted instead of being 10.
+    NHConfig cfg;
+    cfg.tessellationDefaults.maxSegmentsCircle = 10;
+    cfg.tessellationDefaults.fallback = BooleanFallback::Skip;
+
+    auto rt = roundTrip(cfg);
+    REQUIRE(rt.tessellationDefaults.maxSegmentsCircle == 10);
+    REQUIRE(rt.tessellationDefaults.fallback == BooleanFallback::Skip);
+}
+
+TEST_CASE("ConfigWriter: defaults.extras round-trip", "[config][writer]") {
+    NHConfig cfg;
+    cfg.extrasDefaults = nlohmann::json{{"visible", true}, {"opacity", 1.0}};
+
+    auto rt = roundTrip(cfg);
+    REQUIRE(rt.extrasDefaults.has_value());
+    REQUIRE((*rt.extrasDefaults)["visible"] == true);
+    REQUIRE((*rt.extrasDefaults)["opacity"] == 1.0);
 }
 
 TEST_CASE("ConfigWriter: rule with extras round-trip", "[config][writer]") {

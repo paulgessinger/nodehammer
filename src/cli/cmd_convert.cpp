@@ -70,7 +70,7 @@ void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidate
 
 } // namespace
 
-void register_cmd_convert(CLI::App &app) {
+void registerCmdConvert(CLI::App &app) {
     auto *sub = app.add_subcommand("convert", "Convert a geometry file to a render format");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file")->required();
@@ -206,14 +206,7 @@ void register_cmd_convert(CLI::App &app) {
             }
 
             nodehammer::ExportConfig ecfg;
-            const std::string outExt = std::filesystem::path{outputPath}.extension().string();
-            if (outputFmt == "glb" || outExt == ".glb") {
-                ecfg.format = nodehammer::ExportConfig::Format::GLB;
-            } else if (outputFmt == "gltf" || outExt == ".gltf") {
-                ecfg.format = nodehammer::ExportConfig::Format::GLTF;
-            } else if (outputFmt == "obj" || outExt == ".obj") {
-                ecfg.format = nodehammer::ExportConfig::Format::OBJ;
-            }
+            ecfg.format = nodehammer::ExportConfig::formatFromExtension(outputPath, outputFmt);
 
             ecfg.unitScale = nodehammer::ExportConfig::defaultUnitScale(ecfg.format);
             if (ecfg.format == nodehammer::ExportConfig::Format::OBJ) {

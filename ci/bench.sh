@@ -17,10 +17,10 @@ case "$kind" in
   native)
     suffix=""
     [ "${RUNNER_OS:-}" = "Windows" ] && suffix=".exe"
-    cmd="build/Release/nodehammer${suffix} convert -i odd.nhb.zst -c fixtures/configs/odd.toml -o out.glb"
+    cmd="build/Release/tests/nodehammer_bench${suffix} fixtures/configs/odd.toml odd.nhb.zst out.glb"
     ;;
   wasm)
-    cmd="node build/emscripten/Release/nodehammer.js convert -i odd.nhb.zst -c fixtures/configs/odd.toml -o out.glb"
+    cmd="node build/emscripten/Release/tests/nodehammer_bench.js fixtures/configs/odd.toml odd.nhb.zst out.glb"
     ;;
   *)
     echo "unknown kind: $kind" >&2

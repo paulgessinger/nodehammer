@@ -15,7 +15,7 @@ jobs:
     name: prek
     runs-on: ubuntu-slim
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
       - uses: j178/prek-action@cbc2f23eb5539cf20d82d1aabd0d0ecbcc56f4e3 # v2.0.2
 
   build:
@@ -42,16 +42,19 @@ jobs:
             artifact-name: nodehammer-wasm32
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Install CMake and Ninja
         uses: lukka/get-cmake@ea83089aa35e08e459464341fe24ad024ee2466f # v4.3.1
 
-      - name: Install GCC 14 (Linux)
+      - name: Install GCC 14 and viewer deps (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14
+          sudo apt-get install -y \
+            gcc-14 g++-14 \
+            libgtk-3-dev \
+            libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev
           echo "CC=gcc-14" >> "$GITHUB_ENV"
           echo "CXX=g++-14" >> "$GITHUB_ENV"
 
@@ -63,7 +66,7 @@ jobs:
         if: matrix.kind == 'wasm'
         uses: mymindstorm/setup-emsdk@6ab9eb1bda2574c4ddb79809fc9247783eaf9021 # v14
         with:
-          version: 3.1.74
+          version: 5.0.6
           actions-cache-folder: emsdk-cache
 
       - name: Stabilize emsdk path
@@ -85,6 +88,8 @@ jobs:
 
       - name: Set up uv
         uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
+        with:
+          enable-cache: false
 
       - name: Install Conan
         run: uv tool install conan
@@ -109,16 +114,9 @@ jobs:
         with:
           key: ccache-${{ matrix.artifact-name }}
 
-      - name: ccache pre-build stats
-        shell: bash
-        run: |
-          ccache --version
-          ccache -p | grep -E '(compiler_check|sloppiness|base_dir|hash_dir|cache_dir|max_size)' || true
-          ccache -sv
-
       - name: Conan install
         shell: bash
-        run: ci/build.sh conan-install ${{ matrix.kind }}
+        run: ci/build.sh conan-install ${{ matrix.kind }} -o viewer=True
 
       - name: Save Conan cache
         if: always()
@@ -129,13 +127,11 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: ci/build.sh configure ${{ matrix.kind }}
+        run: ci/build.sh configure ${{ matrix.kind }} -DNODEHAMMER_WITH_VIEWER=ON
 
       - name: Build
         shell: bash
         env:
-          CCACHE_DEBUG: "1"
-          CCACHE_DEBUGDIR: ${{ github.workspace }}/ccache-debug
           # emcc is freshly extracted each run -> mtimes differ, so hash by
           # content. BASEDIR + NOHASHDIR strip the workspace prefix from cwd
           # and from absolute include paths in compile args / #line markers.
@@ -150,29 +146,7 @@ jobs:
       - name: ccache post-build stats
         if: always()
         shell: bash
-        run: |
-          set +o pipefail
-          ccache -sv
-          echo "--- sample miss reasons ---"
-          # Each .ccache-log explains why that TU missed/hit; pull the first
-          # 20 logs and print up to 20 verdict lines from each. macOS bash 3.2
-          # has no mapfile, so collect via a temp file.
-          list=$(mktemp)
-          find "${{ github.workspace }}/ccache-debug" -name '*.ccache-log' 2>/dev/null | sort | head -n 20 > "$list"
-          while IFS= read -r f; do
-            echo "=== $f ==="
-            grep -m 20 -E '(Result:|Disabling|Compiler option|preprocessor|hash:|input file|cache hit|cache miss)' "$f" || true
-          done < "$list"
-          rm -f "$list"
-
-      - name: Upload ccache debug logs
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: ccache-debug-${{ matrix.artifact-name }}
-          path: ccache-debug
-          if-no-files-found: ignore
-          retention-days: 3
+        run: ccache -sv
 
       - name: Test
         shell: bash
@@ -188,7 +162,7 @@ jobs:
         run: ci/bench.sh ${{ matrix.kind }} ${{ matrix.artifact-name }}
 
       - name: Upload bench
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-${{ matrix.artifact-name }}
           path: bench.json
@@ -209,7 +183,7 @@ jobs:
           fi
 
       - name: Upload archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ matrix.artifact-name }}
           path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
@@ -222,10 +196,10 @@ jobs:
     runs-on: ubuntu-24.04
     if: always()
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Download bench artifacts
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: bench-results
           pattern: bench-*
@@ -242,7 +216,7 @@ jobs:
       contents: write
     steps:
       - name: Download all binaries
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           path: artifacts
 
@@ -256,7 +230,7 @@ jobs:
     name: LCG 109 (el9-gcc15-opt)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Mount CVMFS
         uses: cvmfs-contrib/github-action-cvmfs@10197e000cc0add8e54ac4fb73d3ed44e2de72b4 # v5.5

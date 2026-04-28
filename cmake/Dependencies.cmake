@@ -189,3 +189,61 @@ if(TARGET flatbuffers)
         target_compile_options(flatbuffers PRIVATE /W0)
     endif()
 endif()
+
+# ── Viewer dependencies (sokol_gfx + Dear ImGui) ─────────────────────────────
+# Only set up when NODEHAMMER_WITH_VIEWER is ON. sokol is single-header so we
+# fetch the repo and let cmake/Sokol.cmake build per-backend STATIC libs from
+# the small impl TUs in src/sokol/. No SDL3 — sokol_app owns the window/event
+# loop on every platform, including Emscripten.
+if(NODEHAMMER_WITH_VIEWER)
+    # Dear ImGui — no upstream CMake. Fetch sources and build the core lib.
+    # No SDL3 backend; input + rendering are wired through util/sokol_imgui.h
+    # in the sokol headers package.
+    FetchContent_Declare(imgui
+        SYSTEM
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        # 1.92 introduced the ImTextureData / RendererHasTextures API that
+        # the pinned sokol_imgui.h requires; bump if sokol moves further.
+        GIT_TAG        v1.92.7
+    )
+    FetchContent_MakeAvailable(imgui)
+
+    if(NOT TARGET imgui)
+        add_library(imgui STATIC
+            ${imgui_SOURCE_DIR}/imgui.cpp
+            ${imgui_SOURCE_DIR}/imgui_demo.cpp
+            ${imgui_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        )
+        target_include_directories(imgui SYSTEM PUBLIC
+            ${imgui_SOURCE_DIR}
+            ${imgui_SOURCE_DIR}/backends
+        )
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            target_compile_options(imgui PRIVATE -w)
+        elseif(MSVC)
+            target_compile_options(imgui PRIVATE /W0)
+        endif()
+    endif()
+
+    # sokol headers + sokol-shdc resolver + nh_add_sokol_lib + nh_compile_shader.
+    include(${CMAKE_SOURCE_DIR}/cmake/Sokol.cmake)
+
+    # ── nativefiledialog-extended ───────────────────────────────────────────
+    # Native-only file picker (NFD::nfd target). The web build uses an
+    # HTML <input type=file> + FileSystemAccess API instead; skip the dep
+    # entirely under emscripten so the wasm binary doesn't grow a useless
+    # AppKit/GTK/win32 stub. NFD_PORTAL=ON makes Linux use xdg-desktop-portal
+    # (works in Wayland/Flatpak without bundling GTK).
+    if(NOT EMSCRIPTEN)
+        set(NFD_PORTAL ON CACHE BOOL "" FORCE)
+        set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(nfd
+            SYSTEM
+            GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
+            GIT_TAG        v1.2.1
+        )
+        FetchContent_MakeAvailable(nfd)
+    endif()
+endif()

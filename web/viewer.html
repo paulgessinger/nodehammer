@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>nodehammer viewer</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            background: #1a1f25;
+            color: #c5cdd9;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            overflow: hidden;
+            height: 100%;
+        }
+        #canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+            outline: none;
+        }
+        #status {
+            position: fixed;
+            left: 12px;
+            bottom: 12px;
+            font-size: 12px;
+            opacity: 0.6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+    <div id="status">loading…</div>
+    <script>
+        // Two viewer entry paths share this single shell:
+        //   - URL auto-load: a sibling `nh_manifest.json` names the default
+        //     scene + config + optional defaults. The viewer fetches them
+        //     via emscripten_fetch on startup and shows a progress panel.
+        //   - Upload-only: no manifest is present (404 is treated as
+        //     "deploy didn't pin a default scene"). The viewer comes up
+        //     empty; drag a .toml + a geometry file onto the canvas, or
+        //     use the file picker.
+        // Per-page query params (?input=…&config=…&pbr=1&…) override the
+        // manifest when both are provided.
+        //
+        // Manifest schema (all fields optional):
+        //   {
+        //     "input":   "scene.nhb.zst",
+        //     "config":  "scene.toml",
+        //     "title":   "Open Data Detector",
+        //     "defaults": { "pbr": true, "autoOrbit": false, ... }
+        //   }
+        // `defaults` keys mirror the query-param names parsed below; they
+        // are merged into params before parsing, so query params always win.
+        // Directory of the current document, including trailing slash. Used
+        // for the manifest fetch (browser-relative) and stripped of its
+        // trailing slash to form `--asset-base` for the C++ side, which
+        // prepends it to MEMFS paths at fetch time only. This lets the
+        // viewer host under arbitrary sub-paths (e.g. /foo/bar/) while the
+        // MEMFS layout (and config-include resolution) stays rooted at /.
+        var basePath = window.location.pathname.replace(/[^/]*$/, '');
+        var assetBase = basePath.replace(/\/$/, '');
+
+        fetch(basePath + 'nh_manifest.json', { cache: 'no-store' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; })
+            .then(function (manifest) { boot(manifest || {}); });
+
+        function boot(manifest) {
+            var params = new URLSearchParams(window.location.search);
+
+            // Manifest defaults appear as virtual query params; explicit
+            // URL params still take precedence.
+            if (manifest.defaults) {
+                Object.keys(manifest.defaults).forEach(function (k) {
+                    if (!params.has(k)) {
+                        params.set(k, String(manifest.defaults[k]));
+                    }
+                });
+            }
+
+            var inputUrl = params.get('input') || manifest.input || '';
+            var configUrl = params.get('config') || manifest.config || '';
+
+            if (manifest.title) {
+                document.title = manifest.title;
+            }
+
+            function queryBool(name) {
+                var value = params.get(name);
+                if (value === null) return null;
+                value = value.toLowerCase();
+                return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
+            }
+
+            function setBoolOpt(opts, queryName, optKey) {
+                var value = queryBool(queryName);
+                if (value !== null) {
+                    opts[optKey] = value;
+                }
+            }
+
+            function setNumberOpt(opts, queryName, optKey) {
+                var value = params.get(queryName);
+                if (value !== null && value !== '') {
+                    var n = Number(value);
+                    if (!Number.isNaN(n)) {
+                        opts[optKey] = n;
+                    }
+                }
+            }
+
+            // Backend selection: WebGPU when available, WebGL2 otherwise.
+            // Force a specific backend with ?backend=wgpu/webgpu or
+            // ?backend=gles3/webgl2.
+            var forced = (params.get('backend') || '').toLowerCase();
+            var useWGPU;
+            if (forced === 'wgpu' || forced === 'webgpu') {
+                useWGPU = true;
+            } else if (forced === 'gles3' || forced === 'webgl2' || forced === 'webgl') {
+                useWGPU = false;
+            } else {
+                if (forced) {
+                    console.warn('unknown backend "' + forced + '", using auto-detect');
+                }
+                useWGPU = !!navigator.gpu;
+            }
+            var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
+
+            // Asset paths use the legacy server-absolute form ("/foo.toml")
+            // because they double as MEMFS paths in the C++ side; the
+            // sub-path-aware URL prefix is passed separately as
+            // --asset-base and applied at fetch time only.
+            function memfsPath(ref) {
+                if (!ref) return ref;
+                return ref.charAt(0) === '/' ? ref : '/' + ref;
+            }
+
+            // Options object mirroring the native CLI's `viewer` flags,
+            // serialised to JSON and handed to the wasm `nh_viewer_start`
+            // export below. Keys match src/web/viewer_main.cpp's reader.
+            var viewerOpts = {};
+            if (inputUrl) {
+                viewerOpts.input = memfsPath(inputUrl);
+            }
+            if (configUrl) {
+                viewerOpts.config = memfsPath(configUrl);
+            }
+            if (assetBase) {
+                viewerOpts.assetBase = assetBase;
+            }
+            setBoolOpt(viewerOpts, 'cullBack', 'cullBack');
+            setBoolOpt(viewerOpts, 'pauseWhenUnfocused', 'pauseWhenUnfocused');
+            setBoolOpt(viewerOpts, 'autoOrbit', 'autoOrbit');
+            setNumberOpt(viewerOpts, 'orbitSpeed', 'orbitSpeed');
+            setBoolOpt(viewerOpts, 'angleCut', 'angleCut');
+            setBoolOpt(viewerOpts, 'shaderAngleCut', 'shaderAngleCut');
+            setNumberOpt(viewerOpts, 'cutStart', 'cutStart');
+            setNumberOpt(viewerOpts, 'cutEnd', 'cutEnd');
+            setBoolOpt(viewerOpts, 'pbr', 'pbr');
+
+            // Camera state survives only when all six fields are present
+            // (matches the C++ reader's mutual-requirement check).
+            var camera = {};
+            setNumberOpt(camera, 'cameraTargetX', 'targetX');
+            setNumberOpt(camera, 'cameraTargetY', 'targetY');
+            setNumberOpt(camera, 'cameraTargetZ', 'targetZ');
+            setNumberOpt(camera, 'cameraDistance', 'distance');
+            setNumberOpt(camera, 'cameraYaw', 'yawDeg');
+            setNumberOpt(camera, 'cameraPitch', 'pitchDeg');
+            if (Object.keys(camera).length === 6) {
+                viewerOpts.camera = camera;
+            }
+
+            var statusEl = document.getElementById('status');
+            window.Module = {
+                canvas: document.getElementById('canvas'),
+                print: function (msg) { console.log(msg); },
+                printErr: function (msg) { console.error(msg); },
+                setStatus: function (text) {
+                    if (text) {
+                        statusEl.textContent = text;
+                        statusEl.style.display = 'block';
+                    } else {
+                        statusEl.style.display = 'none';
+                    }
+                },
+                // Tell emscripten where to fetch the .wasm sidecar (the
+                // loader emits its own filename otherwise, which is fine —
+                // but with two bundles in the same dir we want to be
+                // explicit).
+                locateFile: function (path) {
+                    if (path.endsWith('.wasm')) return bundleBase + '.wasm';
+                    return path;
+                },
+                // No preRun preloads — assets are fetched from C++ via
+                // emscripten_fetch after the viewer starts so imgui can
+                // render a progress UI instead of blocking startup.
+                onRuntimeInitialized: function () {
+                    Module.ccall('nh_viewer_start', 'number', ['string'],
+                                 [JSON.stringify(viewerOpts)]);
+                },
+            };
+            window.Module.setStatus('loading ' + bundleBase + '…');
+            window.onerror = function (msg) {
+                window.Module.setStatus('error — see console');
+                console.error(msg);
+            };
+
+            // Inject the matching loader script. Emscripten's loader picks
+            // up the global `Module` object set above and starts the wasm
+            // fetch (via locateFile) as soon as it executes.
+            var s = document.createElement('script');
+            s.src = bundleBase + '.js';
+            s.async = true;
+            document.body.appendChild(s);
+        }
+    </script>
+</body>
+</html>

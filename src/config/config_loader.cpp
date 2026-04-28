@@ -185,6 +185,16 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
         return PredicateExpr{PathGlobPredicate{*pat}};
     }
 
+    if (type == "material_glob") {
+        auto pat = tbl["pattern"].value<std::string>();
+        if (!pat) {
+            diags.error(codes::kErrConfigParse, "material_glob predicate missing 'pattern'",
+                        context);
+            return std::nullopt;
+        }
+        return PredicateExpr{MaterialGlobPredicate{*pat}};
+    }
+
     if (type == "tag") {
         auto key = tbl["key"].value<std::string>();
         if (!key) {
@@ -794,6 +804,29 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
                     std::format("could not read config file: {}", e.what()), path.string());
     }
     return ConfigResult{{}, std::move(diags)};
+}
+
+std::vector<std::string> ConfigLoader::peekIncludes(const std::filesystem::path &path) {
+    std::vector<std::string> result;
+    try {
+        auto tbl = toml::parse_file(path.string());
+        const auto *includeNode = tbl.get("include");
+        if (includeNode == nullptr) {
+            return result;
+        }
+        if (includeNode->is_string()) {
+            result.push_back(std::string{includeNode->as_string()->get()});
+        } else if (includeNode->is_array()) {
+            for (const auto &e : *includeNode->as_array()) {
+                if (auto s = e.value<std::string>()) {
+                    result.push_back(std::move(*s));
+                }
+            }
+        }
+    } catch (...) {
+        // Swallow — caller will surface the same error via the full loadFromFile.
+    }
+    return result;
 }
 
 ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName) {
