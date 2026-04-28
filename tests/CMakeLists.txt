@@ -50,6 +50,16 @@ endif()
 nodehammer_set_compiler_options(nodehammer_tests)
 nodehammer_apply_emscripten_exe_options(nodehammer_tests)
 
+# Tiny benchmark harness — `nodehammer_bench <cfg> <in> <out>`. Lives next to
+# the test binary because it shares the same dependency surface (linked
+# against nodehammer_lib only, no CLI11) and the same build/install
+# expectations (NODERAWFS under emscripten so Node can read fixtures from
+# the host filesystem). Driven by ci/bench.sh.
+add_executable(nodehammer_bench bench_main.cpp)
+target_link_libraries(nodehammer_bench PRIVATE nodehammer_lib)
+nodehammer_set_compiler_options(nodehammer_bench)
+nodehammer_apply_emscripten_exe_options(nodehammer_bench)
+
 include(CTest)
 # catch_discover_tests runs the test binary to enumerate cases. Under
 # cross-compile the binary is a .js file that needs `node` as emulator, and

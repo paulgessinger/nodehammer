@@ -206,14 +206,7 @@ void registerCmdConvert(CLI::App &app) {
             }
 
             nodehammer::ExportConfig ecfg;
-            const std::string outExt = std::filesystem::path{outputPath}.extension().string();
-            if (outputFmt == "glb" || outExt == ".glb") {
-                ecfg.format = nodehammer::ExportConfig::Format::GLB;
-            } else if (outputFmt == "gltf" || outExt == ".gltf") {
-                ecfg.format = nodehammer::ExportConfig::Format::GLTF;
-            } else if (outputFmt == "obj" || outExt == ".obj") {
-                ecfg.format = nodehammer::ExportConfig::Format::OBJ;
-            }
+            ecfg.format = nodehammer::ExportConfig::formatFromExtension(outputPath, outputFmt);
 
             ecfg.unitScale = nodehammer::ExportConfig::defaultUnitScale(ecfg.format);
             if (ecfg.format == nodehammer::ExportConfig::Format::OBJ) {

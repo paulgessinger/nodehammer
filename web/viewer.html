@@ -94,20 +94,20 @@
                 return !(value === '0' || value === 'false' || value === 'off' || value === 'no');
             }
 
-            function appendBoolArg(args, queryName, trueFlag, falseFlag) {
+            function setBoolOpt(opts, queryName, optKey) {
                 var value = queryBool(queryName);
-                if (value === null) return;
-                if (value && trueFlag) {
-                    args.push(trueFlag);
-                } else if (!value && falseFlag) {
-                    args.push(falseFlag);
+                if (value !== null) {
+                    opts[optKey] = value;
                 }
             }
 
-            function appendValueArg(args, queryName, flag) {
+            function setNumberOpt(opts, queryName, optKey) {
                 var value = params.get(queryName);
                 if (value !== null && value !== '') {
-                    args.push(flag, value);
+                    var n = Number(value);
+                    if (!Number.isNaN(n)) {
+                        opts[optKey] = n;
+                    }
                 }
             }
 
@@ -137,31 +137,41 @@
                 return ref.charAt(0) === '/' ? ref : '/' + ref;
             }
 
-            var viewerArgs = ['viewer'];
+            // Options object mirroring the native CLI's `viewer` flags,
+            // serialised to JSON and handed to the wasm `nh_viewer_start`
+            // export below. Keys match src/web/viewer_main.cpp's reader.
+            var viewerOpts = {};
             if (inputUrl) {
-                viewerArgs.push('--input', memfsPath(inputUrl));
+                viewerOpts.input = memfsPath(inputUrl);
             }
             if (configUrl) {
-                viewerArgs.push('--config', memfsPath(configUrl));
+                viewerOpts.config = memfsPath(configUrl);
             }
             if (assetBase) {
-                viewerArgs.push('--asset-base', assetBase);
+                viewerOpts.assetBase = assetBase;
             }
-            appendBoolArg(viewerArgs, 'cullBack', null, '--no-cull-back');
-            appendBoolArg(viewerArgs, 'pauseWhenUnfocused', null, '--no-pause-when-unfocused');
-            appendBoolArg(viewerArgs, 'autoOrbit', '--auto-orbit', null);
-            appendValueArg(viewerArgs, 'orbitSpeed', '--orbit-speed');
-            appendBoolArg(viewerArgs, 'angleCut', '--angle-cut', null);
-            appendBoolArg(viewerArgs, 'shaderAngleCut', null, '--no-shader-angle-cut');
-            appendValueArg(viewerArgs, 'cutStart', '--cut-start');
-            appendValueArg(viewerArgs, 'cutEnd', '--cut-end');
-            appendBoolArg(viewerArgs, 'pbr', '--pbr', null);
-            appendValueArg(viewerArgs, 'cameraTargetX', '--camera-target-x');
-            appendValueArg(viewerArgs, 'cameraTargetY', '--camera-target-y');
-            appendValueArg(viewerArgs, 'cameraTargetZ', '--camera-target-z');
-            appendValueArg(viewerArgs, 'cameraDistance', '--camera-distance');
-            appendValueArg(viewerArgs, 'cameraYaw', '--camera-yaw');
-            appendValueArg(viewerArgs, 'cameraPitch', '--camera-pitch');
+            setBoolOpt(viewerOpts, 'cullBack', 'cullBack');
+            setBoolOpt(viewerOpts, 'pauseWhenUnfocused', 'pauseWhenUnfocused');
+            setBoolOpt(viewerOpts, 'autoOrbit', 'autoOrbit');
+            setNumberOpt(viewerOpts, 'orbitSpeed', 'orbitSpeed');
+            setBoolOpt(viewerOpts, 'angleCut', 'angleCut');
+            setBoolOpt(viewerOpts, 'shaderAngleCut', 'shaderAngleCut');
+            setNumberOpt(viewerOpts, 'cutStart', 'cutStart');
+            setNumberOpt(viewerOpts, 'cutEnd', 'cutEnd');
+            setBoolOpt(viewerOpts, 'pbr', 'pbr');
+
+            // Camera state survives only when all six fields are present
+            // (matches the C++ reader's mutual-requirement check).
+            var camera = {};
+            setNumberOpt(camera, 'cameraTargetX', 'targetX');
+            setNumberOpt(camera, 'cameraTargetY', 'targetY');
+            setNumberOpt(camera, 'cameraTargetZ', 'targetZ');
+            setNumberOpt(camera, 'cameraDistance', 'distance');
+            setNumberOpt(camera, 'cameraYaw', 'yawDeg');
+            setNumberOpt(camera, 'cameraPitch', 'pitchDeg');
+            if (Object.keys(camera).length === 6) {
+                viewerOpts.camera = camera;
+            }
 
             var statusEl = document.getElementById('status');
             window.Module = {
@@ -185,9 +195,12 @@
                     return path;
                 },
                 // No preRun preloads — assets are fetched from C++ via
-                // emscripten_fetch after main() starts so imgui can render
-                // a progress UI instead of blocking startup.
-                arguments: viewerArgs,
+                // emscripten_fetch after the viewer starts so imgui can
+                // render a progress UI instead of blocking startup.
+                onRuntimeInitialized: function () {
+                    Module.ccall('nh_viewer_start', 'number', ['string'],
+                                 [JSON.stringify(viewerOpts)]);
+                },
             };
             window.Module.setStatus('loading ' + bundleBase + '…');
             window.onerror = function (msg) {

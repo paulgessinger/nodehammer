@@ -105,7 +105,12 @@ if(NODEHAMMER_PROFILING)
     endif()
 endif()
 
-# ── Library target ─────────────────────────────────────────────────────────────
+# ── Core library ───────────────────────────────────────────────────────────────
+# Pipeline core: IR + config + selection + tessellation + importers/exporters
+# + scene_build. Deliberately free of CLI11 and the cmd_*.cpp dispatchers so
+# the bench harness, the test binary, and the future browser entry point can
+# link against it without pulling subcommand registration code (and CLI11's
+# header-only template forest) into their closure.
 add_library(nodehammer_lib STATIC
     src/ir/semantic.cpp
     src/config/config_loader.cpp
@@ -128,13 +133,6 @@ add_library(nodehammer_lib STATIC
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
     src/detail/markup.cpp
-    src/cli/pager.cpp
-    src/cli/cmd_convert.cpp
-    src/cli/cmd_inspect.cpp
-    src/cli/cmd_validate_config.cpp
-    src/cli/cmd_config_flatten.cpp
-    src/cli/cmd_dump_semantic.cpp
-    src/cli/cmd_dump_render.cpp
     src/scene_build.cpp
 )
 
@@ -154,7 +152,6 @@ target_link_libraries(nodehammer_lib PUBLIC
     nlohmann_json::nlohmann_json
     glm::glm
     TinyGLTF::TinyGLTF
-    CLI11::CLI11
     zstd::libzstd_static
     flatbuffers::flatbuffers
     unordered_dense::unordered_dense
@@ -164,6 +161,27 @@ add_dependencies(nodehammer_lib flatbuffers_generate)
 target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_FBS_GENERATED_DIR})
 
 nodehammer_set_compiler_options(nodehammer_lib)
+
+# ── CLI library ────────────────────────────────────────────────────────────────
+# Subcommand dispatchers + CLI11 glue. Native-only: the wasm viewer ships
+# its own C-export bootstrap (src/web/viewer_main.cpp) and the CI bench is
+# a separate exe under tests/. Nothing in the wasm closure links this lib.
+add_library(nodehammer_cli STATIC
+    src/cli/pager.cpp
+    src/cli/cmd_convert.cpp
+    src/cli/cmd_inspect.cpp
+    src/cli/cmd_validate_config.cpp
+    src/cli/cmd_config_flatten.cpp
+    src/cli/cmd_dump_semantic.cpp
+    src/cli/cmd_dump_render.cpp
+)
+
+target_link_libraries(nodehammer_cli PUBLIC
+    nodehammer_lib
+    CLI11::CLI11
+)
+
+nodehammer_set_compiler_options(nodehammer_cli)
 
 # ── Optional backends ──────────────────────────────────────────────────────────
 if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
@@ -201,54 +219,47 @@ target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 # and WGPU executables from a single configure so the wasm shell can pick
 # at runtime via navigator.gpu — see web/viewer.html.
 if(NODEHAMMER_WITH_VIEWER)
-    # Populates NH_VIEWER_SOURCES via PARENT_SCOPE.
-    add_subdirectory(src/viewer)
     # Defines nodehammer_shaders custom target + NH_SHADER_INCLUDE_DIR.
     add_subdirectory(shaders)
+    # Defines nh_add_viewer_lib(name sokol_lib).
+    add_subdirectory(src/viewer)
     target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_VIEWER=1)
 
-    # Helper: compose one viewer executable from the CLI dispatcher + viewer
-    # sources, linked against a single sokol_<backend> lib.
-    function(nh_add_viewer_exe name sokol_lib)
-        add_executable(${name} src/cli/main.cpp src/cli/cmd_viewer.cpp ${NH_VIEWER_SOURCES})
-        target_link_libraries(${name} PRIVATE nodehammer_lib ${sokol_lib})
-        # Generated shader header lives next to shaders/CMakeLists.txt's binary dir.
-        target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
-        add_dependencies(${name} nodehammer_shaders)
-        nodehammer_set_compiler_options(${name})
+    # Compose one viewer executable. The native build keeps the CLI
+    # dispatcher (`nodehammer viewer …` alongside the other subcommands);
+    # the wasm build skips CLI11 entirely and uses src/web/viewer_main.cpp,
+    # which exposes a single `nh_viewer_start(opts_json)` C export driven
+    # by web/viewer.html.
+    function(nh_add_viewer_exe name viewer_lib)
         if(EMSCRIPTEN)
+            add_executable(${name} src/web/viewer_main.cpp)
+            target_link_libraries(${name} PRIVATE ${viewer_lib})
             nodehammer_apply_emscripten_viewer_options(${name})
         else()
+            add_executable(${name} src/cli/main.cpp src/cli/cmd_viewer.cpp)
+            target_link_libraries(${name} PRIVATE nodehammer_cli ${viewer_lib})
             nodehammer_apply_emscripten_exe_options(${name})
-            # Native file picker (NFD-extended). The web build uses an HTML
-            # <input type=file> + FileSystemAccess API, so it never needs
-            # this dep. nfd::nfd is only declared when NOT EMSCRIPTEN — see
-            # cmake/Dependencies.cmake.
-            target_link_libraries(${name} PRIVATE nfd::nfd)
-            target_compile_definitions(${name} PRIVATE NH_HAS_NFD=1)
-            # PlatformFolders resolves the OS cache directory for the IBL
-            # bake cache. Web uses IndexedDB instead, so this dep is native-only.
-            # Conan recipe is `platformfolders`, but it sets cmake_file_name
-            # to `platform_folders` and the target to `sago::platform_folders`.
-            find_package(platform_folders CONFIG REQUIRED)
-            target_link_libraries(${name} PRIVATE sago::platform_folders)
         endif()
+        nodehammer_set_compiler_options(${name})
     endfunction()
 
     if(EMSCRIPTEN)
-        # Two backend libs + two executables from one configure. The viewer
-        # source list is compiled twice — once per executable — because the
-        # sokol headers' visible struct surface depends on the backend define.
+        # Two backend libs + two viewer libs + two executables from one
+        # configure. The viewer source list is compiled twice — once per
+        # backend — because the sokol headers' visible struct surface
+        # depends on the SOKOL_<backend> define.
         nh_add_sokol_lib(sokol_gles3 SOKOL_GLES3)
         nh_add_sokol_lib(sokol_wgpu  SOKOL_WGPU)
         # WGPU backend needs <webgpu/webgpu.h> at compile time AND the
         # WebGPU runtime polyfill at link time. --use-port=emdawnwebgpu
         # covers both (emcc replaced the old -sUSE_WEBGPU=1 flag with this
         # port). PUBLIC on the lib so the include flag also reaches the
-        # viewer source files compiled into the executable.
+        # viewer TUs compiled into the per-backend viewer lib.
         target_compile_options(sokol_wgpu PUBLIC "--use-port=emdawnwebgpu")
-        nh_add_viewer_exe(nodehammer-gles3 sokol_gles3)
-        nh_add_viewer_exe(nodehammer-wgpu  sokol_wgpu)
+        nh_add_viewer_lib(nodehammer_viewer_gles3 sokol_gles3)
+        nh_add_viewer_lib(nodehammer_viewer_wgpu  sokol_wgpu)
+        nh_add_viewer_exe(nodehammer-gles3 nodehammer_viewer_gles3)
+        nh_add_viewer_exe(nodehammer-wgpu  nodehammer_viewer_wgpu)
         target_link_options(nodehammer-wgpu PRIVATE "--use-port=emdawnwebgpu")
     else()
         if(APPLE)
@@ -259,12 +270,13 @@ if(NODEHAMMER_WITH_VIEWER)
             set(_nh_backend SOKOL_GLCORE)
         endif()
         nh_add_sokol_lib(sokol_native ${_nh_backend})
-        nh_add_viewer_exe(nodehammer sokol_native)
+        nh_add_viewer_lib(nodehammer_viewer sokol_native)
+        nh_add_viewer_exe(nodehammer nodehammer_viewer)
     endif()
 else()
     # Headless build: just the CLI dispatcher, no viewer subcommand.
     add_executable(nodehammer src/cli/main.cpp)
-    target_link_libraries(nodehammer PRIVATE nodehammer_lib)
+    target_link_libraries(nodehammer PRIVATE nodehammer_cli)
     nodehammer_set_compiler_options(nodehammer)
     nodehammer_apply_emscripten_exe_options(nodehammer)
 endif()

@@ -102,8 +102,11 @@ function(nodehammer_apply_emscripten_viewer_options target)
         # _main, so opt _malloc / _free in explicitly. HEAPU8 is also
         # opt-in under modern emscripten and is needed to copy the JS
         # bytes into the wasm heap before handing off to the C++ side.
-        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_nh_viewer_deliver_upload"
-        "-sEXPORTED_RUNTIME_METHODS=HEAPU8"
+        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_nh_viewer_deliver_upload,_nh_viewer_start"
+        # ccall is opt-in under modern emscripten and is needed by the JS
+        # shell to invoke nh_viewer_start with a JSON string after runtime
+        # init (auto-marshals std::string).
+        "-sEXPORTED_RUNTIME_METHODS=HEAPU8,ccall"
         # The wasm-exceptions runtime emits JS that calls $stackSave/
         # $stackRestore, which in turn need the C-level emscripten_stack_*
         # helpers from libcompiler_rt. Force-include those JS lib funcs;
