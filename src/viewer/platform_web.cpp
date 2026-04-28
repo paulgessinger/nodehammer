@@ -39,6 +39,7 @@ EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *ma
 // installed on the App only once all bytes have landed. Filenames are
 // UTF-8-encoded via TextEncoder to avoid depending on emscripten's
 // stringToNewUTF8 helper being in EXPORTED_RUNTIME_METHODS.
+// clang-format off
 EM_JS(void, nh_viewer_open_file_picker, (), {
     var input = document.createElement('input');
     input.type = 'file';
@@ -49,11 +50,11 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
         'change', async function(ev) {
             var files = Array.from(ev.target.files);
             document.body.removeChild(input);
-            if (files.length == = 0) {
+            if (files.length === 0) {
                 return;
             }
             var buffers = await Promise.all(files.map(function(f) { return f.arrayBuffer(); }));
-            Module._nh_viewer_begin_upload_batch();
+            var handle = Module._nh_viewer_begin_upload_batch();
             var enc = new TextEncoder();
             for (var i = 0; i < files.length; ++i) {
                 var bytes = new Uint8Array(buffers[i]);
@@ -66,16 +67,17 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
                 Module.HEAPU8.set(name_utf8, name_ptr);
                 Module.HEAPU8[name_ptr + name_utf8.length] = 0;
 
-                Module._nh_viewer_add_upload(name_ptr, data_ptr, size);
+                Module._nh_viewer_add_upload(handle, name_ptr, data_ptr, size);
 
                 Module._free(name_ptr);
                 Module._free(data_ptr);
             }
-            Module._nh_viewer_end_upload_batch();
+            Module._nh_viewer_end_upload_batch(handle);
         });
     document.body.appendChild(input);
     input.click();
 });
+// clang-format on
 
 namespace nodehammer::viewer::platform {
 
