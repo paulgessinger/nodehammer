@@ -1,13 +1,12 @@
 #include <nodehammer/viewer/platform.hpp>
 
 #include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/drop_asset_source.hpp>
+#include <nodehammer/viewer/project_fs.hpp>
 
 #include <nfd.hpp>
 #include <sokol_app.h>
 
 #include <filesystem>
-#include <memory>
 
 namespace nodehammer::viewer::platform {
 
@@ -25,11 +24,13 @@ void dispatchDroppedFiles(App &app) {
     if (n == 0) {
         return;
     }
-    auto source = std::make_unique<DropAssetSource>();
-    for (int i = 0; i < n; ++i) {
-        source->addPath(std::filesystem::path{sapp_get_dropped_file_path(i)});
+    auto *project = app.project();
+    if (project == nullptr) {
+        return;
     }
-    app.setSource(std::move(source));
+    for (int i = 0; i < n; ++i) {
+        project->addPath(std::filesystem::path{sapp_get_dropped_file_path(i)});
+    }
 }
 
 void runNativeFilePicker(const NativeFilePathHandler &handler) {

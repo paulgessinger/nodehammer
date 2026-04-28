@@ -20,7 +20,7 @@
 #   scene_build_job_*   — std::thread (native) or polled state machine (web)
 #   platform_*          — EM_JS / KEEPALIVE shims live in the web variant
 #
-# url_asset_source.cpp is web-only: native already builds synchronously
+# url_project_fs.cpp is web-only: native already builds synchronously
 # from --input/--config in cmd_viewer.cpp, so the network fetch path has
 # no meaning off the browser.
 
@@ -44,9 +44,9 @@ function(nh_add_viewer_lib name sokol_lib)
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/ibl_cache_web.cpp,${_dir}/ibl_cache_native.cpp>
         ${_dir}/scene_build_job_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
-        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_asset_source_web.cpp,>
+        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_project_fs_web.cpp,>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,${_dir}/platform_native.cpp>
-        ${_dir}/drop_asset_source.cpp
+        ${_dir}/bag_project_fs.cpp
     )
     target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib})
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})

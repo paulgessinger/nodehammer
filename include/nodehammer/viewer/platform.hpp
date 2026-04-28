@@ -16,13 +16,13 @@ inline constexpr bool kIsWeb = true;
 inline constexpr bool kIsWeb = false;
 #endif
 
-/// Allocate a fresh `DropAssetSource`, populate it from the current
-/// sokol_app FILES_DROPPED batch, and install it on `app`. Each gesture
-/// owns its own source; the previous source is replaced. On native this
-/// is fully synchronous. On web the bytes arrive via async fetches, so
-/// the platform impl keeps the new source alive in a refcounted batch
-/// context until every file's bytes have landed, then calls
-/// `app.setSource(...)` once.
+/// Push the current sokol_app FILES_DROPPED batch into `app`'s long-lived
+/// project. Multi-gesture accumulation is the norm: the previous drop's
+/// files stay in the bag, and this gesture's files get added on top. On
+/// native this is fully synchronous. On web each file's bytes arrive via
+/// an async sokol_html5 fetch; the per-file callback calls
+/// `app.project()->addBytes(...)` independently, so a partial gesture
+/// already advances the build trigger.
 void dispatchDroppedFiles(App &app);
 
 /// Push the viewer's persisted state into the browser URL's query string,
@@ -33,8 +33,8 @@ void commitUrlState(const std::string &state_query, const std::string &managed_k
 /// Open the browser's transient `<input type=file multiple>` picker
 /// inline. The browser requires `input.click()` to run from the user-
 /// gesture stack, so this dispatches synchronously; selected files arrive
-/// later via the `nh_viewer_*_upload_batch` C exports, which build a
-/// fresh DropAssetSource and install it on the App. No-op on native.
+/// later via the `nh_viewer_*_upload_batch` C exports, which push bytes
+/// into the App's existing project. No-op on native.
 void dispatchWebFilePicker();
 
 /// Run the native (NFD) file picker modally and invoke `handler` for each

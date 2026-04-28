@@ -9,9 +9,9 @@
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
-#include <nodehammer/viewer/asset_source.hpp>
+#include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/drop_asset_source.hpp>
+#include <nodehammer/viewer/project_fs.hpp>
 
 #include <imgui.h>
 #include <sokol_app.h>
@@ -83,7 +83,7 @@ struct App::Impl {
     bool quit{false};
 
     std::shared_ptr<const RenderScene> scene;
-    std::unique_ptr<AssetSource> source;
+    std::unique_ptr<ProjectFs> project_;
     SceneRenderer scene_renderer;
     Camera camera;
 
@@ -112,6 +112,13 @@ struct App::Impl {
     bool build_in_progress{false};
     std::chrono::steady_clock::time_point build_start_time{};
 
+    // Paths that fed the most recent build attempt. The frame loop only
+    // (re)triggers a build when the project's current root paths differ
+    // from these — otherwise a long-lived Ready project would re-fire
+    // every frame after the user clicked Clear scene.
+    std::filesystem::path last_built_config;
+    std::filesystem::path last_built_input;
+
     // Set from inside the imgui frame on native when the user clicks
     // "Open files…"; drained at end of frame to run NFD modally. NFD
     // enters nested event loops that would re-enter the active ImGui
@@ -121,8 +128,8 @@ struct App::Impl {
     // touches this flag.
     bool picker_requested{false};
 
-    // Stashed message after a build failure (so the UI can keep showing it
-    // for more than the one frame the source survives).
+    // Stashed message after a build failure so the UI can keep showing
+    // it across frames.
     std::string build_error;
 
     /// Bounding-sphere radius of the loaded scene; live-only state derived
@@ -148,7 +155,7 @@ struct App::Impl {
     double render_submit_ms{0.0};
     double scene_submit_ms{0.0};
 
-    explicit Impl(Config c) : cfg(std::move(c)) {}
+    explicit Impl(Config c) : cfg(std::move(c)), project_(std::make_unique<BagProjectFs>()) {}
 
     void onInit();
     void onFrame();
@@ -224,10 +231,9 @@ void App::Impl::onEvent(const sapp_event *ev) {
     } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         quit = true;
     } else if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
-        // Platform code allocates a fresh DropAssetSource for the gesture
-        // and installs it on the App when fully populated (synchronously
-        // on native, on the last fetch callback on web). Lives in
-        // platform-specific code.
+        // Platform code pushes the dropped files into the App's existing
+        // project (synchronously on native, via per-file fetch callbacks
+        // on web). Lives in platform-specific code.
         if (auto *app = App::instance()) {
             platform::dispatchDroppedFiles(*app);
         }
@@ -425,16 +431,16 @@ void App::Impl::onFrame() {
             }
         }
         build_in_progress = false;
-        // The source (UrlAssetSource that resolved, or DropAssetSource
-        // from a gesture) has done its job; drop it. The next gesture
-        // creates a fresh one — no need for a placeholder.
-        source.reset();
+        // Project is long-lived: we keep it so additional drops/picks
+        // accumulate into the existing bag (or so a UrlProjectFs's state
+        // survives in case the user wants to inspect what loaded). The
+        // build job already has the paths it needs; nothing else to do.
     }
 
     // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
     // entirely. Full pause was visible as "drag-and-drop into a
     // background viewer feels broken": the drop event fired and the
-    // async source/scene-build state advanced, but no frame rendered the
+    // async project/scene-build state advanced, but no frame rendered the
     // result until focus returned. 5 Hz keeps drag-over feedback and
     // load progress visible while still cutting GPU cost ~12x vs. the
     // active 60 Hz path. The flag's URL/persistence name stays
@@ -534,25 +540,34 @@ void App::Impl::onFrame() {
     }
     if (!scene) {
         ImGui::Separator();
-        // `show_drag_hint` flips off whenever the source has something
+        // `show_drag_hint` flips off whenever the project has something
         // concrete to say (loading progress, ready/build status, or a
         // hard error) — otherwise we encourage the user to drop files.
         bool show_drag_hint = true;
-        if (source) {
-            source->poll();
-            const auto state = source->state();
-            if (state == LoadState::Error) {
+        if (project_) {
+            project_->poll();
+            const auto status = project_->status();
+            if (status == ProjectFsStatus::Error) {
                 ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
-                ImGui::TextWrapped("%s", source->errorMessage().c_str());
+                ImGui::TextWrapped("%s", project_->errorMessage().c_str());
                 show_drag_hint = false;
-            } else if (state == LoadState::Ready) {
+            } else if (status == ProjectFsStatus::Ready) {
                 // Hand the paths to the build job. Native immediately spawns
                 // a worker thread; web defers the synchronous build by one
                 // poll so this frame's "Tessellating…" UI paints first.
-                if (!build_in_progress) {
+                // Only (re)trigger when the project's roots differ from
+                // what we last built — otherwise a long-lived Ready project
+                // would re-fire after the user clicks Clear scene.
+                const auto &cur_cfg = project_->rootConfigPath();
+                const auto &cur_input = project_->rootInputPath();
+                const bool roots_changed =
+                    cur_cfg != last_built_config || cur_input != last_built_input;
+                if (!build_in_progress && roots_changed) {
                     build_start_time = std::chrono::steady_clock::now();
-                    build_job.start(source->configPath(), source->inputPath());
+                    build_job.start(cur_cfg, cur_input);
                     build_in_progress = true;
+                    last_built_config = cur_cfg;
+                    last_built_input = cur_input;
                 }
                 switch (build_job.phase()) {
                 case SceneBuildJob::Phase::Preparing:
@@ -580,12 +595,12 @@ void App::Impl::onFrame() {
                 }
                 show_drag_hint = false;
             } else {
-                // Idle / Fetching: render a source-shaped progress block.
-                // URL-style sources populate `progress()` with active
-                // downloads; drop sources populate it with already-collected
+                // Idle / Fetching: render a project-shaped progress block.
+                // URL-style backends populate `progress()` with active
+                // downloads; bag backends populate it with already-collected
                 // files. Empty progress = no concrete state to show, fall
                 // through to the drag hint below.
-                const auto entries = source->progress();
+                const auto entries = project_->progress();
                 if (!entries.empty()) {
                     show_drag_hint = false;
                     ImGui::Text("Loading…");
@@ -606,13 +621,16 @@ void App::Impl::onFrame() {
                     }
                 }
             }
-            // Slot hints — the latest drop/pick gesture didn't include
-            // one of the required files; nudge the user to include both
-            // next time. Source-agnostic: any source can populate these.
-            for (const auto &msg : source->waitingFor()) {
+            // Slot hints — the project doesn't yet have one of the required
+            // files; nudge the user to drop or pick what's missing. Backend-
+            // agnostic: any project can populate these.
+            for (const auto &msg : project_->waitingFor()) {
                 ImGui::Text("Still waiting for: %s", msg.c_str());
             }
-            if (const auto &u = source->unrecognised(); !u.empty()) {
+            for (const auto &w : project_->warnings()) {
+                ImGui::TextColored({0.9f, 0.85f, 0.4f, 1.f}, "%s", w.c_str());
+            }
+            if (const auto &u = project_->unrecognised(); !u.empty()) {
                 ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f}, "Don't know what to do with: %s",
                                    u.c_str());
             }
@@ -661,7 +679,8 @@ void App::Impl::onFrame() {
         if (ImGui::Button("Clear scene")) {
             scene_renderer.clearScene();
             scene.reset();
-            source.reset();
+            // Project stays — user's accumulated drops survive a clear.
+            // Use a different gesture (or restart) to wipe the bag.
             scene_uploaded = false;
             camera_framed = false;
             scene_radius = 0.f;
@@ -706,14 +725,13 @@ void App::Impl::onFrame() {
     if constexpr (!platform::kIsWeb) {
         if (picker_requested) {
             picker_requested = false;
-            // Per-gesture source: NFD's modal returns synchronously after
-            // the user confirms, so we accumulate paths into a fresh
-            // DropAssetSource and install it once the picker closes.
-            auto fresh = std::make_unique<DropAssetSource>();
-            auto *fresh_ptr = fresh.get();
+            // NFD's modal returns synchronously after the user confirms.
+            // Push each picked path into the App's long-lived project so
+            // gestures accumulate (toml from one pick, geometry from the
+            // next, etc.) rather than each picker invocation starting over.
+            auto *project = project_.get();
             platform::runNativeFilePicker(
-                [fresh_ptr](const std::filesystem::path &path) { fresh_ptr->addPath(path); });
-            source = std::move(fresh);
+                [project](const std::filesystem::path &path) { project->addPath(path); });
         }
     }
 }
@@ -732,14 +750,16 @@ void App::setScene(std::shared_ptr<const RenderScene> scene) {
     impl_->camera_framed = false;
 }
 
-void App::setSource(std::unique_ptr<AssetSource> source) {
-    impl_->source = std::move(source);
+void App::setProject(std::unique_ptr<ProjectFs> project) {
+    impl_->project_ = std::move(project);
     // The previously-displayed scene (if any) stays on screen; the new
-    // source's `Idle → Ready` transition will trigger a fresh build that
+    // project's Idle → Ready transition will trigger a fresh build that
     // swaps the scene atomically when ready. cmd_viewer's `--input` path
-    // calls setScene + setSource at launch in either order; clearing
-    // scene state here would race with that.
+    // calls setScene without touching the project; clearing scene state
+    // here would race with that.
 }
+
+ProjectFs *App::project() const noexcept { return impl_->project_.get(); }
 
 namespace {
 // Function-local-static slot that owns the singleton App. `App::Handle`

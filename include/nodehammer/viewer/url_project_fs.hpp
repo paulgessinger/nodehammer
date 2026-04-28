@@ -1,24 +1,25 @@
 #pragma once
 
-#include <nodehammer/viewer/asset_source.hpp>
+#include <nodehammer/viewer/project_fs.hpp>
 
 #include <memory>
+#include <string>
 
 namespace nodehammer::viewer {
 
-/// AssetSource that downloads a TOML config, its (transitive) `include = …`
-/// dependencies, and a geometry blob via emscripten_fetch (web) and writes
-/// each into MEMFS at its URL-derived path. Includes are discovered
-/// iteratively as each TOML file lands.
+/// ProjectFs backend that downloads a TOML config, its (transitive)
+/// `include = …` dependencies, and a geometry blob via emscripten_fetch
+/// (web) and writes each into MEMFS at its URL-derived path. Includes are
+/// discovered iteratively as each TOML file lands.
 ///
-/// On native this is a stub: start() resolves immediately to Ready (the
-/// files already exist on disk and the synchronous CLI path is taken
-/// instead). The class still exists in both builds so the App's polling
-/// code compiles without ifdefs at the call site.
-class UrlAssetSource final : public AssetSource {
+/// Web-only: this header is included from viewer_main.cpp which is itself
+/// part of the wasm target. The native build uses the synchronous
+/// buildSceneFromPaths flow in cmd_viewer.cpp instead and never instantiates
+/// this class.
+class UrlProjectFs final : public ProjectFs {
   public:
-    UrlAssetSource();
-    ~UrlAssetSource() override;
+    UrlProjectFs();
+    ~UrlProjectFs() override;
 
     /// Begin fetching `config_url` and `input_url`. Both are MEMFS-style
     /// paths (typically root-relative, e.g. `/scene.toml`) and double as
@@ -32,11 +33,11 @@ class UrlAssetSource final : public AssetSource {
     void start(std::string config_url, std::string input_url, std::string asset_base = {});
 
     void poll() override;
-    LoadState state() const override;
-    std::span<const AssetProgress> progress() const override;
+    ProjectFsStatus status() const override;
+    std::span<const ProjectProgress> progress() const override;
     const std::string &errorMessage() const override;
-    const std::filesystem::path &configPath() const override;
-    const std::filesystem::path &inputPath() const override;
+    const std::filesystem::path &rootConfigPath() const override;
+    const std::filesystem::path &rootInputPath() const override;
 
   private:
     struct Impl;

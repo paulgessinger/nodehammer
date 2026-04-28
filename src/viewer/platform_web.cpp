@@ -1,6 +1,6 @@
 #include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/drop_asset_source.hpp>
 #include <nodehammer/viewer/platform.hpp>
+#include <nodehammer/viewer/project_fs.hpp>
 
 #include <emscripten/emscripten.h>
 #include <sokol_app.h>
@@ -12,7 +12,6 @@
 #include <print>
 #include <span>
 #include <string>
-#include <utility>
 #include <vector>
 
 EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
@@ -94,57 +93,48 @@ void runNativeFilePicker(const NativeFilePathHandler & /*handler*/) {
 
 namespace {
 
-// Refcounted batch shared across the N in-flight fetches a single drop
-// kicks off. The batch owns the freshly-allocated source while bytes are
-// arriving; only the last completing fetch installs it on the App. The
-// shared_ptr lives in each per-file ctx, so when the last ctx destructs
-// the batch frees itself naturally.
-struct WebDropBatch {
-    std::unique_ptr<DropAssetSource> source;
-    int pending{0};
-    App *app{nullptr};
-};
-
 // Per-file fetch context. sokol writes the file's bytes into `buffer` then
-// invokes the callback; we transfer ownership of the ctx via `release()`
-// into req.user_data and reclaim with a fresh unique_ptr in the callback.
+// invokes the callback; we transfer ownership via `release()` into
+// req.user_data and reclaim with a fresh unique_ptr in the callback. Each
+// file's bytes flow straight into the App's long-lived project, so there
+// is no per-gesture batch object to refcount — the App owns the project,
+// the project lifetime survives any number of in-flight fetches.
 struct WebDropCtx {
     std::vector<std::byte> buffer;
     std::string filename;
-    std::shared_ptr<WebDropBatch> batch;
 };
 
 void webDropFetchCallback(const sapp_html5_fetch_response *response) {
     std::unique_ptr<WebDropCtx> ctx{static_cast<WebDropCtx *>(response->user_data)};
-    if (response->succeeded) {
-        ctx->batch->source->addBytes(
-            ctx->filename, std::span<const std::byte>{
-                               ctx->buffer.data(), static_cast<std::size_t>(response->data.size)});
-    } else {
+    if (!response->succeeded) {
         std::println(stderr, "viewer: failed to fetch dropped file '{}'", ctx->filename);
+        return;
     }
-    if (--ctx->batch->pending == 0 && ctx->batch->app != nullptr) {
-        ctx->batch->app->setSource(std::move(ctx->batch->source));
+    auto *app = App::instance();
+    if (app == nullptr) {
+        return;
     }
+    auto *project = app->project();
+    if (project == nullptr) {
+        return;
+    }
+    project->addBytes(ctx->filename,
+                      std::span<const std::byte>{ctx->buffer.data(),
+                                                 static_cast<std::size_t>(response->data.size)});
 }
 
 } // namespace
 
-void dispatchDroppedFiles(App &app) {
+void dispatchDroppedFiles(App & /*app*/) {
     const int n = sapp_get_num_dropped_files();
     if (n == 0) {
         return;
     }
-    auto batch = std::make_shared<WebDropBatch>();
-    batch->source = std::make_unique<DropAssetSource>();
-    batch->pending = n;
-    batch->app = &app;
     for (int i = 0; i < n; ++i) {
         const auto size = sapp_html5_get_dropped_file_size(i);
         auto ctx = std::make_unique<WebDropCtx>();
         ctx->filename = sapp_get_dropped_file_path(i);
         ctx->buffer.resize(static_cast<std::size_t>(size));
-        ctx->batch = batch;
         sapp_html5_fetch_request req{};
         req.dropped_file_index = i;
         req.callback = &webDropFetchCallback;
@@ -160,34 +150,38 @@ void dispatchDroppedFiles(App &app) {
 
 extern "C" {
 
-// JS-picker batch lifecycle. The JS shim holds the returned handle in a
-// closure-local variable, threads it through `add` calls, and passes it to
-// `end`. No file-scope state on the C side; the batch lives on the heap
-// for exactly the duration of the gesture.
+// JS-picker batch lifecycle. Bytes flow into the App's long-lived project
+// directly; the begin/end pair no longer carries state. The handle is a
+// fixed non-null sentinel kept only so the JS-side ABI doesn't change
+// (the shim still threads it through, but the C side ignores it).
+namespace {
+char nh_picker_handle_sentinel = 0;
+} // namespace
 
 EMSCRIPTEN_KEEPALIVE
-void *nh_viewer_begin_upload_batch() { return new nodehammer::viewer::DropAssetSource; }
+void *nh_viewer_begin_upload_batch() { return static_cast<void *>(&nh_picker_handle_sentinel); }
 
 EMSCRIPTEN_KEEPALIVE
-void nh_viewer_add_upload(void *handle, const char *filename, const std::uint8_t *data,
+void nh_viewer_add_upload(void * /*handle*/, const char *filename, const std::uint8_t *data,
                           std::size_t size) {
-    if (handle == nullptr || filename == nullptr) {
+    if (filename == nullptr) {
         return;
     }
-    auto *source = static_cast<nodehammer::viewer::DropAssetSource *>(handle);
-    source->addBytes(filename, std::as_bytes(std::span{data, size}));
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr) {
+        return;
+    }
+    auto *project = app->project();
+    if (project == nullptr) {
+        return;
+    }
+    project->addBytes(filename, std::as_bytes(std::span{data, size}));
 }
 
 EMSCRIPTEN_KEEPALIVE
-void nh_viewer_end_upload_batch(void *handle) {
-    if (handle == nullptr) {
-        return;
-    }
-    std::unique_ptr<nodehammer::viewer::DropAssetSource> source{
-        static_cast<nodehammer::viewer::DropAssetSource *>(handle)};
-    if (auto *app = nodehammer::viewer::App::instance()) {
-        app->setSource(std::move(source));
-    }
+void nh_viewer_end_upload_batch(void * /*handle*/) {
+    // No-op: each addBytes already updated the project; the build trigger
+    // picks up the new state on the next frame poll.
 }
 
 } // extern "C"

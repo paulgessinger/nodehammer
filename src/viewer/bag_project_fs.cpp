@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/drop_asset_source.hpp>
+#include <nodehammer/viewer/bag_project_fs.hpp>
 
 #include <nodehammer/ir/semantic/importer.hpp>
 
@@ -11,9 +11,9 @@ namespace nodehammer::viewer {
 
 namespace {
 
-// Lowercase ASCII compare for extension recognition. Real path extension
-// comparison should be case-insensitive (a user-dropped FOO.TOML is still
-// a config). Cheap homemade variant — std::tolower depends on locale.
+// Lowercase ASCII compare for extension recognition. A user-dropped FOO.TOML
+// is still a config; std::tolower depends on locale, so a homemade variant
+// keeps the comparison predictable.
 char asciiLower(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c - 'A' + 'a') : c; }
 
 bool extEquals(const std::filesystem::path &p, std::string_view want) {
@@ -31,34 +31,36 @@ bool extEquals(const std::filesystem::path &p, std::string_view want) {
 
 } // namespace
 
-struct DropAssetSource::Impl {
-    LoadState state{LoadState::Idle};
+struct BagProjectFs::Impl {
+    ProjectFsStatus status{ProjectFsStatus::Idle};
     std::string error;
     std::filesystem::path config_path;
     std::filesystem::path input_path;
-    std::vector<AssetProgress> entries;
+    std::vector<ProjectProgress> entries;
     std::string last_unrecognised;
-    // Cached "what's missing" strings, recomputed alongside `state`.
+    // Cached "what's missing" strings, recomputed alongside `status`.
     // Stored so `waitingFor()` can return a span without allocating.
     std::vector<std::string> waiting;
+    // Soft warnings; e.g. last-write-wins notes on basename collisions.
+    std::vector<std::string> warning_msgs;
 
     // Cached importer registry for extension probing. Constructing it once
-    // avoids re-registering every importer on each dropped file.
+    // avoids re-registering every importer on each ingested file.
     ImporterRegistry registry{ImporterRegistry::makeDefault()};
 
     bool hasConfig() const { return !config_path.empty(); }
     bool hasInput() const { return !input_path.empty(); }
 
-    void recomputeState() {
-        if (state == LoadState::Error) {
+    void recomputeStatus() {
+        if (status == ProjectFsStatus::Error) {
             return;
         }
         if (hasConfig() && hasInput()) {
-            state = LoadState::Ready;
+            status = ProjectFsStatus::Ready;
         } else if (hasConfig() || hasInput()) {
-            state = LoadState::Fetching; // "still accumulating"
+            status = ProjectFsStatus::Fetching;
         } else {
-            state = LoadState::Idle;
+            status = ProjectFsStatus::Idle;
         }
         waiting.clear();
         if (!hasConfig()) {
@@ -73,7 +75,7 @@ struct DropAssetSource::Impl {
         // bytes_total / bytes_done left at 0 — local files are effectively
         // instant; the UI just shows the filename. If we ever want to read
         // them through a streaming layer we can fill these in.
-        AssetProgress p;
+        ProjectProgress p;
         p.url = path.filename().string();
         p.done = true;
         p.bytes_total = 0;
@@ -82,28 +84,32 @@ struct DropAssetSource::Impl {
     }
 };
 
-DropAssetSource::DropAssetSource() : impl_(std::make_unique<Impl>()) {}
-DropAssetSource::~DropAssetSource() = default;
+BagProjectFs::BagProjectFs() : impl_(std::make_unique<Impl>()) {}
+BagProjectFs::~BagProjectFs() = default;
 
-void DropAssetSource::poll() {}
+void BagProjectFs::poll() {}
 
-LoadState DropAssetSource::state() const { return impl_->state; }
+ProjectFsStatus BagProjectFs::status() const { return impl_->status; }
 
-std::span<const AssetProgress> DropAssetSource::progress() const {
+std::span<const ProjectProgress> BagProjectFs::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
 }
 
-const std::string &DropAssetSource::errorMessage() const { return impl_->error; }
-const std::filesystem::path &DropAssetSource::configPath() const { return impl_->config_path; }
-const std::filesystem::path &DropAssetSource::inputPath() const { return impl_->input_path; }
+const std::string &BagProjectFs::errorMessage() const { return impl_->error; }
+const std::filesystem::path &BagProjectFs::rootConfigPath() const { return impl_->config_path; }
+const std::filesystem::path &BagProjectFs::rootInputPath() const { return impl_->input_path; }
 
-std::span<const std::string> DropAssetSource::waitingFor() const {
+std::span<const std::string> BagProjectFs::waitingFor() const {
     return {impl_->waiting.data(), impl_->waiting.size()};
 }
 
-const std::string &DropAssetSource::unrecognised() const { return impl_->last_unrecognised; }
+std::span<const std::string> BagProjectFs::warnings() const {
+    return {impl_->warning_msgs.data(), impl_->warning_msgs.size()};
+}
 
-void DropAssetSource::addBytes(std::string_view filename, std::span<const std::byte> bytes) {
+const std::string &BagProjectFs::unrecognised() const { return impl_->last_unrecognised; }
+
+void BagProjectFs::addBytes(std::string_view filename, std::span<const std::byte> bytes) {
     if (filename.empty()) {
         return;
     }
@@ -115,7 +121,7 @@ void DropAssetSource::addBytes(std::string_view filename, std::span<const std::b
     const auto staging = std::filesystem::temp_directory_path(ec) / "nodehammer-uploads";
     if (ec) {
         impl_->error = "failed to resolve temp dir for upload staging: " + ec.message();
-        impl_->state = LoadState::Error;
+        impl_->status = ProjectFsStatus::Error;
         return;
     }
     std::filesystem::create_directories(staging, ec);
@@ -123,14 +129,14 @@ void DropAssetSource::addBytes(std::string_view filename, std::span<const std::b
     std::ofstream out(path, std::ios::binary);
     if (!out) {
         impl_->error = "failed to stage upload at " + path.string();
-        impl_->state = LoadState::Error;
+        impl_->status = ProjectFsStatus::Error;
         return;
     }
     out.write(reinterpret_cast<const char *>(bytes.data()),
               static_cast<std::streamsize>(bytes.size()));
     if (!out) {
         impl_->error = "short write while staging upload at " + path.string();
-        impl_->state = LoadState::Error;
+        impl_->status = ProjectFsStatus::Error;
         return;
     }
     out.close();
@@ -140,28 +146,36 @@ void DropAssetSource::addBytes(std::string_view filename, std::span<const std::b
     addPath(path);
 }
 
-void DropAssetSource::addPath(const std::filesystem::path &path) {
+void BagProjectFs::addPath(const std::filesystem::path &path) {
     if (path.empty()) {
         return;
     }
 
     // 1) Config: any .toml file fills the config slot.
     if (extEquals(path, "toml")) {
+        if (!impl_->config_path.empty() && impl_->config_path != path) {
+            impl_->warning_msgs.emplace_back("replaced " + impl_->config_path.filename().string() +
+                                             " with " + path.string());
+        }
         impl_->config_path = path;
         impl_->last_unrecognised.clear();
         impl_->recordEntry(path);
-        impl_->recomputeState();
+        impl_->recomputeStatus();
         return;
     }
 
     // 2) Geometry: ask the importer registry whether any registered importer
-    //    claims this extension. Keeps the source format-agnostic — adding
-    //    a new geometry format is purely an importer change.
+    //    claims this extension. Keeps the bag format-agnostic — adding a new
+    //    geometry format is purely an importer change.
     if (impl_->registry.resolve(path, {}) != nullptr) {
+        if (!impl_->input_path.empty() && impl_->input_path != path) {
+            impl_->warning_msgs.emplace_back("replaced " + impl_->input_path.filename().string() +
+                                             " with " + path.string());
+        }
         impl_->input_path = path;
         impl_->last_unrecognised.clear();
         impl_->recordEntry(path);
-        impl_->recomputeState();
+        impl_->recomputeStatus();
         return;
     }
 

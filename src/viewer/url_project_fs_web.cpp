@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/url_asset_source.hpp>
+#include <nodehammer/viewer/url_project_fs.hpp>
 
 #include <nodehammer/config/config_loader.hpp>
 
@@ -29,7 +29,7 @@ bool makeParentDirs(const std::string &path) {
         if (path[i] == '/') {
             if (!current.empty()) {
                 if (::mkdir(current.c_str(), 0755) != 0 && errno != EEXIST) {
-                    std::fprintf(stderr, "url_asset_source: mkdir(%s) failed: %s (errno=%d)\n",
+                    std::fprintf(stderr, "url_project_fs: mkdir(%s) failed: %s (errno=%d)\n",
                                  current.c_str(), std::strerror(errno), errno);
                     return false;
                 }
@@ -45,26 +45,26 @@ bool makeParentDirs(const std::string &path) {
 bool writeFile(const std::string &path, const char *data, size_t size) {
     if (!makeParentDirs(path)) {
         std::fprintf(stderr,
-                     "url_asset_source: writeFile(%s, size=%zu) aborted: "
+                     "url_project_fs: writeFile(%s, size=%zu) aborted: "
                      "parent dirs missing\n",
                      path.c_str(), size);
         return false;
     }
     std::FILE *f = std::fopen(path.c_str(), "wb");
     if (f == nullptr) {
-        std::fprintf(stderr, "url_asset_source: fopen(%s, wb) failed: %s (errno=%d)\n",
-                     path.c_str(), std::strerror(errno), errno);
+        std::fprintf(stderr, "url_project_fs: fopen(%s, wb) failed: %s (errno=%d)\n", path.c_str(),
+                     std::strerror(errno), errno);
         return false;
     }
     const size_t written = std::fwrite(data, 1, size, f);
     if (written != size) {
         std::fprintf(stderr,
-                     "url_asset_source: short write for %s: %zu of %zu bytes "
+                     "url_project_fs: short write for %s: %zu of %zu bytes "
                      "(errno=%d: %s)\n",
                      path.c_str(), written, size, errno, std::strerror(errno));
     }
     if (std::fclose(f) != 0) {
-        std::fprintf(stderr, "url_asset_source: fclose(%s) failed: %s (errno=%d)\n", path.c_str(),
+        std::fprintf(stderr, "url_project_fs: fclose(%s) failed: %s (errno=%d)\n", path.c_str(),
                      std::strerror(errno), errno);
         return false;
     }
@@ -73,7 +73,7 @@ bool writeFile(const std::string &path, const char *data, size_t size) {
         const bool exists_now = std::filesystem::exists(path, ec);
         const auto size_now = exists_now ? std::filesystem::file_size(path, ec) : 0;
         std::fprintf(stderr,
-                     "url_asset_source: wrote %s (%zu bytes; post-write exists=%d size=%zu)\n",
+                     "url_project_fs: wrote %s (%zu bytes; post-write exists=%d size=%zu)\n",
                      path.c_str(), size, exists_now ? 1 : 0, static_cast<size_t>(size_now));
     }
     return written == size;
@@ -105,13 +105,13 @@ std::string resolveIncludeUrl(const std::string &config_url, const std::string &
 
 } // namespace
 
-struct UrlAssetSource::Impl {
-    LoadState state{LoadState::Idle};
+struct UrlProjectFs::Impl {
+    ProjectFsStatus status{ProjectFsStatus::Idle};
     std::string error;
     std::filesystem::path config_path;
     std::filesystem::path input_path;
     std::string asset_base;
-    std::vector<AssetProgress> entries;
+    std::vector<ProjectProgress> entries;
     std::unordered_set<std::string> seen;
 
     struct FetchCtx {
@@ -131,19 +131,18 @@ struct UrlAssetSource::Impl {
     std::vector<Kind> kinds;
 };
 
-void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
+void UrlProjectFs::Impl::enqueue(const std::string &url, Kind kind) {
     if (!seen.insert(url).second) {
-        std::fprintf(stderr, "url_asset_source: enqueue dedup'd %s\n", url.c_str());
+        std::fprintf(stderr, "url_project_fs: enqueue dedup'd %s\n", url.c_str());
         return;
     }
     // url is the MEMFS path (always rooted at `/`). The fetch URL is the
     // same path prefixed by asset_base for sub-path deployments; leaving
     // asset_base empty keeps the legacy server-root behaviour.
     const std::string fetch_url = asset_base + url;
-    std::fprintf(stderr, "url_asset_source: enqueue %s (fetch %s)\n", url.c_str(),
-                 fetch_url.c_str());
+    std::fprintf(stderr, "url_project_fs: enqueue %s (fetch %s)\n", url.c_str(), fetch_url.c_str());
     const size_t index = entries.size();
-    entries.push_back(AssetProgress{url, 0, 0, false, false});
+    entries.push_back(ProjectProgress{url, 0, 0, false, false});
     kinds.push_back(kind);
 
     auto *ctx = new FetchCtx{this, index};
@@ -159,7 +158,7 @@ void UrlAssetSource::Impl::enqueue(const std::string &url, Kind kind) {
     emscripten_fetch(&attr, fetch_url.c_str());
 }
 
-void UrlAssetSource::Impl::onProgress(emscripten_fetch_t *fetch) {
+void UrlProjectFs::Impl::onProgress(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     if (ctx == nullptr) {
         return;
@@ -169,7 +168,7 @@ void UrlAssetSource::Impl::onProgress(emscripten_fetch_t *fetch) {
     entry.bytes_total = static_cast<std::uint64_t>(fetch->totalBytes);
 }
 
-void UrlAssetSource::Impl::onSuccess(emscripten_fetch_t *fetch) {
+void UrlProjectFs::Impl::onSuccess(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
     const size_t index = ctx->index;
@@ -188,7 +187,7 @@ void UrlAssetSource::Impl::onSuccess(emscripten_fetch_t *fetch) {
     delete ctx;
 
     if (!wrote) {
-        self->state = LoadState::Error;
+        self->status = ProjectFsStatus::Error;
         self->error = "failed to write " + entry.url + " to MEMFS";
         return;
     }
@@ -197,7 +196,7 @@ void UrlAssetSource::Impl::onSuccess(emscripten_fetch_t *fetch) {
     self->checkDone();
 }
 
-void UrlAssetSource::Impl::onError(emscripten_fetch_t *fetch) {
+void UrlProjectFs::Impl::onError(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
     const size_t index = ctx->index;
@@ -206,14 +205,14 @@ void UrlAssetSource::Impl::onError(emscripten_fetch_t *fetch) {
     entry.done = true;
     entry.failed = true;
 
-    self->state = LoadState::Error;
+    self->status = ProjectFsStatus::Error;
     self->error = "fetch failed (" + std::to_string(fetch->status) + "): " + entry.url;
 
     emscripten_fetch_close(fetch);
     delete ctx;
 }
 
-void UrlAssetSource::Impl::afterFileLanded(size_t index, Kind kind) {
+void UrlProjectFs::Impl::afterFileLanded(size_t index, Kind kind) {
     if (kind == Kind::Input) {
         return;
     }
@@ -228,8 +227,8 @@ void UrlAssetSource::Impl::afterFileLanded(size_t index, Kind kind) {
     }
 }
 
-void UrlAssetSource::Impl::checkDone() {
-    if (state == LoadState::Error) {
+void UrlProjectFs::Impl::checkDone() {
+    if (status == ProjectFsStatus::Error) {
         return;
     }
     for (const auto &e : entries) {
@@ -237,13 +236,13 @@ void UrlAssetSource::Impl::checkDone() {
             return;
         }
     }
-    state = LoadState::Ready;
+    status = ProjectFsStatus::Ready;
 }
 
-UrlAssetSource::UrlAssetSource() : impl_(std::make_unique<Impl>()) {}
-UrlAssetSource::~UrlAssetSource() = default;
+UrlProjectFs::UrlProjectFs() : impl_(std::make_unique<Impl>()) {}
+UrlProjectFs::~UrlProjectFs() = default;
 
-void UrlAssetSource::start(std::string config_url, std::string input_url, std::string asset_base) {
+void UrlProjectFs::start(std::string config_url, std::string input_url, std::string asset_base) {
     config_url = normalizeMemfsPath(config_url);
     input_url = normalizeMemfsPath(input_url);
     // Strip a trailing slash so `asset_base + url` doesn't double up the
@@ -255,21 +254,21 @@ void UrlAssetSource::start(std::string config_url, std::string input_url, std::s
     impl_->input_path = input_url;
 
     impl_->asset_base = std::move(asset_base);
-    impl_->state = LoadState::Fetching;
+    impl_->status = ProjectFsStatus::Fetching;
     impl_->enqueue(config_url, Impl::Kind::Config);
     impl_->enqueue(input_url, Impl::Kind::Input);
 }
 
-void UrlAssetSource::poll() {}
+void UrlProjectFs::poll() {}
 
-LoadState UrlAssetSource::state() const { return impl_->state; }
+ProjectFsStatus UrlProjectFs::status() const { return impl_->status; }
 
-std::span<const AssetProgress> UrlAssetSource::progress() const {
+std::span<const ProjectProgress> UrlProjectFs::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
 }
 
-const std::string &UrlAssetSource::errorMessage() const { return impl_->error; }
-const std::filesystem::path &UrlAssetSource::configPath() const { return impl_->config_path; }
-const std::filesystem::path &UrlAssetSource::inputPath() const { return impl_->input_path; }
+const std::string &UrlProjectFs::errorMessage() const { return impl_->error; }
+const std::filesystem::path &UrlProjectFs::rootConfigPath() const { return impl_->config_path; }
+const std::filesystem::path &UrlProjectFs::rootInputPath() const { return impl_->input_path; }
 
 } // namespace nodehammer::viewer

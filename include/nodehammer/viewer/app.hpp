@@ -11,7 +11,7 @@ struct RenderScene;
 
 namespace nodehammer::viewer {
 
-class AssetSource;
+class ProjectFs;
 
 /// Top-level viewer lifecycle. Owns the sokol_app window/event loop, the
 /// sokol_gfx render context, and the ImGui state. Native and emscripten
@@ -65,14 +65,23 @@ class App {
     /// scene_renderer uploads lazily on the next frame.
     void setScene(std::shared_ptr<const RenderScene> scene);
 
-    /// Hand the viewer an asset source. Each frame the App polls it; while
+    /// Hand the viewer a project. Each frame the App polls it; while
     /// Fetching it draws a progress / placeholder panel, and on Ready it
-    /// builds the scene from the source's resolved paths and drops the
-    /// source. Replacing an in-flight source clears the current scene.
-    /// Drag-and-drop and the file picker each create a fresh
-    /// DropAssetSource and install it via this method, replacing whatever
-    /// was previously set.
-    void setSource(std::unique_ptr<AssetSource> source);
+    /// builds the scene from the project's resolved paths. The project is
+    /// long-lived: drag-drop and the file-picker push files into the
+    /// existing project rather than allocate a new one. Replacing the
+    /// project (e.g. swapping a BagProjectFs for a UrlProjectFs at startup,
+    /// or wrapping the current one in a future overlay/watcher decorator)
+    /// clears the current scene.
+    void setProject(std::unique_ptr<ProjectFs> project);
+
+    /// Live project the App is polling, never null after construction.
+    /// Platform glue (drop callbacks, JS picker C exports) calls this each
+    /// time it has files to push. Do NOT cache the returned pointer across
+    /// frames — future stages will allow transparent decoration via
+    /// `setProject(make_unique<Wrapper>(std::move(...)))`, and a cached
+    /// pointer would bypass the wrapper.
+    [[nodiscard]] ProjectFs *project() const noexcept;
 
     /// Native: blocks until the window closes; returns the exit code.
     /// Emscripten: registers the main loop with the runtime and returns 0
