@@ -11,9 +11,15 @@
 
 namespace nodehammer {
 
-ScenePrepResult prepareSceneForTessellation(const std::filesystem::path &config_path,
-                                            const std::filesystem::path &input_path,
-                                            const std::optional<std::string> &input_format) {
+namespace {
+
+/// Path-based scene prep — used only by `buildSceneFromPaths` (CLI flow).
+/// The viewer takes the byte-driven `prepareSceneForTessellationFromInputs`
+/// path via BuildSession and never calls this.
+ScenePrepResult
+prepareSceneForTessellationFromPaths(const std::filesystem::path &config_path,
+                                     const std::filesystem::path &input_path,
+                                     const std::optional<std::string> &input_format) {
     ScenePrepResult prep;
 
     if (!config_path.empty()) {
@@ -66,10 +72,42 @@ ScenePrepResult prepareSceneForTessellation(const std::filesystem::path &config_
     return prep;
 }
 
+} // namespace
+
+ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene) {
+    ScenePrepResult prep;
+    prep.config = std::move(config);
+    prep.scene = std::move(scene);
+
+    auto validDiags = ConfigValidator::validate(prep.config);
+    prep.diags.append(validDiags);
+    if (validDiags.hasErrors()) {
+        return prep;
+    }
+
+    if (!prep.config.selection.empty()) {
+        SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
+        auto selDiags = sel.prune(prep.scene);
+        prep.diags.append(selDiags);
+        if (selDiags.hasErrors()) {
+            return prep;
+        }
+    }
+
+    if (prep.config.deduplicateShapes) {
+        prep.scene.deduplicateMaterials();
+        prep.scene.deduplicateShapes();
+        prep.scene.deduplicateLogVols();
+    }
+
+    prep.ok = true;
+    return prep;
+}
+
 SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
                                      const std::filesystem::path &input_path,
                                      const std::optional<std::string> &input_format) {
-    auto prep = prepareSceneForTessellation(config_path, input_path, input_format);
+    auto prep = prepareSceneForTessellationFromPaths(config_path, input_path, input_format);
     if (!prep.ok) {
         return {nullptr, std::move(prep.diags)};
     }

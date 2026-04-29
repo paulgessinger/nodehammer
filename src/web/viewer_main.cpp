@@ -152,11 +152,17 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
 
     if (!inputPath.empty() && !configPath.empty()) {
         auto loader = std::make_unique<nodehammer::viewer::UrlProjectFs>();
-        loader->start(configPath, inputPath, assetBase);
+        loader->setAssetBase(assetBase);
         application->setProject(std::move(loader));
+        // Stage 2: BuildSession resolves these keys lazily through
+        // UrlProjectFs::resolve, which kicks off emscripten_fetch on
+        // first miss. No upfront enqueue needed — the session does it.
+        application->setRootKeys(configPath, inputPath);
     }
     // Otherwise the App keeps its eagerly-allocated BagProjectFs — the
-    // user's first drop or Open-files gesture pushes into it directly.
+    // user's first drop or Open-files gesture pushes into it directly,
+    // and App-side recognition picks the .toml + .nhb/.nhb.zst entries
+    // as the build's root keys.
 
     application->run();
     return 0;

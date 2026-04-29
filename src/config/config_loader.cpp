@@ -1,13 +1,16 @@
 #include <nodehammer/config/config_enums.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/predicate_parser.hpp>
+#include <nodehammer/detail/file_io.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 
 #include <toml++/toml.hpp>
 
 #include <format>
+#include <memory>
 #include <set>
 #include <span>
+#include <unordered_map>
 #include <utility>
 
 namespace nodehammer {
@@ -53,11 +56,15 @@ void mergeToml(toml::table &dst, const toml::table &src) {
     }
 }
 
-/// Recursively resolve includes in a parsed TOML table.
-/// `basePath` is the directory of the file being processed.
-/// `visited` tracks canonical paths for cycle detection.
-void resolveIncludes(toml::table &tbl, const std::filesystem::path &basePath,
-                     std::set<std::filesystem::path> &visited, DiagnosticList &diags) {
+/// Byte-driven include resolver. The visited set tracks
+/// string keys instead of canonical filesystem paths — the caller's key
+/// scheme decides equivalence (URL keys are pre-normalised, bag keys
+/// are basenames, etc.). Each include is computed via the same
+/// `parent_dir / rel` arithmetic the filesystem variant uses, then
+/// resolved through the supplied `fetcher`.
+void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
+                              const IncludeFetcher &fetcher, std::set<std::string> &visited,
+                              DiagnosticList &diags) {
     const auto *includeNode = tbl.get("include");
     if (includeNode == nullptr) {
         return;
@@ -80,45 +87,44 @@ void resolveIncludes(toml::table &tbl, const std::filesystem::path &basePath,
 
     tbl.erase("include");
 
-    // Parse and resolve all included files first, preserving order.
     std::vector<toml::table> includedTables;
     for (const auto &relPath : paths) {
-        auto fullPath = std::filesystem::canonical(basePath / relPath);
+        std::string absKey = ConfigLoader::resolveIncludeKey(parent_key, relPath);
 
-        if (visited.contains(fullPath)) {
+        if (visited.contains(absKey)) {
             diags.error(codes::kErrConfigParse,
-                        std::format("circular include detected: '{}'", fullPath.string()),
-                        "<include>");
+                        std::format("circular include detected: '{}'", absKey), "<include>");
             continue;
         }
-        visited.insert(fullPath);
+        visited.insert(absKey);
+
+        auto bytes = fetcher(absKey);
+        if (!bytes) {
+            diags.error(codes::kErrImportFileNotFound,
+                        std::format("include not found: '{}'", absKey), "<include>");
+            continue;
+        }
 
         toml::table included;
         try {
-            included = toml::parse_file(fullPath.string());
+            included = toml::parse(
+                std::string_view{reinterpret_cast<const char *>(bytes->data()), bytes->size()},
+                absKey);
         } catch (const toml::parse_error &e) {
-            diags.error(codes::kErrConfigParse, e.description(),
-                        std::format("{}:{}:{}", fullPath.string(), e.source().begin.line,
-                                    e.source().begin.column));
-            continue;
-        } catch (const std::exception &e) {
-            diags.error(codes::kErrImportFileNotFound,
-                        std::format("could not read included file: {}", e.what()),
-                        fullPath.string());
+            diags.error(
+                codes::kErrConfigParse, e.description(),
+                std::format("{}:{}:{}", absKey, e.source().begin.line, e.source().begin.column));
             continue;
         }
 
-        resolveIncludes(included, fullPath.parent_path(), visited, diags);
+        resolveIncludesFromBytes(included, absKey, fetcher, visited, diags);
         includedTables.push_back(std::move(included));
     }
 
-    // Build a combined table from all includes in order, then merge the
-    // parent's own entries on top. This gives: include1, include2, ..., parent.
     toml::table combined;
     for (auto &inc : includedTables) {
         mergeToml(combined, inc);
     }
-    // Parent entries come last (fallbacks in first-match-wins).
     mergeToml(combined, tbl);
     tbl = std::move(combined);
 }
@@ -779,37 +785,55 @@ ConfigResult parseTable(const toml::table &tbl) {
 
 ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
     DiagnosticList diags;
+
+    // Read the root file and stage its bytes for `parseAndMerge`. The
+    // canonical path doubles as the root key — using canonical form
+    // keeps `resolveIncludeKey`'s output in the same canonical-path
+    // space, so the visited set deduplicates predictably.
+    std::filesystem::path canonical;
+    std::vector<std::byte> root_bytes;
     try {
-        auto tbl = toml::parse_file(path.string());
-
-        // Resolve includes before parsing config keys.
-        auto canonical = std::filesystem::canonical(path);
-        std::set<std::filesystem::path> visited{canonical};
-        resolveIncludes(tbl, canonical.parent_path(), visited, diags);
-        if (diags.hasErrors()) {
-            return ConfigResult{{}, std::move(diags)};
-        }
-
-        auto result = parseTable(tbl);
-        // Include diagnostics come before parse diagnostics.
-        diags.append(result.diags);
-        result.diags = std::move(diags);
-        return result;
-    } catch (const toml::parse_error &e) {
-        diags.error(
-            codes::kErrConfigParse, e.description(),
-            std::format("{}:{}:{}", path.string(), e.source().begin.line, e.source().begin.column));
+        canonical = std::filesystem::canonical(path);
+        root_bytes = file_io::readFile(canonical);
     } catch (const std::exception &e) {
         diags.error(codes::kErrImportFileNotFound,
                     std::format("could not read config file: {}", e.what()), path.string());
+        return ConfigResult{{}, std::move(diags)};
     }
-    return ConfigResult{{}, std::move(diags)};
+
+    // Cache so the fetcher returns stable spans across `parseAndMerge`'s
+    // walk. Lifetime is tied to the lambda-captured `shared_ptr`, which
+    // outlives the `parseAndMerge` call.
+    auto cache = std::make_shared<std::unordered_map<std::string, std::vector<std::byte>>>();
+
+    IncludeFetcher fetcher =
+        [cache](std::string_view key) -> std::optional<std::span<const std::byte>> {
+        std::string canon_key;
+        std::error_code ec;
+        auto canonical_path = std::filesystem::canonical(std::filesystem::path{key}, ec);
+        canon_key = ec ? std::string{key} : canonical_path.string();
+
+        if (auto it = cache->find(canon_key); it != cache->end()) {
+            return std::span<const std::byte>{it->second};
+        }
+        try {
+            auto bytes = file_io::readFile(canon_key);
+            auto [ins, _] = cache->emplace(std::move(canon_key), std::move(bytes));
+            return std::span<const std::byte>{ins->second};
+        } catch (...) {
+            return std::nullopt;
+        }
+    };
+
+    return parseAndMerge(std::span<const std::byte>{root_bytes}, canonical.string(),
+                         std::move(fetcher));
 }
 
-std::vector<std::string> ConfigLoader::peekIncludes(const std::filesystem::path &path) {
+std::vector<std::string> ConfigLoader::peekIncludesFromBytes(std::span<const std::byte> bytes) {
     std::vector<std::string> result;
     try {
-        auto tbl = toml::parse_file(path.string());
+        auto tbl = toml::parse(
+            std::string_view{reinterpret_cast<const char *>(bytes.data()), bytes.size()});
         const auto *includeNode = tbl.get("include");
         if (includeNode == nullptr) {
             return result;
@@ -824,9 +848,41 @@ std::vector<std::string> ConfigLoader::peekIncludes(const std::filesystem::path 
             }
         }
     } catch (...) {
-        // Swallow — caller will surface the same error via the full loadFromFile.
+        // Swallow — caller will surface the same parse error via `parseAndMerge`.
     }
     return result;
+}
+
+std::string ConfigLoader::resolveIncludeKey(std::string_view parent_key, std::string_view rel) {
+    auto base = std::filesystem::path(parent_key).parent_path();
+    auto joined = (base / std::filesystem::path(rel)).lexically_normal();
+    return joined.generic_string();
+}
+
+ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
+                                         std::string_view root_key, IncludeFetcher fetcher) {
+    DiagnosticList diags;
+    try {
+        auto tbl = toml::parse(
+            std::string_view{reinterpret_cast<const char *>(root_bytes.data()), root_bytes.size()},
+            root_key);
+
+        std::set<std::string> visited{std::string{root_key}};
+        resolveIncludesFromBytes(tbl, root_key, fetcher, visited, diags);
+        if (diags.hasErrors()) {
+            return ConfigResult{{}, std::move(diags)};
+        }
+
+        auto result = parseTable(tbl);
+        diags.append(result.diags);
+        result.diags = std::move(diags);
+        return result;
+    } catch (const toml::parse_error &e) {
+        diags.error(
+            codes::kErrConfigParse, e.description(),
+            std::format("{}:{}:{}", root_key, e.source().begin.line, e.source().begin.column));
+    }
+    return ConfigResult{{}, std::move(diags)};
 }
 
 ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName) {

@@ -8,9 +8,9 @@
 
 #include <atomic>
 #include <cstdint>
-#include <filesystem>
 #include <limits>
 #include <memory>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -27,8 +27,17 @@ struct SceneBuildJob::Impl {
     ::nodehammer::ScenePrepResult prep;
     ::nodehammer::TessellationJob tess_job;
 
-    std::filesystem::path config_path;
-    std::filesystem::path input_path;
+    // Diagnostic labels for the pre-build log. The byte-driven build job
+    // doesn't have real filesystem paths — these are just whatever the
+    // BuildSession resolved as the root keys (e.g. "scene.toml" or
+    // "/path/to/scene.toml").
+    std::string config_label;
+    std::string geometry_label;
+
+    // Pre-prepared inputs handed in by `start`.
+    std::unique_ptr<::nodehammer::NHConfig> preset_config;
+    std::unique_ptr<::nodehammer::SemanticScene> preset_scene;
+
     ::nodehammer::SceneBuildResult result;
 };
 
@@ -40,9 +49,12 @@ SceneBuildJob::~SceneBuildJob() {
     }
 }
 
-void SceneBuildJob::start(std::filesystem::path config_path, std::filesystem::path input_path) {
-    impl_->config_path = std::move(config_path);
-    impl_->input_path = std::move(input_path);
+void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
+                          std::string config_label, std::string geometry_label) {
+    impl_->config_label = std::move(config_label);
+    impl_->geometry_label = std::move(geometry_label);
+    impl_->preset_config = std::make_unique<::nodehammer::NHConfig>(std::move(config));
+    impl_->preset_scene = std::make_unique<::nodehammer::SemanticScene>(std::move(scene));
     impl_->result = {};
 
     impl_->prep = {};
@@ -50,9 +62,12 @@ void SceneBuildJob::start(std::filesystem::path config_path, std::filesystem::pa
 
     impl_->done.store(false, std::memory_order_release);
     impl_->state = Impl::State::Running;
-    logPreBuild(impl_->config_path, impl_->input_path);
+    logPreBuild(impl_->config_label, impl_->geometry_label);
     impl_->worker = std::thread([impl = impl_.get()] {
-        impl->prep = ::nodehammer::prepareSceneForTessellation(impl->config_path, impl->input_path);
+        impl->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
+            std::move(*impl->preset_config), std::move(*impl->preset_scene));
+        impl->preset_config.reset();
+        impl->preset_scene.reset();
         if (!impl->prep.ok) {
             impl->result.scene = nullptr;
             impl->result.diags = std::move(impl->prep.diags);
@@ -60,9 +75,6 @@ void SceneBuildJob::start(std::filesystem::path config_path, std::filesystem::pa
             return;
         }
         impl->tess_job.start(impl->prep.config, impl->prep.scene);
-        // Run the iterator straight through — the thread isn't budget-
-        // driven, but `totalNodes` / `processedNodes` get updated as we
-        // go, so the main-thread UI can show a real-time bar.
         while (!impl->tess_job.advance(std::numeric_limits<uint64_t>::max())) {
         }
         ::nodehammer::TessellationPassResult tess = impl->tess_job.take();
@@ -98,8 +110,8 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
     ::nodehammer::SceneBuildResult out = std::move(impl_->result);
     impl_->result = {};
     impl_->state = Impl::State::Idle;
-    impl_->config_path.clear();
-    impl_->input_path.clear();
+    impl_->config_label.clear();
+    impl_->geometry_label.clear();
     impl_->prep = {};
     impl_->tess_job = ::nodehammer::TessellationJob{};
     return out;

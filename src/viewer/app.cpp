@@ -10,6 +10,7 @@
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
 #include <nodehammer/viewer/bag_project_fs.hpp>
+#include <nodehammer/viewer/build_session.hpp>
 #include <nodehammer/viewer/camera.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
 
@@ -112,12 +113,25 @@ struct App::Impl {
     bool build_in_progress{false};
     std::chrono::steady_clock::time_point build_start_time{};
 
-    // Paths that fed the most recent build attempt. The frame loop only
-    // (re)triggers a build when the project's current root paths differ
-    // from these — otherwise a long-lived Ready project would re-fire
-    // every frame after the project's own internal state stops changing.
-    std::filesystem::path last_built_config;
-    std::filesystem::path last_built_input;
+    // BuildSession drives the include-graph walk against the project's
+    // resolve() interface and produces parsed config + imported geometry
+    // for the build job. App owns it so the frame loop can poll once
+    // per frame.
+    BuildSession build_session;
+
+    // Root keys the App last fed to the session. URL mode sets these
+    // explicitly via setRootKeys (from viewer_main.cpp). Bag mode
+    // discovers them by scanning the project's progress entries for
+    // .toml + .nhb/.nhb.zst extensions on each generation bump.
+    std::string root_config_key;
+    std::string root_geometry_key;
+    bool explicit_root_keys{false};
+    std::uint64_t last_seen_project_generation{
+        static_cast<std::uint64_t>(-1)}; // forces a recompute on first frame
+
+    // Files in the bag that don't match a recognised role. Recomputed
+    // alongside root key recognition; cleared in URL mode.
+    std::vector<std::string> impl_unrecognised_;
 
     // Set from inside the imgui frame on native when the user clicks
     // "Open files…"; drained at end of frame to run NFD modally. NFD
@@ -547,29 +561,74 @@ void App::Impl::onFrame() {
         bool show_drag_hint = true;
         if (project_) {
             project_->poll();
-            const auto status = project_->status();
-            if (status == ProjectFsStatus::Error) {
+
+            // Bag mode: re-classify the project's entries on each
+            // generation bump to identify which file is the root config
+            // and which is the input. URL mode bypasses this — the JS
+            // shell sets explicit root keys via App::setRootKeys().
+            const auto cur_gen = project_->generation();
+            if (!explicit_root_keys && cur_gen != last_seen_project_generation) {
+                std::string config_key;
+                std::string geometry_key;
+                std::vector<std::string> unrecognised_files;
+                for (const auto &p : project_->progress()) {
+                    const auto path = std::filesystem::path{p.url};
+                    auto ext = path.extension().string();
+                    for (auto &c : ext) {
+                        if (c >= 'A' && c <= 'Z')
+                            c = static_cast<char>(c - 'A' + 'a');
+                    }
+                    auto stemExt = path.stem().extension().string();
+                    for (auto &c : stemExt) {
+                        if (c >= 'A' && c <= 'Z')
+                            c = static_cast<char>(c - 'A' + 'a');
+                    }
+                    if (ext == ".toml") {
+                        config_key = p.url; // last-write wins
+                    } else if (ext == ".nhb" || (ext == ".zst" && stemExt == ".nhb")) {
+                        geometry_key = p.url;
+                    } else {
+                        unrecognised_files.push_back(p.url);
+                    }
+                }
+                if (config_key != root_config_key || geometry_key != root_geometry_key) {
+                    root_config_key = std::move(config_key);
+                    root_geometry_key = std::move(geometry_key);
+                    build_session.setRootKeys(root_config_key, root_geometry_key);
+                    build_error.clear();
+                }
+                last_seen_project_generation = cur_gen;
+                // Keep last-classification-only state for UI hints below.
+                impl_unrecognised_ = std::move(unrecognised_files);
+            }
+
+            // Drive the session: walk includes, parse config, import geometry.
+            build_session.poll(project_.get());
+
+            // Surface any project-level error first; build session errors
+            // are surfaced via build_error below (set in the build_in_progress
+            // branch when the build job completes with diagnostics).
+            if (project_->status() == ProjectFsStatus::Error) {
                 ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
                 ImGui::TextWrapped("%s", project_->errorMessage().c_str());
                 show_drag_hint = false;
-            } else if (status == ProjectFsStatus::Ready) {
-                // Hand the paths to the build job. Native immediately spawns
-                // a worker thread; web defers the synchronous build by one
-                // poll so this frame's "Tessellating…" UI paints first.
-                // Only (re)trigger when the project's roots differ from
-                // what we last built — otherwise a long-lived Ready project
-                // would re-fire after the user clicks Clear scene.
-                const auto &cur_cfg = project_->rootConfigPath();
-                const auto &cur_input = project_->rootInputPath();
-                const bool roots_changed =
-                    cur_cfg != last_built_config || cur_input != last_built_input;
-                if (!build_in_progress && roots_changed) {
+            }
+
+            // Hand session inputs to the build job once they're ready.
+            if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
+                if (auto inputs = build_session.takeInputs()) {
                     build_start_time = std::chrono::steady_clock::now();
-                    build_job.start(cur_cfg, cur_input);
+                    build_job.start(std::move(inputs->config.config),
+                                    std::move(inputs->import.scene), std::move(inputs->config_key),
+                                    std::move(inputs->geometry_key));
                     build_in_progress = true;
-                    last_built_config = cur_cfg;
-                    last_built_input = cur_input;
+                    show_drag_hint = false;
                 }
+            }
+
+            // Build progress UI (when the job is running).
+            if (build_in_progress) {
+                show_drag_hint = false;
                 switch (build_job.phase()) {
                 case SceneBuildJob::Phase::Preparing:
                     ImGui::Text("Loading config and importing geometry…");
@@ -594,26 +653,24 @@ void App::Impl::onFrame() {
                 case SceneBuildJob::Phase::Done:
                     break;
                 }
-                show_drag_hint = false;
             } else {
-                // Idle / Fetching: render a project-shaped progress block.
-                // URL-style backends populate `progress()` with active
-                // downloads; bag backends populate it with already-collected
-                // files. Empty progress = no concrete state to show, fall
-                // through to the drag hint below.
+                // Not building: show the project's transfer progress
+                // (URL fetches in flight, bag entries already collected).
                 const auto entries = project_->progress();
                 if (!entries.empty()) {
                     show_drag_hint = false;
-                    ImGui::Text("Loading…");
+                    ImGui::Text("Project files:");
                     for (const auto &p : entries) {
-                        if (!p.done && p.bytes_total > 0) {
+                        if (p.failed) {
+                            ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "[fail]");
+                        } else if (!p.done && p.bytes_total > 0) {
                             const float frac =
                                 static_cast<float>(static_cast<double>(p.bytes_done) /
                                                    static_cast<double>(p.bytes_total));
-                            ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+                            ImGui::ProgressBar(frac, ImVec2(60.f, 0.f));
                         } else if (!p.done) {
                             ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
-                                               ImVec2(-1.f, 0.f), "");
+                                               ImVec2(60.f, 0.f), "");
                         } else {
                             ImGui::TextColored({0.5f, 0.9f, 0.5f, 1.f}, "[ok]");
                         }
@@ -622,18 +679,42 @@ void App::Impl::onFrame() {
                     }
                 }
             }
-            // Slot hints — the project doesn't yet have one of the required
-            // files; nudge the user to drop or pick what's missing. Backend-
-            // agnostic: any project can populate these.
-            for (const auto &msg : project_->waitingFor()) {
-                ImGui::Text("Still waiting for: %s", msg.c_str());
+
+            // What the build session is waiting on (missing includes,
+            // session-level errors).
+            if (build_session.phase() == BuildPhase::WaitingForUser) {
+                show_drag_hint = false;
+                for (const auto &k : build_session.missing()) {
+                    ImGui::Text("Still need: %s", k.c_str());
+                }
+            } else if (build_session.phase() == BuildPhase::Error) {
+                show_drag_hint = false;
+                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Build session error:");
+                ImGui::TextWrapped("%s", build_session.errorMessage().c_str());
             }
+
+            // What the user dropped that we don't recognise.
+            for (const auto &u : impl_unrecognised_) {
+                ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f},
+                                   "Don't know what to do with: %s "
+                                   "(viewer expects .toml or .nhb / .nhb.zst)",
+                                   u.c_str());
+            }
+
+            // App-level "still need a config" / "still need geometry"
+            // hint, shown when the user has dropped files but neither
+            // matches a needed slot.
+            if (!explicit_root_keys && !project_->progress().empty()) {
+                if (root_config_key.empty()) {
+                    ImGui::Text("Still waiting for: a .toml config");
+                }
+                if (root_geometry_key.empty()) {
+                    ImGui::Text("Still waiting for: a FlatBuffer geometry (.nhb / .nhb.zst)");
+                }
+            }
+
             for (const auto &w : project_->warnings()) {
                 ImGui::TextColored({0.9f, 0.85f, 0.4f, 1.f}, "%s", w.c_str());
-            }
-            if (const auto &u = project_->unrecognised(); !u.empty()) {
-                ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f}, "Don't know what to do with: %s",
-                                   u.c_str());
             }
         }
         if (!build_error.empty()) {
@@ -680,15 +761,17 @@ void App::Impl::onFrame() {
         if (ImGui::Button("Close project")) {
             // Drop everything: the rendered scene, any accumulated bag
             // contents, any in-flight URL backend. Re-allocating a fresh
-            // BagProjectFs gets us back to the App's startup shape, so the
-            // user's next drop / pick starts a clean accumulation. Reset
-            // the build-trigger gate too — the new bag's empty paths
-            // shouldn't compare equal to anything we built before.
+            // BagProjectFs gets us back to the App's startup shape, so
+            // the user's next drop / pick starts a clean accumulation.
             scene_renderer.clearScene();
             scene.reset();
             project_ = std::make_unique<BagProjectFs>();
-            last_built_config.clear();
-            last_built_input.clear();
+            root_config_key.clear();
+            root_geometry_key.clear();
+            explicit_root_keys = false;
+            last_seen_project_generation = static_cast<std::uint64_t>(-1);
+            impl_unrecognised_.clear();
+            build_session.setRootKeys({}, {});
             scene_uploaded = false;
             camera_framed = false;
             scene_radius = 0.f;
@@ -803,11 +886,23 @@ void App::setScene(std::shared_ptr<const RenderScene> scene) {
 
 void App::setProject(std::unique_ptr<ProjectFs> project) {
     impl_->project_ = std::move(project);
-    // The previously-displayed scene (if any) stays on screen; the new
-    // project's Idle → Ready transition will trigger a fresh build that
-    // swaps the scene atomically when ready. cmd_viewer's `--input` path
-    // calls setScene without touching the project; clearing scene state
-    // here would race with that.
+    // Reset session-side state so the BuildSession doesn't keep walking
+    // an old project's stale keys against a new backend. Root keys
+    // either come back via setRootKeys (URL mode) or via App-side
+    // recognition on the next generation bump (bag mode).
+    impl_->root_config_key.clear();
+    impl_->root_geometry_key.clear();
+    impl_->explicit_root_keys = false;
+    impl_->last_seen_project_generation = static_cast<std::uint64_t>(-1);
+    impl_->impl_unrecognised_.clear();
+    impl_->build_session.setRootKeys({}, {});
+}
+
+void App::setRootKeys(std::string config_key, std::string geometry_key) {
+    impl_->root_config_key = config_key;
+    impl_->root_geometry_key = geometry_key;
+    impl_->explicit_root_keys = !config_key.empty() && !geometry_key.empty();
+    impl_->build_session.setRootKeys(std::move(config_key), std::move(geometry_key));
 }
 
 ProjectFs *App::project() const noexcept { return impl_->project_.get(); }

@@ -2,7 +2,6 @@
 
 #include <cstdint>
 #include <filesystem>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -22,10 +21,27 @@ struct ProjectProgress {
     bool failed{false};
 };
 
-/// Stage 2 placeholder: returned once `resolve(key)` is wired through the
-/// include walker. Stage 1 implementations stub out resolve().
-struct ResolvedFile {
-    std::filesystem::path path;
+enum class ResolveStatus {
+    Ready,   // bytes available; OpenedFile populated
+    Pending, // backend is fetching; ask again on a later poll
+    Missing, // backend cannot supply this key without user action
+    Error,   // backend hit a hard failure for this key
+};
+
+/// View into project-owned bytes. The span is valid until the backend
+/// next mutates the underlying storage (bag mutation, overlay write,
+/// archive remount). Consumers that need to keep the bytes across that
+/// boundary must copy.
+struct OpenedFile {
+    std::string key;
+    std::span<const std::byte> bytes;
+};
+
+struct ResolveResult {
+    ResolveStatus status{ResolveStatus::Missing};
+    OpenedFile file;         // valid when status == Ready
+    std::string missing_key; // populated when status == Missing
+    std::string error;       // populated when status == Error
 };
 
 /// Pluggable virtual filesystem used by the App to load a viewer project.
@@ -67,26 +83,10 @@ class ProjectFs {
     /// the UI capitalises on render if it cares.
     virtual std::string_view name() const = 0;
 
-    /// Build trigger: filesystem paths the App passes to SceneBuildJob.
-    /// Valid once status() == Ready. May be empty until then. Stage 2 will
-    /// replace these with byte-span resolution through `resolve(key)`.
-    virtual const std::filesystem::path &rootConfigPath() const = 0;
-    virtual const std::filesystem::path &rootInputPath() const = 0;
-
-    /// Human-readable hints about files the project is still expecting
-    /// (e.g. "a .toml config", "a geometry file"). Empty when satisfied.
-    virtual std::span<const std::string> waitingFor() const { return {}; }
-
-    /// Soft warnings that don't fail the build (e.g. "replaced foo.toml
-    /// with /tmp/.../foo.toml"). Surfaced in the UI alongside waitingFor.
+    /// Soft warnings that don't fail the build (e.g. bag's "replaced
+    /// foo.toml" note when a same-basename drop overwrites an existing
+    /// entry). Empty by default; backends that emit warnings override.
     virtual std::span<const std::string> warnings() const { return {}; }
-
-    /// The most recent file the backend was offered but didn't recognise,
-    /// or empty. Drives the "don't know what to do with X" UI hint.
-    virtual const std::string &unrecognised() const {
-        static const std::string empty;
-        return empty;
-    }
 
     /// User-gesture file ingestion. Default no-ops so URL-style backends
     /// don't have to override; BagProjectFs implements both. The platform
@@ -95,11 +95,22 @@ class ProjectFs {
     virtual void addPath(const std::filesystem::path & /*path*/) {}
     virtual void addBytes(std::string_view /*filename*/, std::span<const std::byte> /*bytes*/) {}
 
-    /// Stage 2 will plumb this through the include walker. Stage 1 stub
-    /// returns nullopt. Defined here so Stage 2 lands as a pure addition.
-    virtual std::optional<ResolvedFile> resolve(std::string_view /*key*/) const {
-        return std::nullopt;
+    /// Look up the bytes for a logical key. Backends that have everything
+    /// in memory (the bag, an archive) return Ready or Missing
+    /// synchronously; backends that fetch lazily (the URL backend) return
+    /// Pending while the bytes are in flight and Ready once they land.
+    /// The returned span is valid until the next backend mutation.
+    virtual ResolveResult resolve(std::string_view key) const {
+        return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }
+
+    /// Bumps on every state change that could affect a build (file added,
+    /// replaced, removed, overlay write). Consumers that cache build
+    /// results (the BuildSession's gate) read this in addition to the
+    /// root keys, so an include-only update — e.g. dropping a missing
+    /// `common.toml` after a build failed for missing-include — still
+    /// fires a fresh walk even though the root paths didn't change.
+    virtual std::uint64_t generation() const { return 0; }
 };
 
 } // namespace nodehammer::viewer

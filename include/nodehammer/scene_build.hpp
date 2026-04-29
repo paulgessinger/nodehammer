@@ -42,14 +42,12 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
                                      const std::filesystem::path &input_path,
                                      const std::optional<std::string> &input_format = std::nullopt);
 
-/// Run all stages *up to but not including* tessellation: config load,
-/// validate, importer, selection prune, dedup. Returns a populated
-/// `ScenePrepResult` whose `scene` can be handed off to `TessellationJob`
-/// for cooperative iteration. Fast on `.nhb.zst`; slower on backends that
-/// hit a heavy single-threaded library (ROOT/DD4hep/Geant4/GeoModel).
-ScenePrepResult
-prepareSceneForTessellation(const std::filesystem::path &config_path,
-                            const std::filesystem::path &input_path,
-                            const std::optional<std::string> &input_format = std::nullopt);
+/// Run validate + select + dedup against an already-parsed config and
+/// already-imported semantic scene. Used by the viewer's BuildSession,
+/// which has done the resolve + parse + import dance against bytes
+/// pulled from a `ProjectFs`. No filesystem access. The result's
+/// `scene` is handed off to `TessellationJob` for cooperative
+/// iteration.
+ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene);
 
 } // namespace nodehammer

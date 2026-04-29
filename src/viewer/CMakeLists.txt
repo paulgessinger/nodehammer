@@ -47,6 +47,7 @@ function(nh_add_viewer_lib name sokol_lib)
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_project_fs_web.cpp,>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,${_dir}/platform_native.cpp>
         ${_dir}/bag_project_fs.cpp
+        ${_dir}/build_session.cpp
     )
     target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib})
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})

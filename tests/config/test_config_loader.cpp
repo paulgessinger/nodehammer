@@ -2,6 +2,9 @@
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 
+#include <cstring>
+#include <fstream>
+
 #ifndef NODEHAMMER_FIXTURES_DIR
 #error "NODEHAMMER_FIXTURES_DIR must be defined by CMake"
 #endif
@@ -507,4 +510,152 @@ TEST_CASE("ConfigLoader: included rules come before parent rules", "[config][loa
     REQUIRE(rules[0].match.has_value());
     REQUIRE(rules[0].material == "steel");
     REQUIRE(rules[2].material == "copper");
+}
+
+// ── Byte-shaped API ──────────────────────────────────────────────────────────
+
+namespace {
+
+std::vector<std::byte> readFileBytes(const std::filesystem::path &path) {
+    std::ifstream in{path, std::ios::binary};
+    REQUIRE(in);
+    in.seekg(0, std::ios::end);
+    const auto size = static_cast<std::size_t>(in.tellg());
+    in.seekg(0, std::ios::beg);
+    std::vector<std::byte> bytes(size);
+    in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size));
+    return bytes;
+}
+
+// Build a fetcher that reads from disk relative to a base directory.
+// Used to give parseAndMerge equivalent semantics to loadFromFile so the
+// equivalence test below is meaningful.
+nodehammer::IncludeFetcher fsFetcher(const std::filesystem::path &base,
+                                     std::vector<std::vector<std::byte>> &owned) {
+    return [base, &owned](std::string_view abs_key) -> std::optional<std::span<const std::byte>> {
+        auto path = base / std::filesystem::path{abs_key};
+        std::ifstream in{path, std::ios::binary};
+        if (!in) {
+            return std::nullopt;
+        }
+        in.seekg(0, std::ios::end);
+        const auto size = static_cast<std::size_t>(in.tellg());
+        in.seekg(0, std::ios::beg);
+        std::vector<std::byte> bytes(size);
+        in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size));
+        owned.push_back(std::move(bytes));
+        return std::span<const std::byte>{owned.back()};
+    };
+}
+
+} // namespace
+
+TEST_CASE("ConfigLoader: peekIncludesFromBytes returns top-level includes",
+          "[config][loader][include][bytes]") {
+    auto bytes = readFileBytes(fixturesDir / "configs/include_basic.toml");
+    auto includes = nodehammer::ConfigLoader::peekIncludesFromBytes(bytes);
+    REQUIRE(includes.size() == 2);
+    REQUIRE(includes[0] == "includes/materials.toml");
+    REQUIRE(includes[1] == "includes/rules.toml");
+}
+
+TEST_CASE("ConfigLoader: peekIncludesFromBytes returns empty when no include key",
+          "[config][loader][include][bytes]") {
+    auto bytes = readFileBytes(fixturesDir / "configs/minimal.toml");
+    auto includes = nodehammer::ConfigLoader::peekIncludesFromBytes(bytes);
+    REQUIRE(includes.empty());
+}
+
+TEST_CASE("ConfigLoader: resolveIncludeKey computes relative paths against parent",
+          "[config][loader][include]") {
+    using L = nodehammer::ConfigLoader;
+    REQUIRE(L::resolveIncludeKey("scene.toml", "common.toml") == "common.toml");
+    REQUIRE(L::resolveIncludeKey("scene.toml", "subdir/common.toml") == "subdir/common.toml");
+    REQUIRE(L::resolveIncludeKey("subdir/scene.toml", "common.toml") == "subdir/common.toml");
+    REQUIRE(L::resolveIncludeKey("subdir/scene.toml", "../common.toml") == "common.toml");
+    REQUIRE(L::resolveIncludeKey("a/b/scene.toml", "../c/common.toml") == "a/c/common.toml");
+}
+
+TEST_CASE("ConfigLoader: parseAndMerge matches loadFromFile for include_basic",
+          "[config][loader][include][bytes]") {
+    auto path = fixturesDir / "configs/include_basic.toml";
+    auto via_path = nodehammer::ConfigLoader::loadFromFile(path);
+
+    auto bytes = readFileBytes(path);
+    std::vector<std::vector<std::byte>> owned;
+    auto via_bytes = nodehammer::ConfigLoader::parseAndMerge(bytes, "include_basic.toml",
+                                                             fsFetcher(path.parent_path(), owned));
+
+    REQUIRE_FALSE(via_path.diags.hasErrors());
+    REQUIRE_FALSE(via_bytes.diags.hasErrors());
+    REQUIRE(via_path.config.hoistOrphans == via_bytes.config.hoistOrphans);
+    REQUIRE(via_path.config.materials.size() == via_bytes.config.materials.size());
+    REQUIRE(via_path.config.rules.size() == via_bytes.config.rules.size());
+}
+
+TEST_CASE("ConfigLoader: parseAndMerge matches loadFromFile for nested includes",
+          "[config][loader][include][bytes]") {
+    auto path = fixturesDir / "configs/include_nested.toml";
+    auto via_path = nodehammer::ConfigLoader::loadFromFile(path);
+
+    auto bytes = readFileBytes(path);
+    std::vector<std::vector<std::byte>> owned;
+    auto via_bytes = nodehammer::ConfigLoader::parseAndMerge(bytes, "include_nested.toml",
+                                                             fsFetcher(path.parent_path(), owned));
+
+    REQUIRE_FALSE(via_path.diags.hasErrors());
+    REQUIRE_FALSE(via_bytes.diags.hasErrors());
+    REQUIRE(via_path.config.materials.size() == via_bytes.config.materials.size());
+}
+
+TEST_CASE("ConfigLoader: parseAndMerge surfaces missing include as error",
+          "[config][loader][include][bytes]") {
+    // Synthetic root that includes a non-existent key; fetcher always returns nullopt.
+    std::string root_toml = "include = \"missing.toml\"\nhoist_orphans = true\n";
+    std::vector<std::byte> bytes(root_toml.size());
+    std::memcpy(bytes.data(), root_toml.data(), root_toml.size());
+
+    auto result = nodehammer::ConfigLoader::parseAndMerge(
+        bytes, "root.toml",
+        [](std::string_view) -> std::optional<std::span<const std::byte>> { return std::nullopt; });
+    REQUIRE(result.diags.hasErrors());
+    bool foundMissing = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("not found") != std::string::npos) {
+            foundMissing = true;
+        }
+    }
+    REQUIRE(foundMissing);
+}
+
+TEST_CASE("ConfigLoader: parseAndMerge detects cycles via key equality",
+          "[config][loader][include][bytes]") {
+    // Two TOML buffers that include each other.
+    std::string a_toml = "include = \"b.toml\"\n";
+    std::string b_toml = "include = \"a.toml\"\n";
+
+    std::vector<std::byte> a_bytes(a_toml.size());
+    std::memcpy(a_bytes.data(), a_toml.data(), a_toml.size());
+    std::vector<std::byte> b_bytes(b_toml.size());
+    std::memcpy(b_bytes.data(), b_toml.data(), b_toml.size());
+
+    auto fetcher = [&](std::string_view k) -> std::optional<std::span<const std::byte>> {
+        if (k == "a.toml") {
+            return std::span<const std::byte>{a_bytes};
+        }
+        if (k == "b.toml") {
+            return std::span<const std::byte>{b_bytes};
+        }
+        return std::nullopt;
+    };
+
+    auto result = nodehammer::ConfigLoader::parseAndMerge(a_bytes, "a.toml", fetcher);
+    REQUIRE(result.diags.hasErrors());
+    bool foundCycle = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("circular") != std::string::npos) {
+            foundCycle = true;
+        }
+    }
+    REQUIRE(foundCycle);
 }

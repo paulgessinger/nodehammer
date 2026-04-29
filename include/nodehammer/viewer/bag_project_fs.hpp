@@ -2,20 +2,26 @@
 
 #include <nodehammer/viewer/project_fs.hpp>
 
+#include <cstdint>
 #include <memory>
+#include <string_view>
 
 namespace nodehammer::viewer {
 
 /// ProjectFs backend that accumulates files from drag-drop and file-picker
 /// gestures. Long-lived (App-owned, not per-gesture), so dropping a config
 /// in one gesture and a geometry in the next adds to the same bag rather
-/// than replacing it. Becomes Ready once both a `.toml` and a recognised
-/// geometry input have landed; reports per-slot "still missing" hints in
-/// the meantime so the UI can prompt the user.
+/// than replacing it.
 ///
-/// Last-write wins on basename collisions: if the user drops a second
-/// `foo.toml`, the new path replaces the old, and a "replaced foo.toml"
-/// note shows up in `warnings()`.
+/// Stage 2: bag is a pure key→bytes store. It has no awareness of file
+/// types — recognition lives one layer up (the App scans `progress()` to
+/// classify entries). Bytes are held in memory keyed by case-folded
+/// filename; subdir-collapsing fallback in `resolve()` handles includes
+/// like `subdir/foo.toml` whose siblings were dropped flat.
+///
+/// Last-write wins on basename collisions: dropping a second `foo.toml`
+/// replaces the first and emits a `replaced foo.toml` note via
+/// `warnings()`.
 class BagProjectFs final : public ProjectFs {
   public:
     BagProjectFs();
@@ -26,21 +32,17 @@ class BagProjectFs final : public ProjectFs {
     std::span<const ProjectProgress> progress() const override;
     const std::string &errorMessage() const override;
     std::string_view name() const override { return "bag"; }
-    const std::filesystem::path &rootConfigPath() const override;
-    const std::filesystem::path &rootInputPath() const override;
-    std::span<const std::string> waitingFor() const override;
     std::span<const std::string> warnings() const override;
-    const std::string &unrecognised() const override;
+    ResolveResult resolve(std::string_view key) const override;
+    std::uint64_t generation() const override;
 
-    /// Add a file by path. Recognises `.toml` (case-insensitive) as the
-    /// config slot and asks the importer registry for the input slot;
-    /// unrecognised filenames are surfaced via `unrecognised()`.
+    /// Add a file by path: read its bytes into the bag and key by the
+    /// filename. Used by native drag-drop and the NFD picker.
     void addPath(const std::filesystem::path &path) override;
 
-    /// Add a file by name + bytes. Stages the bytes under the OS temp dir
-    /// (which resolves to `/tmp` under Emscripten) and then runs the same
-    /// role recognition as `addPath`. Used by web drop fetch callbacks
-    /// and the JS file-picker C export.
+    /// Add a file by name + bytes: store directly in the bag's
+    /// in-memory map. Used by web drag-drop's async fetch callback and
+    /// the JS file-picker C export.
     void addBytes(std::string_view filename, std::span<const std::byte> bytes) override;
 
   private:

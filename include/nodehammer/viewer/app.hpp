@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 
 namespace nodehammer {
 struct RenderScene;
@@ -82,6 +83,14 @@ class App {
     /// `setProject(make_unique<Wrapper>(std::move(...)))`, and a cached
     /// pointer would bypass the wrapper.
     [[nodiscard]] ProjectFs *project() const noexcept;
+
+    /// Tell the App which project keys are the build's root inputs:
+    /// the TOML config and the FlatBuffer geometry file. Used by web
+    /// URL mode (the JS layer hands over explicit keys from
+    /// `?config=…&input=…`); bag mode discovers them via extension-
+    /// based recognition over the project's progress entries. Either
+    /// argument may be empty to clear the corresponding root.
+    void setRootKeys(std::string config_key, std::string geometry_key);
 
     /// Native: blocks until the window closes; returns the exit code.
     /// Emscripten: registers the main loop with the runtime and returns 0

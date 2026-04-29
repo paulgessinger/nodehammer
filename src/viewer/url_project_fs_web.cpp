@@ -1,91 +1,28 @@
 #include <nodehammer/viewer/url_project_fs.hpp>
 
-#include <nodehammer/config/config_loader.hpp>
-
 #include <emscripten/fetch.h>
-#include <sys/stat.h>
 
-#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_set>
+#include <unordered_map>
 #include <vector>
 
 namespace nodehammer::viewer {
 
 namespace {
 
-// Walk the parent dirs of `path` (a MEMFS-rooted path like `/odd/base.toml`)
-// and `mkdir` each one. EEXIST is the success case for re-runs; any other
-// errno is logged so silent MEMFS failures stop hiding from us.
-bool makeParentDirs(const std::string &path) {
-    std::string current;
-    for (size_t i = 0; i < path.size(); ++i) {
-        if (path[i] == '/') {
-            if (!current.empty()) {
-                if (::mkdir(current.c_str(), 0755) != 0 && errno != EEXIST) {
-                    std::fprintf(stderr, "url_project_fs: mkdir(%s) failed: %s (errno=%d)\n",
-                                 current.c_str(), std::strerror(errno), errno);
-                    return false;
-                }
-            }
-            current.push_back('/');
-        } else {
-            current.push_back(path[i]);
-        }
-    }
-    return true;
-}
-
-bool writeFile(const std::string &path, const char *data, size_t size) {
-    if (!makeParentDirs(path)) {
-        std::fprintf(stderr,
-                     "url_project_fs: writeFile(%s, size=%zu) aborted: "
-                     "parent dirs missing\n",
-                     path.c_str(), size);
-        return false;
-    }
-    std::FILE *f = std::fopen(path.c_str(), "wb");
-    if (f == nullptr) {
-        std::fprintf(stderr, "url_project_fs: fopen(%s, wb) failed: %s (errno=%d)\n", path.c_str(),
-                     std::strerror(errno), errno);
-        return false;
-    }
-    const size_t written = std::fwrite(data, 1, size, f);
-    if (written != size) {
-        std::fprintf(stderr,
-                     "url_project_fs: short write for %s: %zu of %zu bytes "
-                     "(errno=%d: %s)\n",
-                     path.c_str(), written, size, errno, std::strerror(errno));
-    }
-    if (std::fclose(f) != 0) {
-        std::fprintf(stderr, "url_project_fs: fclose(%s) failed: %s (errno=%d)\n", path.c_str(),
-                     std::strerror(errno), errno);
-        return false;
-    }
-    if (written == size) {
-        std::error_code ec;
-        const bool exists_now = std::filesystem::exists(path, ec);
-        const auto size_now = exists_now ? std::filesystem::file_size(path, ec) : 0;
-        std::fprintf(stderr,
-                     "url_project_fs: wrote %s (%zu bytes; post-write exists=%d size=%zu)\n",
-                     path.c_str(), size, exists_now ? 1 : 0, static_cast<size_t>(size_now));
-    }
-    return written == size;
-}
-
-// Force a MEMFS-rooted absolute path. `path("foo").parent_path()` yields an
-// empty path on relative inputs, which then makes `(empty / rel)` come out
-// without the leading slash — different string, breaks the `seen` dedup,
-// and `fopen` writes to the CWD instead of `/`. Normalising up-front keeps
-// every URL canonical so the dedup set actually deduplicates.
-std::string normalizeMemfsPath(std::string_view url) {
-    auto p = std::filesystem::path(url).lexically_normal();
+// Force a leading-slash, lexically-normal MEMFS-style path. Stage 1 normalised
+// these for MEMFS write paths; Stage 2 keeps the same canonical form for keys
+// so that BuildSession's resolveIncludeKey arithmetic and direct caller-side
+// keys collapse to the same string before fetch dedup runs.
+std::string normalizeKey(std::string_view raw) {
+    auto p = std::filesystem::path(raw).lexically_normal();
     auto s = p.generic_string();
     if (s.empty() || s.front() != '/') {
         s = "/" + s;
@@ -93,59 +30,82 @@ std::string normalizeMemfsPath(std::string_view url) {
     return s;
 }
 
-// Resolve an `include` entry (relative to the config file) to an absolute
-// MEMFS / URL path. Mirrors the std::filesystem::canonical step the real
-// loader does, but lexically only — at peek time the include file is not
-// yet on MEMFS, so canonical() would throw.
-std::string resolveIncludeUrl(const std::string &config_url, const std::string &rel) {
-    std::filesystem::path base = std::filesystem::path(config_url).parent_path();
-    std::filesystem::path joined = (base / rel).lexically_normal();
-    return normalizeMemfsPath(joined.generic_string());
-}
-
 } // namespace
 
 struct UrlProjectFs::Impl {
-    ProjectFsStatus status{ProjectFsStatus::Idle};
-    std::string error;
-    std::filesystem::path config_path;
-    std::filesystem::path input_path;
+    enum class State { InFlight, Ready, Failed };
+
+    struct Entry {
+        State state{State::InFlight};
+        std::vector<std::byte> bytes; // valid when Ready
+        std::string error;            // when Failed
+        std::uint64_t bytes_done{0};
+        std::uint64_t bytes_total{0};
+        bool failed_visible{false}; // mirrors `failed` in ProjectProgress
+    };
+
     std::string asset_base;
-    std::vector<ProjectProgress> entries;
-    std::unordered_set<std::string> seen;
+    std::string error; // first hard failure across all fetches
+    bool any_in_flight{false};
+
+    /// Stable storage so emscripten_fetch callbacks can hold raw pointers
+    /// across the suspend without worrying about hash-map rehash.
+    std::unordered_map<std::string, std::unique_ptr<Entry>> entries;
+
+    /// Display order (UI shows fetches in the order resolve was first
+    /// called). Strings are the same canonical keys used in `entries`.
+    std::vector<std::string> order;
+
+    /// Snapshot of `entries` used by `progress()` so the returned span
+    /// has a stable address. Recomputed lazily; cheap given the small
+    /// file count.
+    mutable std::vector<ProjectProgress> progress_view;
+    mutable std::uint64_t progress_view_gen{0};
+
+    std::uint64_t generation{0};
 
     struct FetchCtx {
         Impl *self;
-        size_t index;
+        std::string key;
     };
 
-    enum class Kind { Config, Include, Input };
-
-    void enqueue(const std::string &url, Kind kind);
     static void onSuccess(emscripten_fetch_t *fetch);
     static void onError(emscripten_fetch_t *fetch);
     static void onProgress(emscripten_fetch_t *fetch);
-    void afterFileLanded(size_t index, Kind kind);
-    void checkDone();
 
-    std::vector<Kind> kinds;
+    /// Returns a pointer to the Entry for `key`, creating one + kicking
+    /// off the fetch if it doesn't already exist. The pointer is stable
+    /// for the lifetime of this Impl.
+    Entry *startFetch(const std::string &key);
+
+    void recountInFlight() {
+        any_in_flight = false;
+        for (const auto &[k, e] : entries) {
+            (void)k;
+            if (e->state == State::InFlight) {
+                any_in_flight = true;
+                return;
+            }
+        }
+    }
 };
 
-void UrlProjectFs::Impl::enqueue(const std::string &url, Kind kind) {
-    if (!seen.insert(url).second) {
-        std::fprintf(stderr, "url_project_fs: enqueue dedup'd %s\n", url.c_str());
-        return;
+UrlProjectFs::Impl::Entry *UrlProjectFs::Impl::startFetch(const std::string &key) {
+    if (auto it = entries.find(key); it != entries.end()) {
+        return it->second.get();
     }
-    // url is the MEMFS path (always rooted at `/`). The fetch URL is the
-    // same path prefixed by asset_base for sub-path deployments; leaving
-    // asset_base empty keeps the legacy server-root behaviour.
-    const std::string fetch_url = asset_base + url;
-    std::fprintf(stderr, "url_project_fs: enqueue %s (fetch %s)\n", url.c_str(), fetch_url.c_str());
-    const size_t index = entries.size();
-    entries.push_back(ProjectProgress{url, 0, 0, false, false});
-    kinds.push_back(kind);
 
-    auto *ctx = new FetchCtx{this, index};
+    auto e = std::make_unique<Entry>();
+    auto *raw = e.get();
+    entries.emplace(key, std::move(e));
+    order.push_back(key);
+    any_in_flight = true;
+    ++generation;
+
+    const std::string fetch_url = asset_base + key;
+    std::fprintf(stderr, "url_project_fs: enqueue %s (fetch %s)\n", key.c_str(), fetch_url.c_str());
+
+    auto *ctx = new FetchCtx{this, key};
 
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
@@ -156,6 +116,8 @@ void UrlProjectFs::Impl::enqueue(const std::string &url, Kind kind) {
     attr.onprogress = &Impl::onProgress;
     attr.userData = ctx;
     emscripten_fetch(&attr, fetch_url.c_str());
+
+    return raw;
 }
 
 void UrlProjectFs::Impl::onProgress(emscripten_fetch_t *fetch) {
@@ -163,112 +125,121 @@ void UrlProjectFs::Impl::onProgress(emscripten_fetch_t *fetch) {
     if (ctx == nullptr) {
         return;
     }
-    auto &entry = ctx->self->entries[ctx->index];
-    entry.bytes_done = static_cast<std::uint64_t>(fetch->dataOffset + fetch->numBytes);
-    entry.bytes_total = static_cast<std::uint64_t>(fetch->totalBytes);
+    auto it = ctx->self->entries.find(ctx->key);
+    if (it == ctx->self->entries.end()) {
+        return;
+    }
+    it->second->bytes_done = static_cast<std::uint64_t>(fetch->dataOffset + fetch->numBytes);
+    it->second->bytes_total = static_cast<std::uint64_t>(fetch->totalBytes);
 }
 
 void UrlProjectFs::Impl::onSuccess(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
-    const size_t index = ctx->index;
-    const Kind kind = self->kinds[index];
+    auto it = self->entries.find(ctx->key);
 
-    auto &entry = self->entries[index];
-    const bool wrote = writeFile(entry.url, fetch->data, static_cast<size_t>(fetch->numBytes));
-    entry.bytes_done = static_cast<std::uint64_t>(fetch->numBytes);
-    if (entry.bytes_total == 0) {
-        entry.bytes_total = entry.bytes_done;
+    const auto size = static_cast<std::size_t>(fetch->numBytes);
+    if (it != self->entries.end()) {
+        auto &e = *it->second;
+        e.bytes.assign(reinterpret_cast<const std::byte *>(fetch->data),
+                       reinterpret_cast<const std::byte *>(fetch->data) + size);
+        e.bytes_done = static_cast<std::uint64_t>(size);
+        if (e.bytes_total == 0) {
+            e.bytes_total = e.bytes_done;
+        }
+        e.state = State::Ready;
     }
-    entry.done = true;
-    entry.failed = !wrote;
 
     emscripten_fetch_close(fetch);
     delete ctx;
 
-    if (!wrote) {
-        self->status = ProjectFsStatus::Error;
-        self->error = "failed to write " + entry.url + " to MEMFS";
-        return;
-    }
-
-    self->afterFileLanded(index, kind);
-    self->checkDone();
+    self->recountInFlight();
+    ++self->generation;
 }
 
 void UrlProjectFs::Impl::onError(emscripten_fetch_t *fetch) {
     auto *ctx = static_cast<FetchCtx *>(fetch->userData);
     Impl *self = ctx->self;
-    const size_t index = ctx->index;
+    auto it = self->entries.find(ctx->key);
 
-    auto &entry = self->entries[index];
-    entry.done = true;
-    entry.failed = true;
-
-    self->status = ProjectFsStatus::Error;
-    self->error = "fetch failed (" + std::to_string(fetch->status) + "): " + entry.url;
+    if (it != self->entries.end()) {
+        auto &e = *it->second;
+        e.state = State::Failed;
+        e.failed_visible = true;
+        e.error = "fetch failed (" + std::to_string(fetch->status) + "): " + ctx->key;
+    }
+    if (self->error.empty()) {
+        self->error = "fetch failed (" + std::to_string(fetch->status) + "): " + ctx->key;
+    }
 
     emscripten_fetch_close(fetch);
     delete ctx;
-}
 
-void UrlProjectFs::Impl::afterFileLanded(size_t index, Kind kind) {
-    if (kind == Kind::Input) {
-        return;
-    }
-    // Copy the URL by value: enqueue() below push_backs into `entries`,
-    // which can reallocate and invalidate any reference into the vector.
-    // Reading a dangling reference on the next iteration shows up as
-    // garbled UTF-8 in the fetch URL.
-    const std::string url = entries[index].url;
-    auto includes = ConfigLoader::peekIncludes(url);
-    for (const auto &rel : includes) {
-        enqueue(resolveIncludeUrl(url, rel), Kind::Include);
-    }
-}
-
-void UrlProjectFs::Impl::checkDone() {
-    if (status == ProjectFsStatus::Error) {
-        return;
-    }
-    for (const auto &e : entries) {
-        if (!e.done || e.failed) {
-            return;
-        }
-    }
-    status = ProjectFsStatus::Ready;
+    self->recountInFlight();
+    ++self->generation;
 }
 
 UrlProjectFs::UrlProjectFs() : impl_(std::make_unique<Impl>()) {}
 UrlProjectFs::~UrlProjectFs() = default;
 
-void UrlProjectFs::start(std::string config_url, std::string input_url, std::string asset_base) {
-    config_url = normalizeMemfsPath(config_url);
-    input_url = normalizeMemfsPath(input_url);
-    // Strip a trailing slash so `asset_base + url` doesn't double up the
-    // separator (url already starts with `/`).
+void UrlProjectFs::setAssetBase(std::string asset_base) {
     while (!asset_base.empty() && asset_base.back() == '/') {
         asset_base.pop_back();
     }
-    impl_->config_path = config_url;
-    impl_->input_path = input_url;
-
     impl_->asset_base = std::move(asset_base);
-    impl_->status = ProjectFsStatus::Fetching;
-    impl_->enqueue(config_url, Impl::Kind::Config);
-    impl_->enqueue(input_url, Impl::Kind::Input);
 }
 
 void UrlProjectFs::poll() {}
 
-ProjectFsStatus UrlProjectFs::status() const { return impl_->status; }
+ProjectFsStatus UrlProjectFs::status() const {
+    if (!impl_->error.empty()) {
+        return ProjectFsStatus::Error;
+    }
+    if (impl_->any_in_flight) {
+        return ProjectFsStatus::Fetching;
+    }
+    return ProjectFsStatus::Idle;
+}
 
 std::span<const ProjectProgress> UrlProjectFs::progress() const {
-    return {impl_->entries.data(), impl_->entries.size()};
+    if (impl_->progress_view_gen != impl_->generation) {
+        impl_->progress_view.clear();
+        impl_->progress_view.reserve(impl_->order.size());
+        for (const auto &k : impl_->order) {
+            const auto &e = *impl_->entries.at(k);
+            ProjectProgress p;
+            p.url = k;
+            p.bytes_done = e.bytes_done;
+            p.bytes_total = e.bytes_total;
+            p.done = e.state == Impl::State::Ready;
+            p.failed = e.failed_visible;
+            impl_->progress_view.push_back(std::move(p));
+        }
+        impl_->progress_view_gen = impl_->generation;
+    }
+    return {impl_->progress_view.data(), impl_->progress_view.size()};
 }
 
 const std::string &UrlProjectFs::errorMessage() const { return impl_->error; }
-const std::filesystem::path &UrlProjectFs::rootConfigPath() const { return impl_->config_path; }
-const std::filesystem::path &UrlProjectFs::rootInputPath() const { return impl_->input_path; }
+
+ResolveResult UrlProjectFs::resolve(std::string_view key) const {
+    const auto canonical = normalizeKey(key);
+    auto *entry = impl_->startFetch(canonical);
+
+    switch (entry->state) {
+    case Impl::State::Ready:
+        return ResolveResult{ResolveStatus::Ready,
+                             OpenedFile{canonical, std::span<const std::byte>{entry->bytes}},
+                             {},
+                             {}};
+    case Impl::State::InFlight:
+        return ResolveResult{ResolveStatus::Pending, {}, {}, {}};
+    case Impl::State::Failed:
+        return ResolveResult{ResolveStatus::Error, {}, {}, entry->error};
+    }
+    return ResolveResult{ResolveStatus::Error, {}, {}, "unknown fetch state"};
+}
+
+std::uint64_t UrlProjectFs::generation() const { return impl_->generation; }
 
 } // namespace nodehammer::viewer

@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
+#include <nodehammer/ir/fb/semantic/importer.hpp>
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/ir/semantic/importer.hpp>
 
@@ -425,4 +426,55 @@ TEST_CASE("FlatBuffer importer resolves compound .nhb.zst extension", "[ir][flat
 
     REQUIRE(imp != nullptr);
     REQUIRE(imp->formatName() == "flatbuffer");
+}
+
+TEST_CASE("FlatBufferImporter::importFromBytes accepts raw .nhb bytes", "[ir][flatbuffer][bytes]") {
+    auto scene = makeMinimalScene();
+    auto raw = semanticSceneToBytes(scene);
+
+    auto result = FlatBufferImporter::importFromBytes("scene.nhb", std::as_bytes(std::span{raw}));
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(!result.diags.hasErrors());
+    REQUIRE(result.scene.nodes.contains(result.scene.rootId));
+    REQUIRE(result.scene.nodes.at(result.scene.rootId).name == "root");
+}
+
+TEST_CASE("FlatBufferImporter::importFromBytes decompresses .nhb.zst bytes",
+          "[ir][flatbuffer][bytes]") {
+    auto scene = makeMinimalScene();
+    auto raw = semanticSceneToBytes(scene);
+    auto compressed = nodehammer::zstd_io::compress(std::as_bytes(std::span{raw}));
+
+    auto result = FlatBufferImporter::importFromBytes("scene.nhb.zst",
+                                                      std::span<const std::byte>{compressed});
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(!result.diags.hasErrors());
+    REQUIRE(result.scene.nodes.contains(result.scene.rootId));
+    REQUIRE(result.scene.nodes.at(result.scene.rootId).name == "root");
+}
+
+TEST_CASE("FlatBufferImporter::importFromBytes matches path-based import",
+          "[ir][flatbuffer][bytes]") {
+    auto scene = makeMinimalScene();
+    auto raw = semanticSceneToBytes(scene);
+
+    const auto uniqueSuffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto tmp = std::filesystem::temp_directory_path() /
+                     std::filesystem::path{"nodehammer_fb_bytes_path_eq_" +
+                                           std::to_string(uniqueSuffix) + ".nhb"};
+    nodehammer::zstd_io::writeBytesToFile(tmp, std::as_bytes(std::span{raw}));
+
+    FlatBufferImporter imp;
+    auto via_path = imp.import(tmp);
+    auto via_bytes =
+        FlatBufferImporter::importFromBytes("scene.nhb", std::as_bytes(std::span{raw}));
+
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+
+    REQUIRE_FALSE(via_path.diags.hasErrors());
+    REQUIRE_FALSE(via_bytes.diags.hasErrors());
+    REQUIRE(via_path.scene.nodes.size() == via_bytes.scene.nodes.size());
+    REQUIRE(via_path.scene.materials.size() == via_bytes.scene.materials.size());
+    REQUIRE(via_path.scene.shapes.size() == via_bytes.scene.shapes.size());
 }
