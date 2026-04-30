@@ -23,6 +23,7 @@
 
 #include <chrono>
 #include <cmath>
+#include <filesystem>
 #include <iomanip>
 #include <memory>
 #include <print>
@@ -75,6 +76,14 @@ void appendUrlFloat(std::string &query, std::string_view name, float value, floa
     if (std::abs(value - default_value) >= 0.0001f) {
         appendUrlParam(query, name, formatUrlFloat(value));
     }
+}
+
+std::string projectTreeSelectionKey(std::string_view key) {
+    auto out = std::filesystem::path{key}.lexically_normal().generic_string();
+    if (!out.empty() && out.front() == '/') {
+        out.erase(out.begin());
+    }
+    return out;
 }
 
 } // namespace
@@ -762,6 +771,8 @@ void App::Impl::onFrame() {
             if (root_nodes.empty()) {
                 ImGui::TextDisabled("(no files yet)");
             } else {
+                const auto selected_config_key = projectTreeSelectionKey(root_config_key);
+                const auto selected_geometry_key = projectTreeSelectionKey(root_geometry_key);
                 // Index progress() by key so each leaf can render a
                 // fetch-state badge (in-flight URL, [ok], [fail])
                 // regardless of backend.
@@ -831,8 +842,11 @@ void App::Impl::onFrame() {
                                 ImGui::SameLine();
                             }
                         }
-                        const bool is_config = (n.key == root_config_key);
-                        const bool is_geom = (n.key == root_geometry_key);
+                        const auto tree_key = projectTreeSelectionKey(n.key);
+                        const bool is_config =
+                            !selected_config_key.empty() && tree_key == selected_config_key;
+                        const bool is_geom =
+                            !selected_geometry_key.empty() && tree_key == selected_geometry_key;
                         ImGuiTreeNodeFlags flags =
                             ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
                         if (is_config || is_geom) {
