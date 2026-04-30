@@ -133,6 +133,14 @@ add_library(nodehammer_lib STATIC
     src/ir/semantic/exporter_registry.cpp
     src/detail/markup.cpp
     src/scene_build.cpp
+    # ProjectFs-based build orchestration. The bag (in-memory key→bytes
+    # store) and BuildSession (resolve→parse→import driver) live under
+    # src/viewer/ for organisational reasons but have no sokol/GUI deps,
+    # so they belong in nodehammer_lib alongside scene_build.cpp — both
+    # the viewer and the headless `buildSceneFromPaths` shim drive their
+    # builds through this layer.
+    src/viewer/bag_project_fs.cpp
+    src/viewer/build_session.cpp
 )
 
 configure_file(

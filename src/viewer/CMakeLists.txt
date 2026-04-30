@@ -46,8 +46,8 @@ function(nh_add_viewer_lib name sokol_lib)
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_project_fs_web.cpp,>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,${_dir}/platform_native.cpp>
-        ${_dir}/bag_project_fs.cpp
-        ${_dir}/build_session.cpp
+        # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
+        # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )
     target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib})
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})

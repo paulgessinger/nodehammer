@@ -17,9 +17,8 @@ namespace nodehammer::viewer {
 /// and returns Pending until the bytes land.
 ///
 /// Web-only: this header is included from viewer_main.cpp which is
-/// itself part of the wasm target. Native uses the synchronous
-/// buildSceneFromPaths flow in cmd_viewer.cpp and never instantiates
-/// this class.
+/// itself part of the wasm target. Native viewer entry points feed the
+/// App a `BagProjectFs` (drag-drop / picker / CLI) instead.
 class UrlProjectFs final : public ProjectFs {
   public:
     UrlProjectFs();

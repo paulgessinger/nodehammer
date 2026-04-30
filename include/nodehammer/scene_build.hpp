@@ -7,8 +7,6 @@
 
 #include <filesystem>
 #include <memory>
-#include <optional>
-#include <string>
 
 namespace nodehammer {
 
@@ -31,16 +29,15 @@ struct ScenePrepResult {
     bool ok{false};
 };
 
-/// Run the full disk-backed scene pipeline used by the viewer:
-/// load+validate config, import the geometry, optional selection prune,
-/// optional dedup, then tessellate to a RenderScene. Both paths must already
-/// exist on the filesystem (real disk on native, MEMFS on the web build —
-/// the AssetLoader is responsible for materialising files there before this
-/// is called). `input_format` overrides extension-based format detection when
-/// set.
+/// Synchronous drive-to-completion shim for headless callers (the
+/// `convert` CLI subcommand and `nodehammer_bench`). Reads both files
+/// into a `BagProjectFs`, runs the same `BuildSession` walk the viewer
+/// uses, then tessellates the resulting scene synchronously and returns
+/// the `RenderScene`. Geometry is FlatBuffer-only (`.nhb` / `.nhb.zst`);
+/// the rest of the importer registry is reserved for the `convert`
+/// subcommand.
 SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
-                                     const std::filesystem::path &input_path,
-                                     const std::optional<std::string> &input_format = std::nullopt);
+                                     const std::filesystem::path &geometry_path);
 
 /// Run validate + select + dedup against an already-parsed config and
 /// already-imported semantic scene. Used by the viewer's BuildSession,
