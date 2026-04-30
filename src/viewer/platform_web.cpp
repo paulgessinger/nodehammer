@@ -12,6 +12,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
@@ -29,6 +30,147 @@ EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *ma
 
     history.replaceState(null, "", url);
 });
+
+// clang-format off
+EM_JS(void, nh_viewer_install_window_observers, (), {
+    if (Module.__nhWindowObserversInstalled) {
+        return;
+    }
+    Module.__nhWindowObserversInstalled = true;
+
+    var canvas = Module.canvas || document.getElementById('canvas');
+    if (!canvas) {
+        return;
+    }
+
+    var dragDepth = 0;
+    function fileLike(ev) {
+        var types = ev.dataTransfer && ev.dataTransfer.types;
+        if (!types) return false;
+        for (var i = 0; i < types.length; ++i) {
+            if (types[i] === 'Files') return true;
+        }
+        return false;
+    }
+    function fileCount(ev) {
+        var items = ev.dataTransfer && ev.dataTransfer.items;
+        return items ? items.length : 0;
+    }
+    function setDrag(active, ev) {
+        Module._nh_viewer_platform_set_drag_hover(
+            active ? 1 : 0,
+            ev ? ev.clientX : 0,
+            ev ? ev.clientY : 0,
+            ev ? fileCount(ev) : 0,
+            ev && fileLike(ev) ? 1 : 0);
+    }
+    function onDragEnter(ev) {
+        ++dragDepth;
+        setDrag(true, ev);
+    }
+    function onDragOver(ev) {
+        if (fileLike(ev)) {
+            ev.preventDefault();
+        }
+        setDrag(true, ev);
+    }
+    function onDragLeave(ev) {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) {
+            setDrag(false, ev);
+        }
+    }
+    function onDrop(ev) {
+        dragDepth = 0;
+        setDrag(false, ev);
+    }
+    canvas.addEventListener('dragenter', onDragEnter);
+    canvas.addEventListener('dragover', onDragOver);
+    canvas.addEventListener('dragleave', onDragLeave);
+    canvas.addEventListener('drop', onDrop);
+    window.addEventListener('blur', function(ev) {
+        dragDepth = 0;
+        setDrag(false, ev);
+    });
+
+    var gestureScale = 1.0;
+    function pushPinch(type, scaleDelta, ev) {
+        Module._nh_viewer_platform_push_pinch(
+            type, scaleDelta,
+            ev ? ev.clientX : 0,
+            ev ? ev.clientY : 0,
+            ev ? ((ev.shiftKey ? 1 : 0) | (ev.ctrlKey ? 2 : 0) | (ev.altKey ? 4 : 0) | (ev.metaKey ? 8 : 0)) : 0);
+    }
+    canvas.addEventListener('wheel', function(ev) {
+        if (!(ev.ctrlKey || ev.metaKey)) {
+            return;
+        }
+        ev.preventDefault();
+        pushPinch(1, Math.exp(-ev.deltaY * 0.01), ev);
+    }, { passive: false });
+    canvas.addEventListener('gesturestart', function(ev) {
+        gestureScale = ev.scale || 1.0;
+        ev.preventDefault();
+        pushPinch(0, 1.0, ev);
+    }, { passive: false });
+    canvas.addEventListener('gesturechange', function(ev) {
+        var next = ev.scale || gestureScale;
+        var delta = gestureScale !== 0 ? next / gestureScale : 1.0;
+        gestureScale = next;
+        ev.preventDefault();
+        pushPinch(1, delta, ev);
+    }, { passive: false });
+    canvas.addEventListener('gestureend', function(ev) {
+        ev.preventDefault();
+        pushPinch(2, 1.0, ev);
+    }, { passive: false });
+
+    var touchDistance = 0;
+    function twoTouchDistance(touches) {
+        if (!touches || touches.length < 2) return 0;
+        var dx = touches[0].clientX - touches[1].clientX;
+        var dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    function touchCenter(touches) {
+        return {
+            clientX: (touches[0].clientX + touches[1].clientX) * 0.5,
+            clientY: (touches[0].clientY + touches[1].clientY) * 0.5,
+            ctrlKey: false,
+            shiftKey: false,
+            altKey: false,
+            metaKey: false
+        };
+    }
+    canvas.addEventListener('touchstart', function(ev) {
+        if (ev.touches.length === 2) {
+            touchDistance = twoTouchDistance(ev.touches);
+            ev.preventDefault();
+            pushPinch(0, 1.0, touchCenter(ev.touches));
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchmove', function(ev) {
+        if (ev.touches.length === 2 && touchDistance > 0) {
+            var next = twoTouchDistance(ev.touches);
+            ev.preventDefault();
+            pushPinch(1, next / touchDistance, touchCenter(ev.touches));
+            touchDistance = next;
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchend', function(ev) {
+        if (touchDistance > 0 && ev.touches.length < 2) {
+            touchDistance = 0;
+            pushPinch(2, 1.0, ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0] : ev);
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchcancel', function(ev) {
+        if (touchDistance > 0) {
+            touchDistance = 0;
+            pushPinch(3, 1.0, ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0] : ev);
+        }
+    }, { passive: false });
+});
+// clang-format on
 
 // Open a transient <input type=file multiple> picker. After the user
 // selects N files, we wait until every FileReader has resolved (Promise.all)
@@ -126,10 +268,47 @@ void webDropFetchCallback(const sapp_html5_fetch_response *response) {
 /// shim that prefers a typed reference over the singleton).
 struct Platform::Impl {
     App &app;
+    WindowCustomizationRequest window_request;
+    PlatformWindowState window_state;
+    std::vector<PlatformGestureEvent> gesture_events;
 };
 
-Platform::Platform(App &app) : impl_(std::make_unique<Impl>(app)) {}
-Platform::~Platform() = default;
+namespace {
+Platform::Impl *g_impl{nullptr};
+} // namespace
+
+Platform::Platform(App &app) : impl_(std::make_unique<Impl>(app)) { g_impl = impl_.get(); }
+Platform::~Platform() {
+    if (g_impl == impl_.get()) {
+        g_impl = nullptr;
+    }
+}
+
+void Platform::configureWindowDesc(sapp_desc & /*desc*/, const Config & /*cfg*/,
+                                   const WindowCustomizationRequest &request) {
+    impl_->window_request = request;
+}
+
+void Platform::attachWindow(const WindowCustomizationRequest &request) {
+    impl_->window_request = request;
+    impl_->window_state.drag_hover.supported = request.track_drag_hover;
+    impl_->window_state.supports_pinch_gesture = request.track_platform_gestures;
+    nh_viewer_install_window_observers();
+}
+
+void Platform::handleWindowEvent(const sapp_event *ev) {
+    if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+        impl_->window_state.drag_hover.active = false;
+    }
+}
+
+void Platform::beginFrameWindowSync() {}
+
+const PlatformWindowState &Platform::windowState() const noexcept { return impl_->window_state; }
+
+std::vector<PlatformGestureEvent> Platform::takeGestureEvents() {
+    return std::exchange(impl_->gesture_events, {});
+}
 
 void Platform::dispatchDroppedFiles() {
     const int n = sapp_get_num_dropped_files();
@@ -162,6 +341,47 @@ void Platform::commitUrlState(const std::string &state_query, const std::string 
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
 void Platform::openFolderPicker() {} // no folder picker on web today
 void Platform::drainPickers() {}     // web pickers dispatch inline
+
+void setWebDragHover(bool active, float x, float y, int file_count, bool file_like) {
+    if (g_impl == nullptr) {
+        return;
+    }
+    DragHoverState state{};
+    state.supported = true;
+    state.active = active;
+    state.file_like = file_like;
+    state.file_count = active ? file_count : 0;
+    state.x = x;
+    state.y = y;
+    g_impl->window_state.drag_hover = state;
+}
+
+void pushWebPinch(int type, float scale_delta, float x, float y, uint32_t modifiers) {
+    if (g_impl == nullptr) {
+        return;
+    }
+    PlatformGestureEvent event{};
+    switch (type) {
+    case 0:
+        event.type = GestureType::PinchBegin;
+        break;
+    case 2:
+        event.type = GestureType::PinchEnd;
+        break;
+    case 3:
+        event.type = GestureType::PinchCancel;
+        break;
+    case 1:
+    default:
+        event.type = GestureType::PinchUpdate;
+        break;
+    }
+    event.scale_delta = scale_delta > 0.f ? scale_delta : 1.f;
+    event.x = x;
+    event.y = y;
+    event.modifiers = modifiers;
+    g_impl->gesture_events.push_back(event);
+}
 
 } // namespace nodehammer::viewer::platform
 
@@ -203,6 +423,18 @@ EMSCRIPTEN_KEEPALIVE
 void nh_viewer_end_upload_batch(void * /*handle*/) {
     // No-op: each addBytes already updated the project; the build trigger
     // picks up the new state on the next frame poll.
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_platform_set_drag_hover(int active, float x, float y, int file_count,
+                                       int file_like) {
+    nodehammer::viewer::platform::setWebDragHover(active != 0, x, y, file_count, file_like != 0);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_platform_push_pinch(int type, float scale_delta, float x, float y,
+                                   std::uint32_t modifiers) {
+    nodehammer::viewer::platform::pushWebPinch(type, scale_delta, x, y, modifiers);
 }
 
 } // extern "C"

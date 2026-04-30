@@ -2,9 +2,14 @@
 
 #include <memory>
 #include <string>
+#include <vector>
+
+struct sapp_desc;
+struct sapp_event;
 
 namespace nodehammer::viewer {
 class App;
+struct Config;
 } // namespace nodehammer::viewer
 
 namespace nodehammer::viewer::platform {
@@ -14,6 +19,48 @@ inline constexpr bool kIsWeb = true;
 #else
 inline constexpr bool kIsWeb = false;
 #endif
+
+struct WindowCustomizationRequest {
+    std::string persistence_id{"nodehammer.viewer.window"};
+    bool restore_placement{true};
+    bool hide_titlebar_chrome{true};
+    bool track_drag_hover{true};
+    bool track_platform_gestures{true};
+};
+
+struct WindowChromeState {
+    bool titlebar_hidden{false};
+    bool traffic_lights_overlap_content{false};
+    float content_top_inset{0.f};
+    float content_left_inset{0.f};
+};
+
+struct DragHoverState {
+    bool supported{false};
+    bool active{false};
+    bool file_like{false};
+    int file_count{0};
+    float x{0.f};
+    float y{0.f};
+};
+
+struct PlatformWindowState {
+    WindowChromeState chrome;
+    DragHoverState drag_hover;
+    bool supports_window_restoration{false};
+    bool supports_hidden_titlebar{false};
+    bool supports_pinch_gesture{false};
+};
+
+enum class GestureType { PinchBegin, PinchUpdate, PinchEnd, PinchCancel };
+
+struct PlatformGestureEvent {
+    GestureType type{GestureType::PinchUpdate};
+    float scale_delta{1.f};
+    float x{0.f};
+    float y{0.f};
+    uint32_t modifiers{0};
+};
 
 /// Platform surface owned by the App. Concrete pImpl: `struct Impl` is
 /// forward-declared here and defined differently in `platform_native.cpp`
@@ -26,6 +73,8 @@ inline constexpr bool kIsWeb = false;
 /// compiler can see `Impl`'s full type when destroying the unique_ptr.
 class Platform {
   public:
+    struct Impl;
+
     /// Construct with a back-pointer to the owning App. App is non-
     /// movable, lives in a static slot, and strictly outlives its
     /// Platform, so the bare reference stored in `Impl` is safe across
@@ -34,6 +83,26 @@ class Platform {
     ~Platform();
     Platform(const Platform &) = delete;
     Platform &operator=(const Platform &) = delete;
+
+    /// Give the platform one last chance to adjust the sokol descriptor
+    /// before the OS window is created.
+    void configureWindowDesc(sapp_desc &desc, const Config &cfg,
+                             const WindowCustomizationRequest &request);
+
+    /// Attach platform-native window customisations after sokol has
+    /// created the OS window.
+    void attachWindow(const WindowCustomizationRequest &request);
+
+    /// Let platform-specific code observe raw sokol events before the App
+    /// handles its portable state transitions.
+    void handleWindowEvent(const sapp_event *ev);
+
+    /// Poll/synchronise any native state that is easiest to observe once
+    /// per frame.
+    void beginFrameWindowSync();
+
+    [[nodiscard]] const PlatformWindowState &windowState() const noexcept;
+    [[nodiscard]] std::vector<PlatformGestureEvent> takeGestureEvents();
 
     /// Push the current sokol_app FILES_DROPPED batch into the App's
     /// long-lived project. Multi-gesture accumulation is the norm: the
@@ -73,7 +142,6 @@ class Platform {
     void drainPickers();
 
   private:
-    struct Impl;
     std::unique_ptr<Impl> impl_;
 };
 

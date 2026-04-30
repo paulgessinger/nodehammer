@@ -46,6 +46,7 @@ function(nh_add_viewer_lib name sokol_lib)
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_project_fs_web.cpp,>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,${_dir}/platform_native.cpp>
+        $<$<AND:$<BOOL:${APPLE}>,$<NOT:$<BOOL:${EMSCRIPTEN}>>>:${_dir}/platform_macos.mm>
         # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
         # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )

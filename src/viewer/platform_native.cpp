@@ -4,11 +4,17 @@
 #include <nodehammer/viewer/filesystem_project_fs.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
 
+#if defined(__APPLE__)
+#include "platform_macos.hpp"
+#endif
+
 #include <nfd.hpp>
 #include <sokol_app.h>
 
 #include <filesystem>
 #include <memory>
+#include <utility>
+#include <vector>
 
 namespace nodehammer::viewer::platform {
 
@@ -20,8 +26,31 @@ namespace nodehammer::viewer::platform {
 /// inline.
 struct Platform::Impl {
     App &app;
+    WindowCustomizationRequest window_request;
+    PlatformWindowState window_state;
+    std::vector<PlatformGestureEvent> gesture_events;
     bool pending_file_picker{false};
     bool pending_folder_picker{false};
+
+#if defined(__APPLE__)
+    MacWindowCallbacks macCallbacks() {
+        return MacWindowCallbacks{
+            .user = this,
+            .set_chrome =
+                [](void *user, const WindowChromeState &chrome) {
+                    static_cast<Impl *>(user)->window_state.chrome = chrome;
+                },
+            .set_drag_hover =
+                [](void *user, const DragHoverState &drag_hover) {
+                    static_cast<Impl *>(user)->window_state.drag_hover = drag_hover;
+                },
+            .push_gesture =
+                [](void *user, const PlatformGestureEvent &event) {
+                    static_cast<Impl *>(user)->gesture_events.push_back(event);
+                },
+        };
+    }
+#endif
 
     void runFilePickerModal() {
         NFD::Guard nfd;
@@ -58,6 +87,42 @@ struct Platform::Impl {
 
 Platform::Platform(App &app) : impl_(std::make_unique<Impl>(app)) {}
 Platform::~Platform() = default;
+
+void Platform::configureWindowDesc(sapp_desc & /*desc*/, const Config & /*cfg*/,
+                                   const WindowCustomizationRequest &request) {
+    impl_->window_request = request;
+}
+
+void Platform::attachWindow(const WindowCustomizationRequest &request) {
+    impl_->window_request = request;
+    impl_->window_state.supports_window_restoration = false;
+    impl_->window_state.supports_hidden_titlebar = false;
+    impl_->window_state.supports_pinch_gesture = false;
+#if defined(__APPLE__)
+    impl_->window_state.supports_window_restoration = request.restore_placement;
+    impl_->window_state.supports_hidden_titlebar = request.hide_titlebar_chrome;
+    impl_->window_state.supports_pinch_gesture = request.track_platform_gestures;
+    attachMacWindow(request, impl_->macCallbacks());
+#endif
+}
+
+void Platform::handleWindowEvent(const sapp_event *ev) {
+    if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+        impl_->window_state.drag_hover.active = false;
+    }
+}
+
+void Platform::beginFrameWindowSync() {
+#if defined(__APPLE__)
+    syncMacWindowState(impl_->macCallbacks());
+#endif
+}
+
+const PlatformWindowState &Platform::windowState() const noexcept { return impl_->window_state; }
+
+std::vector<PlatformGestureEvent> Platform::takeGestureEvents() {
+    return std::exchange(impl_->gesture_events, {});
+}
 
 void Platform::dispatchDroppedFiles() {
     const int n = sapp_get_num_dropped_files();

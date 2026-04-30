@@ -33,6 +33,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace nodehammer::viewer {
 
@@ -103,11 +104,13 @@ struct App::Impl {
     std::shared_ptr<const RenderScene> scene;
     std::unique_ptr<ProjectFs> project_;
     /// Platform impl: native vs web. Constructed by App's ctor body
-    /// (after this Impl is in place) via `platform::createPlatform(app)`,
-    /// so the impl can hold a back-pointer to the live App. State that
-    /// would otherwise live in file-static globals (picker latches)
-    /// lives as members on the impl.
+    /// after this Impl is in place, so the impl can hold a back-pointer
+    /// to the live App. State that would otherwise live in file-static
+    /// globals (picker latches, window hooks) lives as platform members.
     std::unique_ptr<platform::Platform> platform_;
+    platform::WindowCustomizationRequest window_customization;
+    platform::PlatformWindowState platform_window_state;
+    std::vector<platform::PlatformGestureEvent> platform_gesture_events;
     SceneRenderer scene_renderer;
     Camera camera;
 
@@ -241,9 +244,11 @@ void App::Impl::onInit() {
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
+    platform_->attachWindow(window_customization);
 }
 
 void App::Impl::onEvent(const sapp_event *ev) {
+    platform_->handleWindowEvent(ev);
     const bool imgui_handled = ImGui_ImplSokol_HandleEvent(ev);
     if (ev->type == SAPP_EVENTTYPE_MOUSE_SCROLL) {
         handleScrollEvent(ev, imgui_handled);
@@ -333,6 +338,7 @@ void App::Impl::updateCameraInput() {
     if (!scene) {
         pending_scroll_x = 0.f;
         pending_scroll_y = 0.f;
+        platform_gesture_events.clear();
         return;
     }
     ImGuiIO &io = ImGui::GetIO();
@@ -362,9 +368,15 @@ void App::Impl::updateCameraInput() {
                              pending_scroll_y * kTrackpadOrbitSensitivity);
             }
         }
+        for (const auto &event : platform_gesture_events) {
+            if (event.type == platform::GestureType::PinchUpdate && event.scale_delta > 0.f) {
+                camera.dolly(1.f / std::clamp(event.scale_delta, 0.05f, 20.f), scene_radius);
+            }
+        }
     }
     pending_scroll_x = 0.f;
     pending_scroll_y = 0.f;
+    platform_gesture_events.clear();
 }
 
 void App::Impl::applyInitialCamera() {
@@ -579,12 +591,21 @@ void App::Impl::onFrame() {
     ImGui_ImplSokol_NewFrame(static_cast<int>(fb_width), static_cast<int>(fb_height), delta_seconds,
                              sapp_dpi_scale());
 
+    platform_->beginFrameWindowSync();
+    platform_window_state = platform_->windowState();
+    platform_gesture_events = platform_->takeGestureEvents();
+
     updateCameraInput();
     if (scene && cfg.auto_orbit) {
         camera.orbit(glm::radians(cfg.auto_orbit_speed_deg) * static_cast<float>(delta_seconds),
                      0.f);
     }
 
+    const auto &chrome = platform_window_state.chrome;
+    if (chrome.titlebar_hidden && chrome.traffic_lights_overlap_content) {
+        ImGui::SetNextWindowPos({chrome.content_left_inset + 8.f, chrome.content_top_inset + 8.f},
+                                ImGuiCond_FirstUseEver);
+    }
     ImGui::SetNextWindowSize({500, 1000}, ImGuiCond_FirstUseEver);
     ImGui::Begin("nodehammer viewer");
     ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
@@ -985,6 +1006,24 @@ void App::Impl::onFrame() {
     }
     ImGui::End();
 
+    if (platform_window_state.drag_hover.active) {
+        const ImGuiViewport *viewport = ImGui::GetMainViewport();
+        const ImVec2 min = viewport->Pos;
+        const ImVec2 max{viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y};
+        auto *draw_list = ImGui::GetForegroundDrawList();
+        draw_list->AddRectFilled(min, max, IM_COL32(80, 120, 180, 40));
+        draw_list->AddRect(min, max, IM_COL32(130, 180, 255, 180), 0.f, 0, 3.f);
+
+        const char *message = platform_window_state.drag_hover.file_like
+                                  ? "Drop files to load them"
+                                  : "Drop supported scene files";
+        const ImVec2 text_size = ImGui::CalcTextSize(message);
+        const ImVec2 center{(min.x + max.x - text_size.x) * 0.5f,
+                            (min.y + max.y - text_size.y) * 0.5f};
+        draw_list->AddText({center.x + 1.f, center.y + 1.f}, IM_COL32(0, 0, 0, 180), message);
+        draw_list->AddText(center, IM_COL32(230, 240, 255, 255), message);
+    }
+
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
     render();
@@ -1099,6 +1138,7 @@ int App::run() {
     desc.enable_dragndrop = true;
     desc.max_dropped_files = 8;
     desc.max_dropped_file_path_length = 1024;
+    impl_->platform_->configureWindowDesc(desc, impl_->cfg, impl_->window_customization);
     // sapp_run on emscripten registers the main loop and returns (older
     // sokol versions did a stack-unwind, current ones don't). The Impl
     // outlives the unwind anyway because App lives in the static slot()
