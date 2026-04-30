@@ -3,12 +3,35 @@
 #include <nodehammer/viewer/app.hpp>
 #include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/config.hpp>
+#include <nodehammer/viewer/filesystem_project_fs.hpp>
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
+
+namespace {
+
+std::optional<std::string> relativeKeyUnder(std::filesystem::path root,
+                                            std::filesystem::path file) {
+    root = root.lexically_normal();
+    file = file.lexically_normal();
+
+    auto rel = file.lexically_relative(root);
+    if (rel.empty() || rel.is_absolute()) {
+        return std::nullopt;
+    }
+    for (const auto &part : rel) {
+        if (part == "..") {
+            return std::nullopt;
+        }
+    }
+    return rel.generic_string();
+}
+
+} // namespace
 
 void registerCmdViewer(CLI::App &app) {
     auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
@@ -90,12 +113,12 @@ void registerCmdViewer(CLI::App &app) {
 
         nodehammer::viewer::App::Handle application(*cfg);
 
-        // Native CLI flow: if --input is supplied, read both files into a
-        // BagProjectFs and let the App's BuildSession drive the build
-        // asynchronously after the window opens (same path URL mode and
-        // drag-drop go through). Existence checks happen here so typos
-        // exit before the window opens; build failures show up as red
-        // text in the project panel.
+        // Native CLI flow: if both roots live under the launch CWD, mount that
+        // directory as a real filesystem project so the tree can expose
+        // neighbouring includes/assets. Otherwise keep the historical bag path:
+        // read the supplied files into memory and build from those keys.
+        // Existence checks happen here so typos exit before the window opens;
+        // build failures show up as red text in the project panel.
         // The web flow lives in src/web/viewer_main.cpp.
         if (!inputPath.empty()) {
             const std::filesystem::path config_path{configPath};
@@ -107,6 +130,53 @@ void registerCmdViewer(CLI::App &app) {
             if (!std::filesystem::exists(geometry_path)) {
                 std::println(stderr, "viewer: input file not found: {}", inputPath);
                 std::exit(1);
+            }
+
+            std::error_code path_ec;
+            const auto launch_cwd = std::filesystem::current_path(path_ec);
+            if (path_ec) {
+                std::println(stderr, "viewer: cannot read current working directory: {}",
+                             path_ec.message());
+                std::exit(1);
+            }
+            const auto cwd = std::filesystem::canonical(launch_cwd, path_ec);
+            if (path_ec) {
+                std::println(stderr, "viewer: cannot resolve current working directory: {}",
+                             path_ec.message());
+                std::exit(1);
+            }
+            const auto geometry_abs = std::filesystem::canonical(geometry_path, path_ec);
+            if (path_ec) {
+                std::println(stderr, "viewer: cannot resolve input file '{}': {}", inputPath,
+                             path_ec.message());
+                std::exit(1);
+            }
+
+            if (!configPath.empty()) {
+                const auto config_abs = std::filesystem::canonical(config_path, path_ec);
+                if (path_ec) {
+                    std::println(stderr, "viewer: cannot resolve config file '{}': {}", configPath,
+                                 path_ec.message());
+                    std::exit(1);
+                }
+                if (config_abs == geometry_abs) {
+                    std::println(stderr, "viewer: --config and --input point at the same file: {}",
+                                 configPath);
+                    std::exit(1);
+                }
+
+                auto config_key = relativeKeyUnder(cwd, config_abs);
+                auto geometry_key = relativeKeyUnder(cwd, geometry_abs);
+                if (config_key && geometry_key) {
+                    application->setProject(
+                        std::make_unique<nodehammer::viewer::FilesystemProjectFs>(cwd));
+                    application->setRootKeys(std::move(*config_key), std::move(*geometry_key));
+                    const int rc = application->run();
+                    if (rc != 0) {
+                        std::println(stderr, "viewer exited with code {}", rc);
+                    }
+                    return;
+                }
             }
 
             auto bag = std::make_unique<nodehammer::viewer::BagProjectFs>();
