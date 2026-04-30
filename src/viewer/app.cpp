@@ -268,10 +268,10 @@ void App::Impl::updateCameraInput() {
             const float scale = camera.distance * 0.001f;
             camera.pan(-d.x * scale, d.y * scale);
         }
-    }
-    if (io.MouseWheel != 0.f) {
-        // 1.1^wheel: each notch = 10% closer/further. Matches Blender feel.
-        camera.dolly(std::pow(1.1f, -io.MouseWheel), scene_radius);
+        if (io.MouseWheel != 0.f) {
+            // 1.1^wheel: each notch = 10% closer/further. Matches Blender feel.
+            camera.dolly(std::pow(1.1f, -io.MouseWheel), scene_radius);
+        }
     }
 }
 
