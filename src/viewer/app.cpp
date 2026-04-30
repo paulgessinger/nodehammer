@@ -21,8 +21,10 @@
 #include <sokol_log.h>
 #include <sokol_time.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <iomanip>
 #include <memory>
@@ -35,6 +37,12 @@
 namespace nodehammer::viewer {
 
 namespace {
+
+enum class ScrollInputMode { Wheel, Trackpad };
+
+bool isZoomModifier(uint32_t modifiers) {
+    return (modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER)) != 0;
+}
 
 float wrapDegrees(float angle) {
     angle = std::fmod(angle, 360.f);
@@ -168,6 +176,14 @@ struct App::Impl {
     double render_submit_ms{0.0};
     double scene_submit_ms{0.0};
 
+    ScrollInputMode scroll_input_mode{ScrollInputMode::Wheel};
+    float pending_scroll_x{0.f};
+    float pending_scroll_y{0.f};
+    uint32_t pending_scroll_modifiers{0};
+    uint64_t last_scroll_time{0};
+    int smooth_scroll_score{0};
+    int wheel_scroll_score{0};
+
     explicit Impl(Config c) : cfg(std::move(c)), project_(std::make_unique<BagProjectFs>()) {}
 
     void onInit();
@@ -175,6 +191,8 @@ struct App::Impl {
     void onEvent(const sapp_event *ev);
     void onCleanup();
 
+    void classifyScroll(float scroll_x, float scroll_y);
+    void handleScrollEvent(const sapp_event *ev, bool imgui_handled);
     void updateCameraInput();
     void applyInitialCamera();
     void render();
@@ -226,7 +244,10 @@ void App::Impl::onInit() {
 }
 
 void App::Impl::onEvent(const sapp_event *ev) {
-    ImGui_ImplSokol_HandleEvent(ev);
+    const bool imgui_handled = ImGui_ImplSokol_HandleEvent(ev);
+    if (ev->type == SAPP_EVENTTYPE_MOUSE_SCROLL) {
+        handleScrollEvent(ev, imgui_handled);
+    }
     if (ev->type == SAPP_EVENTTYPE_FOCUSED) {
         window_focused = true;
         last_time = stm_now();
@@ -251,8 +272,67 @@ void App::Impl::onEvent(const sapp_event *ev) {
     }
 }
 
+void App::Impl::classifyScroll(float scroll_x, float scroll_y) {
+    constexpr double kQuietSeconds = 0.25;
+    constexpr float kScrollEpsilon = 0.001f;
+    constexpr float kStepEpsilon = 0.025f;
+    constexpr int kTrackpadScoreThreshold = 2;
+    constexpr int kWheelScoreThreshold = 2;
+
+    const uint64_t now = stm_now();
+    if (last_scroll_time != 0 && stm_sec(stm_diff(now, last_scroll_time)) > kQuietSeconds) {
+        smooth_scroll_score = 0;
+        wheel_scroll_score = 0;
+    }
+    last_scroll_time = now;
+
+    const float abs_x = std::abs(scroll_x);
+    const float abs_y = std::abs(scroll_y);
+    const bool has_horizontal = abs_x > kScrollEpsilon;
+    const bool has_vertical = abs_y > kScrollEpsilon;
+    if (!has_horizontal && !has_vertical) {
+        return;
+    }
+
+    const float rounded_y = std::round(abs_y);
+    const bool vertical_step =
+        has_vertical && rounded_y >= 1.f && std::abs(abs_y - rounded_y) <= kStepEpsilon;
+    const bool wheel_like = !has_horizontal && vertical_step;
+    const bool strong_smooth_like = has_horizontal || (has_vertical && abs_y < 1.f - kStepEpsilon);
+    const bool smooth_like = strong_smooth_like || !vertical_step;
+
+    if (smooth_like) {
+        ++smooth_scroll_score;
+        wheel_scroll_score = std::max(0, wheel_scroll_score - 1);
+    } else if (wheel_like) {
+        ++wheel_scroll_score;
+        smooth_scroll_score = std::max(0, smooth_scroll_score - 1);
+    }
+
+    if (strong_smooth_like || smooth_scroll_score >= kTrackpadScoreThreshold) {
+        scroll_input_mode = ScrollInputMode::Trackpad;
+    } else if (wheel_scroll_score >= kWheelScoreThreshold) {
+        scroll_input_mode = ScrollInputMode::Wheel;
+    }
+}
+
+void App::Impl::handleScrollEvent(const sapp_event *ev, bool imgui_handled) {
+    classifyScroll(ev->scroll_x, ev->scroll_y);
+
+    const ImGuiIO &io = ImGui::GetIO();
+    if (imgui_handled || io.WantCaptureMouse) {
+        return;
+    }
+
+    pending_scroll_x += ev->scroll_x;
+    pending_scroll_y += ev->scroll_y;
+    pending_scroll_modifiers = ev->modifiers;
+}
+
 void App::Impl::updateCameraInput() {
     if (!scene) {
+        pending_scroll_x = 0.f;
+        pending_scroll_y = 0.f;
         return;
     }
     ImGuiIO &io = ImGui::GetIO();
@@ -268,11 +348,23 @@ void App::Impl::updateCameraInput() {
             const float scale = camera.distance * 0.001f;
             camera.pan(-d.x * scale, d.y * scale);
         }
-        if (io.MouseWheel != 0.f) {
+        if (pending_scroll_y != 0.f || pending_scroll_x != 0.f) {
             // 1.1^wheel: each notch = 10% closer/further. Matches Blender feel.
-            camera.dolly(std::pow(1.1f, -io.MouseWheel), scene_radius);
+            const bool zoom_scroll = scroll_input_mode == ScrollInputMode::Wheel ||
+                                     isZoomModifier(pending_scroll_modifiers);
+            if (zoom_scroll) {
+                const float wheel = pending_scroll_y != 0.f ? pending_scroll_y : pending_scroll_x;
+                camera.dolly(std::pow(1.1f, -wheel), scene_radius);
+            } else {
+
+                constexpr float kTrackpadOrbitSensitivity = platform::kIsWeb ? 0.08f : 0.03f;
+                camera.orbit(pending_scroll_x * kTrackpadOrbitSensitivity,
+                             pending_scroll_y * kTrackpadOrbitSensitivity);
+            }
         }
     }
+    pending_scroll_x = 0.f;
+    pending_scroll_y = 0.f;
 }
 
 void App::Impl::applyInitialCamera() {
