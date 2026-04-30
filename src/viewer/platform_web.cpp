@@ -80,17 +80,6 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
 
 namespace nodehammer::viewer::platform {
 
-void commitUrlState(const std::string &state_query, const std::string &managed_keys) {
-    nh_viewer_commit_url_state(state_query.c_str(), managed_keys.c_str());
-}
-
-void dispatchWebFilePicker() { nh_viewer_open_file_picker(); }
-
-void runNativeFilePicker(const NativeFilePathHandler & /*handler*/) {
-    // NFD doesn't exist on web; the web picker is dispatched via
-    // dispatchWebFilePicker and bytes arrive through the C upload export.
-}
-
 namespace {
 
 // Per-file fetch context. sokol writes the file's bytes into `buffer` then
@@ -129,12 +118,29 @@ void webDropFetchCallback(const sapp_html5_fetch_response *response) {
 
 } // namespace
 
-void dispatchDroppedFiles(App & /*app*/) {
+/// Web platform state. Empty — the browser file picker dispatches
+/// inline at button-click time, byte-fetch callbacks for drops route
+/// through `App::instance()`, and there are no latches to hold. The
+/// `app` back-reference is here for symmetry with the native impl in
+/// case future web flows need it (e.g., a setProject call from a JS
+/// shim that prefers a typed reference over the singleton).
+struct Platform::Impl {
+    App &app;
+};
+
+Platform::Platform(App &app) : impl_(std::make_unique<Impl>(app)) {}
+Platform::~Platform() = default;
+
+void Platform::dispatchDroppedFiles() {
     const int n = sapp_get_num_dropped_files();
     std::println(stderr, "[viewer] dispatchDroppedFiles: n={}", n);
     if (n == 0) {
         return;
     }
+    // Bytes land asynchronously through `webDropFetchCallback`, which
+    // reaches the App via `App::instance()` — sokol's fetch callbacks
+    // are plain C function pointers and outlive any per-gesture
+    // context, so we don't try to thread `impl_->app` through them.
     for (int i = 0; i < n; ++i) {
         const auto size = sapp_html5_get_dropped_file_size(i);
         auto ctx = std::make_unique<WebDropCtx>();
@@ -144,12 +150,18 @@ void dispatchDroppedFiles(App & /*app*/) {
         req.dropped_file_index = i;
         req.callback = &webDropFetchCallback;
         req.buffer = sapp_range{ctx->buffer.data(), ctx->buffer.size()};
-        // Ownership transfers to the callback via user_data; callback
-        // reclaims with a unique_ptr on the receiving end.
         req.user_data = ctx.release();
         sapp_html5_fetch_dropped_file(&req);
     }
 }
+
+void Platform::commitUrlState(const std::string &state_query, const std::string &managed_keys) {
+    nh_viewer_commit_url_state(state_query.c_str(), managed_keys.c_str());
+}
+
+void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
+void Platform::openFolderPicker() {} // no folder picker on web today
+void Platform::drainPickers() {}     // web pickers dispatch inline
 
 } // namespace nodehammer::viewer::platform
 

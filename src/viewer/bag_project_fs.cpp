@@ -46,6 +46,14 @@ struct BagProjectFs::Impl {
     /// integer comparison.
     std::uint64_t generation{0};
 
+    /// Flat tree snapshot exposed via `list()`. The bag has no real
+    /// hierarchy, so every entry surfaces as a top-level leaf. Rebuilt
+    /// lazily on first `list()` after a generation bump; mutable so
+    /// the const accessor can refresh without forcing the App to call
+    /// a non-const refresh hook.
+    mutable std::vector<DirNode> tree_snapshot;
+    mutable std::uint64_t tree_snapshot_gen{static_cast<std::uint64_t>(-1)};
+
     void recordEntry(std::string_view filename, std::size_t size) {
         ProjectProgress p;
         p.url = std::string{filename};
@@ -84,6 +92,27 @@ std::span<const std::string> BagProjectFs::warnings() const {
 }
 
 std::uint64_t BagProjectFs::generation() const { return impl_->generation; }
+
+std::span<const DirNode> BagProjectFs::list(std::string_view dir) const {
+    if (!dir.empty() && dir != "/") {
+        return {};
+    }
+    if (impl_->tree_snapshot_gen != impl_->generation) {
+        impl_->tree_snapshot.clear();
+        impl_->tree_snapshot.reserve(impl_->entries.size());
+        for (const auto &p : impl_->entries) {
+            DirNode n;
+            auto base = std::filesystem::path{p.url}.filename().string();
+            n.name = base.empty() ? p.url : base;
+            n.key = p.url;
+            n.is_directory = false;
+            n.bytes = p.bytes_total;
+            impl_->tree_snapshot.push_back(std::move(n));
+        }
+        impl_->tree_snapshot_gen = impl_->generation;
+    }
+    return {impl_->tree_snapshot.data(), impl_->tree_snapshot.size()};
+}
 
 ResolveResult BagProjectFs::resolve(std::string_view key) const {
     const auto exact = asciiLowerCopy(key);

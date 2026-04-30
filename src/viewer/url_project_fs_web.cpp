@@ -2,11 +2,14 @@
 
 #include <emscripten/fetch.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -61,6 +64,20 @@ struct UrlProjectFs::Impl {
     /// file count.
     mutable std::vector<ProjectProgress> progress_view;
     mutable std::uint64_t progress_view_gen{0};
+
+    /// Hierarchical tree snapshot for `list()`. URL keys can include
+    /// `/`-separated path components (e.g. `subdir/common.toml`); we
+    /// expose them as a real tree so the App's tree panel renders
+    /// folders properly. Implicit `DirNode`s are synthesised for any
+    /// directory prefix that doesn't have its own fetched entry.
+    /// BFS layout — siblings of a directory are contiguous in `tree`
+    /// before any of its descendants — so a contiguous span over a
+    /// directory's children doesn't accidentally include grandchildren.
+    mutable std::vector<DirNode> tree;
+    mutable std::unordered_map<std::string, std::size_t> tree_index;
+    mutable std::size_t root_first_child{0};
+    mutable std::size_t root_child_count{0};
+    mutable std::uint64_t tree_snapshot_gen{static_cast<std::uint64_t>(-1)};
 
     std::uint64_t generation{0};
 
@@ -241,5 +258,157 @@ ResolveResult UrlProjectFs::resolve(std::string_view key) const {
 }
 
 std::uint64_t UrlProjectFs::generation() const { return impl_->generation; }
+
+namespace {
+
+constexpr std::size_t kRootSentinel = static_cast<std::size_t>(-1);
+
+/// Strip a single leading `/` from a normalised key so subsequent path
+/// arithmetic produces clean component splits. `normalizeKey` always
+/// prepends `/`, but for `list()` we want to treat the storage as
+/// rooted at the bag root, not at filesystem-root.
+std::string_view stripLeadingSlash(std::string_view k) {
+    if (!k.empty() && k.front() == '/') {
+        k.remove_prefix(1);
+    }
+    return k;
+}
+
+std::string parentKey(std::string_view key) {
+    auto pos = key.find_last_of('/');
+    if (pos == std::string_view::npos) {
+        return {};
+    }
+    return std::string{key.substr(0, pos)};
+}
+
+std::string baseKey(std::string_view key) {
+    auto pos = key.find_last_of('/');
+    if (pos == std::string_view::npos) {
+        return std::string{key};
+    }
+    return std::string{key.substr(pos + 1)};
+}
+
+} // namespace
+
+std::span<const DirNode> UrlProjectFs::list(std::string_view dir) const {
+    if (impl_->tree_snapshot_gen != impl_->generation) {
+        // Rebuild the hierarchical snapshot. URL keys carry path
+        // components (e.g. `subdir/common.toml`); we synthesise
+        // implicit DirNodes for each directory prefix that doesn't
+        // have its own fetched entry, then lay everything out in BFS
+        // order so a directory's children occupy a contiguous range.
+        impl_->tree.clear();
+        impl_->tree_index.clear();
+        impl_->root_first_child = 0;
+        impl_->root_child_count = 0;
+
+        struct ChildInfo {
+            std::string name;
+            std::string key;
+            bool is_directory;
+            std::uint64_t bytes;
+        };
+        std::unordered_map<std::string, std::vector<ChildInfo>> children_by_parent;
+        std::set<std::string> dir_keys;
+
+        // Register every directory prefix of every fetched key as an
+        // implicit directory.
+        for (const auto &raw : impl_->order) {
+            std::string current{stripLeadingSlash(raw)};
+            std::string p = parentKey(current);
+            while (!p.empty()) {
+                dir_keys.insert(p);
+                p = parentKey(p);
+            }
+        }
+
+        // Populate children_by_parent. Files first (with bytes), then
+        // implicit directories — sort happens after so order doesn't
+        // matter here.
+        for (const auto &raw : impl_->order) {
+            const std::string key{stripLeadingSlash(raw)};
+            const auto &e = *impl_->entries.at(raw);
+            children_by_parent[parentKey(key)].push_back(
+                ChildInfo{baseKey(key), key, false, e.bytes_total});
+        }
+        for (const auto &dk : dir_keys) {
+            children_by_parent[parentKey(dk)].push_back(ChildInfo{baseKey(dk), dk, true, 0});
+        }
+        for (auto &[parent, kids] : children_by_parent) {
+            std::sort(kids.begin(), kids.end(),
+                      [](const auto &a, const auto &b) { return a.name < b.name; });
+        }
+
+        struct ChildRange {
+            std::size_t parent_idx;
+            std::size_t first_child_idx;
+            std::size_t child_count;
+        };
+        std::vector<ChildRange> ranges;
+
+        struct DirJob {
+            std::string key; // empty for the root
+            std::size_t parent_idx;
+        };
+        std::deque<DirJob> queue;
+        queue.push_back({std::string{}, kRootSentinel});
+
+        while (!queue.empty()) {
+            const auto job = queue.front();
+            queue.pop_front();
+
+            const auto first_child_idx = impl_->tree.size();
+            std::size_t child_count = 0;
+            if (auto it = children_by_parent.find(job.key); it != children_by_parent.end()) {
+                for (const auto &info : it->second) {
+                    DirNode node;
+                    node.name = info.name;
+                    node.key = info.key;
+                    node.is_directory = info.is_directory;
+                    node.bytes = info.bytes;
+                    const auto idx = impl_->tree.size();
+                    impl_->tree.push_back(std::move(node));
+                    impl_->tree_index.emplace(impl_->tree.back().key, idx);
+                    ++child_count;
+                    if (info.is_directory) {
+                        queue.push_back({info.key, idx});
+                    }
+                }
+            }
+            ranges.push_back({job.parent_idx, first_child_idx, child_count});
+        }
+
+        for (const auto &r : ranges) {
+            if (r.parent_idx == kRootSentinel) {
+                impl_->root_first_child = r.first_child_idx;
+                impl_->root_child_count = r.child_count;
+            } else if (r.child_count > 0) {
+                impl_->tree[r.parent_idx].children =
+                    std::span<const DirNode>{impl_->tree.data() + r.first_child_idx, r.child_count};
+            }
+        }
+
+        impl_->tree_snapshot_gen = impl_->generation;
+    }
+
+    if (dir.empty() || dir == "/") {
+        if (impl_->root_child_count == 0) {
+            return {};
+        }
+        return {impl_->tree.data() + impl_->root_first_child, impl_->root_child_count};
+    }
+    const std::string norm{stripLeadingSlash(dir)};
+    auto it = impl_->tree_index.find(norm);
+    if (it == impl_->tree_index.end()) {
+        return {};
+    }
+    const auto &node = impl_->tree[it->second];
+    if (!node.is_directory) {
+        return {};
+    }
+    return node.children;
+}
 
 } // namespace nodehammer::viewer

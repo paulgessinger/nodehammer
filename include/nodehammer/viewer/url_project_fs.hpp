@@ -38,6 +38,7 @@ class UrlProjectFs final : public ProjectFs {
     std::string_view name() const override { return "url"; }
     ResolveResult resolve(std::string_view key) const override;
     std::uint64_t generation() const override;
+    std::span<const DirNode> list(std::string_view dir = {}) const override;
 
   private:
     struct Impl;

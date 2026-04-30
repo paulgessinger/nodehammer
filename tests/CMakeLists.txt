@@ -21,6 +21,12 @@ add_executable(nodehammer_tests
     test_timing.cpp
 )
 
+# FilesystemProjectFs is native-only; the source is gated the same way
+# in nodehammer_lib. The test follows.
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_tests PRIVATE viewer/test_filesystem_project_fs.cpp)
+endif()
+
 target_compile_definitions(nodehammer_tests PRIVATE
     NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
     $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>

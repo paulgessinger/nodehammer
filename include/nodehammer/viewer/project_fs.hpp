@@ -44,6 +44,19 @@ struct ResolveResult {
     std::string error;       // populated when status == Error
 };
 
+/// Node in a backend's directory snapshot. Backends with a real hierarchy
+/// (filesystem, future archive) build a flat owning vector of these on
+/// mount/rescan; child spans point into contiguous slices of that storage.
+/// Spans are valid until the next `generation()` bump (rescan, archive
+/// remount, overlay write).
+struct DirNode {
+    std::string name; // last path component, e.g. "common.toml"
+    std::string key;  // full relative-to-root logical key
+    bool is_directory{false};
+    std::span<const DirNode> children; // empty for files
+    std::uint64_t bytes{0};            // size on disk for files; 0 for directories
+};
+
 /// Pluggable virtual filesystem used by the App to load a viewer project.
 /// Backends nominate where bytes come from: URL fetches (UrlProjectFs),
 /// drag-drop / file-picker bags (BagProjectFs), and (future) archives,
@@ -111,6 +124,21 @@ class ProjectFs {
     /// `common.toml` after a build failed for missing-include — still
     /// fires a fresh walk even though the root paths didn't change.
     virtual std::uint64_t generation() const { return 0; }
+
+    /// Optional directory-listing capability. Backends with a real
+    /// hierarchy (FilesystemProjectFs, future archive) override; the bag
+    /// and URL backends return an empty span and the App's tree panel
+    /// falls back to its flat progress UI. The returned span and the
+    /// children spans inside it are valid until the next `generation()`
+    /// bump. `dir` is the empty string (or "/") for the root.
+    virtual std::span<const DirNode> list(std::string_view /*dir*/ = {}) const { return {}; }
+
+    /// Force the backend to drop any cached state and rebuild its
+    /// snapshot from the source of truth. Default: no-op. The filesystem
+    /// backend re-walks its mount root and invalidates its byte cache;
+    /// in-memory backends (bag, URL) have nothing to refresh. Bumps
+    /// `generation()` if the backend has anything cached.
+    virtual void rescan() {}
 };
 
 } // namespace nodehammer::viewer

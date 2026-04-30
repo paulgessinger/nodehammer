@@ -85,6 +85,12 @@ struct App::Impl {
 
     std::shared_ptr<const RenderScene> scene;
     std::unique_ptr<ProjectFs> project_;
+    /// Platform impl: native vs web. Constructed by App's ctor body
+    /// (after this Impl is in place) via `platform::createPlatform(app)`,
+    /// so the impl can hold a back-pointer to the live App. State that
+    /// would otherwise live in file-static globals (picker latches)
+    /// lives as members on the impl.
+    std::unique_ptr<platform::Platform> platform_;
     SceneRenderer scene_renderer;
     Camera camera;
 
@@ -119,28 +125,12 @@ struct App::Impl {
     // per frame.
     BuildSession build_session;
 
-    // Root keys the App last fed to the session. URL mode sets these
-    // explicitly via setRootKeys (from viewer_main.cpp). Bag mode
-    // discovers them by scanning the project's progress entries for
-    // .toml + .nhb/.nhb.zst extensions on each generation bump.
+    // Root keys the App last fed to the session. Set by external
+    // entry points via App::setRootKeys (URL JS shell, CLI) and by
+    // double-click in the tree panel. The user can override the
+    // initial selection at any time by clicking a different leaf.
     std::string root_config_key;
     std::string root_geometry_key;
-    bool explicit_root_keys{false};
-    std::uint64_t last_seen_project_generation{
-        static_cast<std::uint64_t>(-1)}; // forces a recompute on first frame
-
-    // Files in the bag that don't match a recognised role. Recomputed
-    // alongside root key recognition; cleared in URL mode.
-    std::vector<std::string> impl_unrecognised_;
-
-    // Set from inside the imgui frame on native when the user clicks
-    // "Open files…"; drained at end of frame to run NFD modally. NFD
-    // enters nested event loops that would re-enter the active ImGui
-    // frame, so the open-and-drain split is required. Always present but
-    // only meaningful on native — the web picker dispatches inline (the
-    // browser requires `input.click()` from the gesture stack) and never
-    // touches this flag.
-    bool picker_requested{false};
 
     // Stashed message after a build failure so the UI can keep showing
     // it across frames.
@@ -248,9 +238,7 @@ void App::Impl::onEvent(const sapp_event *ev) {
         // Platform code pushes the dropped files into the App's existing
         // project (synchronously on native, via per-file fetch callbacks
         // on web). Lives in platform-specific code.
-        if (auto *app = App::instance()) {
-            platform::dispatchDroppedFiles(*app);
-        }
+        platform_->dispatchDroppedFiles();
     }
 }
 
@@ -368,7 +356,7 @@ void App::Impl::syncBrowserUrl() const {
             "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
             "cutEnd,"
             "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
-        platform::commitUrlState(state_query, kManagedKeys);
+        platform_->commitUrlState(state_query, kManagedKeys);
     }
 }
 
@@ -562,45 +550,12 @@ void App::Impl::onFrame() {
         if (project_) {
             project_->poll();
 
-            // Bag mode: re-classify the project's entries on each
-            // generation bump to identify which file is the root config
-            // and which is the input. URL mode bypasses this — the JS
-            // shell sets explicit root keys via App::setRootKeys().
-            const auto cur_gen = project_->generation();
-            if (!explicit_root_keys && cur_gen != last_seen_project_generation) {
-                std::string config_key;
-                std::string geometry_key;
-                std::vector<std::string> unrecognised_files;
-                for (const auto &p : project_->progress()) {
-                    const auto path = std::filesystem::path{p.url};
-                    auto ext = path.extension().string();
-                    for (auto &c : ext) {
-                        if (c >= 'A' && c <= 'Z')
-                            c = static_cast<char>(c - 'A' + 'a');
-                    }
-                    auto stemExt = path.stem().extension().string();
-                    for (auto &c : stemExt) {
-                        if (c >= 'A' && c <= 'Z')
-                            c = static_cast<char>(c - 'A' + 'a');
-                    }
-                    if (ext == ".toml") {
-                        config_key = p.url; // last-write wins
-                    } else if (ext == ".nhb" || (ext == ".zst" && stemExt == ".nhb")) {
-                        geometry_key = p.url;
-                    } else {
-                        unrecognised_files.push_back(p.url);
-                    }
-                }
-                if (config_key != root_config_key || geometry_key != root_geometry_key) {
-                    root_config_key = std::move(config_key);
-                    root_geometry_key = std::move(geometry_key);
-                    build_session.setRootKeys(root_config_key, root_geometry_key);
-                    build_error.clear();
-                }
-                last_seen_project_generation = cur_gen;
-                // Keep last-classification-only state for UI hints below.
-                impl_unrecognised_ = std::move(unrecognised_files);
-            }
+            // Root selection is user-driven across all backends:
+            // double-click in the tree panel sets the matching root
+            // key. Initial roots can also come from external sources
+            // (App::setRootKeys called by the URL JS shell or the CLI
+            // entry point) — those just preselect the first build;
+            // the tree click handler still treats them as overridable.
 
             // Drive the session: walk includes, parse config, import geometry.
             build_session.poll(project_.get());
@@ -653,31 +608,9 @@ void App::Impl::onFrame() {
                 case SceneBuildJob::Phase::Done:
                     break;
                 }
-            } else {
-                // Not building: show the project's transfer progress
-                // (URL fetches in flight, bag entries already collected).
-                const auto entries = project_->progress();
-                if (!entries.empty()) {
-                    show_drag_hint = false;
-                    ImGui::Text("Project files:");
-                    for (const auto &p : entries) {
-                        if (p.failed) {
-                            ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "[fail]");
-                        } else if (!p.done && p.bytes_total > 0) {
-                            const float frac =
-                                static_cast<float>(static_cast<double>(p.bytes_done) /
-                                                   static_cast<double>(p.bytes_total));
-                            ImGui::ProgressBar(frac, ImVec2(60.f, 0.f));
-                        } else if (!p.done) {
-                            ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
-                                               ImVec2(60.f, 0.f), "");
-                        } else {
-                            ImGui::TextColored({0.5f, 0.9f, 0.5f, 1.f}, "[ok]");
-                        }
-                        ImGui::SameLine();
-                        ImGui::Text("%s", p.url.c_str());
-                    }
-                }
+            }
+            if (!project_->list("").empty()) {
+                show_drag_hint = false;
             }
 
             // What the build session is waiting on (missing includes,
@@ -693,23 +626,16 @@ void App::Impl::onFrame() {
                 ImGui::TextWrapped("%s", build_session.errorMessage().c_str());
             }
 
-            // What the user dropped that we don't recognise.
-            for (const auto &u : impl_unrecognised_) {
-                ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f},
-                                   "Don't know what to do with: %s "
-                                   "(viewer expects .toml or .nhb / .nhb.zst)",
-                                   u.c_str());
-            }
-
             // App-level "still need a config" / "still need geometry"
-            // hint, shown when the user has dropped files but neither
-            // matches a needed slot.
-            if (!explicit_root_keys && !project_->progress().empty()) {
+            // hint, shown when the project has files but the user
+            // hasn't picked a root yet (either via tree double-click
+            // or via external setRootKeys).
+            if (!project_->progress().empty()) {
                 if (root_config_key.empty()) {
-                    ImGui::Text("Still waiting for: a .toml config");
+                    ImGui::Text("Pick a .toml config in the tree above");
                 }
                 if (root_geometry_key.empty()) {
-                    ImGui::Text("Still waiting for: a FlatBuffer geometry (.nhb / .nhb.zst)");
+                    ImGui::Text("Pick a FlatBuffer geometry (.nhb / .nhb.zst) in the tree above");
                 }
             }
 
@@ -725,15 +651,20 @@ void App::Impl::onFrame() {
             ImGui::Text("or use the Open files button below.");
         }
         if (ImGui::Button("Open files…")) {
-            if constexpr (platform::kIsWeb) {
-                // Browser requires input.click() in the user-gesture stack;
-                // the EM_JS shim returns synchronously and bytes arrive
-                // later via the upload-batch C exports.
-                platform::dispatchWebFilePicker();
-            } else {
-                // Latch — drained at end of frame so NFD's nested event
-                // loop doesn't re-enter the active ImGui frame.
-                picker_requested = true;
+            // Web dispatches inline (browser requires input.click() in
+            // the gesture stack); native queues a latch and drains at
+            // end of frame to avoid NFD re-entering the active ImGui
+            // frame. Both shapes hide behind Platform::openFilePicker.
+            platform_->openFilePicker();
+        }
+        // "Open folder…" mounts a real on-disk directory as the project
+        // (FilesystemProjectFs). Native-only — the browser sandbox has
+        // no folder picker via NFD; web users would need <input
+        // webkitdirectory>, which is a Stage 4+ concern.
+        if constexpr (!platform::kIsWeb) {
+            ImGui::SameLine();
+            if (ImGui::Button("Open folder…")) {
+                platform_->openFolderPicker();
             }
         }
     } else if (scene && !scene_uploaded) {
@@ -768,9 +699,6 @@ void App::Impl::onFrame() {
             project_ = std::make_unique<BagProjectFs>();
             root_config_key.clear();
             root_geometry_key.clear();
-            explicit_root_keys = false;
-            last_seen_project_generation = static_cast<std::uint64_t>(-1);
-            impl_unrecognised_.clear();
             build_session.setRootKeys({}, {});
             scene_uploaded = false;
             camera_framed = false;
@@ -801,9 +729,13 @@ void App::Impl::onFrame() {
                     glm::degrees(camera.pitch), camera.distance);
         ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
     }
-    // Project debug — outside the scene-gated block so it stays visible
-    // before any scene loads (e.g. after Close project, while the user is
-    // still dropping files into a fresh bag).
+    // Project panel — outside the scene-gated block so it stays
+    // visible during and after a build. The tree view is the unified
+    // project-presentation: every backend overrides list() to expose
+    // its files (real hierarchy for filesystem / future archive,
+    // flat for bag and URL). Double-clicking a recognised file
+    // (.toml / .nhb / .nhb.zst) sets the matching root key — the
+    // BuildSession picks it up on the next poll.
     if (project_) {
         ImGui::Separator();
         if (ImGui::CollapsingHeader("Project", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -823,25 +755,126 @@ void App::Impl::onFrame() {
                 break;
             }
             const auto bname = project_->name();
-            ImGui::Text("backend: %.*s", static_cast<int>(bname.size()), bname.data());
-            ImGui::Text("status: %s", status_label);
-            const auto entries = project_->progress();
-            ImGui::Text("files (%zu):", entries.size());
-            ImGui::Indent();
-            if (entries.empty()) {
-                ImGui::TextDisabled("(none)");
+            ImGui::Text("backend: %.*s   status: %s", static_cast<int>(bname.size()), bname.data(),
+                        status_label);
+
+            const auto root_nodes = project_->list("");
+            if (root_nodes.empty()) {
+                ImGui::TextDisabled("(no files yet)");
             } else {
-                for (const auto &e : entries) {
-                    if (e.failed) {
-                        ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", e.url.c_str());
-                    } else if (e.done) {
-                        ImGui::Text("%s", e.url.c_str());
-                    } else {
-                        ImGui::TextDisabled("%s (loading)", e.url.c_str());
+                // Index progress() by key so each leaf can render a
+                // fetch-state badge (in-flight URL, [ok], [fail])
+                // regardless of backend.
+                std::unordered_map<std::string_view, const ProjectProgress *> progress_by_key;
+                for (const auto &p : project_->progress()) {
+                    progress_by_key.emplace(p.url, &p);
+                }
+                auto isFlatBufferGeom = [](std::string_view key) {
+                    auto path = std::filesystem::path{key};
+                    auto ext = path.extension().string();
+                    for (auto &c : ext) {
+                        if (c >= 'A' && c <= 'Z') {
+                            c = static_cast<char>(c - 'A' + 'a');
+                        }
                     }
+                    if (ext == ".nhb") {
+                        return true;
+                    }
+                    if (ext != ".zst") {
+                        return false;
+                    }
+                    auto stemExt = path.stem().extension().string();
+                    for (auto &c : stemExt) {
+                        if (c >= 'A' && c <= 'Z') {
+                            c = static_cast<char>(c - 'A' + 'a');
+                        }
+                    }
+                    return stemExt == ".nhb";
+                };
+                // ImGui::BeginChild("project_tree", ImVec2(0.f, 240.f), ImGuiChildFlags_Borders);
+                // Deducing-this recursive lambda — avoids std::function
+                // and its type-erased indirection. PushID per node
+                // gives every TreeNodeEx call a fully isolated ID
+                // scope, so two directories sharing a basename can't
+                // alias their open/closed state regardless of how the
+                // label hashes.
+                auto renderNodes = [&](this const auto &self,
+                                       std::span<const DirNode> nodes) -> void {
+                    for (const auto &n : nodes) {
+                        ImGui::PushID(n.key.c_str());
+                        if (n.is_directory) {
+                            const bool open = ImGui::TreeNodeEx("##dir", ImGuiTreeNodeFlags_None,
+                                                                "%s", n.name.c_str());
+                            if (open) {
+                                self(n.children);
+                                ImGui::TreePop();
+                            }
+                            ImGui::PopID();
+                            continue;
+                        }
+                        // Fetch-state badge from progress(), when we
+                        // have one for this key.
+                        if (auto it = progress_by_key.find(n.key); it != progress_by_key.end()) {
+                            const auto &p = *it->second;
+                            if (p.failed) {
+                                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "[fail]");
+                                ImGui::SameLine();
+                            } else if (!p.done && p.bytes_total > 0) {
+                                const float frac =
+                                    static_cast<float>(static_cast<double>(p.bytes_done) /
+                                                       static_cast<double>(p.bytes_total));
+                                ImGui::ProgressBar(frac, ImVec2(60.f, 0.f));
+                                ImGui::SameLine();
+                            } else if (!p.done) {
+                                ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
+                                                   ImVec2(60.f, 0.f), "");
+                                ImGui::SameLine();
+                            }
+                        }
+                        const bool is_config = (n.key == root_config_key);
+                        const bool is_geom = (n.key == root_geometry_key);
+                        ImGuiTreeNodeFlags flags =
+                            ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                        if (is_config || is_geom) {
+                            flags |= ImGuiTreeNodeFlags_Selected;
+                        }
+                        const char *tag = is_config ? " [config]" : is_geom ? " [geometry]" : "";
+                        ImGui::TreeNodeEx("##leaf", flags, "%s%s", n.name.c_str(), tag);
+                        // Double-click triggers auto-detection by
+                        // extension and assigns the matching root key.
+                        // Single-click is a no-op (avoids accidental
+                        // rebuilds while exploring).
+                        if (ImGui::IsItemHovered() &&
+                            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                            auto ext = std::filesystem::path{n.key}.extension().string();
+                            for (auto &c : ext) {
+                                if (c >= 'A' && c <= 'Z') {
+                                    c = static_cast<char>(c - 'A' + 'a');
+                                }
+                            }
+                            if (ext == ".toml") {
+                                root_config_key = n.key;
+                                build_session.setRootKeys(root_config_key, root_geometry_key);
+                                build_error.clear();
+                            } else if (isFlatBufferGeom(n.key)) {
+                                root_geometry_key = n.key;
+                                build_session.setRootKeys(root_config_key, root_geometry_key);
+                                build_error.clear();
+                            }
+                        }
+                        ImGui::PopID();
+                    }
+                };
+                renderNodes(root_nodes);
+                // ImGui::EndChild();
+                if (ImGui::Button("Rescan")) {
+                    // No-op on backends without a mutable source
+                    // (bag, URL); meaningful for filesystem mounts
+                    // where on-disk edits warrant a re-walk.
+                    project_->rescan();
+                    build_error.clear();
                 }
             }
-            ImGui::Unindent();
         }
     }
     ImGui::End();
@@ -850,24 +883,13 @@ void App::Impl::onFrame() {
     // internally calls ImGui::Render itself before issuing draws.
     render();
 
-    // Drain a pending native file picker. The ImGui frame is fully ended
-    // and rendered by this point, sokol's pass is committed, and any
-    // sokol_app frame_cb re-entry from the modal's nested run loop will
-    // hit a clean self-contained frame instead of overlapping with one
-    // already in progress. Web's picker dispatched inline at click-time;
-    // there's nothing to drain here.
-    if constexpr (!platform::kIsWeb) {
-        if (picker_requested) {
-            picker_requested = false;
-            // NFD's modal returns synchronously after the user confirms.
-            // Push each picked path into the App's long-lived project so
-            // gestures accumulate (toml from one pick, geometry from the
-            // next, etc.) rather than each picker invocation starting over.
-            auto *project = project_.get();
-            platform::runNativeFilePicker(
-                [project](const std::filesystem::path &path) { project->addPath(path); });
-        }
-    }
+    // Drain any pending native picker modal. ImGui frame is ended,
+    // sokol pass is committed; if NFD spawns a nested run loop and
+    // re-enters frame_cb, it'll hit a clean self-contained frame
+    // instead of overlapping with one already in progress. Web's
+    // pickers dispatch inline at click-time, so this is a no-op
+    // there — both platforms are reached through the same call.
+    platform_->drainPickers();
 }
 
 void App::Impl::onCleanup() {
@@ -892,16 +914,12 @@ void App::setProject(std::unique_ptr<ProjectFs> project) {
     // recognition on the next generation bump (bag mode).
     impl_->root_config_key.clear();
     impl_->root_geometry_key.clear();
-    impl_->explicit_root_keys = false;
-    impl_->last_seen_project_generation = static_cast<std::uint64_t>(-1);
-    impl_->impl_unrecognised_.clear();
     impl_->build_session.setRootKeys({}, {});
 }
 
 void App::setRootKeys(std::string config_key, std::string geometry_key) {
     impl_->root_config_key = config_key;
     impl_->root_geometry_key = geometry_key;
-    impl_->explicit_root_keys = !config_key.empty() && !geometry_key.empty();
     impl_->build_session.setRootKeys(std::move(config_key), std::move(geometry_key));
 }
 
@@ -922,7 +940,13 @@ std::unique_ptr<App> &slot() {
 
 App *App::instance() { return slot().get(); }
 
-App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
+App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {
+    // Construct Platform after the App body is in place so it can
+    // hold a back-reference to *this. The Platform pImpl is defined
+    // per-TU (platform_native.cpp / platform_web.cpp); whichever TU
+    // is linked into this executable supplies the matching ctor.
+    impl_->platform_ = std::make_unique<platform::Platform>(*this);
+}
 
 App::~App() = default;
 

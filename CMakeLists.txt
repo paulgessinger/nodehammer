@@ -219,6 +219,16 @@ endif()
 target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
 target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 
+# FilesystemProjectFs mounts a real on-disk directory; the web sandbox
+# has no equivalent (no recursive_directory_iterator, no readable host
+# fs without NODERAWFS), so the source is native-only. It lives in
+# nodehammer_lib alongside bag/build_session because future
+# `buildSceneFromPaths` callers will want to mount the geometry's
+# parent directory in CLI mode.
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_lib PRIVATE src/viewer/filesystem_project_fs.cpp)
+endif()
+
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
 # When the viewer is on, we build a per-backend sokol STATIC lib + a viewer
 # executable per backend. Native picks the right backend for the host

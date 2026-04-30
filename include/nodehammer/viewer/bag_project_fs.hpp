@@ -35,6 +35,7 @@ class BagProjectFs final : public ProjectFs {
     std::span<const std::string> warnings() const override;
     ResolveResult resolve(std::string_view key) const override;
     std::uint64_t generation() const override;
+    std::span<const DirNode> list(std::string_view dir = {}) const override;
 
     /// Add a file by path: read its bytes into the bag and key by the
     /// filename. Used by native drag-drop and the NFD picker.
