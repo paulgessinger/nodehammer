@@ -15,7 +15,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
-#include <print>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,9 +32,6 @@ void macPushMagnification(Platform::Impl &impl, NSMagnificationGestureRecognizer
     nodehammer::viewer::platform::Platform::Impl *impl;
     Class original_class;
     Class subclass;
-    Class original_delegate_class;
-    Class delegate_subclass;
-    id delegate_object;
     NSView *view;
     NSMagnificationGestureRecognizer *recognizer;
     BOOL drag_active;
@@ -43,7 +39,6 @@ void macPushMagnification(Platform::Impl &impl, NSMagnificationGestureRecognizer
 }
 - (instancetype)initWithImpl:(nodehammer::viewer::platform::Platform::Impl *)impl;
 - (void)attachToView:(NSView *)view trackDrag:(BOOL)track_drag trackGestures:(BOOL)track_gestures;
-- (void)attachToWindowDelegate:(NSWindow *)window;
 - (void)detach;
 - (BOOL)beginWindowDragIfToolbarArea:(NSEvent *)event;
 - (void)magnify:(NSMagnificationGestureRecognizer *)recognizer;
@@ -62,16 +57,12 @@ struct Platform::Impl {
     PlatformWindowState window_state;
     std::vector<PlatformGestureEvent> gesture_events;
     NodehammerMacWindowBridge *bridge{nil};
-    NSToolbar *toolbar{nil};
 
     explicit Impl(App &app_) : app(app_) {}
     ~Impl() {
         if (bridge != nil) {
             [bridge detach];
             [bridge release];
-        }
-        if (toolbar != nil) {
-            [toolbar release];
         }
     }
 };
@@ -189,41 +180,6 @@ Class makeViewSubclass(NSView *view) {
     return subclass;
 }
 
-NSApplicationPresentationOptions
-nhWillUseFullScreenPresentationOptions(id self, SEL selector, NSWindow *window,
-                                       NSApplicationPresentationOptions proposed) {
-    (void)window;
-    NSApplicationPresentationOptions opts = proposed;
-    if (superclassResponds(self, selector)) {
-        struct objc_super super_info{self, class_getSuperclass(object_getClass(self))};
-        using Fn = NSApplicationPresentationOptions (*)(struct objc_super *, SEL, NSWindow *,
-                                                        NSApplicationPresentationOptions);
-        opts = reinterpret_cast<Fn>(objc_msgSendSuper)(&super_info, selector, window, proposed);
-    }
-    opts |= NSApplicationPresentationAutoHideMenuBar | NSApplicationPresentationAutoHideToolbar;
-    std::println(
-        stderr,
-        "[viewer/mac] willUseFullScreenPresentationOptions: proposed=0x{:x} returning=0x{:x}",
-        static_cast<unsigned long long>(proposed), static_cast<unsigned long long>(opts));
-    return opts;
-}
-
-Class makeDelegateSubclass(id delegate) {
-    Class original = [delegate class];
-    std::array<char, 128> name{};
-    std::snprintf(name.data(), name.size(), "%s_NodehammerDelegate_%p", class_getName(original),
-                  static_cast<void *>(delegate));
-    Class subclass = objc_allocateClassPair(original, name.data(), 0);
-    if (subclass == Nil) {
-        return Nil;
-    }
-    // NSApplicationPresentationOptions is NSUInteger, encoded as Q on 64-bit.
-    class_addMethod(subclass, @selector(window:willUseFullScreenPresentationOptions:),
-                    reinterpret_cast<IMP>(nhWillUseFullScreenPresentationOptions), "Q@:@Q");
-    objc_registerClassPair(subclass);
-    return subclass;
-}
-
 } // namespace
 } // namespace nodehammer::viewer::platform
 
@@ -235,33 +191,12 @@ Class makeDelegateSubclass(id delegate) {
         impl = incoming_impl;
         original_class = Nil;
         subclass = Nil;
-        original_delegate_class = Nil;
-        delegate_subclass = Nil;
-        delegate_object = nil;
         view = nil;
         recognizer = nil;
         drag_active = NO;
         last_magnification = 0.0;
     }
     return self;
-}
-
-- (void)attachToWindowDelegate:(NSWindow *)window {
-    id current_delegate = [window delegate];
-    std::println(stderr, "[viewer/mac] attachToWindowDelegate: delegate={} class={}",
-                 static_cast<const void *>(current_delegate),
-                 current_delegate != nil ? class_getName([current_delegate class]) : "<nil>");
-    if (current_delegate == nil) {
-        return;
-    }
-    delegate_object = current_delegate;
-    original_delegate_class = [current_delegate class];
-    delegate_subclass = nodehammer::viewer::platform::makeDelegateSubclass(current_delegate);
-    if (delegate_subclass != Nil) {
-        object_setClass(current_delegate, delegate_subclass);
-        std::println(stderr, "[viewer/mac] delegate ISA-swizzled to {}",
-                     class_getName(delegate_subclass));
-    }
 }
 
 - (void)attachToView:(NSView *)incoming_view
@@ -298,16 +233,9 @@ Class makeDelegateSubclass(id delegate) {
     if (view != nil && subclass != Nil && object_getClass(view) == subclass) {
         object_setClass(view, original_class);
     }
-    if (delegate_object != nil && delegate_subclass != Nil &&
-        object_getClass(delegate_object) == delegate_subclass) {
-        object_setClass(delegate_object, original_delegate_class);
-    }
     view = nil;
     original_class = Nil;
     subclass = Nil;
-    delegate_object = nil;
-    original_delegate_class = Nil;
-    delegate_subclass = Nil;
 }
 
 - (BOOL)beginWindowDragIfToolbarArea:(NSEvent *)event {
@@ -367,19 +295,17 @@ Class makeDelegateSubclass(id delegate) {
     if (win == nil || impl == nullptr) {
         return;
     }
-    // Drop the entire chromeless treatment for fullscreen. With
-    // FullSizeContentView + a toolbar + transparent titlebar, AppKit
-    // treats the chrome as a translucent overlay that's pinned at the
-    // top — the standard top-edge auto-reveal (menu bar AND title bar)
-    // doesn't fire. Stripping back to a vanilla titled window for the
-    // duration of fullscreen lets AppKit's default behavior take over.
+    // Drop the chromeless treatment before the transition. With
+    // FullSizeContentView + transparent titlebar, AppKit treats the
+    // chrome as a translucent overlay pinned at the top — the standard
+    // top-edge auto-reveal of the title bar (with traffic lights) and
+    // menu bar doesn't fire. Reverting to a vanilla titled window for
+    // the duration of fullscreen lets AppKit's default behavior work.
     NSWindowStyleMask mask = [win styleMask];
     mask &= ~NSWindowStyleMaskFullSizeContentView;
     [win setStyleMask:mask];
     [win setTitlebarAppearsTransparent:NO];
     [win setMovableByWindowBackground:NO];
-    [win setToolbar:nil];
-    std::println(stderr, "[viewer/mac] windowWillEnterFullScreen: stripped chromeless treatment");
 }
 
 - (void)windowWillExitFullScreen:(NSNotification *)notification {
@@ -392,10 +318,6 @@ Class makeDelegateSubclass(id delegate) {
     [win setStyleMask:mask];
     [win setTitlebarAppearsTransparent:YES];
     [win setMovableByWindowBackground:YES];
-    if (impl->toolbar != nil) {
-        [win setToolbar:impl->toolbar];
-    }
-    std::println(stderr, "[viewer/mac] windowWillExitFullScreen: restored chromeless treatment");
 }
 
 - (void)dealloc {
@@ -532,16 +454,30 @@ void Platform::attachWindow(const WindowCustomizationRequest &request) {
         [window setRestorable:YES];
     }
 
+    // Sokol launches us as a command-line app (no .app bundle) and never
+    // calls -[NSApp setMainMenu:]. Without a main menu, AppKit's "auto-show
+    // menu bar on top-edge hover" in fullscreen has nothing to reveal — see
+    // https://github.com/floooh/sokol-nim/issues/37. Build a minimal app
+    // menu so AppKit has a menu bar to manage.
+    if ([NSApp mainMenu] == nil) {
+        NSMenu *menubar = [[[NSMenu alloc] init] autorelease];
+        NSMenuItem *app_item = [[[NSMenuItem alloc] init] autorelease];
+        [menubar addItem:app_item];
+        NSMenu *app_menu = [[[NSMenu alloc] init] autorelease];
+        NSString *app_name = [[NSProcessInfo processInfo] processName];
+        [app_menu addItemWithTitle:[NSString stringWithFormat:@"Quit %@", app_name]
+                            action:@selector(terminate:)
+                     keyEquivalent:@"q"];
+        [app_item setSubmenu:app_menu];
+        [NSApp setMainMenu:menubar];
+    }
+
     if (request.hide_titlebar_chrome) {
-        // Apply chromeless titlebar style ONCE. The style mask must not
-        // be touched after this — toggling it while the OS is animating
-        // a fullscreen transition cancels the transition.
-        //
-        // The empty NSToolbar is required for the fullscreen auto-reveal
-        // behavior: in fullscreen, AppKit slides down the toolbar +
-        // titlebar (with traffic lights) on top-edge hover. Without a
-        // toolbar attached there is no surface to reveal, so the user
-        // gets stuck — no way to access the menu bar or exit fullscreen.
+        // Chromeless windowed mode: title bar is transparent, content
+        // extends behind it via FullSizeContentView, traffic lights
+        // overlap the imgui content. Applied ONCE — the windowWill*
+        // handlers strip and restore these around fullscreen, since
+        // AppKit's top-edge auto-reveal won't work while they're set.
         [window setStyleMask:([window styleMask] | NSWindowStyleMaskFullSizeContentView)];
         [window setTitleVisibility:NSWindowTitleVisible];
         [window setTitlebarAppearsTransparent:YES];
@@ -551,12 +487,6 @@ void Platform::attachWindow(const WindowCustomizationRequest &request) {
         }
         [window setCollectionBehavior:([window collectionBehavior] |
                                        NSWindowCollectionBehaviorFullScreenPrimary)];
-
-        impl_->toolbar = [[NSToolbar alloc] initWithIdentifier:@"nodehammer.viewer.toolbar"];
-        [impl_->toolbar setAllowsUserCustomization:NO];
-        [impl_->toolbar setAutosavesConfiguration:NO];
-        [window setToolbar:impl_->toolbar];
-
         macPublishChrome(window, *impl_);
     }
 
@@ -564,7 +494,6 @@ void Platform::attachWindow(const WindowCustomizationRequest &request) {
     [impl_->bridge attachToView:view
                       trackDrag:request.track_drag_hover
                   trackGestures:request.track_platform_gestures];
-    [impl_->bridge attachToWindowDelegate:window];
     NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
     [center addObserver:impl_->bridge
                selector:@selector(windowWillEnterFullScreen:)
