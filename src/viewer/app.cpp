@@ -602,7 +602,7 @@ void App::Impl::onFrame() {
     }
 
     const auto &chrome = platform_window_state.chrome;
-    if (chrome.titlebar_hidden && chrome.traffic_lights_overlap_content) {
+    if (chrome.titlebar_transparent && chrome.traffic_lights_overlap_content) {
         ImGui::SetNextWindowPos({chrome.content_left_inset + 8.f, chrome.content_top_inset + 8.f},
                                 ImGuiCond_FirstUseEver);
     }
@@ -1088,7 +1088,7 @@ App *App::instance() { return slot().get(); }
 App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {
     // Construct Platform after the App body is in place so it can
     // hold a back-reference to *this. The Platform pImpl is defined
-    // per-TU (platform_native.cpp / platform_web.cpp); whichever TU
+    // per-TU (platform_macos.mm / platform_native_default.cpp / platform_web.cpp); whichever TU
     // is linked into this executable supplies the matching ctor.
     impl_->platform_ = std::make_unique<platform::Platform>(*this);
 }

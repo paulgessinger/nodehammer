@@ -29,7 +29,7 @@ struct WindowCustomizationRequest {
 };
 
 struct WindowChromeState {
-    bool titlebar_hidden{false};
+    bool titlebar_transparent{false};
     bool traffic_lights_overlap_content{false};
     float content_top_inset{0.f};
     float content_left_inset{0.f};

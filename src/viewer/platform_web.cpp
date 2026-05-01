@@ -32,7 +32,7 @@ EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *ma
 });
 
 // clang-format off
-EM_JS(void, nh_viewer_install_window_observers, (), {
+EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
     if (Module.__nhWindowObserversInstalled) {
         return;
     }
@@ -58,6 +58,7 @@ EM_JS(void, nh_viewer_install_window_observers, (), {
     }
     function setDrag(active, ev) {
         Module._nh_viewer_platform_set_drag_hover(
+            handle,
             active ? 1 : 0,
             ev ? ev.clientX : 0,
             ev ? ev.clientY : 0,
@@ -96,6 +97,7 @@ EM_JS(void, nh_viewer_install_window_observers, (), {
     var gestureScale = 1.0;
     function pushPinch(type, scaleDelta, ev) {
         Module._nh_viewer_platform_push_pinch(
+            handle,
             type, scaleDelta,
             ev ? ev.clientX : 0,
             ev ? ev.clientY : 0,
@@ -273,16 +275,8 @@ struct Platform::Impl {
     std::vector<PlatformGestureEvent> gesture_events;
 };
 
-namespace {
-Platform::Impl *g_impl{nullptr};
-} // namespace
-
-Platform::Platform(App &app) : impl_(std::make_unique<Impl>(app)) { g_impl = impl_.get(); }
-Platform::~Platform() {
-    if (g_impl == impl_.get()) {
-        g_impl = nullptr;
-    }
-}
+Platform::Platform(App &app) : impl_(std::make_unique<Impl>(app)) {}
+Platform::~Platform() = default;
 
 void Platform::configureWindowDesc(sapp_desc & /*desc*/, const Config & /*cfg*/,
                                    const WindowCustomizationRequest &request) {
@@ -293,7 +287,7 @@ void Platform::attachWindow(const WindowCustomizationRequest &request) {
     impl_->window_request = request;
     impl_->window_state.drag_hover.supported = request.track_drag_hover;
     impl_->window_state.supports_pinch_gesture = request.track_platform_gestures;
-    nh_viewer_install_window_observers();
+    nh_viewer_install_window_observers(reinterpret_cast<std::uintptr_t>(impl_.get()));
 }
 
 void Platform::handleWindowEvent(const sapp_event *ev) {
@@ -342,8 +336,9 @@ void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
 void Platform::openFolderPicker() {} // no folder picker on web today
 void Platform::drainPickers() {}     // web pickers dispatch inline
 
-void setWebDragHover(bool active, float x, float y, int file_count, bool file_like) {
-    if (g_impl == nullptr) {
+void setWebDragHover(Platform::Impl *impl, bool active, float x, float y, int file_count,
+                     bool file_like) {
+    if (impl == nullptr) {
         return;
     }
     DragHoverState state{};
@@ -353,11 +348,12 @@ void setWebDragHover(bool active, float x, float y, int file_count, bool file_li
     state.file_count = active ? file_count : 0;
     state.x = x;
     state.y = y;
-    g_impl->window_state.drag_hover = state;
+    impl->window_state.drag_hover = state;
 }
 
-void pushWebPinch(int type, float scale_delta, float x, float y, uint32_t modifiers) {
-    if (g_impl == nullptr) {
+void pushWebPinch(Platform::Impl *impl, int type, float scale_delta, float x, float y,
+                  uint32_t modifiers) {
+    if (impl == nullptr) {
         return;
     }
     PlatformGestureEvent event{};
@@ -380,23 +376,15 @@ void pushWebPinch(int type, float scale_delta, float x, float y, uint32_t modifi
     event.x = x;
     event.y = y;
     event.modifiers = modifiers;
-    g_impl->gesture_events.push_back(event);
+    impl->gesture_events.push_back(event);
 }
 
 } // namespace nodehammer::viewer::platform
 
 extern "C" {
 
-// JS-picker batch lifecycle. Bytes flow into the App's long-lived project
-// directly; the begin/end pair no longer carries state. The handle is a
-// fixed non-null sentinel kept only so the JS-side ABI doesn't change
-// (the shim still threads it through, but the C side ignores it).
-namespace {
-char nh_picker_handle_sentinel = 0;
-} // namespace
-
 EMSCRIPTEN_KEEPALIVE
-void *nh_viewer_begin_upload_batch() { return static_cast<void *>(&nh_picker_handle_sentinel); }
+void *nh_viewer_begin_upload_batch() { return reinterpret_cast<void *>(std::uintptr_t{1}); }
 
 EMSCRIPTEN_KEEPALIVE
 void nh_viewer_add_upload(void * /*handle*/, const char *filename, const std::uint8_t *data,
@@ -426,15 +414,18 @@ void nh_viewer_end_upload_batch(void * /*handle*/) {
 }
 
 EMSCRIPTEN_KEEPALIVE
-void nh_viewer_platform_set_drag_hover(int active, float x, float y, int file_count,
-                                       int file_like) {
-    nodehammer::viewer::platform::setWebDragHover(active != 0, x, y, file_count, file_like != 0);
+void nh_viewer_platform_set_drag_hover(std::uintptr_t handle, int active, float x, float y,
+                                       int file_count, int file_like) {
+    auto *impl = reinterpret_cast<nodehammer::viewer::platform::Platform::Impl *>(handle);
+    nodehammer::viewer::platform::setWebDragHover(impl, active != 0, x, y, file_count,
+                                                  file_like != 0);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void nh_viewer_platform_push_pinch(int type, float scale_delta, float x, float y,
-                                   std::uint32_t modifiers) {
-    nodehammer::viewer::platform::pushWebPinch(type, scale_delta, x, y, modifiers);
+void nh_viewer_platform_push_pinch(std::uintptr_t handle, int type, float scale_delta, float x,
+                                   float y, std::uint32_t modifiers) {
+    auto *impl = reinterpret_cast<nodehammer::viewer::platform::Platform::Impl *>(handle);
+    nodehammer::viewer::platform::pushWebPinch(impl, type, scale_delta, x, y, modifiers);
 }
 
 } // extern "C"
