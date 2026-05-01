@@ -1149,20 +1149,26 @@ void App::Impl::onFrame() {
 
     if (platform_window_state.drag_hover.active) {
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
-        const ImVec2 min = viewport->Pos;
-        const ImVec2 max{viewport->Pos.x + viewport->Size.x, viewport->Pos.y + viewport->Size.y};
+        const float padding = 10.f;
+        const ImVec2 min{viewport->Pos.x + padding, viewport->Pos.y + padding};
+        const ImVec2 max{viewport->Pos.x + viewport->Size.x - padding,
+                         viewport->Pos.y + viewport->Size.y - padding};
         auto *draw_list = ImGui::GetForegroundDrawList();
-        draw_list->AddRectFilled(min, max, IM_COL32(80, 120, 180, 40));
-        draw_list->AddRect(min, max, IM_COL32(130, 180, 255, 180), 0.f, 0, 3.f);
+        const float rounding = 20.0f;
+        draw_list->AddRectFilled(min, max, IM_COL32(80, 120, 180, 200), rounding);
+        draw_list->AddRect(min, max, IM_COL32(130, 180, 255, 255), rounding, 0, 3.f);
 
         const char *message = platform_window_state.drag_hover.file_like
                                   ? "Drop files to load them"
                                   : "Drop supported scene files";
-        const ImVec2 text_size = ImGui::CalcTextSize(message);
+        ImFont *font = ImGui::GetFont();
+        const float font_size = ImGui::GetFontSize() * 1.8f;
+        const ImVec2 text_size = font->CalcTextSizeA(font_size, FLT_MAX, 0.f, message);
         const ImVec2 center{(min.x + max.x - text_size.x) * 0.5f,
                             (min.y + max.y - text_size.y) * 0.5f};
-        draw_list->AddText({center.x + 1.f, center.y + 1.f}, IM_COL32(0, 0, 0, 180), message);
-        draw_list->AddText(center, IM_COL32(230, 240, 255, 255), message);
+        draw_list->AddText(font, font_size, {center.x + 1.f, center.y + 1.f},
+                           IM_COL32(0, 0, 0, 180), message);
+        draw_list->AddText(font, font_size, center, IM_COL32(230, 240, 255, 255), message);
     }
 
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
