@@ -54,7 +54,18 @@ struct BagProjectFs::Impl {
     mutable std::vector<DirNode> tree_snapshot;
     mutable std::uint64_t tree_snapshot_gen{static_cast<std::uint64_t>(-1)};
 
-    void recordEntry(std::string_view filename, std::size_t size) {
+    void recordOrReplaceEntry(std::string_view filename, std::size_t size) {
+        const auto key = asciiLowerCopy(filename);
+        for (auto &p : entries) {
+            if (asciiLowerCopy(p.url) == key) {
+                p.url = std::string{filename};
+                p.bytes_total = static_cast<std::uint64_t>(size);
+                p.bytes_done = p.bytes_total;
+                p.done = true;
+                p.failed = false;
+                return;
+            }
+        }
         ProjectProgress p;
         p.url = std::string{filename};
         p.done = true;
@@ -92,6 +103,31 @@ std::span<const std::string> BagProjectFs::warnings() const {
 }
 
 std::uint64_t BagProjectFs::generation() const { return impl_->generation; }
+
+ProjectDropDecision BagProjectFs::planAddPath(const std::filesystem::path &path) const {
+    return planAddBytes(path.filename().string(), {});
+}
+
+ProjectDropDecision BagProjectFs::planAddBytes(std::string_view filename,
+                                               std::span<const std::byte> /*bytes*/) const {
+    using enum ProjectDropDecision::Kind;
+    if (filename.empty()) {
+        return ProjectDropDecision{
+            Reject, "Cannot add file", "Dropped files must have a filename.", "OK", {},
+        };
+    }
+    if (!impl_->bytes_by_key.contains(asciiLowerCopy(filename))) {
+        return ProjectDropDecision{Accept, {}, {}, {}, {}};
+    }
+    return ProjectDropDecision{
+        Confirm,
+        "Replace existing file?",
+        "A file named \"" + std::string{filename} +
+            "\" already exists in this project.\n\nReplace it with the newly added file?",
+        "Replace",
+        "Cancel",
+    };
+}
 
 std::span<const DirNode> BagProjectFs::list(std::string_view dir) const {
     if (!dir.empty() && dir != "/") {
@@ -145,7 +181,7 @@ void BagProjectFs::addBytes(std::string_view filename, std::span<const std::byte
         return;
     }
     impl_->store(filename, bytes);
-    impl_->recordEntry(filename, bytes.size());
+    impl_->recordOrReplaceEntry(filename, bytes.size());
     ++impl_->generation;
 }
 
@@ -162,7 +198,7 @@ void BagProjectFs::addPath(const std::filesystem::path &path) {
     }
     const auto filename = path.filename().string();
     impl_->store(filename, contents);
-    impl_->recordEntry(filename, contents.size());
+    impl_->recordOrReplaceEntry(filename, contents.size());
     ++impl_->generation;
 }
 

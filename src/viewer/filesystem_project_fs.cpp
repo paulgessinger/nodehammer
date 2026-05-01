@@ -185,10 +185,10 @@ void FilesystemProjectFs::Impl::buildTree() {
     }
 }
 
-FilesystemProjectFs::FilesystemProjectFs(std::filesystem::path root)
-    : FilesystemProjectFs(std::move(root), Options{}) {}
+FilesystemProjectFs::FilesystemProjectFs(const std::filesystem::path &root)
+    : FilesystemProjectFs(root, Options{}) {}
 
-FilesystemProjectFs::FilesystemProjectFs(std::filesystem::path root, Options options)
+FilesystemProjectFs::FilesystemProjectFs(const std::filesystem::path &root, Options options)
     : impl_(std::make_unique<Impl>()) {
     impl_->options = options;
     std::error_code ec;
@@ -222,6 +222,29 @@ const std::string &FilesystemProjectFs::errorMessage() const { return impl_->err
 
 std::span<const std::string> FilesystemProjectFs::warnings() const {
     return {impl_->warning_msgs.data(), impl_->warning_msgs.size()};
+}
+
+ProjectDropDecision FilesystemProjectFs::planAddPath(const std::filesystem::path &path) const {
+    return ProjectDropDecision{
+        ProjectDropDecision::Kind::Reject,
+        "Cannot add file to filesystem project",
+        "This project is mounted from a folder on disk.\n\nAdd \"" + path.filename().string() +
+            "\" to the mounted folder, then click Rescan.",
+        "OK",
+        {},
+    };
+}
+
+ProjectDropDecision FilesystemProjectFs::planAddBytes(std::string_view filename,
+                                                      std::span<const std::byte> /*bytes*/) const {
+    return ProjectDropDecision{
+        ProjectDropDecision::Kind::Reject,
+        "Cannot add file to filesystem project",
+        "This project is mounted from a folder on disk.\n\nAdd \"" + std::string{filename} +
+            "\" to the mounted folder, then click Rescan.",
+        "OK",
+        {},
+    };
 }
 
 void FilesystemProjectFs::addPath(const std::filesystem::path & /*path*/) {

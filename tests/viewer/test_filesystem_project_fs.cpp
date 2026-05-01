@@ -11,13 +11,13 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
 
 using nodehammer::viewer::BuildPhase;
 using nodehammer::viewer::BuildSession;
 using nodehammer::viewer::DirNode;
 using nodehammer::viewer::FilesystemProjectFs;
 using nodehammer::viewer::ResolveStatus;
+using Kind = nodehammer::viewer::ProjectDropDecision::Kind;
 
 namespace {
 
@@ -232,6 +232,7 @@ TEST_CASE("FilesystemProjectFs::addPath emits a warning rather than mutating",
     tp.writeFile("scene.toml", "x");
     FilesystemProjectFs fs{tp.root};
 
+    REQUIRE(fs.planAddPath(std::filesystem::path{"/tmp/somewhere.toml"}).kind == Kind::Reject);
     fs.addPath(std::filesystem::path{"/tmp/somewhere.toml"});
     REQUIRE_FALSE(fs.warnings().empty());
 }

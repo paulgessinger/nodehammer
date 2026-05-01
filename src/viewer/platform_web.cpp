@@ -250,14 +250,13 @@ void webDropFetchCallback(const sapp_html5_fetch_response *response) {
         std::println(stderr, "[viewer] drop callback: App::instance() is null");
         return;
     }
-    auto *project = app->project();
-    if (project == nullptr) {
+    if (app->project() == nullptr) {
         std::println(stderr, "[viewer] drop callback: app->project() is null");
         return;
     }
-    project->addBytes(ctx->filename,
-                      std::span<const std::byte>{ctx->buffer.data(),
-                                                 static_cast<std::size_t>(response->data.size)});
+    app->addProjectBytes(ctx->filename,
+                         std::span<const std::byte>{ctx->buffer.data(),
+                                                    static_cast<std::size_t>(response->data.size)});
 }
 
 } // namespace
@@ -399,12 +398,11 @@ void nh_viewer_add_upload(void * /*handle*/, const char *filename, const std::ui
         std::println(stderr, "[viewer] nh_viewer_add_upload: App::instance() is null");
         return;
     }
-    auto *project = app->project();
-    if (project == nullptr) {
+    if (app->project() == nullptr) {
         std::println(stderr, "[viewer] nh_viewer_add_upload: app->project() is null");
         return;
     }
-    project->addBytes(filename, std::as_bytes(std::span{data, size}));
+    app->addProjectBytes(filename, std::as_bytes(std::span{data, size}));
 }
 
 EMSCRIPTEN_KEEPALIVE

@@ -3,7 +3,9 @@
 #include <nodehammer/viewer/config.hpp>
 
 #include <cstddef>
+#include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 
 namespace nodehammer {
@@ -83,6 +85,11 @@ class App {
     /// `setProject(make_unique<Wrapper>(std::move(...)))`, and a cached
     /// pointer would bypass the wrapper.
     [[nodiscard]] ProjectFs *project() const noexcept;
+
+    /// Add files to the current project through the App. The ProjectFs decides
+    /// whether to accept, reject, or require confirmation; App owns the UI.
+    void addProjectPath(const std::filesystem::path &path);
+    void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
 
     /// Tell the App which project keys are the build's root inputs:
     /// the TOML config and the FlatBuffer geometry file. Used by web

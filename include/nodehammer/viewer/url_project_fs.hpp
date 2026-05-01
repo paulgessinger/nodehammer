@@ -36,6 +36,9 @@ class UrlProjectFs final : public ProjectFs {
     std::span<const ProjectProgress> progress() const override;
     const std::string &errorMessage() const override;
     std::string_view name() const override { return "url"; }
+    ProjectDropDecision planAddPath(const std::filesystem::path &path) const override;
+    ProjectDropDecision planAddBytes(std::string_view filename,
+                                     std::span<const std::byte> bytes) const override;
     ResolveResult resolve(std::string_view key) const override;
     std::uint64_t generation() const override;
     std::span<const DirNode> list(std::string_view dir = {}) const override;

@@ -26,8 +26,10 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <print>
 #include <sstream>
 #include <string>
@@ -40,6 +42,18 @@ namespace nodehammer::viewer {
 namespace {
 
 enum class ScrollInputMode { Wheel, Trackpad };
+
+struct RetainedModal {
+    std::uint64_t id{0};
+    std::string title;
+    std::string message;
+    std::string confirm_label{"OK"};
+    std::string cancel_label{"Cancel"};
+    bool show_cancel{false};
+    bool opened{false};
+    std::function<void()> on_confirm;
+    std::function<void()> on_cancel;
+};
 
 bool isZoomModifier(uint32_t modifiers) {
     return (modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER)) != 0;
@@ -156,6 +170,9 @@ struct App::Impl {
     // it across frames.
     std::string build_error;
 
+    std::vector<RetainedModal> active_modals;
+    std::uint64_t next_modal_id{1};
+
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
     /// "no scene framed yet" — `dolly` falls back to distance-relative sizing.
@@ -200,6 +217,11 @@ struct App::Impl {
     void applyInitialCamera();
     void render();
     void syncBrowserUrl() const;
+    void addProjectPath(const std::filesystem::path &path);
+    void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+    void enqueueModal(RetainedModal modal);
+    void enqueueProjectDropModal(ProjectDropDecision decision, std::function<void()> on_confirm);
+    void renderActiveModal();
     [[nodiscard]] std::string browserUrlStateQuery() const;
 
     static void initCb(void *user) { static_cast<Impl *>(user)->onInit(); }
@@ -470,6 +492,123 @@ void App::Impl::syncBrowserUrl() const {
             "cutEnd,"
             "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
         platform_->commitUrlState(state_query, kManagedKeys);
+    }
+}
+
+void App::Impl::addProjectPath(const std::filesystem::path &path) {
+    using enum ProjectDropDecision::Kind;
+    if (path.empty() || project_ == nullptr) {
+        return;
+    }
+    auto decision = project_->planAddPath(path);
+    if (decision.kind == Accept) {
+        project_->addPath(path);
+        build_error.clear();
+        return;
+    }
+
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), [this, path = path]() {
+            if (project_ == nullptr) {
+                return;
+            }
+            project_->addPath(path);
+            build_error.clear();
+        });
+    } else {
+        enqueueProjectDropModal(std::move(decision), {});
+    }
+}
+
+void App::Impl::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
+    using enum ProjectDropDecision::Kind;
+    if (filename.empty() || project_ == nullptr) {
+        return;
+    }
+    auto decision = project_->planAddBytes(filename, bytes);
+    if (decision.kind == Accept) {
+        project_->addBytes(filename, bytes);
+        build_error.clear();
+        return;
+    }
+
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), [this, filename = filename, bytes = bytes]() {
+            if (project_ == nullptr) {
+                return;
+            }
+            project_->addBytes(filename, std::span<const std::byte>{bytes.data(), bytes.size()});
+            build_error.clear();
+        });
+    } else {
+        enqueueProjectDropModal(std::move(decision), {});
+    }
+}
+
+void App::Impl::enqueueProjectDropModal(ProjectDropDecision decision,
+                                        std::function<void()> on_confirm) {
+    RetainedModal modal;
+    modal.title = decision.title.empty() ? "Project file drop" : std::move(decision.title);
+    modal.message = std::move(decision.message);
+    modal.confirm_label = decision.confirm_label.empty() ? "OK" : std::move(decision.confirm_label);
+    modal.cancel_label =
+        decision.cancel_label.empty() ? "Cancel" : std::move(decision.cancel_label);
+    modal.show_cancel = decision.kind == ProjectDropDecision::Kind::Confirm;
+    modal.on_confirm = std::move(on_confirm);
+    enqueueModal(std::move(modal));
+}
+
+void App::Impl::enqueueModal(RetainedModal modal) {
+    modal.id = next_modal_id++;
+    active_modals.push_back(std::move(modal));
+}
+
+void App::Impl::renderActiveModal() {
+    if (active_modals.empty()) {
+        return;
+    }
+
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
+    auto &modal = active_modals.back();
+    const std::string popup_id = modal.title + "###modal_" + std::to_string(modal.id);
+    if (!modal.opened) {
+        ImGui::OpenPopup(popup_id.c_str());
+        modal.opened = true;
+    }
+
+    const float max_width = std::min(640.f, viewport->Size.x * 0.85f);
+    const float min_width = std::min(360.f, max_width);
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSizeConstraints({min_width, 0.f}, {max_width, viewport->Size.y * 0.85f});
+    if (ImGui::BeginPopupModal(popup_id.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("%s", modal.message.c_str());
+        ImGui::Separator();
+
+        if (ImGui::Button(modal.confirm_label.c_str())) {
+            auto on_confirm = std::move(modal.on_confirm);
+            ImGui::CloseCurrentPopup();
+            active_modals.pop_back();
+            if (on_confirm) {
+                on_confirm();
+            }
+            ImGui::EndPopup();
+            return;
+        }
+        if (modal.show_cancel) {
+            ImGui::SameLine();
+            if (ImGui::Button(modal.cancel_label.c_str())) {
+                auto on_cancel = std::move(modal.on_cancel);
+                ImGui::CloseCurrentPopup();
+                active_modals.pop_back();
+                if (on_cancel) {
+                    on_cancel();
+                }
+                ImGui::EndPopup();
+                return;
+            }
+        }
+
+        ImGui::EndPopup();
     }
 }
 
@@ -822,6 +961,7 @@ void App::Impl::onFrame() {
             root_config_key.clear();
             root_geometry_key.clear();
             build_session.setRootKeys({}, {});
+            active_modals.clear();
             scene_uploaded = false;
             camera_framed = false;
             scene_radius = 0.f;
@@ -1005,6 +1145,7 @@ void App::Impl::onFrame() {
         }
     }
     ImGui::End();
+    renderActiveModal();
 
     if (platform_window_state.drag_hover.active) {
         const ImGuiViewport *viewport = ImGui::GetMainViewport();
@@ -1060,6 +1201,7 @@ void App::setProject(std::unique_ptr<ProjectFs> project) {
     impl_->root_config_key.clear();
     impl_->root_geometry_key.clear();
     impl_->build_session.setRootKeys({}, {});
+    impl_->active_modals.clear();
 }
 
 void App::setRootKeys(std::string config_key, std::string geometry_key) {
@@ -1069,6 +1211,12 @@ void App::setRootKeys(std::string config_key, std::string geometry_key) {
 }
 
 ProjectFs *App::project() const noexcept { return impl_->project_.get(); }
+
+void App::addProjectPath(const std::filesystem::path &path) { impl_->addProjectPath(path); }
+
+void App::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
+    impl_->addProjectBytes(filename, bytes);
+}
 
 namespace {
 // Function-local-static slot that owns the singleton App. `App::Handle`

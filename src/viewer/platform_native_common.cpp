@@ -35,8 +35,7 @@ void NativePickerState::runFilePickerModal(App &app) {
     if (NFD::OpenDialogMultiple(picked, filters, 1) != NFD_OKAY) {
         return;
     }
-    auto *project = app.project();
-    if (project == nullptr) {
+    if (app.project() == nullptr) {
         return;
     }
     nfdpathsetsize_t count = 0;
@@ -44,7 +43,7 @@ void NativePickerState::runFilePickerModal(App &app) {
     for (nfdpathsetsize_t i = 0; i < count; ++i) {
         NFD::UniquePathSetPathU8 path;
         if (NFD::PathSet::GetPath(picked, i, path) == NFD_OKAY) {
-            project->addPath(std::filesystem::path{path.get()});
+            app.addProjectPath(std::filesystem::path{path.get()});
         }
     }
 }
@@ -63,8 +62,7 @@ void dispatchNativeDroppedFiles(App &app) {
     if (n == 0) {
         return;
     }
-    auto *project = app.project();
-    if (project == nullptr) {
+    if (app.project() == nullptr) {
         return;
     }
     // First-directory-wins: a folder drop replaces the project with a
@@ -80,7 +78,7 @@ void dispatchNativeDroppedFiles(App &app) {
         }
     }
     for (int i = 0; i < n; ++i) {
-        project->addPath(std::filesystem::path{sapp_get_dropped_file_path(i)});
+        app.addProjectPath(std::filesystem::path{sapp_get_dropped_file_path(i)});
     }
 }
 

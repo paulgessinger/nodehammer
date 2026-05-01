@@ -239,6 +239,29 @@ std::span<const ProjectProgress> UrlProjectFs::progress() const {
 
 const std::string &UrlProjectFs::errorMessage() const { return impl_->error; }
 
+ProjectDropDecision UrlProjectFs::planAddPath(const std::filesystem::path &path) const {
+    return ProjectDropDecision{
+        ProjectDropDecision::Kind::Reject,
+        "Cannot add file to URL project",
+        "This project is loaded from URLs and is read-only.\n\nDropped file \"" +
+            path.filename().string() + "\" was not added.",
+        "OK",
+        {},
+    };
+}
+
+ProjectDropDecision UrlProjectFs::planAddBytes(std::string_view filename,
+                                               std::span<const std::byte> /*bytes*/) const {
+    return ProjectDropDecision{
+        ProjectDropDecision::Kind::Reject,
+        "Cannot add file to URL project",
+        "This project is loaded from URLs and is read-only.\n\nUploaded file \"" +
+            std::string{filename} + "\" was not added.",
+        "OK",
+        {},
+    };
+}
+
 ResolveResult UrlProjectFs::resolve(std::string_view key) const {
     const auto canonical = normalizeKey(key);
     auto *entry = impl_->startFetch(canonical);

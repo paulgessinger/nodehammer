@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <span>
@@ -57,6 +58,20 @@ struct DirNode {
     std::uint64_t bytes{0};            // size on disk for files; 0 for directories
 };
 
+struct ProjectDropDecision {
+    enum class Kind {
+        Accept,  // Apply immediately via addPath/addBytes.
+        Confirm, // App should ask before applying via addPath/addBytes.
+        Reject,  // App should present the message and leave the project unchanged.
+    };
+
+    Kind kind{Kind::Reject};
+    std::string title;
+    std::string message;
+    std::string confirm_label{"OK"};
+    std::string cancel_label{"Cancel"};
+};
+
 /// Pluggable virtual filesystem used by the App to load a viewer project.
 /// Backends nominate where bytes come from: URL fetches (UrlProjectFs),
 /// drag-drop / file-picker bags (BagProjectFs), and (future) archives,
@@ -101,10 +116,32 @@ class ProjectFs {
     /// entry). Empty by default; backends that emit warnings override.
     virtual std::span<const std::string> warnings() const { return {}; }
 
-    /// User-gesture file ingestion. Default no-ops so URL-style backends
-    /// don't have to override; BagProjectFs implements both. The platform
-    /// layer pushes through these without needing to know the concrete
-    /// backend, which is what avoids a dynamic_cast at every call site.
+    /// User-gesture file ingestion policy. The App asks for a decision first
+    /// so backend-specific behavior (bag replacement, filesystem read-only,
+    /// URL read-only, future overlays) stays with the ProjectFs, while the
+    /// App owns any modal UI needed for Confirm/Reject decisions.
+    virtual ProjectDropDecision planAddPath(const std::filesystem::path & /*path*/) const {
+        return ProjectDropDecision{
+            ProjectDropDecision::Kind::Reject,
+            "Cannot add file",
+            "The current project backend does not accept dropped local files.",
+            "OK",
+            {},
+        };
+    }
+    virtual ProjectDropDecision planAddBytes(std::string_view /*filename*/,
+                                             std::span<const std::byte> /*bytes*/) const {
+        return ProjectDropDecision{
+            ProjectDropDecision::Kind::Reject,
+            "Cannot add file",
+            "The current project backend does not accept uploaded file bytes.",
+            "OK",
+            {},
+        };
+    }
+
+    /// Commit a user-approved file ingestion. Default no-ops preserve the old
+    /// backend contract for direct callers; App code should use planAdd* first.
     virtual void addPath(const std::filesystem::path & /*path*/) {}
     virtual void addBytes(std::string_view /*filename*/, std::span<const std::byte> /*bytes*/) {}
 

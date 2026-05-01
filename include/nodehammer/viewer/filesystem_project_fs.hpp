@@ -46,8 +46,8 @@ class FilesystemProjectFs final : public ProjectFs {
     /// definition, but Options's in-class member initializer for
     /// `skip_hidden_files` is also parsed there — using `Options{}`
     /// as a default arg would race itself.
-    explicit FilesystemProjectFs(std::filesystem::path root);
-    FilesystemProjectFs(std::filesystem::path root, Options options);
+    explicit FilesystemProjectFs(const std::filesystem::path &root);
+    FilesystemProjectFs(const std::filesystem::path &root, Options options);
     ~FilesystemProjectFs() override;
 
     void poll() override;
@@ -57,6 +57,9 @@ class FilesystemProjectFs final : public ProjectFs {
     std::string_view name() const override { return "filesystem"; }
     std::span<const std::string> warnings() const override;
 
+    ProjectDropDecision planAddPath(const std::filesystem::path &path) const override;
+    ProjectDropDecision planAddBytes(std::string_view filename,
+                                     std::span<const std::byte> bytes) const override;
     void addPath(const std::filesystem::path &path) override;
     void addBytes(std::string_view filename, std::span<const std::byte> bytes) override;
 
