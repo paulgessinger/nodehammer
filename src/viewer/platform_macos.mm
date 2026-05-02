@@ -247,7 +247,8 @@ Class makeViewSubclass(NSView *view) {
     // traffic_lights_overlap_content is only true in windowed chromeless
     // mode; in fullscreen the OS owns the title chrome via slide-down,
     // so we must not steal mouse-down to drag the (non-draggable) window.
-    if (window == nil || !impl->window_state.chrome.traffic_lights_overlap_content) {
+    if (window == nil || !impl->window_request.hide_titlebar_chrome ||
+        !impl->window_state.chrome.traffic_lights_overlap_content) {
         return NO;
     }
 
@@ -295,6 +296,9 @@ Class makeViewSubclass(NSView *view) {
     if (win == nil || impl == nullptr) {
         return;
     }
+    if (!impl->window_request.hide_titlebar_chrome) {
+        return;
+    }
     // Drop the chromeless treatment before the transition. With
     // FullSizeContentView + transparent titlebar, AppKit treats the
     // chrome as a translucent overlay pinned at the top — the standard
@@ -311,6 +315,9 @@ Class makeViewSubclass(NSView *view) {
 - (void)windowWillExitFullScreen:(NSNotification *)notification {
     NSWindow *win = [notification object];
     if (win == nil || impl == nullptr) {
+        return;
+    }
+    if (!impl->window_request.hide_titlebar_chrome) {
         return;
     }
     NSWindowStyleMask mask = [win styleMask];
@@ -338,6 +345,10 @@ bool macIsFullscreen(NSWindow *window) {
 
 void macPublishChrome(NSWindow *window, Platform::Impl &impl) {
     if (window == nil) {
+        return;
+    }
+    if (!impl.window_request.hide_titlebar_chrome) {
+        impl.window_state.chrome = {};
         return;
     }
     // Style mask / titlebar attributes were applied once at attach time.

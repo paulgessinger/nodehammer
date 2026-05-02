@@ -38,6 +38,13 @@ function(nh_add_viewer_lib name sokol_lib)
         ${_dir}/camera.cpp
         ${_dir}/scene_renderer.cpp
         ${_dir}/imgui_backend.cpp
+        ${_dir}/ui/debug_panel.cpp
+        ${_dir}/ui/menu_bar.cpp
+        ${_dir}/ui/notifications.cpp
+        ${_dir}/ui/project_panel.cpp
+        ${_dir}/ui/status_ui.cpp
+        ${_dir}/ui/view_panel.cpp
+        ${_dir}/ui/viewer_ui.cpp
         ${_dir}/ibl_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/ibl_web.cpp,${_dir}/ibl_native.cpp>
         ${_dir}/ibl_cache_common.cpp
@@ -50,7 +57,7 @@ function(nh_add_viewer_lib name sokol_lib)
         # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
         # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )
-    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib})
+    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} ImGuiNotify::ImGuiNotify)
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
     add_dependencies(${name} nodehammer_shaders)
     nodehammer_set_compiler_options(${name})
