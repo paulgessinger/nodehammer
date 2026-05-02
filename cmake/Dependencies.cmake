@@ -202,9 +202,10 @@ if(NODEHAMMER_WITH_VIEWER)
     FetchContent_Declare(imgui
         SYSTEM
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        # 1.92 introduced the ImTextureData / RendererHasTextures API that
-        # the pinned sokol_imgui.h requires; bump if sokol moves further.
-        GIT_TAG        v1.92.7
+        # Docking branch commit. 1.92 introduced the ImTextureData /
+        # RendererHasTextures API that the pinned sokol_imgui.h requires;
+        # keep this on/after that surface when bumping.
+        GIT_TAG        ed9d1e742793f7e4333565f891b4e3821b205f09
     )
     FetchContent_MakeAvailable(imgui)
 
@@ -225,6 +226,26 @@ if(NODEHAMMER_WITH_VIEWER)
         elseif(MSVC)
             target_compile_options(imgui PRIVATE /W0)
         endif()
+    endif()
+    if(TARGET imgui AND NOT TARGET ImGui::ImGui)
+        add_library(ImGui::ImGui ALIAS imgui)
+    endif()
+
+    FetchContent_Declare(imgui_notify
+        SYSTEM
+        GIT_REPOSITORY https://github.com/TyomaVader/ImGuiNotify.git
+        GIT_TAG        d00e45f8d6b1e094bc9288d20eb3d2840f6a7d73
+    )
+    FetchContent_MakeAvailable(imgui_notify)
+
+    if(NOT TARGET ImGuiNotify::ImGuiNotify)
+        add_library(imgui_notify INTERFACE)
+        target_include_directories(imgui_notify SYSTEM INTERFACE
+            ${imgui_notify_SOURCE_DIR}/unixExample/backends
+            ${imgui_notify_SOURCE_DIR}/unixExample/fonts
+        )
+        target_link_libraries(imgui_notify INTERFACE ImGui::ImGui)
+        add_library(ImGuiNotify::ImGuiNotify ALIAS imgui_notify)
     endif()
 
     # sokol headers + sokol-shdc resolver + nh_add_sokol_lib + nh_compile_shader.

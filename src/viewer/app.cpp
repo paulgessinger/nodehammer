@@ -5,6 +5,8 @@
 #include "imgui_backend.hpp"
 #include "scene_build_job.hpp"
 #include "scene_renderer.hpp"
+#include "ui/notifications.hpp"
+#include "ui/viewer_ui.hpp"
 #include <nodehammer/viewer/platform.hpp>
 
 #include <nodehammer/ir/render.hpp>
@@ -59,14 +61,6 @@ bool isZoomModifier(uint32_t modifiers) {
     return (modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER)) != 0;
 }
 
-float wrapDegrees(float angle) {
-    angle = std::fmod(angle, 360.f);
-    if (angle < 0.f) {
-        angle += 360.f;
-    }
-    return angle;
-}
-
 std::string formatUrlFloat(float value) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(3) << value;
@@ -99,14 +93,6 @@ void appendUrlFloat(std::string &query, std::string_view name, float value, floa
     if (std::abs(value - default_value) >= 0.0001f) {
         appendUrlParam(query, name, formatUrlFloat(value));
     }
-}
-
-std::string projectTreeSelectionKey(std::string_view key) {
-    auto out = std::filesystem::path{key}.lexically_normal().generic_string();
-    if (!out.empty() && out.front() == '/') {
-        out.erase(out.begin());
-    }
-    return out;
 }
 
 } // namespace
@@ -172,6 +158,7 @@ struct App::Impl {
 
     std::vector<RetainedModal> active_modals;
     std::uint64_t next_modal_id{1};
+    ui::UiState ui_state;
 
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
@@ -263,6 +250,8 @@ void App::Impl::onInit() {
     // ImGui::StyleColorsDark here, that would double-init and crash on
     // simgui_shutdown.
     ImGui_ImplSokol_Init();
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    ui::Notifications::initializeFonts();
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
@@ -632,6 +621,7 @@ void App::Impl::onFrame() {
                                                 std::chrono::steady_clock::now() - ibl_start_time)
                                                 .count();
                     std::println("viewer: IBL loaded from cache ({:.1f} ms)", elapsed_ms);
+                    ui::Notifications::info("IBL loaded from cache");
                 } else {
                     // Miss — start the real bake now. ibl_start_time stays
                     // anchored at the cache attempt so the reported total
@@ -652,6 +642,7 @@ void App::Impl::onFrame() {
                                         std::chrono::steady_clock::now() - ibl_start_time)
                                         .count();
             std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+            ui::Notifications::success("IBL bake complete");
         }
     }
 
@@ -671,6 +662,7 @@ void App::Impl::onFrame() {
                          "{} materials)",
                          build_ms, built.scene->nodes.size(), built.scene->meshAssets.size(),
                          built.scene->materials.size());
+            ui::Notifications::success("Tessellation complete");
             scene = std::move(built.scene);
             scene_uploaded = false;
             camera_framed = false;
@@ -683,6 +675,7 @@ void App::Impl::onFrame() {
                     break;
                 }
             }
+            ui::Notifications::error(build_error);
         }
         build_in_progress = false;
         // Project is long-lived: we keep it so additional drops/picks
@@ -740,68 +733,6 @@ void App::Impl::onFrame() {
                      0.f);
     }
 
-    const auto &chrome = platform_window_state.chrome;
-    if (chrome.titlebar_transparent && chrome.traffic_lights_overlap_content) {
-        ImGui::SetNextWindowPos({chrome.content_left_inset + 8.f, chrome.content_top_inset + 8.f},
-                                ImGuiCond_FirstUseEver);
-    }
-    ImGui::SetNextWindowSize({500, 1000}, ImGuiCond_FirstUseEver);
-    ImGui::Begin("nodehammer viewer");
-    ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
-    {
-        const sg_backend backend = sg_query_backend();
-        const char *name = "?";
-        switch (backend) {
-        case SG_BACKEND_GLCORE:
-            name = "GL";
-            break;
-        case SG_BACKEND_GLES3:
-            name = "GLES3 / WebGL2";
-            break;
-        case SG_BACKEND_D3D11:
-            name = "D3D11";
-            break;
-        case SG_BACKEND_METAL_IOS:
-            name = "Metal (iOS)";
-            break;
-        case SG_BACKEND_METAL_MACOS:
-            name = "Metal (macOS)";
-            break;
-        case SG_BACKEND_METAL_SIMULATOR:
-            name = "Metal (sim)";
-            break;
-        case SG_BACKEND_WGPU:
-            name = "WebGPU";
-            break;
-        case SG_BACKEND_VULKAN:
-            name = "Vulkan";
-            break;
-        case SG_BACKEND_DUMMY:
-            name = "dummy";
-            break;
-        }
-        ImGui::Text("Renderer: %s", name);
-    }
-    ImGui::Text("FPS: %.1f", fps);
-    ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", frame_interval_ms,
-                render_submit_ms, scene_submit_ms);
-    if constexpr (platform::kIsWeb) {
-        if (ImGui::Button("Commit settings to URL")) {
-            syncBrowserUrl();
-        }
-    }
-    ImGui::Checkbox("throttle when unfocused", &cfg.pause_when_unfocused);
-    if (!ibl_installed) {
-        const auto frac = static_cast<float>(ibl_job.progress());
-        ImGui::Text("IBL bake: %.0f%%", frac * 100.0f);
-        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-    }
-    // Developer escape hatch: drop the persisted IBL cache. Doesn't touch
-    // the live GPU IBL — only takes effect on the next page load / launch,
-    // which then re-bakes from scratch.
-    if (ImGui::Button("Clear IBL cache")) {
-        clearIblCache();
-    }
     // Drive the project + build pipeline unconditionally — running this
     // only when `!scene` means double-clicking a different config in the
     // tree panel after a scene is already rendered would update the
@@ -822,386 +753,82 @@ void App::Impl::onFrame() {
         }
     }
 
-    if (!scene) {
-        ImGui::Separator();
-        // `show_drag_hint` flips off whenever the project has something
-        // concrete to say (loading progress, ready/build status, or a
-        // hard error) — otherwise we encourage the user to drop files.
-        bool show_drag_hint = true;
+    ui::ViewerUiContext ui_ctx{
+        .cfg = cfg,
+        .project = project_.get(),
+        .build_session = build_session,
+        .build_job = build_job,
+        .scene_renderer = scene_renderer,
+        .camera = camera,
+        .platform_window_state = platform_window_state,
+        .root_config_key = root_config_key,
+        .root_geometry_key = root_geometry_key,
+        .build_error = build_error,
+        .fb_width = fb_width,
+        .fb_height = fb_height,
+        .fps = fps,
+        .frame_interval_ms = frame_interval_ms,
+        .render_submit_ms = render_submit_ms,
+        .scene_submit_ms = scene_submit_ms,
+        .has_scene = static_cast<bool>(scene),
+        .scene_uploaded = scene_uploaded,
+        .build_in_progress = build_in_progress,
+        .ibl_installed = ibl_installed,
+        .ibl_progress = ibl_job.progress(),
+    };
+
+    ui::UiActions ui_actions;
+    ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
+    ui_actions.clear_ibl_cache = []() {
+        clearIblCache();
+        ui::Notifications::info("IBL cache cleared");
+    };
+    ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
+    ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
+    ui_actions.frame_scene = [this]() {
+        if (!scene) {
+            return;
+        }
+        glm::vec3 bmin{0.f}, bmax{0.f};
+        if (scene_renderer.worldBounds(bmin, bmax)) {
+            scene_radius = camera.frameBounds(bmin, bmax);
+        }
+    };
+    ui_actions.close_project = [this]() {
+        scene_renderer.clearScene();
+        scene.reset();
+        project_ = std::make_unique<BagProjectFs>();
+        root_config_key.clear();
+        root_geometry_key.clear();
+        build_session.setRootKeys({}, {});
+        active_modals.clear();
+        scene_uploaded = false;
+        camera_framed = false;
+        scene_radius = 0.f;
+        build_error.clear();
+        ui::Notifications::info("Project closed");
+    };
+    ui_actions.rescan_project = [this]() {
         if (project_) {
-            // Root selection is user-driven across all backends:
-            // double-click in the tree panel sets the matching root
-            // key. Initial roots can also come from external sources
-            // (App::setRootKeys called by the URL JS shell or the CLI
-            // entry point) — those just preselect the first build;
-            // the tree click handler still treats them as overridable.
-
-            // Surface any project-level error first; build session errors
-            // are surfaced via build_error below (set in the build_in_progress
-            // branch when the build job completes with diagnostics).
-            if (project_->status() == ProjectFsStatus::Error) {
-                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
-                ImGui::TextWrapped("%s", project_->errorMessage().c_str());
-                show_drag_hint = false;
-            }
-
-            // Build progress UI (when the job is running).
-            if (build_in_progress) {
-                show_drag_hint = false;
-                switch (build_job.phase()) {
-                case SceneBuildJob::Phase::Preparing:
-                    ImGui::Text("Loading config and importing geometry…");
-                    break;
-                case SceneBuildJob::Phase::Tessellating: {
-                    const auto total = build_job.tessellationTotal();
-                    const auto processed = build_job.tessellationProcessed();
-                    if (total > 0) {
-                        ImGui::Text("Tessellating… (%zu / %zu nodes)", processed, total);
-                        const float frac =
-                            static_cast<float>(processed) / static_cast<float>(total);
-                        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-                    } else {
-                        ImGui::Text("Tessellating…");
-                    }
-                    break;
-                }
-                case SceneBuildJob::Phase::Finalizing:
-                    ImGui::Text("Finalising scene…");
-                    break;
-                case SceneBuildJob::Phase::Idle:
-                case SceneBuildJob::Phase::Done:
-                    break;
-                }
-            }
-            if (!project_->list("").empty()) {
-                show_drag_hint = false;
-            }
-
-            // What the build session is waiting on (missing includes,
-            // session-level errors).
-            if (build_session.phase() == BuildPhase::WaitingForUser) {
-                show_drag_hint = false;
-                for (const auto &k : build_session.missing()) {
-                    ImGui::Text("Still need: %s", k.c_str());
-                }
-            } else if (build_session.phase() == BuildPhase::Error) {
-                show_drag_hint = false;
-                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Build session error:");
-                ImGui::TextWrapped("%s", build_session.errorMessage().c_str());
-            }
-
-            // App-level "still need a config" / "still need geometry"
-            // hint, shown when the project has files but the user
-            // hasn't picked a root yet (either via tree double-click
-            // or via external setRootKeys).
-            if (!project_->progress().empty()) {
-                if (root_config_key.empty()) {
-                    ImGui::Text("Pick a .toml config in the tree above");
-                }
-                if (root_geometry_key.empty()) {
-                    ImGui::Text("Pick a FlatBuffer geometry (.nhb / .nhb.zst) in the tree above");
-                }
-            }
-
-            for (const auto &w : project_->warnings()) {
-                ImGui::TextColored({0.9f, 0.85f, 0.4f, 1.f}, "%s", w.c_str());
-            }
-        }
-        if (!build_error.empty()) {
-            ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
-        }
-        if (show_drag_hint) {
-            ImGui::Text("Drag a config (.toml) and a geometry file onto the window,");
-            ImGui::Text("or use the Open files button below.");
-        }
-        if (ImGui::Button("Open files…")) {
-            // Web dispatches inline (browser requires input.click() in
-            // the gesture stack); native queues a latch and drains at
-            // end of frame to avoid NFD re-entering the active ImGui
-            // frame. Both shapes hide behind Platform::openFilePicker.
-            platform_->openFilePicker();
-        }
-        // "Open folder…" mounts a real on-disk directory as the project
-        // (FilesystemProjectFs). Native-only — the browser sandbox has
-        // no folder picker via NFD; web users would need <input
-        // webkitdirectory>, which is a Stage 4+ concern.
-        if constexpr (!platform::kIsWeb) {
-            ImGui::SameLine();
-            if (ImGui::Button("Open folder…")) {
-                platform_->openFolderPicker();
-            }
-        }
-    } else if (scene && !scene_uploaded) {
-        ImGui::Separator();
-        ImGui::Text("Uploading scene to GPU…");
-        ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()), ImVec2(-1.f, 0.f), "");
-    }
-
-    if (scene) {
-        ImGui::Separator();
-        // Surface in-flight rebuilds (e.g. user double-clicked a
-        // different config in the tree) so the panel doesn't look
-        // frozen between the click and the swap.
-        if (build_in_progress) {
-            switch (build_job.phase()) {
-            case SceneBuildJob::Phase::Preparing:
-                ImGui::Text("Rebuilding: loading config and importing geometry…");
-                break;
-            case SceneBuildJob::Phase::Tessellating: {
-                const auto total = build_job.tessellationTotal();
-                const auto processed = build_job.tessellationProcessed();
-                if (total > 0) {
-                    ImGui::Text("Rebuilding: tessellating… (%zu / %zu nodes)", processed, total);
-                    const float frac = static_cast<float>(processed) / static_cast<float>(total);
-                    ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-                } else {
-                    ImGui::Text("Rebuilding: tessellating…");
-                }
-                break;
-            }
-            case SceneBuildJob::Phase::Finalizing:
-                ImGui::Text("Rebuilding: finalising scene…");
-                break;
-            case SceneBuildJob::Phase::Idle:
-            case SceneBuildJob::Phase::Done:
-                break;
-            }
-            ImGui::Separator();
-        }
-        ImGui::Text("Meshes: %u", scene_renderer.meshAssetCount());
-        ImGui::Text("Nodes: %u", scene_renderer.nodeCount());
-        ImGui::Text("Tris (scene): %llu",
-                    static_cast<unsigned long long>(scene_renderer.triangleCount()));
-        const auto fs = scene_renderer.lastFrameStats();
-        ImGui::Text("Draw calls: %u  Instances: %u  Tris/frame: %llu", fs.draw_calls, fs.instances,
-                    static_cast<unsigned long long>(fs.triangles));
-        if (ImGui::Button("Frame scene")) {
-            glm::vec3 bmin{0.f}, bmax{0.f};
-            if (scene_renderer.worldBounds(bmin, bmax)) {
-                scene_radius = camera.frameBounds(bmin, bmax);
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Close project")) {
-            // Drop everything: the rendered scene, any accumulated bag
-            // contents, any in-flight URL backend. Re-allocating a fresh
-            // BagProjectFs gets us back to the App's startup shape, so
-            // the user's next drop / pick starts a clean accumulation.
-            scene_renderer.clearScene();
-            scene.reset();
-            project_ = std::make_unique<BagProjectFs>();
-            root_config_key.clear();
-            root_geometry_key.clear();
-            build_session.setRootKeys({}, {});
-            active_modals.clear();
-            scene_uploaded = false;
-            camera_framed = false;
-            scene_radius = 0.f;
+            project_->rescan();
             build_error.clear();
+            ui::Notifications::info("Project rescan requested");
         }
-        ImGui::Separator();
-        ImGui::Checkbox("backface cull", &cfg.cull_back);
-        ImGui::Checkbox("auto orbit", &cfg.auto_orbit);
-        ImGui::SliderFloat("orbit speed", &cfg.auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
-        ImGui::Checkbox("angle cut", &cfg.angle_cut);
-        ImGui::Checkbox("shader angle cut", &cfg.shader_angle_cut);
-        ImGui::SliderFloat("cut start", &cfg.angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(80.f);
-        if (ImGui::InputFloat("##cut_start_input", &cfg.angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
-            cfg.angle_cut_start_deg = wrapDegrees(cfg.angle_cut_start_deg);
-        }
-        ImGui::SliderFloat("cut end", &cfg.angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(80.f);
-        if (ImGui::InputFloat("##cut_end_input", &cfg.angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
-            cfg.angle_cut_end_deg = wrapDegrees(cfg.angle_cut_end_deg);
-        }
-        ImGui::Separator();
-        ImGui::Checkbox("PBR / IBL", &cfg.enable_pbr);
-        ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
-                    glm::degrees(camera.pitch), camera.distance);
-        ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
-    }
-    // Project panel — outside the scene-gated block so it stays
-    // visible during and after a build. The tree view is the unified
-    // project-presentation: every backend overrides list() to expose
-    // its files (real hierarchy for filesystem / future archive,
-    // flat for bag and URL). Double-clicking a recognised file
-    // (.toml / .nhb / .nhb.zst) sets the matching root key — the
-    // BuildSession picks it up on the next poll.
-    if (project_) {
-        ImGui::Separator();
-        if (ImGui::CollapsingHeader("Project", ImGuiTreeNodeFlags_DefaultOpen)) {
-            const char *status_label = "?";
-            switch (project_->status()) {
-            case ProjectFsStatus::Idle:
-                status_label = "idle";
-                break;
-            case ProjectFsStatus::Fetching:
-                status_label = "fetching";
-                break;
-            case ProjectFsStatus::Ready:
-                status_label = "ready";
-                break;
-            case ProjectFsStatus::Error:
-                status_label = "error";
-                break;
-            }
-            const auto bname = project_->name();
-            ImGui::Text("backend: %.*s   status: %s", static_cast<int>(bname.size()), bname.data(),
-                        status_label);
+    };
+    ui_actions.select_config_key = [this](std::string key) {
+        root_config_key = std::move(key);
+        build_session.setRootKeys(root_config_key, root_geometry_key);
+        build_error.clear();
+    };
+    ui_actions.select_geometry_key = [this](std::string key) {
+        root_geometry_key = std::move(key);
+        build_session.setRootKeys(root_config_key, root_geometry_key);
+        build_error.clear();
+    };
 
-            const auto root_nodes = project_->list("");
-            if (root_nodes.empty()) {
-                ImGui::TextDisabled("(no files yet)");
-            } else {
-                const auto selected_config_key = projectTreeSelectionKey(root_config_key);
-                const auto selected_geometry_key = projectTreeSelectionKey(root_geometry_key);
-                // Index progress() by key so each leaf can render a
-                // fetch-state badge (in-flight URL, [ok], [fail])
-                // regardless of backend.
-                std::unordered_map<std::string_view, const ProjectProgress *> progress_by_key;
-                for (const auto &p : project_->progress()) {
-                    progress_by_key.emplace(p.url, &p);
-                }
-                auto isFlatBufferGeom = [](std::string_view key) {
-                    auto path = std::filesystem::path{key};
-                    auto ext = path.extension().string();
-                    for (auto &c : ext) {
-                        if (c >= 'A' && c <= 'Z') {
-                            c = static_cast<char>(c - 'A' + 'a');
-                        }
-                    }
-                    if (ext == ".nhb") {
-                        return true;
-                    }
-                    if (ext != ".zst") {
-                        return false;
-                    }
-                    auto stemExt = path.stem().extension().string();
-                    for (auto &c : stemExt) {
-                        if (c >= 'A' && c <= 'Z') {
-                            c = static_cast<char>(c - 'A' + 'a');
-                        }
-                    }
-                    return stemExt == ".nhb";
-                };
-                // ImGui::BeginChild("project_tree", ImVec2(0.f, 240.f), ImGuiChildFlags_Borders);
-                // Deducing-this recursive lambda — avoids std::function
-                // and its type-erased indirection. PushID per node
-                // gives every TreeNodeEx call a fully isolated ID
-                // scope, so two directories sharing a basename can't
-                // alias their open/closed state regardless of how the
-                // label hashes.
-                auto renderNodes = [&](this const auto &self,
-                                       std::span<const DirNode> nodes) -> void {
-                    for (const auto &n : nodes) {
-                        ImGui::PushID(n.key.c_str());
-                        if (n.is_directory) {
-                            const bool open = ImGui::TreeNodeEx("##dir", ImGuiTreeNodeFlags_None,
-                                                                "%s", n.name.c_str());
-                            if (open) {
-                                self(project_->list(n.key));
-                                ImGui::TreePop();
-                            }
-                            ImGui::PopID();
-                            continue;
-                        }
-                        // Fetch-state badge from progress(), when we
-                        // have one for this key.
-                        if (auto it = progress_by_key.find(n.key); it != progress_by_key.end()) {
-                            const auto &p = *it->second;
-                            if (p.failed) {
-                                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "[fail]");
-                                ImGui::SameLine();
-                            } else if (!p.done && p.bytes_total > 0) {
-                                const float frac =
-                                    static_cast<float>(static_cast<double>(p.bytes_done) /
-                                                       static_cast<double>(p.bytes_total));
-                                ImGui::ProgressBar(frac, ImVec2(60.f, 0.f));
-                                ImGui::SameLine();
-                            } else if (!p.done) {
-                                ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
-                                                   ImVec2(60.f, 0.f), "");
-                                ImGui::SameLine();
-                            }
-                        }
-                        const auto tree_key = projectTreeSelectionKey(n.key);
-                        const bool is_config =
-                            !selected_config_key.empty() && tree_key == selected_config_key;
-                        const bool is_geom =
-                            !selected_geometry_key.empty() && tree_key == selected_geometry_key;
-                        ImGuiTreeNodeFlags flags =
-                            ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                        if (is_config || is_geom) {
-                            flags |= ImGuiTreeNodeFlags_Selected;
-                        }
-                        const char *tag = is_config ? " [config]" : is_geom ? " [geometry]" : "";
-                        ImGui::TreeNodeEx("##leaf", flags, "%s%s", n.name.c_str(), tag);
-                        // Double-click triggers auto-detection by
-                        // extension and assigns the matching root key.
-                        // Single-click is a no-op (avoids accidental
-                        // rebuilds while exploring).
-                        if (ImGui::IsItemHovered() &&
-                            ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                            auto ext = std::filesystem::path{n.key}.extension().string();
-                            for (auto &c : ext) {
-                                if (c >= 'A' && c <= 'Z') {
-                                    c = static_cast<char>(c - 'A' + 'a');
-                                }
-                            }
-                            if (ext == ".toml") {
-                                root_config_key = n.key;
-                                build_session.setRootKeys(root_config_key, root_geometry_key);
-                                build_error.clear();
-                            } else if (isFlatBufferGeom(n.key)) {
-                                root_geometry_key = n.key;
-                                build_session.setRootKeys(root_config_key, root_geometry_key);
-                                build_error.clear();
-                            }
-                        }
-                        ImGui::PopID();
-                    }
-                };
-                renderNodes(root_nodes);
-                // ImGui::EndChild();
-                if (ImGui::Button("Rescan")) {
-                    // No-op on backends without a mutable source
-                    // (bag, URL); meaningful for filesystem mounts
-                    // where on-disk edits warrant a re-walk.
-                    project_->rescan();
-                    build_error.clear();
-                }
-            }
-        }
-    }
-    ImGui::End();
+    ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
     renderActiveModal();
-
-    if (platform_window_state.drag_hover.active) {
-        const ImGuiViewport *viewport = ImGui::GetMainViewport();
-        const float padding = 10.f;
-        const ImVec2 min{viewport->Pos.x + padding, viewport->Pos.y + padding};
-        const ImVec2 max{viewport->Pos.x + viewport->Size.x - padding,
-                         viewport->Pos.y + viewport->Size.y - padding};
-        auto *draw_list = ImGui::GetForegroundDrawList();
-        const float rounding = 20.0f;
-        draw_list->AddRectFilled(min, max, IM_COL32(80, 120, 180, 200), rounding);
-        draw_list->AddRect(min, max, IM_COL32(130, 180, 255, 255), rounding, 0, 3.f);
-
-        const char *message = platform_window_state.drag_hover.file_like
-                                  ? "Drop files to load them"
-                                  : "Drop supported scene files";
-        ImFont *font = ImGui::GetFont();
-        const float font_size = ImGui::GetFontSize() * 1.8f;
-        const ImVec2 text_size = font->CalcTextSizeA(font_size, FLT_MAX, 0.f, message);
-        const ImVec2 center{(min.x + max.x - text_size.x) * 0.5f,
-                            (min.y + max.y - text_size.y) * 0.5f};
-        draw_list->AddText(font, font_size, {center.x + 1.f, center.y + 1.f},
-                           IM_COL32(0, 0, 0, 180), message);
-        draw_list->AddText(font, font_size, center, IM_COL32(230, 240, 255, 255), message);
-    }
+    ui::renderNotifications();
 
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
