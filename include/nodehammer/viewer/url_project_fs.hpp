@@ -34,8 +34,8 @@ class UrlProjectFs final : public ProjectFs {
     void poll() override;
     ProjectFsStatus status() const override;
     std::span<const ProjectProgress> progress() const override;
-    const std::string &errorMessage() const override;
     std::string_view name() const override { return "url"; }
+    void setLogSink(LogSink *sink) noexcept override;
     ProjectDropDecision planAddPath(const std::filesystem::path &path) const override;
     ProjectDropDecision planAddBytes(std::string_view filename,
                                      std::span<const std::byte> bytes) const override;
@@ -45,6 +45,8 @@ class UrlProjectFs final : public ProjectFs {
 
   private:
     struct Impl;
+    friend struct Impl; // so static fetch callbacks can route diagnostics
+                        // through the inherited protected `pushError`.
     std::unique_ptr<Impl> impl_;
 };
 

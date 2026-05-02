@@ -56,8 +56,7 @@ void renderStatusWindow(bool *open, const ViewerUiContext &ctx, const UiActions 
         bool show_drag_hint = true;
         if (ctx.project != nullptr) {
             if (ctx.project->status() == ProjectFsStatus::Error) {
-                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
-                ImGui::TextWrapped("%s", ctx.project->errorMessage().c_str());
+                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed");
                 show_drag_hint = false;
             }
 

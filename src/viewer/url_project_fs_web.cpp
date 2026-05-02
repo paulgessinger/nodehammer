@@ -39,16 +39,24 @@ struct UrlProjectFs::Impl {
 
     struct Entry {
         State state{State::InFlight};
-        ByteBuffer bytes;  // populated when Ready (refcount handle)
-        std::string error; // when Failed
+        ByteBuffer bytes; // populated when Ready (refcount handle)
         std::uint64_t bytes_done{0};
         std::uint64_t bytes_total{0};
         bool failed_visible{false}; // mirrors `failed` in ProjectProgress
     };
 
     std::string asset_base;
-    std::string error; // first hard failure across all fetches
+    /// Sticky-once-set: any fetch failure flips this true. Per-fetch
+    /// messages are pushed to the LogSink at the moment they occur; we
+    /// no longer retain text here.
+    bool errored{false};
     bool any_in_flight{false};
+
+    /// Backpointer to the outer `ProjectFs` so the static fetch callbacks
+    /// can route diagnostics through `pushError`/`pushWarning`. Set in
+    /// `UrlProjectFs::setLogSink` (which always runs once at App-wire
+    /// time, well before any fetch can complete).
+    UrlProjectFs *parent{nullptr};
 
     /// Stable storage so emscripten_fetch callbacks can hold raw pointers
     /// across the suspend without worrying about hash-map rehash.
@@ -176,11 +184,12 @@ void UrlProjectFs::Impl::onError(emscripten_fetch_t *fetch) {
         auto &e = *it->second;
         e.state = State::Failed;
         e.failed_visible = true;
-        e.error = "fetch failed (" + std::to_string(fetch->status) + "): " + ctx->key;
     }
-    if (self->error.empty()) {
-        self->error = "fetch failed (" + std::to_string(fetch->status) + "): " + ctx->key;
+    if (self->parent != nullptr) {
+        self->parent->pushError("fetch failed (" + std::to_string(fetch->status) +
+                                "): " + ctx->key);
     }
+    self->errored = true;
 
     emscripten_fetch_close(fetch);
     delete ctx;
@@ -201,8 +210,18 @@ void UrlProjectFs::setAssetBase(std::string asset_base) {
 
 void UrlProjectFs::poll() {}
 
+void UrlProjectFs::setLogSink(LogSink *sink) noexcept {
+    // Base flushes any constructor-time pending diagnostics here.
+    ProjectFs::setLogSink(sink);
+    // The parent backpointer doesn't depend on the sink itself; we set it
+    // here because this method is the App's "the FS is now wired" hook.
+    // Static fetch callbacks route through `parent->pushError`, which the
+    // base forwards to the live sink (or buffers if `sink == nullptr`).
+    impl_->parent = this;
+}
+
 ProjectFsStatus UrlProjectFs::status() const {
-    if (!impl_->error.empty()) {
+    if (impl_->errored) {
         return ProjectFsStatus::Error;
     }
     if (impl_->any_in_flight) {
@@ -229,8 +248,6 @@ std::span<const ProjectProgress> UrlProjectFs::progress() const {
     }
     return {impl_->progress_view.data(), impl_->progress_view.size()};
 }
-
-const std::string &UrlProjectFs::errorMessage() const { return impl_->error; }
 
 ProjectDropDecision UrlProjectFs::planAddPath(const std::filesystem::path &path) const {
     return ProjectDropDecision{
@@ -265,7 +282,7 @@ ResolveResult UrlProjectFs::resolve(std::string_view key) const {
     case Impl::State::InFlight:
         return ResolveResult{ResolveStatus::Pending, {}, {}, {}};
     case Impl::State::Failed:
-        return ResolveResult{ResolveStatus::Error, {}, {}, entry->error};
+        return ResolveResult{ResolveStatus::Error, {}, {}, "fetch failed: " + canonical};
     }
     return ResolveResult{ResolveStatus::Error, {}, {}, "unknown fetch state"};
 }

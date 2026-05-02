@@ -7,6 +7,7 @@
 #include "scene_renderer.hpp"
 #include "ui/notifications.hpp"
 #include "ui/viewer_ui.hpp"
+
 #include <nodehammer/viewer/platform.hpp>
 
 #include <nodehammer/ir/render.hpp>
@@ -158,6 +159,7 @@ struct App::Impl {
     std::vector<RetainedModal> active_modals;
     std::uint64_t next_modal_id{1};
     ui::UiState ui_state;
+    ui::Notifications notifications;
 
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
@@ -251,6 +253,7 @@ void App::Impl::onInit() {
     ImGui_ImplSokol_Init();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ui::Notifications::initializeFonts();
+    project_->setLogSink(&notifications);
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
@@ -620,7 +623,7 @@ void App::Impl::onFrame() {
                                                 std::chrono::steady_clock::now() - ibl_start_time)
                                                 .count();
                     std::println("viewer: IBL loaded from cache ({:.1f} ms)", elapsed_ms);
-                    ui::Notifications::info("IBL loaded from cache");
+                    notifications.info("IBL loaded from cache");
                 } else {
                     // Miss — start the real bake now. ibl_start_time stays
                     // anchored at the cache attempt so the reported total
@@ -641,7 +644,7 @@ void App::Impl::onFrame() {
                                         std::chrono::steady_clock::now() - ibl_start_time)
                                         .count();
             std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
-            ui::Notifications::success("IBL bake complete");
+            notifications.success("IBL bake complete");
         }
     }
 
@@ -661,7 +664,7 @@ void App::Impl::onFrame() {
                          "{} materials)",
                          build_ms, built.scene->nodes.size(), built.scene->meshAssets.size(),
                          built.scene->materials.size());
-            ui::Notifications::success("Tessellation complete");
+            notifications.success("Tessellation complete");
             scene = std::move(built.scene);
             scene_uploaded = false;
             camera_framed = false;
@@ -674,7 +677,7 @@ void App::Impl::onFrame() {
                     break;
                 }
             }
-            ui::Notifications::error(build_error);
+            notifications.error(build_error);
         }
         build_in_progress = false;
         // Project is long-lived: we keep it so additional drops/picks
@@ -778,9 +781,9 @@ void App::Impl::onFrame() {
 
     ui::UiActions ui_actions;
     ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
-    ui_actions.clear_ibl_cache = []() {
+    ui_actions.clear_ibl_cache = [this]() {
         clearIblCache();
-        ui::Notifications::info("IBL cache cleared");
+        notifications.info("IBL cache cleared");
     };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
@@ -797,6 +800,7 @@ void App::Impl::onFrame() {
         scene_renderer.clearScene();
         scene.reset();
         project_ = platform::makeEmptyBag();
+        project_->setLogSink(&notifications);
         root_config_key.clear();
         root_geometry_key.clear();
         build_session.setRootKeys({}, {});
@@ -805,13 +809,13 @@ void App::Impl::onFrame() {
         camera_framed = false;
         scene_radius = 0.f;
         build_error.clear();
-        ui::Notifications::info("Project closed");
+        notifications.info("Project closed");
     };
     ui_actions.rescan_project = [this]() {
         if (project_) {
             project_->rescan();
             build_error.clear();
-            ui::Notifications::info("Project rescan requested");
+            notifications.info("Project rescan requested");
         }
     };
     ui_actions.select_config_key = [this](std::string key) {
@@ -827,7 +831,7 @@ void App::Impl::onFrame() {
 
     ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
     renderActiveModal();
-    ui::renderNotifications();
+    notifications.render();
 
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
@@ -858,6 +862,9 @@ void App::setScene(std::shared_ptr<const RenderScene> scene) {
 
 void App::setProject(std::unique_ptr<ProjectFs> project) {
     impl_->project_ = std::move(project);
+    if (impl_->project_) {
+        impl_->project_->setLogSink(&impl_->notifications);
+    }
     // Reset session-side state so the BuildSession doesn't keep walking
     // an old project's stale keys against a new backend. Root keys
     // either come back via setRootKeys (URL mode) or via App-side

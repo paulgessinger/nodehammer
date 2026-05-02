@@ -53,7 +53,6 @@ class FilesystemProjectFs final : public ProjectFs {
     void poll() override;
     ProjectFsStatus status() const override;
     std::span<const ProjectProgress> progress() const override;
-    const std::string &errorMessage() const override;
     std::string_view name() const override { return "filesystem"; }
     std::span<const std::string> warnings() const override;
 

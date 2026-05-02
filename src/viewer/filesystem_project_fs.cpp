@@ -63,8 +63,6 @@ struct FilesystemProjectFs::Impl {
     /// Soft warnings (e.g. addPath/addBytes-on-filesystem hint).
     std::vector<std::string> warning_msgs;
 
-    std::string error;
-
     /// Bumps on construction and on every rescan. Each bump invalidates
     /// `dir_cache` and `byte_cache` spans handed out from earlier calls.
     std::uint64_t generation{0};
@@ -154,16 +152,9 @@ FilesystemProjectFs::~FilesystemProjectFs() = default;
 
 void FilesystemProjectFs::poll() {}
 
-ProjectFsStatus FilesystemProjectFs::status() const {
-    if (!impl_->error.empty()) {
-        return ProjectFsStatus::Error;
-    }
-    return ProjectFsStatus::Ready;
-}
+ProjectFsStatus FilesystemProjectFs::status() const { return ProjectFsStatus::Ready; }
 
 std::span<const ProjectProgress> FilesystemProjectFs::progress() const { return {}; }
-
-const std::string &FilesystemProjectFs::errorMessage() const { return impl_->error; }
 
 std::span<const std::string> FilesystemProjectFs::warnings() const {
     return {impl_->warning_msgs.data(), impl_->warning_msgs.size()};
@@ -193,14 +184,18 @@ ProjectDropDecision FilesystemProjectFs::planAddBytes(std::string_view filename,
 }
 
 void FilesystemProjectFs::addPath(const std::filesystem::path & /*path*/) {
-    impl_->warning_msgs.emplace_back("this project is filesystem-mounted; drop new files into the "
-                                     "folder on disk and click Rescan");
+    auto msg = std::string{"this project is filesystem-mounted; drop new files into the "
+                           "folder on disk and click Rescan"};
+    impl_->warning_msgs.push_back(msg);
+    pushWarning(std::move(msg));
 }
 
 void FilesystemProjectFs::addBytes(std::string_view /*filename*/,
                                    std::span<const std::byte> /*bytes*/) {
-    impl_->warning_msgs.emplace_back(
-        "this project is filesystem-mounted; addBytes ignored — write to disk and click Rescan");
+    auto msg = std::string{
+        "this project is filesystem-mounted; addBytes ignored — write to disk and click Rescan"};
+    impl_->warning_msgs.push_back(msg);
+    pushWarning(std::move(msg));
 }
 
 ResolveResult FilesystemProjectFs::resolve(std::string_view key) const {
@@ -262,7 +257,6 @@ void FilesystemProjectFs::rescan() {
         impl_->dir_cache.clear();
     }
     impl_->warning_msgs.clear();
-    impl_->error.clear();
     ++impl_->generation;
 }
 

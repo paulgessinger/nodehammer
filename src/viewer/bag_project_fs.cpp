@@ -40,7 +40,10 @@ struct BagProjectFs::Impl {
     /// urgent — keep simple, append-only.
     std::vector<std::string> warning_msgs;
 
-    std::string error;
+    /// Sticky-once-set: any error during `addPath` flips this true so
+    /// `status()` reports Error. The actual message is pushed to the
+    /// `LogSink` at the moment of failure; we don't retain it here.
+    bool errored{false};
 
     /// Bumps on every mutation so consumers (App's recognition, the
     /// build-trigger gate) can detect content changes via a single
@@ -75,16 +78,22 @@ struct BagProjectFs::Impl {
         entries.push_back(std::move(p));
     }
 
-    void store(std::string_view filename, std::span<const std::byte> bytes) {
-        store(filename, std::vector<std::byte>{bytes.begin(), bytes.end()});
-    }
-
-    void store(std::string_view filename, std::vector<std::byte> bytes) {
+    /// Returns the duplicate-replaced warning string when `filename`
+    /// collides with an existing entry, empty otherwise. The caller pushes
+    /// it through the base helper since `Impl` has no `ProjectFs` access.
+    std::string store(std::string_view filename, std::vector<std::byte> bytes) {
         const auto key = asciiLowerCopy(filename);
+        std::string warn;
         if (auto it = bytes_by_key.find(key); it != bytes_by_key.end()) {
-            warning_msgs.emplace_back("replaced " + std::string{filename});
+            warn = "replaced " + std::string{filename};
+            warning_msgs.push_back(warn);
         }
         bytes_by_key[key] = ByteBuffer{std::move(bytes)};
+        return warn;
+    }
+
+    std::string store(std::string_view filename, std::span<const std::byte> bytes) {
+        return store(filename, std::vector<std::byte>{bytes.begin(), bytes.end()});
     }
 };
 
@@ -94,14 +103,12 @@ BagProjectFs::~BagProjectFs() = default;
 void BagProjectFs::poll() {}
 
 ProjectFsStatus BagProjectFs::status() const {
-    return impl_->error.empty() ? ProjectFsStatus::Idle : ProjectFsStatus::Error;
+    return impl_->errored ? ProjectFsStatus::Error : ProjectFsStatus::Idle;
 }
 
 std::span<const ProjectProgress> BagProjectFs::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
 }
-
-const std::string &BagProjectFs::errorMessage() const { return impl_->error; }
 
 std::span<const std::string> BagProjectFs::warnings() const {
     return {impl_->warning_msgs.data(), impl_->warning_msgs.size()};
@@ -180,7 +187,10 @@ void BagProjectFs::addBytes(std::string_view filename, std::span<const std::byte
     if (filename.empty()) {
         return;
     }
-    impl_->store(filename, bytes);
+    auto warn = impl_->store(filename, bytes);
+    if (!warn.empty()) {
+        pushWarning(std::move(warn));
+    }
     impl_->recordOrReplaceEntry(filename, bytes.size());
     ++impl_->generation;
 }
@@ -193,12 +203,16 @@ void BagProjectFs::addPath(const std::filesystem::path &path) {
     try {
         contents = file_io::readFile(path);
     } catch (const std::exception &e) {
-        impl_->error = std::string{"failed to read "} + path.string() + ": " + e.what();
+        pushError(std::string{"failed to read "} + path.string() + ": " + e.what());
+        impl_->errored = true;
         return;
     }
     const auto filename = path.filename().string();
     const auto size = contents.size();
-    impl_->store(filename, std::move(contents));
+    auto warn = impl_->store(filename, std::move(contents));
+    if (!warn.empty()) {
+        pushWarning(std::move(warn));
+    }
     impl_->recordOrReplaceEntry(filename, size);
     ++impl_->generation;
 }

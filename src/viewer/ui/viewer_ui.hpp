@@ -5,6 +5,5 @@
 namespace nodehammer::viewer::ui {
 
 void renderViewerUi(UiState &state, const ViewerUiContext &ctx, const UiActions &actions);
-void renderNotifications();
 
 } // namespace nodehammer::viewer::ui

@@ -9,7 +9,7 @@
 
 #include <string>
 
-namespace nodehammer::viewer::ui::Notifications {
+namespace nodehammer::viewer::ui {
 namespace {
 
 void push(ImGuiToastType type, std::string_view message) {
@@ -19,7 +19,7 @@ void push(ImGuiToastType type, std::string_view message) {
 
 } // namespace
 
-void initializeFonts() {
+void Notifications::initializeFonts() {
     ImGuiIO &io = ImGui::GetIO();
     constexpr float kBaseFontSize = 16.0f;
     constexpr float kIconFontSize = kBaseFontSize * 2.0f / 3.0f;
@@ -34,15 +34,15 @@ void initializeFonts() {
                                              &icons_config, kIconRanges);
 }
 
-void info(std::string_view message) { push(ImGuiToastType::Info, message); }
+void Notifications::info(std::string_view message) { push(ImGuiToastType::Info, message); }
 
-void success(std::string_view message) { push(ImGuiToastType::Success, message); }
+void Notifications::success(std::string_view message) { push(ImGuiToastType::Success, message); }
 
-void warning(std::string_view message) { push(ImGuiToastType::Warning, message); }
+void Notifications::warning(std::string_view message) { push(ImGuiToastType::Warning, message); }
 
-void error(std::string_view message) { push(ImGuiToastType::Error, message); }
+void Notifications::error(std::string_view message) { push(ImGuiToastType::Error, message); }
 
-void render() {
+void Notifications::render() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.10f, 0.10f, 0.10f, 1.00f));
@@ -51,4 +51,4 @@ void render() {
     ImGui::PopStyleVar(2);
 }
 
-} // namespace nodehammer::viewer::ui::Notifications
+} // namespace nodehammer::viewer::ui

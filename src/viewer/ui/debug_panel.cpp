@@ -54,12 +54,6 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
 
     ImGui::Checkbox("throttle when unfocused", &ctx.cfg.pause_when_unfocused);
 
-    if (!ctx.ibl_installed) {
-        const auto frac = static_cast<float>(ctx.ibl_progress);
-        ImGui::Text("IBL bake: %.0f%%", frac * 100.0f);
-        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-    }
-
     if (ImGui::Button("Clear IBL cache") && actions.clear_ibl_cache) {
         actions.clear_ibl_cache();
     }

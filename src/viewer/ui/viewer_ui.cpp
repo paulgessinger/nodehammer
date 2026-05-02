@@ -2,7 +2,6 @@
 
 #include "debug_panel.hpp"
 #include "menu_bar.hpp"
-#include "notifications.hpp"
 #include "project_panel.hpp"
 #include "status_ui.hpp"
 #include "view_panel.hpp"
@@ -134,7 +133,5 @@ void renderViewerUi(UiState &state, const ViewerUiContext &ctx, const UiActions 
     renderMenuBar(state, ctx, actions);
     renderDragOverlay(ctx);
 }
-
-void renderNotifications() { Notifications::render(); }
 
 } // namespace nodehammer::viewer::ui

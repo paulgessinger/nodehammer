@@ -63,7 +63,13 @@ struct NativeBagProjectFs::Impl {
     /// bag's `progress()` for the project panel.
     std::vector<ProjectProgress> entries;
     std::vector<std::string> warning_msgs;
-    std::string error;
+
+    /// Sticky-once-set: storage-dir creation, write, or read failures flip
+    /// this true. The actual message is pushed to the LogSink at the moment
+    /// of failure; we don't retain it here. `inner` may also drive Error
+    /// independently (read failures during resolve), but its `status()` is
+    /// always Ready today, so this flag is the only thing `status()` reads.
+    bool errored{false};
 
     void recordOrReplaceEntry(std::string_view filename, std::size_t size) {
         const auto key = asciiLowerCopy(filename);
@@ -105,8 +111,9 @@ NativeBagProjectFs::NativeBagProjectFs() : impl_(std::make_unique<Impl>()) {
     std::error_code ec;
     std::filesystem::create_directories(impl_->storage_dir, ec);
     if (ec) {
-        impl_->error =
-            "failed to create bag storage dir " + impl_->storage_dir.string() + ": " + ec.message();
+        pushError("failed to create bag storage dir " + impl_->storage_dir.string() + ": " +
+                  ec.message());
+        impl_->errored = true;
         return;
     }
     impl_->inner = std::make_unique<FilesystemProjectFs>(impl_->storage_dir);
@@ -131,21 +138,14 @@ void NativeBagProjectFs::poll() {
 }
 
 ProjectFsStatus NativeBagProjectFs::status() const {
-    if (!impl_->error.empty()) {
+    if (impl_->errored || !impl_->inner) {
         return ProjectFsStatus::Error;
     }
-    return impl_->inner ? impl_->inner->status() : ProjectFsStatus::Error;
+    return impl_->inner->status();
 }
 
 std::span<const ProjectProgress> NativeBagProjectFs::progress() const {
     return {impl_->entries.data(), impl_->entries.size()};
-}
-
-const std::string &NativeBagProjectFs::errorMessage() const {
-    if (!impl_->error.empty()) {
-        return impl_->error;
-    }
-    return impl_->inner ? impl_->inner->errorMessage() : impl_->error;
 }
 
 std::span<const std::string> NativeBagProjectFs::warnings() const {
@@ -168,7 +168,8 @@ void NativeBagProjectFs::rescan() {
 
 ResolveResult NativeBagProjectFs::resolve(std::string_view key) const {
     if (!impl_->inner) {
-        return ResolveResult{ResolveStatus::Error, {}, std::string{key}, impl_->error};
+        return ResolveResult{
+            ResolveStatus::Error, {}, std::string{key}, "native bag storage unavailable"};
     }
     auto r = impl_->inner->resolve(key);
     if (r.status != ResolveStatus::Missing) {
@@ -246,11 +247,14 @@ void NativeBagProjectFs::addBytes(std::string_view filename, std::span<const std
     try {
         file_io::writeFile(target, bytes);
     } catch (const std::exception &e) {
-        impl_->error = std::string{"failed to write "} + target.string() + ": " + e.what();
+        pushError(std::string{"failed to write "} + target.string() + ": " + e.what());
+        impl_->errored = true;
         return;
     }
     if (replacing) {
-        impl_->warning_msgs.emplace_back("replaced " + std::string{filename});
+        auto msg = "replaced " + std::string{filename};
+        impl_->warning_msgs.push_back(msg);
+        pushWarning(std::move(msg));
     }
     impl_->recordOrReplaceEntry(filename, bytes.size());
     impl_->inner->rescan();
@@ -264,7 +268,8 @@ void NativeBagProjectFs::addPath(const std::filesystem::path &path) {
     try {
         contents = file_io::readFile(path);
     } catch (const std::exception &e) {
-        impl_->error = std::string{"failed to read "} + path.string() + ": " + e.what();
+        pushError(std::string{"failed to read "} + path.string() + ": " + e.what());
+        impl_->errored = true;
         return;
     }
     addBytes(path.filename().string(), contents);
