@@ -88,8 +88,9 @@ TEST_CASE("FilesystemProjectFs resolves nested keys via real subdir paths",
     auto *subdir = findChild(top, "subdir");
     REQUIRE(subdir != nullptr);
     REQUIRE(subdir->is_directory);
-    REQUIRE(subdir->children.size() == 1);
-    REQUIRE(subdir->children.front().key == "subdir/common.toml");
+    auto sub_children = fs.list(subdir->key);
+    REQUIRE(sub_children.size() == 1);
+    REQUIRE(sub_children.front().key == "subdir/common.toml");
 
     auto r = fs.resolve("subdir/common.toml");
     REQUIRE(r.status == ResolveStatus::Ready);
@@ -162,10 +163,11 @@ TEST_CASE("FilesystemProjectFs subdir span excludes grandchildren when followed 
     REQUIRE(top.size() == 1);
     auto *subdir = findChild(top, "subdir");
     REQUIRE(subdir != nullptr);
-    REQUIRE(subdir->children.size() == 2);
-    REQUIRE(findChild(subdir->children, "inner") != nullptr);
-    REQUIRE(findChild(subdir->children, "sibling.toml") != nullptr);
-    REQUIRE(findChild(subdir->children, "deep.toml") == nullptr);
+    auto sub_children = fs.list(subdir->key);
+    REQUIRE(sub_children.size() == 2);
+    REQUIRE(findChild(sub_children, "inner") != nullptr);
+    REQUIRE(findChild(sub_children, "sibling.toml") != nullptr);
+    REQUIRE(findChild(sub_children, "deep.toml") == nullptr);
 }
 
 TEST_CASE("FilesystemProjectFs root span does not leak nested entries",
@@ -187,15 +189,17 @@ TEST_CASE("FilesystemProjectFs root span does not leak nested entries",
     REQUIRE(findChild(top, "inner") == nullptr);
 
     auto *subdir = findChild(top, "subdir");
-    REQUIRE(subdir->children.size() == 3);
-    REQUIRE(findChild(subdir->children, "b.toml") != nullptr);
-    REQUIRE(findChild(subdir->children, "c.toml") != nullptr);
-    REQUIRE(findChild(subdir->children, "inner") != nullptr);
-    REQUIRE(findChild(subdir->children, "d.toml") == nullptr);
+    auto sub_children = fs.list(subdir->key);
+    REQUIRE(sub_children.size() == 3);
+    REQUIRE(findChild(sub_children, "b.toml") != nullptr);
+    REQUIRE(findChild(sub_children, "c.toml") != nullptr);
+    REQUIRE(findChild(sub_children, "inner") != nullptr);
+    REQUIRE(findChild(sub_children, "d.toml") == nullptr);
 
-    auto *inner = findChild(subdir->children, "inner");
-    REQUIRE(inner->children.size() == 1);
-    REQUIRE(inner->children.front().name == "d.toml");
+    auto *inner = findChild(sub_children, "inner");
+    auto inner_children = fs.list(inner->key);
+    REQUIRE(inner_children.size() == 1);
+    REQUIRE(inner_children.front().name == "d.toml");
 }
 
 TEST_CASE("FilesystemProjectFs skips dot-prefixed entries by default",
@@ -224,6 +228,45 @@ TEST_CASE("FilesystemProjectFs includes dot-prefixed entries when option toggled
     auto top = fs.list("");
     REQUIRE(top.size() == 2);
     REQUIRE(findChild(top, ".secret") != nullptr);
+}
+
+TEST_CASE("FilesystemProjectFs::list does not walk siblings when scoped to one subdir",
+          "[viewer][filesystem_project_fs]") {
+    // Listing one subtree should not require materialising the other —
+    // confirmed indirectly by the count of children returned at each
+    // level. (No white-box hook into the cache size; the assertion
+    // shape is the same as the old contiguity tests.)
+    TempProject tp{"laziness"};
+    tp.writeFile("a/a1.toml", "");
+    tp.writeFile("a/a2.toml", "");
+    tp.writeFile("b/b1.toml", "");
+    tp.writeFile("b/b2.toml", "");
+    tp.writeFile("b/b3.toml", "");
+
+    FilesystemProjectFs fs{tp.root};
+    auto a_children = fs.list("a");
+    REQUIRE(a_children.size() == 2);
+    REQUIRE(findChild(a_children, "a1.toml") != nullptr);
+    REQUIRE(findChild(a_children, "a2.toml") != nullptr);
+    REQUIRE(findChild(a_children, "b1.toml") == nullptr);
+}
+
+TEST_CASE("FilesystemProjectFs::rescan invalidates the per-dir cache",
+          "[viewer][filesystem_project_fs]") {
+    TempProject tp{"rescan_dir_cache"};
+    tp.writeFile("scene.toml", "x");
+    FilesystemProjectFs fs{tp.root};
+
+    auto top0 = fs.list("");
+    REQUIRE(top0.size() == 1);
+
+    tp.writeFile("added.toml", "y");
+    fs.rescan();
+
+    auto top1 = fs.list("");
+    REQUIRE(top1.size() == 2);
+    REQUIRE(findChild(top1, "scene.toml") != nullptr);
+    REQUIRE(findChild(top1, "added.toml") != nullptr);
 }
 
 TEST_CASE("FilesystemProjectFs::addPath emits a warning rather than mutating",

@@ -1102,7 +1102,7 @@ void App::Impl::onFrame() {
                             const bool open = ImGui::TreeNodeEx("##dir", ImGuiTreeNodeFlags_None,
                                                                 "%s", n.name.c_str());
                             if (open) {
-                                self(n.children);
+                                self(project_->list(n.key));
                                 ImGui::TreePop();
                             }
                             ImGui::PopID();

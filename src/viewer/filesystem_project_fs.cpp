@@ -3,7 +3,6 @@
 #include <nodehammer/detail/file_io.hpp>
 
 #include <algorithm>
-#include <deque>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -19,7 +18,41 @@ std::string makeKey(const std::filesystem::path &root, const std::filesystem::pa
     return rel.generic_string();
 }
 
-constexpr std::size_t kRootSentinel = static_cast<std::size_t>(-1);
+/// Normalised cache key for a directory: empty for root, otherwise
+/// `lexically_normal().generic_string()`. Trailing slashes collapse, `.`
+/// segments disappear; we reject any input that escapes the project root
+/// via `..` separately.
+std::string normaliseDirKey(std::string_view dir) {
+    if (dir.empty() || dir == "/") {
+        return {};
+    }
+    return std::filesystem::path{dir}.lexically_normal().generic_string();
+}
+
+/// Returns true when `rel` (a lexically-normal relative path) does not
+/// escape the project root via `..`. Used by `list()` and `resolve()` to
+/// reject keys like `../../etc/passwd` before any disk access.
+bool isWithinRoot(const std::filesystem::path &rel) {
+    for (const auto &seg : rel) {
+        if (seg == "..") {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Returns true when any path segment of `rel` starts with `.` — used by
+/// `resolve()` under `skip_hidden_files` to make dot-prefixed entries
+/// behave as if they don't exist (matching the listing filter).
+bool hasHiddenSegment(const std::filesystem::path &rel) {
+    for (const auto &seg : rel) {
+        const auto s = seg.string();
+        if (!s.empty() && s.front() == '.' && s != ".") {
+            return true;
+        }
+    }
+    return false;
+}
 
 } // namespace
 
@@ -27,162 +60,82 @@ struct FilesystemProjectFs::Impl {
     std::filesystem::path root;
     FilesystemProjectFs::Options options{};
 
-    /// Flat owning storage for the directory snapshot. Built once in
-    /// `buildTree()`; child spans inside each `DirNode` point into
-    /// contiguous slices of this vector.
-    std::vector<DirNode> tree;
-
-    /// O(1) key → tree index for `resolve` and `list(dir)` lookups.
-    std::unordered_map<std::string, std::size_t> tree_index;
-
-    /// Top-level (root) child range. The root itself isn't represented
-    /// as a `DirNode` in `tree`, so we cache its child slice separately
-    /// and expose it via `list("")`.
-    std::size_t root_first_child{0};
-    std::size_t root_child_count{0};
-
-    /// Per-file progress. Lets the existing flat progress UI render a
-    /// sensible summary; the tree panel reads `tree` instead.
-    std::vector<ProjectProgress> progress_entries;
-
     /// Soft warnings (e.g. addPath/addBytes-on-filesystem hint).
     std::vector<std::string> warning_msgs;
 
     std::string error;
 
-    /// Bumps on construction and on every rescan.
+    /// Bumps on construction and on every rescan. Each bump invalidates
+    /// `dir_cache` and `byte_cache` spans handed out from earlier calls.
     std::uint64_t generation{0};
 
+    /// Per-directory listing cache. Key is the normalised directory key
+    /// (empty for root). Spans returned from `list()` point into the
+    /// stored vectors. Cleared en masse on `rescan()`.
+    mutable std::unordered_map<std::string, std::vector<DirNode>> dir_cache;
+    mutable std::mutex dir_cache_mu;
+
     /// Lazily-populated byte cache. Spans handed out from `resolve`
-    /// point into these vectors, valid for the lifetime of a generation.
+    /// point into these vectors, valid until the next generation bump.
     mutable std::unordered_map<std::string, std::vector<std::byte>> byte_cache;
     mutable std::mutex byte_cache_mu;
 
-    /// Walk `root` and rebuild `tree` + `tree_index` + `progress_entries`.
-    /// Caller is responsible for clearing `byte_cache` and bumping
-    /// `generation`.
-    void buildTree();
+    /// Walk `root / dir_key` once and return its immediate children
+    /// (directories + regular files), sorted alphabetically. Hidden
+    /// entries are filtered per `options.skip_hidden_files`.
+    std::vector<DirNode> walkDir(const std::string &dir_key) const;
 };
 
-void FilesystemProjectFs::Impl::buildTree() {
-    tree.clear();
-    tree_index.clear();
-    progress_entries.clear();
-    root_first_child = 0;
-    root_child_count = 0;
+std::vector<DirNode> FilesystemProjectFs::Impl::walkDir(const std::string &dir_key) const {
+    std::vector<DirNode> out;
 
-    // BFS layout: process directories level by level so a directory's
-    // direct children land in a contiguous range of `tree`. Pre-order
-    // DFS would interleave grandchildren between siblings (visit a
-    // subdir, then its descendants, only THEN the subdir's
-    // alphabetical sibling), making any contiguous-span representation
-    // of a parent's children wrong. With BFS, when we finish enqueuing
-    // the children of a directory, those children occupy
-    // `[first_child_idx, first_child_idx + child_count)` in `tree`.
-    // tree.data() may move as we keep pushing more nodes, so we
-    // record (parent_idx, first_child_idx, child_count) per directory
-    // and write the spans in a second pass once `tree` is finalised.
-
-    auto entries_in_dir = [](const std::filesystem::path &dir) {
-        std::vector<std::filesystem::directory_entry> out;
-        std::error_code ec;
-        for (std::filesystem::directory_iterator it(dir, ec), end; it != end; it.increment(ec)) {
-            if (ec) {
-                break;
-            }
-            out.push_back(*it);
-        }
-        std::sort(out.begin(), out.end(),
-                  [](const auto &a, const auto &b) { return a.path() < b.path(); });
-        return out;
-    };
-
-    struct ChildRange {
-        std::size_t parent_idx; // kRootSentinel for top-level
-        std::size_t first_child_idx;
-        std::size_t child_count;
-    };
-    std::vector<ChildRange> ranges;
-
-    struct DirJob {
-        std::filesystem::path dir;
-        std::size_t parent_idx; // kRootSentinel for top-level
-    };
-    std::deque<DirJob> queue;
-    queue.push_back({root, kRootSentinel});
-
-    while (!queue.empty()) {
-        const auto job = queue.front();
-        queue.pop_front();
-
-        const auto entries = entries_in_dir(job.dir);
-        const std::size_t first_child_idx = tree.size();
-        std::size_t child_count = 0;
-
-        for (const auto &entry : entries) {
-            const auto &p = entry.path();
-
-            // Skip dot-prefixed entries (.DS_Store, .git, editor swap
-            // files, ...) when the option is on. Applied at every
-            // depth so a hidden directory is pruned wholesale.
-            if (options.skip_hidden_files) {
-                const auto fname = p.filename().string();
-                if (!fname.empty() && fname.front() == '.') {
-                    continue;
-                }
-            }
-
-            std::error_code is_dir_ec;
-            const bool is_dir = entry.is_directory(is_dir_ec);
-            std::error_code is_reg_ec;
-            const bool is_reg = entry.is_regular_file(is_reg_ec);
-
-            if (!is_dir && !is_reg) {
-                continue; // skip symlinks / sockets / unknown
-            }
-
-            DirNode node;
-            node.name = p.filename().string();
-            node.key = makeKey(root, p);
-            node.is_directory = is_dir;
-
-            if (is_reg) {
-                std::error_code size_ec;
-                const auto size = entry.file_size(size_ec);
-                node.bytes = size_ec ? 0 : static_cast<std::uint64_t>(size);
-            }
-
-            const std::size_t idx = tree.size();
-            tree.push_back(std::move(node));
-            tree_index.emplace(tree.back().key, idx);
-            ++child_count;
-
-            if (is_reg) {
-                ProjectProgress prog;
-                prog.url = tree.back().key;
-                prog.done = true;
-                prog.bytes_total = tree.back().bytes;
-                prog.bytes_done = tree.back().bytes;
-                progress_entries.push_back(std::move(prog));
-            } else {
-                queue.push_back({p, idx});
-            }
-        }
-
-        ranges.push_back({job.parent_idx, first_child_idx, child_count});
+    std::filesystem::path abs = root;
+    if (!dir_key.empty()) {
+        abs /= std::filesystem::path{dir_key};
     }
 
-    // Second pass: write child spans into directory nodes (and the
-    // root sentinel). `tree.data()` is now stable.
-    for (const auto &r : ranges) {
-        if (r.parent_idx == kRootSentinel) {
-            root_first_child = r.first_child_idx;
-            root_child_count = r.child_count;
-        } else if (r.child_count > 0) {
-            tree[r.parent_idx].children =
-                std::span<const DirNode>{tree.data() + r.first_child_idx, r.child_count};
+    std::vector<std::filesystem::directory_entry> entries;
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(abs, ec), end; it != end; it.increment(ec)) {
+        if (ec) {
+            break;
         }
+        entries.push_back(*it);
     }
+    std::sort(entries.begin(), entries.end(),
+              [](const auto &a, const auto &b) { return a.path() < b.path(); });
+
+    out.reserve(entries.size());
+    for (const auto &entry : entries) {
+        const auto &p = entry.path();
+
+        if (options.skip_hidden_files) {
+            const auto fname = p.filename().string();
+            if (!fname.empty() && fname.front() == '.') {
+                continue;
+            }
+        }
+
+        std::error_code is_dir_ec;
+        const bool is_dir = entry.is_directory(is_dir_ec);
+        std::error_code is_reg_ec;
+        const bool is_reg = entry.is_regular_file(is_reg_ec);
+        if (!is_dir && !is_reg) {
+            continue; // skip symlinks / sockets / unknown
+        }
+
+        DirNode node;
+        node.name = p.filename().string();
+        node.key = makeKey(root, p);
+        node.is_directory = is_dir;
+        if (is_reg) {
+            std::error_code size_ec;
+            const auto size = entry.file_size(size_ec);
+            node.bytes = size_ec ? 0 : static_cast<std::uint64_t>(size);
+        }
+        out.push_back(std::move(node));
+    }
+    return out;
 }
 
 FilesystemProjectFs::FilesystemProjectFs(const std::filesystem::path &root)
@@ -199,7 +152,6 @@ FilesystemProjectFs::FilesystemProjectFs(const std::filesystem::path &root, Opti
         // the iterator's error_code if root is inaccessible.
         impl_->root = std::filesystem::absolute(root);
     }
-    impl_->buildTree();
     ++impl_->generation;
 }
 
@@ -214,9 +166,7 @@ ProjectFsStatus FilesystemProjectFs::status() const {
     return ProjectFsStatus::Ready;
 }
 
-std::span<const ProjectProgress> FilesystemProjectFs::progress() const {
-    return {impl_->progress_entries.data(), impl_->progress_entries.size()};
-}
+std::span<const ProjectProgress> FilesystemProjectFs::progress() const { return {}; }
 
 const std::string &FilesystemProjectFs::errorMessage() const { return impl_->error; }
 
@@ -259,16 +209,18 @@ void FilesystemProjectFs::addBytes(std::string_view /*filename*/,
 }
 
 ResolveResult FilesystemProjectFs::resolve(std::string_view key) const {
-    // Normalise: collapse any `subdir/../foo` indirection. The
-    // BuildSession already normalises, but defense in depth is cheap.
-    auto norm = std::filesystem::path{key}.lexically_normal().generic_string();
-
-    auto it = impl_->tree_index.find(norm);
-    if (it == impl_->tree_index.end()) {
+    auto rel = std::filesystem::path{key}.lexically_normal();
+    if (!isWithinRoot(rel)) {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }
-    const auto &node = impl_->tree[it->second];
-    if (node.is_directory) {
+    if (impl_->options.skip_hidden_files && hasHiddenSegment(rel)) {
+        return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
+    }
+    auto norm = rel.generic_string();
+
+    auto abs = impl_->root / rel;
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(abs, ec)) {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }
 
@@ -283,7 +235,7 @@ ResolveResult FilesystemProjectFs::resolve(std::string_view key) const {
 
     std::vector<std::byte> bytes;
     try {
-        bytes = file_io::readFile(impl_->root / std::filesystem::path{norm});
+        bytes = file_io::readFile(abs);
     } catch (const std::exception &e) {
         return ResolveResult{ResolveStatus::Error, {}, std::string{key}, e.what()};
     }
@@ -297,22 +249,29 @@ ResolveResult FilesystemProjectFs::resolve(std::string_view key) const {
 std::uint64_t FilesystemProjectFs::generation() const { return impl_->generation; }
 
 std::span<const DirNode> FilesystemProjectFs::list(std::string_view dir) const {
-    if (dir.empty() || dir == "/") {
-        if (impl_->root_child_count == 0) {
+    auto norm = normaliseDirKey(dir);
+    if (!norm.empty() && !isWithinRoot(std::filesystem::path{norm})) {
+        return {};
+    }
+
+    std::lock_guard<std::mutex> lk(impl_->dir_cache_mu);
+    if (auto it = impl_->dir_cache.find(norm); it != impl_->dir_cache.end()) {
+        return {it->second.data(), it->second.size()};
+    }
+
+    // Reject non-root keys whose target isn't an actual directory; root
+    // is always considered a directory (we may still get an empty span if
+    // it's empty or unreadable).
+    if (!norm.empty()) {
+        std::error_code ec;
+        if (!std::filesystem::is_directory(impl_->root / std::filesystem::path{norm}, ec)) {
             return {};
         }
-        return {impl_->tree.data() + impl_->root_first_child, impl_->root_child_count};
     }
-    auto norm = std::filesystem::path{dir}.lexically_normal().generic_string();
-    auto it = impl_->tree_index.find(norm);
-    if (it == impl_->tree_index.end()) {
-        return {};
-    }
-    const auto &node = impl_->tree[it->second];
-    if (!node.is_directory) {
-        return {};
-    }
-    return node.children;
+
+    auto entries = impl_->walkDir(norm);
+    auto [ins, _] = impl_->dir_cache.emplace(std::move(norm), std::move(entries));
+    return {ins->second.data(), ins->second.size()};
 }
 
 void FilesystemProjectFs::rescan() {
@@ -320,9 +279,12 @@ void FilesystemProjectFs::rescan() {
         std::lock_guard<std::mutex> lk(impl_->byte_cache_mu);
         impl_->byte_cache.clear();
     }
+    {
+        std::lock_guard<std::mutex> lk(impl_->dir_cache_mu);
+        impl_->dir_cache.clear();
+    }
     impl_->warning_msgs.clear();
     impl_->error.clear();
-    impl_->buildTree();
     ++impl_->generation;
 }
 
