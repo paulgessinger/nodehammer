@@ -23,10 +23,13 @@ add_executable(nodehammer_tests
     test_timing.cpp
 )
 
-# FilesystemProjectFs is native-only; the source is gated the same way
-# in nodehammer_lib. The test follows.
+# FilesystemProjectFs and NativeBagProjectFs are native-only; the
+# sources are gated the same way in nodehammer_lib. Tests follow.
 if(NOT EMSCRIPTEN)
-    target_sources(nodehammer_tests PRIVATE viewer/test_filesystem_project_fs.cpp)
+    target_sources(nodehammer_tests PRIVATE
+        viewer/test_filesystem_project_fs.cpp
+        viewer/test_native_bag_project_fs.cpp
+    )
 endif()
 
 target_compile_definitions(nodehammer_tests PRIVATE

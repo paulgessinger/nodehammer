@@ -11,7 +11,6 @@
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/build_session.hpp>
 #include <nodehammer/viewer/camera.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
@@ -191,7 +190,7 @@ struct App::Impl {
     int smooth_scroll_score{0};
     int wheel_scroll_score{0};
 
-    explicit Impl(Config c) : cfg(std::move(c)), project_(std::make_unique<BagProjectFs>()) {}
+    explicit Impl(Config c) : cfg(std::move(c)), project_(platform::makeEmptyBag()) {}
 
     void onInit();
     void onFrame();
@@ -797,7 +796,7 @@ void App::Impl::onFrame() {
     ui_actions.close_project = [this]() {
         scene_renderer.clearScene();
         scene.reset();
-        project_ = std::make_unique<BagProjectFs>();
+        project_ = platform::makeEmptyBag();
         root_config_key.clear();
         root_geometry_key.clear();
         build_session.setRootKeys({}, {});

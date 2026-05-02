@@ -225,8 +225,16 @@ target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 # nodehammer_lib alongside bag/build_session because future
 # `buildSceneFromPaths` callers will want to mount the geometry's
 # parent directory in CLI mode.
+#
+# NativeBagProjectFs (strategy doc step 3) wraps FilesystemProjectFs
+# pointed at a process-owned tmp dir. Native-only for the same reason
+# the underlying FS backend is — and the in-memory BagProjectFs stays
+# as the web bag until WebBagProjectFs lands (step 8).
 if(NOT EMSCRIPTEN)
-    target_sources(nodehammer_lib PRIVATE src/viewer/filesystem_project_fs.cpp)
+    target_sources(nodehammer_lib PRIVATE
+        src/viewer/filesystem_project_fs.cpp
+        src/viewer/native_bag_project_fs.cpp
+    )
 endif()
 
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────

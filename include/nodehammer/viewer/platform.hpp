@@ -9,6 +9,7 @@ struct sapp_event;
 
 namespace nodehammer::viewer {
 class App;
+class ProjectFs;
 struct Config;
 } // namespace nodehammer::viewer
 
@@ -19,6 +20,13 @@ inline constexpr bool kIsWeb = true;
 #else
 inline constexpr bool kIsWeb = false;
 #endif
+
+/// Construct the App's "empty project" backend. Native returns a
+/// write-through `NativeBagProjectFs` rooted at a process-owned tmp
+/// dir (strategy doc step 3); web returns the in-memory `BagProjectFs`
+/// until `WebBagProjectFs` (step 8) lands. Defined per-platform so the
+/// App TU stays free of bag-backend headers.
+std::unique_ptr<ProjectFs> makeEmptyBag();
 
 struct WindowCustomizationRequest {
     std::string persistence_id{"nodehammer.viewer.window"};

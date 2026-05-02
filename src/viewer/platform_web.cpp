@@ -1,4 +1,5 @@
 #include <nodehammer/viewer/app.hpp>
+#include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
 
@@ -223,6 +224,8 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
 // clang-format on
 
 namespace nodehammer::viewer::platform {
+
+std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<BagProjectFs>(); }
 
 namespace {
 

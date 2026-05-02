@@ -670,12 +670,27 @@ without an editor sitting on top of churning APIs.
    in the §2 principle that "the storage layer is the cache" so when
    `NativeBagProjectFs` lands storage-backed, no separate cache layer
    needs reinventing.
-3. **`NativeBagProjectFs` (storage dir + write-through `add`)** — port
-   the existing `BagProjectFs` so drops persist to a per-app storage
-   directory. Shares the resolve/list implementation with
-   `FilesystemProjectFs` (no extra cache layer, per step 2). `add`
-   replace-on-collision semantics already cover what the future editor
-   commit path will need.
+3. ✅ **`NativeBagProjectFs` (storage dir + write-through `add`)** —
+   landed as a thin wrapper around an inner
+   [`FilesystemProjectFs`](../include/nodehammer/viewer/filesystem_project_fs.hpp)
+   pointed at a process-owned `temp_directory_path()` subdirectory
+   (created in ctor, best-effort `remove_all` in dtor). Reads delegate
+   straight through to the inner FS — no separate byte cache, per the
+   §2 principle. Writes (`addPath`/`addBytes`) write the file with
+   `file_io::writeFile`, append/replace a `ProjectProgress` entry,
+   bump a `replaced foo.toml` warning on collision, and call
+   `inner_->rescan()` to invalidate the per-dir list cache and bump
+   `generation()`. Subdir-key resolve falls back to the basename so
+   include graphs whose siblings were dropped flat keep resolving.
+   App swaps the empty bag through a `makeEmptyBag()` helper:
+   native gets `NativeBagProjectFs`, web stays on the in-memory
+   `BagProjectFs` until step 8.
+   **Deferred from §3.2**: stable per-app data directory under
+   `sago::getDataHome()`, `state.json` session-id slot for relaunch
+   restore, and atomic temp+rename writes. Drops survive within a
+   process (which is what step 4's watcher and step 11's editor commit
+   need); cross-launch persistence and crash-safe writes follow when
+   we wire up `state.json`.
 4. **`WatchedFilesystemProjectFs` decorator** + rebuild-on-change.
    Closes the loop for the canonical dev flow (edit on disk → viewer
    re-walks). Invalidates the per-dir lazy cache for the affected

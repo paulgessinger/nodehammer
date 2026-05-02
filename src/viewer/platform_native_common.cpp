@@ -2,6 +2,8 @@
 
 #include <nodehammer/viewer/app.hpp>
 #include <nodehammer/viewer/filesystem_project_fs.hpp>
+#include <nodehammer/viewer/native_bag_project_fs.hpp>
+#include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <nfd.hpp>
@@ -11,6 +13,8 @@
 #include <memory>
 
 namespace nodehammer::viewer::platform {
+
+std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<NativeBagProjectFs>(); }
 
 void NativePickerState::openFilePicker() { pending_file_picker_ = true; }
 void NativePickerState::openFolderPicker() { pending_folder_picker_ = true; }
