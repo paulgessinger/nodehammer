@@ -16,9 +16,16 @@ The viewer already has the right shape for this work; what's missing is mostly
 a write path, a unified hierarchical listing model, an editor surface, and a
 few mode-transition rules.
 
-**Status:** Step 1 of §12 (hierarchical lazy `list(dir)` redesign) has landed.
-`DirNode::children` is gone; backends maintain per-directory caches keyed by
-`generation()`; the App's tree panel recurses via `project_->list(node.key)`.
+**Status:** Steps 1 and 2 of §12 have landed.
+- Step 1: `DirNode::children` is gone; backends maintain per-directory
+  caches keyed by `generation()`; the App's tree panel recurses via
+  `project_->list(node.key)`.
+- Step 2: `OpenedFile::bytes` is now a `ByteBuffer` (refcounted handle
+  over a `shared_ptr<const vector<byte>>`); `FilesystemProjectFs` reads
+  fresh from disk on every `resolve()` (no in-memory byte cache); bag
+  and URL backends share their cached vectors by refcount-bump.
+  `BuildSession` holds `ByteBuffer`s, dropping the immediate-copy
+  protection it used to need.
 
 ### Existing `ProjectFs` surface (relevant parts)
 
@@ -35,9 +42,9 @@ rescan()                                               // force re-walk
 
 | Backend                  | Source              | `addPath/Bytes` | `list`         | `rescan`        | Notes                                                                  |
 | ------------------------ | ------------------- | --------------- | -------------- | --------------- | ---------------------------------------------------------------------- |
-| `BagProjectFs`           | drops + picks       | accept          | flat snapshot  | no-op           | last-write-wins on basename collision; in-memory only                  |
-| `FilesystemProjectFs`    | on-disk dir         | reject (no-op)  | lazy per-dir   | drops per-dir caches + bumps `generation()` | reads from disk on every `resolve`; OS page cache handles repeats |
-| `UrlProjectFs` (web)     | `emscripten_fetch`  | reject          | lazy per-prefix | no-op          | lazy fetch on first `resolve`; fetched bytes are the storage           |
+| `BagProjectFs`           | drops + picks       | accept          | flat snapshot  | no-op           | last-write-wins on basename collision; in-memory only; resolve hands out a `ByteBuffer` (refcount bump) |
+| `FilesystemProjectFs`    | on-disk dir         | reject (no-op)  | lazy per-dir   | drops per-dir caches + bumps `generation()` | reads from disk on every `resolve` and wraps a fresh `ByteBuffer`; OS page cache handles repeats |
+| `UrlProjectFs` (web)     | `emscripten_fetch`  | reject          | lazy per-prefix | no-op          | lazy fetch on first `resolve`; cached bytes are stored as a `ByteBuffer`, resolve is a refcount bump |
 
 ### Decoration discipline (already documented)
 
@@ -647,22 +654,22 @@ without an editor sitting on top of churning APIs.
    backends (bag, filesystem, URL) onto the lazy per-dir API. Prerequisite
    for archive/bag-web's synthesized hierarchy and for the eventual
    editor's "show icons for all visible files".
-2. **Introduce `ByteBuffer` and drop the filesystem byte cache** —
-   add a `ByteBuffer` type that wraps a
-   `std::shared_ptr<const std::vector<std::byte>>` and exposes a
-   read-only `span()`. Switch `ResolveResult::OpenedFile` to carry a
-   `ByteBuffer` instead of a backend-owned span. `FilesystemProjectFs`
-   reads from disk on every `resolve()` (no in-memory byte cache; OS
-   page cache handles repeats) and wraps the fresh vector in a new
-   `ByteBuffer`. URL and ZIP-backed cache slots store
-   `shared_ptr<const vector>` directly so `resolve()` becomes a refcount
-   bump on cache hits. Consumers (BuildSession; future editor) hold a
-   `ByteBuffer` for as long as they need; the buffer survives any
-   backend mutation. The editor copy-on-writes into its own mutable
-   buffer when the user starts editing, dropping the `ByteBuffer` once
-   it owns a private copy. Locks in the §2 principle that "the storage
-   layer is the cache" so when `NativeBagProjectFs` lands
-   storage-backed, no separate cache layer needs reinventing.
+2. ✅ **Introduce `ByteBuffer` and drop the filesystem byte cache** —
+   landed. `ByteBuffer` (wrapping `shared_ptr<const vector<byte>>`,
+   exposing `span()`/`size()`/`empty()`) lives at
+   [`include/nodehammer/viewer/byte_buffer.hpp`](../include/nodehammer/viewer/byte_buffer.hpp);
+   only public construction is from a `vector<std::byte>`, after which
+   it's a copyable handle (refcount bump) — no `shared_ptr` is exposed
+   on the API. `OpenedFile::bytes` carries it. `FilesystemProjectFs`
+   reads from disk on every `resolve()` (cache + mutex deleted; OS page
+   cache handles repeats); `BagProjectFs` and `UrlProjectFs` store one
+   `ByteBuffer` per cached entry and hand out a copy. `BuildSession`
+   holds `ByteBuffer`s in `bytes_by_key` (no immediate-copy step). The
+   future editor will copy-on-write into a mutable buffer when editing
+   starts, dropping the `ByteBuffer` once it owns a private copy. Locks
+   in the §2 principle that "the storage layer is the cache" so when
+   `NativeBagProjectFs` lands storage-backed, no separate cache layer
+   needs reinventing.
 3. **`NativeBagProjectFs` (storage dir + write-through `add`)** — port
    the existing `BagProjectFs` so drops persist to a per-app storage
    directory. Shares the resolve/list implementation with
