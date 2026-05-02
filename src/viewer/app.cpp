@@ -802,6 +802,26 @@ void App::Impl::onFrame() {
     if (ImGui::Button("Clear IBL cache")) {
         clearIblCache();
     }
+    // Drive the project + build pipeline unconditionally — running this
+    // only when `!scene` means double-clicking a different config in the
+    // tree panel after a scene is already rendered would update the
+    // session's root keys but never actually walk → parse → build the
+    // new selection. The build-job completion above swaps `scene` over
+    // when the new build lands.
+    if (project_) {
+        project_->poll();
+        build_session.poll(project_.get());
+
+        if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
+            if (auto inputs = build_session.takeInputs()) {
+                build_start_time = std::chrono::steady_clock::now();
+                build_job.start(std::move(inputs->config.config), std::move(inputs->import.scene),
+                                std::move(inputs->config_key), std::move(inputs->geometry_key));
+                build_in_progress = true;
+            }
+        }
+    }
+
     if (!scene) {
         ImGui::Separator();
         // `show_drag_hint` flips off whenever the project has something
@@ -809,17 +829,12 @@ void App::Impl::onFrame() {
         // hard error) — otherwise we encourage the user to drop files.
         bool show_drag_hint = true;
         if (project_) {
-            project_->poll();
-
             // Root selection is user-driven across all backends:
             // double-click in the tree panel sets the matching root
             // key. Initial roots can also come from external sources
             // (App::setRootKeys called by the URL JS shell or the CLI
             // entry point) — those just preselect the first build;
             // the tree click handler still treats them as overridable.
-
-            // Drive the session: walk includes, parse config, import geometry.
-            build_session.poll(project_.get());
 
             // Surface any project-level error first; build session errors
             // are surfaced via build_error below (set in the build_in_progress
@@ -828,18 +843,6 @@ void App::Impl::onFrame() {
                 ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
                 ImGui::TextWrapped("%s", project_->errorMessage().c_str());
                 show_drag_hint = false;
-            }
-
-            // Hand session inputs to the build job once they're ready.
-            if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
-                if (auto inputs = build_session.takeInputs()) {
-                    build_start_time = std::chrono::steady_clock::now();
-                    build_job.start(std::move(inputs->config.config),
-                                    std::move(inputs->import.scene), std::move(inputs->config_key),
-                                    std::move(inputs->geometry_key));
-                    build_in_progress = true;
-                    show_drag_hint = false;
-                }
             }
 
             // Build progress UI (when the job is running).
@@ -936,6 +939,35 @@ void App::Impl::onFrame() {
 
     if (scene) {
         ImGui::Separator();
+        // Surface in-flight rebuilds (e.g. user double-clicked a
+        // different config in the tree) so the panel doesn't look
+        // frozen between the click and the swap.
+        if (build_in_progress) {
+            switch (build_job.phase()) {
+            case SceneBuildJob::Phase::Preparing:
+                ImGui::Text("Rebuilding: loading config and importing geometry…");
+                break;
+            case SceneBuildJob::Phase::Tessellating: {
+                const auto total = build_job.tessellationTotal();
+                const auto processed = build_job.tessellationProcessed();
+                if (total > 0) {
+                    ImGui::Text("Rebuilding: tessellating… (%zu / %zu nodes)", processed, total);
+                    const float frac = static_cast<float>(processed) / static_cast<float>(total);
+                    ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
+                } else {
+                    ImGui::Text("Rebuilding: tessellating…");
+                }
+                break;
+            }
+            case SceneBuildJob::Phase::Finalizing:
+                ImGui::Text("Rebuilding: finalising scene…");
+                break;
+            case SceneBuildJob::Phase::Idle:
+            case SceneBuildJob::Phase::Done:
+                break;
+            }
+            ImGui::Separator();
+        }
         ImGui::Text("Meshes: %u", scene_renderer.meshAssetCount());
         ImGui::Text("Nodes: %u", scene_renderer.nodeCount());
         ImGui::Text("Tris (scene): %llu",
