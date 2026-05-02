@@ -51,5 +51,35 @@ TEST_CASE("BagProjectFs replaces duplicate filenames without duplicate entries",
 
     auto resolved = bag.resolve("scene.toml");
     REQUIRE(resolved.status == ResolveStatus::Ready);
-    REQUIRE(asString(resolved.file.bytes) == "second");
+    REQUIRE(asString(resolved.file.bytes.span()) == "second");
+}
+
+TEST_CASE("BagProjectFs ByteBuffer outlives mutation", "[viewer][bag_project_fs]") {
+    BagProjectFs bag;
+    auto first = bytes("first");
+    bag.addBytes("scene.toml", std::span<const std::byte>{first});
+
+    auto r1 = bag.resolve("scene.toml");
+    REQUIRE(r1.status == ResolveStatus::Ready);
+    auto buf1 = r1.file.bytes;
+
+    auto second = bytes("second");
+    bag.addBytes("scene.toml", std::span<const std::byte>{second});
+    auto extra = bytes("x");
+    bag.addBytes("other.toml", std::span<const std::byte>{extra});
+
+    REQUIRE(asString(buf1.span()) == "first");
+
+    auto r2 = bag.resolve("scene.toml");
+    REQUIRE(asString(r2.file.bytes.span()) == "second");
+}
+
+TEST_CASE("BagProjectFs repeated resolve returns the same buffer", "[viewer][bag_project_fs]") {
+    BagProjectFs bag;
+    auto data = bytes("payload");
+    bag.addBytes("scene.toml", std::span<const std::byte>{data});
+
+    auto a = bag.resolve("scene.toml").file.bytes;
+    auto b = bag.resolve("scene.toml").file.bytes;
+    REQUIRE(a.span().data() == b.span().data());
 }

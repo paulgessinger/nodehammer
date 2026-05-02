@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nodehammer/viewer/byte_buffer.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -29,13 +31,16 @@ enum class ResolveStatus {
     Error,   // backend hit a hard failure for this key
 };
 
-/// View into project-owned bytes. The span is valid until the backend
-/// next mutates the underlying storage (bag mutation, overlay write,
-/// archive remount). Consumers that need to keep the bytes across that
-/// boundary must copy.
+/// Refcounted handle to project-owned bytes. The buffer pins the bytes
+/// by refcount, so consumers may hold an `OpenedFile` (or just its
+/// `ByteBuffer`) across backend mutations and the underlying storage
+/// stays alive until the last handle releases it. Cache-backed backends
+/// (bag, URL, future ZIP) share storage via refcount; storage-backed
+/// backends (filesystem, future native bag) build a fresh `ByteBuffer`
+/// per call.
 struct OpenedFile {
     std::string key;
-    std::span<const std::byte> bytes;
+    ByteBuffer bytes;
 };
 
 struct ResolveResult {
@@ -147,7 +152,8 @@ class ProjectFs {
     /// in memory (the bag, an archive) return Ready or Missing
     /// synchronously; backends that fetch lazily (the URL backend) return
     /// Pending while the bytes are in flight and Ready once they land.
-    /// The returned span is valid until the next backend mutation.
+    /// The returned `ByteBuffer` holds its bytes by refcount; consumers
+    /// may keep it across backend mutations.
     virtual ResolveResult resolve(std::string_view key) const {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }

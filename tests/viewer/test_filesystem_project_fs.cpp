@@ -72,7 +72,8 @@ TEST_CASE("FilesystemProjectFs walks a flat directory and resolves bytes",
 
     auto r = fs.resolve("scene.toml");
     REQUIRE(r.status == ResolveStatus::Ready);
-    std::string s{reinterpret_cast<const char *>(r.file.bytes.data()), r.file.bytes.size()};
+    auto sp = r.file.bytes.span();
+    std::string s{reinterpret_cast<const char *>(sp.data()), sp.size()};
     REQUIRE(s == "# minimal config\n");
 }
 
@@ -94,7 +95,8 @@ TEST_CASE("FilesystemProjectFs resolves nested keys via real subdir paths",
 
     auto r = fs.resolve("subdir/common.toml");
     REQUIRE(r.status == ResolveStatus::Ready);
-    std::string s{reinterpret_cast<const char *>(r.file.bytes.data()), r.file.bytes.size()};
+    auto sp = r.file.bytes.span();
+    std::string s{reinterpret_cast<const char *>(sp.data()), sp.size()};
     REQUIRE(s == "# included\n");
 }
 
@@ -124,11 +126,12 @@ TEST_CASE("FilesystemProjectFs::rescan picks up freshly-written files",
 
     auto r = fs.resolve("subdir/common.toml");
     REQUIRE(r.status == ResolveStatus::Ready);
-    std::string s{reinterpret_cast<const char *>(r.file.bytes.data()), r.file.bytes.size()};
+    auto sp = r.file.bytes.span();
+    std::string s{reinterpret_cast<const char *>(sp.data()), sp.size()};
     REQUIRE(s == "appeared");
 }
 
-TEST_CASE("FilesystemProjectFs::rescan invalidates cached bytes",
+TEST_CASE("FilesystemProjectFs returns updated bytes for modified files",
           "[viewer][filesystem_project_fs]") {
     TempProject tp{"rescan_invalidate"};
     tp.writeFile("scene.toml", "first");
@@ -136,7 +139,8 @@ TEST_CASE("FilesystemProjectFs::rescan invalidates cached bytes",
 
     auto r1 = fs.resolve("scene.toml");
     REQUIRE(r1.status == ResolveStatus::Ready);
-    std::string s1{reinterpret_cast<const char *>(r1.file.bytes.data()), r1.file.bytes.size()};
+    auto sp1 = r1.file.bytes.span();
+    std::string s1{reinterpret_cast<const char *>(sp1.data()), sp1.size()};
     REQUIRE(s1 == "first");
 
     tp.writeFile("scene.toml", "second contents");
@@ -144,8 +148,33 @@ TEST_CASE("FilesystemProjectFs::rescan invalidates cached bytes",
 
     auto r2 = fs.resolve("scene.toml");
     REQUIRE(r2.status == ResolveStatus::Ready);
-    std::string s2{reinterpret_cast<const char *>(r2.file.bytes.data()), r2.file.bytes.size()};
+    auto sp2 = r2.file.bytes.span();
+    std::string s2{reinterpret_cast<const char *>(sp2.data()), sp2.size()};
     REQUIRE(s2 == "second contents");
+}
+
+TEST_CASE("FilesystemProjectFs ByteBuffer outlives rescan", "[viewer][filesystem_project_fs]") {
+    TempProject tp{"buffer_outlives_rescan"};
+    tp.writeFile("scene.toml", "snapshot");
+    FilesystemProjectFs fs{tp.root};
+
+    auto buf = fs.resolve("scene.toml").file.bytes;
+    fs.rescan();
+
+    auto sp = buf.span();
+    std::string s{reinterpret_cast<const char *>(sp.data()), sp.size()};
+    REQUIRE(s == "snapshot");
+}
+
+TEST_CASE("FilesystemProjectFs repeated resolves return distinct buffers",
+          "[viewer][filesystem_project_fs]") {
+    TempProject tp{"distinct_resolves"};
+    tp.writeFile("scene.toml", "x");
+    FilesystemProjectFs fs{tp.root};
+
+    auto a = fs.resolve("scene.toml").file.bytes;
+    auto b = fs.resolve("scene.toml").file.bytes;
+    REQUIRE(a.span().data() != b.span().data());
 }
 
 TEST_CASE("FilesystemProjectFs subdir span excludes grandchildren when followed by a sibling",

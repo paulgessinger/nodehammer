@@ -42,9 +42,10 @@ struct BuildSession::Impl {
     std::string error;
     std::vector<std::string> missing;
 
-    /// Bytes-by-key collected during the walk. Owning copies so the App
-    /// can keep them alive past a project mutation if it needs to.
-    std::unordered_map<std::string, std::vector<std::byte>> bytes_by_key;
+    /// Bytes-by-key collected during the walk. Each value is a
+    /// `ByteBuffer` handle — refcounted, so the bytes survive a project
+    /// mutation even if the backend drops its own reference.
+    std::unordered_map<std::string, ByteBuffer> bytes_by_key;
 
     /// Keys to attempt to resolve next. Populated initially with the
     /// config + input keys; expanded as configs land and their includes
@@ -159,11 +160,13 @@ void BuildSession::poll(ProjectFs *project) {
         auto result = project->resolve(key);
         switch (result.status) {
         case ResolveStatus::Ready: {
-            // Copy bytes — project's storage may move on the next mutation.
-            std::vector<std::byte> owned(result.file.bytes.begin(), result.file.bytes.end());
+            // The ByteBuffer pins the bytes by refcount; they stay
+            // valid even if the backend later replaces or drops its
+            // own reference.
+            auto buf = result.file.bytes;
             // Discover and enqueue nested includes for any TOML key.
             if (isTomlKey(key)) {
-                auto rels = ConfigLoader::peekIncludesFromBytes(std::span<const std::byte>{owned});
+                auto rels = ConfigLoader::peekIncludesFromBytes(buf.span());
                 for (const auto &rel : rels) {
                     auto abs = ConfigLoader::resolveIncludeKey(key, rel);
                     if (impl_->seen.insert(abs).second) {
@@ -171,7 +174,7 @@ void BuildSession::poll(ProjectFs *project) {
                     }
                 }
             }
-            impl_->bytes_by_key.emplace(key, std::move(owned));
+            impl_->bytes_by_key.emplace(key, std::move(buf));
             break;
         }
         case ResolveStatus::Pending:
@@ -217,11 +220,10 @@ void BuildSession::poll(ProjectFs *project) {
         if (it == impl_->bytes_by_key.end()) {
             return std::nullopt;
         }
-        return std::span<const std::byte>{it->second};
+        return it->second.span();
     };
 
-    auto cfg = ConfigLoader::parseAndMerge(std::span<const std::byte>{cfg_it->second},
-                                           impl_->config_key, fetcher);
+    auto cfg = ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
     if (cfg.diags.hasErrors()) {
         impl_->error = "config parse failed";
         for (const auto &d : cfg.diags.items()) {
@@ -234,8 +236,7 @@ void BuildSession::poll(ProjectFs *project) {
         return;
     }
 
-    auto imp = FlatBufferImporter::importFromBytes(impl_->geometry_key,
-                                                   std::span<const std::byte>{in_it->second});
+    auto imp = FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
     if (imp.diags.hasErrors()) {
         impl_->error = "geometry import failed";
         for (const auto &d : imp.diags.items()) {

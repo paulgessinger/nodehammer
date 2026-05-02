@@ -18,6 +18,7 @@ add_executable(nodehammer_tests
     export/test_semantic_exporter_registry.cpp
     viewer/test_bag_project_fs.cpp
     viewer/test_build_session.cpp
+    viewer/test_byte_buffer.cpp
     test_markup.cpp
     test_timing.cpp
 )

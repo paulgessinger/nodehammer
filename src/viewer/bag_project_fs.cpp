@@ -26,9 +26,10 @@ std::string asciiLowerCopy(std::string_view s) {
 struct BagProjectFs::Impl {
     /// Bytes-by-key storage. Keys are case-folded filenames so drops with
     /// mismatched casing line up with config includes that use a canonical
-    /// spelling. Values are owning vectors — `resolve` returns spans into
-    /// them, valid until the next mutation.
-    std::unordered_map<std::string, std::vector<std::byte>> bytes_by_key;
+    /// spelling. Values are `ByteBuffer` handles — `resolve` returns a
+    /// copy (refcount bump). Replacement on `addBytes` swaps in a new
+    /// handle; consumers holding the previous one keep their bytes alive.
+    std::unordered_map<std::string, ByteBuffer> bytes_by_key;
 
     /// Per-file display entries, in addition order. The bag debug panel
     /// renders this; App scans it to identify root config + geometry.
@@ -75,11 +76,15 @@ struct BagProjectFs::Impl {
     }
 
     void store(std::string_view filename, std::span<const std::byte> bytes) {
+        store(filename, std::vector<std::byte>{bytes.begin(), bytes.end()});
+    }
+
+    void store(std::string_view filename, std::vector<std::byte> bytes) {
         const auto key = asciiLowerCopy(filename);
         if (auto it = bytes_by_key.find(key); it != bytes_by_key.end()) {
             warning_msgs.emplace_back("replaced " + std::string{filename});
         }
-        bytes_by_key[key] = std::vector<std::byte>{bytes.begin(), bytes.end()};
+        bytes_by_key[key] = ByteBuffer{std::move(bytes)};
     }
 };
 
@@ -153,10 +158,8 @@ std::span<const DirNode> BagProjectFs::list(std::string_view dir) const {
 ResolveResult BagProjectFs::resolve(std::string_view key) const {
     const auto exact = asciiLowerCopy(key);
     if (auto it = impl_->bytes_by_key.find(exact); it != impl_->bytes_by_key.end()) {
-        return ResolveResult{ResolveStatus::Ready,
-                             OpenedFile{std::string{key}, std::span<const std::byte>{it->second}},
-                             {},
-                             {}};
+        return ResolveResult{
+            ResolveStatus::Ready, OpenedFile{std::string{key}, it->second}, {}, {}};
     }
     // Subdir fallback: the bag has no directory structure today, so
     // includes like `subdir/foo.toml` collapse to their basename. Stage 3+
@@ -167,10 +170,7 @@ ResolveResult BagProjectFs::resolve(std::string_view key) const {
         const auto fb = asciiLowerCopy(basename);
         if (auto it = impl_->bytes_by_key.find(fb); it != impl_->bytes_by_key.end()) {
             return ResolveResult{
-                ResolveStatus::Ready,
-                OpenedFile{std::string{key}, std::span<const std::byte>{it->second}},
-                {},
-                {}};
+                ResolveStatus::Ready, OpenedFile{std::string{key}, it->second}, {}, {}};
         }
     }
     return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
@@ -197,8 +197,9 @@ void BagProjectFs::addPath(const std::filesystem::path &path) {
         return;
     }
     const auto filename = path.filename().string();
-    impl_->store(filename, contents);
-    impl_->recordOrReplaceEntry(filename, contents.size());
+    const auto size = contents.size();
+    impl_->store(filename, std::move(contents));
+    impl_->recordOrReplaceEntry(filename, size);
     ++impl_->generation;
 }
 

@@ -39,8 +39,8 @@ struct UrlProjectFs::Impl {
 
     struct Entry {
         State state{State::InFlight};
-        std::vector<std::byte> bytes; // valid when Ready
-        std::string error;            // when Failed
+        ByteBuffer bytes;  // populated when Ready (refcount handle)
+        std::string error; // when Failed
         std::uint64_t bytes_done{0};
         std::uint64_t bytes_total{0};
         bool failed_visible{false}; // mirrors `failed` in ProjectProgress
@@ -150,8 +150,9 @@ void UrlProjectFs::Impl::onSuccess(emscripten_fetch_t *fetch) {
     const auto size = static_cast<std::size_t>(fetch->numBytes);
     if (it != self->entries.end()) {
         auto &e = *it->second;
-        e.bytes.assign(reinterpret_cast<const std::byte *>(fetch->data),
-                       reinterpret_cast<const std::byte *>(fetch->data) + size);
+        std::vector<std::byte> buf(reinterpret_cast<const std::byte *>(fetch->data),
+                                   reinterpret_cast<const std::byte *>(fetch->data) + size);
+        e.bytes = ByteBuffer{std::move(buf)};
         e.bytes_done = static_cast<std::uint64_t>(size);
         if (e.bytes_total == 0) {
             e.bytes_total = e.bytes_done;
@@ -260,10 +261,7 @@ ResolveResult UrlProjectFs::resolve(std::string_view key) const {
 
     switch (entry->state) {
     case Impl::State::Ready:
-        return ResolveResult{ResolveStatus::Ready,
-                             OpenedFile{canonical, std::span<const std::byte>{entry->bytes}},
-                             {},
-                             {}};
+        return ResolveResult{ResolveStatus::Ready, OpenedFile{canonical, entry->bytes}, {}, {}};
     case Impl::State::InFlight:
         return ResolveResult{ResolveStatus::Pending, {}, {}, {}};
     case Impl::State::Failed:

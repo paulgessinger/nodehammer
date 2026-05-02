@@ -75,11 +75,6 @@ struct FilesystemProjectFs::Impl {
     mutable std::unordered_map<std::string, std::vector<DirNode>> dir_cache;
     mutable std::mutex dir_cache_mu;
 
-    /// Lazily-populated byte cache. Spans handed out from `resolve`
-    /// point into these vectors, valid until the next generation bump.
-    mutable std::unordered_map<std::string, std::vector<std::byte>> byte_cache;
-    mutable std::mutex byte_cache_mu;
-
     /// Walk `root / dir_key` once and return its immediate children
     /// (directories + regular files), sorted alphabetically. Hidden
     /// entries are filtered per `options.skip_hidden_files`.
@@ -216,21 +211,11 @@ ResolveResult FilesystemProjectFs::resolve(std::string_view key) const {
     if (impl_->options.skip_hidden_files && hasHiddenSegment(rel)) {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }
-    auto norm = rel.generic_string();
 
     auto abs = impl_->root / rel;
     std::error_code ec;
     if (!std::filesystem::is_regular_file(abs, ec)) {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
-    }
-
-    std::lock_guard<std::mutex> lk(impl_->byte_cache_mu);
-    if (auto cached = impl_->byte_cache.find(norm); cached != impl_->byte_cache.end()) {
-        return ResolveResult{
-            ResolveStatus::Ready,
-            OpenedFile{std::string{key}, std::span<const std::byte>{cached->second}},
-            {},
-            {}};
     }
 
     std::vector<std::byte> bytes;
@@ -239,11 +224,8 @@ ResolveResult FilesystemProjectFs::resolve(std::string_view key) const {
     } catch (const std::exception &e) {
         return ResolveResult{ResolveStatus::Error, {}, std::string{key}, e.what()};
     }
-    auto [ins, _] = impl_->byte_cache.emplace(norm, std::move(bytes));
-    return ResolveResult{ResolveStatus::Ready,
-                         OpenedFile{std::string{key}, std::span<const std::byte>{ins->second}},
-                         {},
-                         {}};
+    return ResolveResult{
+        ResolveStatus::Ready, OpenedFile{std::string{key}, ByteBuffer{std::move(bytes)}}, {}, {}};
 }
 
 std::uint64_t FilesystemProjectFs::generation() const { return impl_->generation; }
@@ -275,10 +257,6 @@ std::span<const DirNode> FilesystemProjectFs::list(std::string_view dir) const {
 }
 
 void FilesystemProjectFs::rescan() {
-    {
-        std::lock_guard<std::mutex> lk(impl_->byte_cache_mu);
-        impl_->byte_cache.clear();
-    }
     {
         std::lock_guard<std::mutex> lk(impl_->dir_cache_mu);
         impl_->dir_cache.clear();
