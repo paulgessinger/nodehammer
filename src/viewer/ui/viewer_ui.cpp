@@ -10,6 +10,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <cfloat>
 
 namespace nodehammer::viewer::ui {
@@ -20,39 +21,44 @@ constexpr const char *kProjectWindowName = "Project";
 constexpr const char *kStatusWindowName = "Status";
 constexpr const char *kDebugWindowName = "Debug";
 constexpr const char *kViewWindowName = "View";
+constexpr float kDefaultSidebarWidth = 300.f;
+
+float menuBarHeight() {
+    const ImGuiStyle &style = ImGui::GetStyle();
+    return ImGui::GetFrameHeight() + style.WindowPadding.y * 2.f;
+}
 
 void buildDefaultDockLayout(ImGuiID dockspace_id, const ImVec2 &size) {
     ImGui::DockBuilderRemoveNode(dockspace_id);
-    ImGui::DockBuilderAddNode(dockspace_id);
+    ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
     ImGui::DockBuilderSetNodeSize(dockspace_id, size);
 
     ImGuiID main_id = dockspace_id;
-    const ImGuiID left_id =
-        ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Left, 0.25f, nullptr, &main_id);
-    const ImGuiID right_id =
-        ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Right, 0.25f, nullptr, &main_id);
-    const ImGuiID bottom_id =
-        ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Down, 0.25f, nullptr, &main_id);
+    const float sidebar_fraction =
+        size.x > kDefaultSidebarWidth ? kDefaultSidebarWidth / size.x : 0.35f;
+    const ImGuiID project_id =
+        ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Left, sidebar_fraction, nullptr, &main_id);
+    const ImGuiID right_stack_id =
+        ImGui::DockBuilderSplitNode(main_id, ImGuiDir_Right, sidebar_fraction, nullptr, &main_id);
 
-    ImGui::DockBuilderDockWindow(kProjectWindowName, left_id);
-    ImGui::DockBuilderDockWindow(kStatusWindowName, bottom_id);
-    ImGui::DockBuilderDockWindow(kDebugWindowName, right_id);
-    ImGui::DockBuilderDockWindow(kViewWindowName, right_id);
+    ImGuiID middle_right_id = right_stack_id;
+    const ImGuiID debug_id =
+        ImGui::DockBuilderSplitNode(middle_right_id, ImGuiDir_Up, 0.25f, nullptr, &middle_right_id);
+    const ImGuiID status_id = ImGui::DockBuilderSplitNode(middle_right_id, ImGuiDir_Down, 0.30f,
+                                                          nullptr, &middle_right_id);
+
+    ImGui::DockBuilderDockWindow(kProjectWindowName, project_id);
+    ImGui::DockBuilderDockWindow(kDebugWindowName, debug_id);
+    ImGui::DockBuilderDockWindow(kViewWindowName, middle_right_id);
+    ImGui::DockBuilderDockWindow(kStatusWindowName, status_id);
     ImGui::DockBuilderFinish(dockspace_id);
 }
 
-void renderDockspace(UiState &state, const ViewerUiContext &ctx) {
+void renderDockspace(UiState &state) {
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    ImVec2 pos = viewport->WorkPos;
-    ImVec2 size = viewport->WorkSize;
-
-    const auto &chrome = ctx.platform_window_state.chrome;
-    if (chrome.titlebar_transparent && chrome.traffic_lights_overlap_content) {
-        pos.x += chrome.content_left_inset;
-        pos.y += chrome.content_top_inset;
-        size.x -= chrome.content_left_inset;
-        size.y -= chrome.content_top_inset;
-    }
+    const float top_offset = menuBarHeight();
+    const ImVec2 pos{viewport->WorkPos.x, viewport->WorkPos.y + top_offset};
+    const ImVec2 size{viewport->WorkSize.x, std::max(0.f, viewport->WorkSize.y - top_offset)};
 
     ImGui::SetNextWindowPos(pos);
     ImGui::SetNextWindowSize(size);
@@ -110,8 +116,7 @@ void renderDragOverlay(const ViewerUiContext &ctx) {
 } // namespace
 
 void renderViewerUi(UiState &state, const ViewerUiContext &ctx, const UiActions &actions) {
-    renderMenuBar(state, ctx, actions);
-    renderDockspace(state, ctx);
+    renderDockspace(state);
 
     if (state.show_project) {
         renderProjectPanel(&state.show_project, ctx, actions);
@@ -126,6 +131,7 @@ void renderViewerUi(UiState &state, const ViewerUiContext &ctx, const UiActions 
         renderDebugPanel(&state.show_debug, ctx, actions);
     }
 
+    renderMenuBar(state, ctx, actions);
     renderDragOverlay(ctx);
 }
 

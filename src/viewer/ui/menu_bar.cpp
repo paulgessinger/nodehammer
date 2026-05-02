@@ -7,7 +7,30 @@
 namespace nodehammer::viewer::ui {
 
 void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &actions) {
-    if (!ImGui::BeginMainMenuBar()) {
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
+    const ImGuiStyle &style = ImGui::GetStyle();
+    const float height = ImGui::GetFrameHeight() + style.WindowPadding.y * 2.f;
+
+    ImGui::SetNextWindowPos(viewport->WorkPos);
+    ImGui::SetNextWindowSize({viewport->WorkSize.x, height});
+    ImGui::SetNextWindowViewport(viewport->ID);
+
+    constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
+                                        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                        ImGuiWindowFlags_NoScrollbar |
+                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+    const bool window_open = ImGui::Begin("Nodehammer Menu Bar", nullptr, kFlags);
+    ImGui::PopStyleVar(2);
+    if (!window_open) {
+        ImGui::End();
+        return;
+    }
+
+    if (!ImGui::BeginMenuBar()) {
+        ImGui::End();
         return;
     }
 
@@ -35,6 +58,14 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
         ImGui::MenuItem("Status", nullptr, &state.show_status);
         ImGui::MenuItem("View Controls", nullptr, &state.show_view);
         ImGui::MenuItem("Debug", nullptr, &state.show_debug);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Reset layout")) {
+            state.show_project = true;
+            state.show_status = true;
+            state.show_view = true;
+            state.show_debug = true;
+            state.dockspace_built = false;
+        }
         ImGui::EndMenu();
     }
 
@@ -47,7 +78,8 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
         }
     }
 
-    ImGui::EndMainMenuBar();
+    ImGui::EndMenuBar();
+    ImGui::End();
 }
 
 } // namespace nodehammer::viewer::ui

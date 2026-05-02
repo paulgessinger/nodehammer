@@ -23,7 +23,7 @@ inline constexpr bool kIsWeb = false;
 struct WindowCustomizationRequest {
     std::string persistence_id{"nodehammer.viewer.window"};
     bool restore_placement{true};
-    bool hide_titlebar_chrome{true};
+    bool hide_titlebar_chrome{false};
     bool track_drag_hover{true};
     bool track_platform_gestures{true};
 };
