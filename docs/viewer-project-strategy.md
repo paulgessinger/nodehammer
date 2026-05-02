@@ -16,6 +16,10 @@ The viewer already has the right shape for this work; what's missing is mostly
 a write path, a unified hierarchical listing model, an editor surface, and a
 few mode-transition rules.
 
+**Status:** Step 1 of §12 (hierarchical lazy `list(dir)` redesign) has landed.
+`DirNode::children` is gone; backends maintain per-directory caches keyed by
+`generation()`; the App's tree panel recurses via `project_->list(node.key)`.
+
 ### Existing `ProjectFs` surface (relevant parts)
 
 ```
@@ -32,8 +36,8 @@ rescan()                                               // force re-walk
 | Backend                  | Source              | `addPath/Bytes` | `list`         | `rescan`        | Notes                                                                  |
 | ------------------------ | ------------------- | --------------- | -------------- | --------------- | ---------------------------------------------------------------------- |
 | `BagProjectFs`           | drops + picks       | accept          | flat snapshot  | no-op           | last-write-wins on basename collision; in-memory only                  |
-| `FilesystemProjectFs`    | on-disk dir         | reject (no-op)  | full recursive | re-walks + bumps `generation()` | bytes cached on first `resolve`                                        |
-| `UrlProjectFs` (web)     | `emscripten_fetch`  | reject          | flat manifest  | no-op           | lazy fetch on first `resolve`                                          |
+| `FilesystemProjectFs`    | on-disk dir         | reject (no-op)  | lazy per-dir   | drops per-dir caches + bumps `generation()` | reads from disk on every `resolve`; OS page cache handles repeats |
+| `UrlProjectFs` (web)     | `emscripten_fetch`  | reject          | lazy per-prefix | no-op          | lazy fetch on first `resolve`; fetched bytes are the storage           |
 
 ### Decoration discipline (already documented)
 
@@ -74,14 +78,34 @@ consumed via the same interface — no API churn at the App boundary.
    on native it persists into the app data folder, on web into IndexedDB.
    `resolve` reads from that storage. Persistence is a property of the
    storage backend, not a separate concern bolted on top.
-3. **Hierarchy is the universal listing model.** All backends expose a
+3. **The storage layer is the cache.** Backends backed by a real storage
+   tier (filesystem, native bag's storage dir) do **not** keep an
+   in-memory byte cache on top — the OS page cache already does that
+   job. Backends without a cheap re-read (URL fetch results; ZIP entries
+   that paid a decompression cost) keep what they need resident, but
+   only for that reason.
+4. **`ResolveResult` carries a `ByteBuffer`, not a span.** `ByteBuffer`
+   is a thin wrapper around a `std::shared_ptr<const std::vector<std::byte>>`
+   exposing only a read-only `span()`. Storage-backed backends allocate
+   a fresh vector per `resolve()` call; cache-backed backends (URL,
+   `ZipWorkingSet`) share their cached vector by refcount-bump — same
+   `ByteBuffer` shape, no API split. Consumers (BuildSession, editor)
+   hold a `ByteBuffer` for as long as they need; the buffer survives
+   any backend mutation because the `shared_ptr` keeps it alive even
+   after the cache slot drops its own reference. The editor
+   copy-on-writes into its own mutable buffer when the user starts
+   editing, dropping its `ByteBuffer` handle once it owns a private
+   copy. A future memory-mapped backend can plug a custom deleter into
+   the same `shared_ptr` shape (munmap on last release) without touching
+   any caller.
+5. **Hierarchy is the universal listing model.** All backends expose a
    tree. Flat backends are simply trees that are one level deep. Lazy
    expansion is part of the contract so large filesystems and archives
    don't pay full-walk cost up front.
-4. **Each backend owns its own save semantics.** No unified overlay layer.
+6. **Each backend owns its own save semantics.** No unified overlay layer.
    Filesystem saves individual files; bag has no save target other than
    archive export; archive (native) saves in place; URL is read-only.
-5. **Mode transitions are explicit `setProject` swaps.** Promotions are
+7. **Mode transitions are explicit `setProject` swaps.** Promotions are
    user-initiated and irreversible within a session, with the previous
    project's relevant state migrated into the new one before installing.
 
@@ -127,9 +151,11 @@ behavior; only the backing store differs.
 - **Drops / picks**: `addPath` copies the source file into the storage
   dir (atomic temp + rename); `addBytes` writes a new file into the
   storage dir. Both bump `generation()`.
-- **Resolve**: opens the file from the storage dir. Same lazy
-  read-and-cache shape as `FilesystemProjectFs` — they share most of
-  their resolve/list implementation.
+- **Resolve**: opens the file from the storage dir on every call. Same
+  shape as `FilesystemProjectFs` — no in-memory byte cache; the OS page
+  cache handles repeats, and the BuildSession / editor copy bytes into
+  their own buffers anyway. They share most of their resolve/list
+  implementation.
 - **Persistence**: by virtue of writing through, the bag survives across
   app launches. A small session-id slot in `~/.../nodehammer/state.json`
   remembers which storage dir is the "current bag" so relaunch can
@@ -612,45 +638,76 @@ directory's cached entries. The UI re-fetches lazily on next render.
 
 ## 12. Recommended build order
 
-Each step is independently shippable and lights up real user value.
+Each step is independently shippable and lights up real user value. Editor
+work is deliberately deferred to the end — the project-organization layer
+(backends, mode transitions, save/export, watcher) gets to settle first
+without an editor sitting on top of churning APIs.
 
-1. **Hierarchical lazy `list(dir)` redesign** — port the three existing
-   backends (bag, filesystem, URL) onto the lazy per-dir API. This is a
-   prerequisite for the editor's "show icons for all visible files" and
-   for archive/bag-web's synthesized hierarchy.
-2. **Editor windows + per-key dirty buffers** (no save yet) —
-   establishes the edit UX shape across all modes. Reads via `resolve()`,
-   writes nowhere.
+1. ✅ **Hierarchical lazy `list(dir)` redesign** — port the three existing
+   backends (bag, filesystem, URL) onto the lazy per-dir API. Prerequisite
+   for archive/bag-web's synthesized hierarchy and for the eventual
+   editor's "show icons for all visible files".
+2. **Introduce `ByteBuffer` and drop the filesystem byte cache** —
+   add a `ByteBuffer` type that wraps a
+   `std::shared_ptr<const std::vector<std::byte>>` and exposes a
+   read-only `span()`. Switch `ResolveResult::OpenedFile` to carry a
+   `ByteBuffer` instead of a backend-owned span. `FilesystemProjectFs`
+   reads from disk on every `resolve()` (no in-memory byte cache; OS
+   page cache handles repeats) and wraps the fresh vector in a new
+   `ByteBuffer`. URL and ZIP-backed cache slots store
+   `shared_ptr<const vector>` directly so `resolve()` becomes a refcount
+   bump on cache hits. Consumers (BuildSession; future editor) hold a
+   `ByteBuffer` for as long as they need; the buffer survives any
+   backend mutation. The editor copy-on-writes into its own mutable
+   buffer when the user starts editing, dropping the `ByteBuffer` once
+   it owns a private copy. Locks in the §2 principle that "the storage
+   layer is the cache" so when `NativeBagProjectFs` lands
+   storage-backed, no separate cache layer needs reinventing.
 3. **`NativeBagProjectFs` (storage dir + write-through `add`)** — port
-   the existing `BagProjectFs` so drops and editor commits both flow
-   through `add(FileInput)` and persist to the storage dir. Editor
-   commits route via `App::commitEdit`, bypassing `planAdd`.
-4. **Filesystem `add` policy + per-window ⌘S save** — `planAdd` returns
-   Accept only for keys that already exist on disk (so editor saves
-   work, raw drops onto FS mode are still rejected); ⌘S calls
-   `commitEdit`, which writes through to disk.
-5. **`WatchedFilesystemProjectFs` decorator** + rebuild-on-change. Closes
-   the loop for the canonical dev flow.
-6. **`ZipWorkingSet` helper (§6.5)** — miniz integration: open from
+   the existing `BagProjectFs` so drops persist to a per-app storage
+   directory. Shares the resolve/list implementation with
+   `FilesystemProjectFs` (no extra cache layer, per step 2). `add`
+   replace-on-collision semantics already cover what the future editor
+   commit path will need.
+4. **`WatchedFilesystemProjectFs` decorator** + rebuild-on-change.
+   Closes the loop for the canonical dev flow (edit on disk → viewer
+   re-walks). Invalidates the per-dir lazy cache for the affected
+   directory and bumps `generation()`.
+5. **`ZipWorkingSet` helper (§6.5)** — miniz integration: open from
    bytes / open from file path, lazy `read(key)`, in-memory overrides
-   via `writeEntry`, `serialize()` for save/export. No `ProjectFs`
+   via `writeEntry`, `serialize()` for save/export. Keeps decompressed
+   entries hot (decompression cost, not IO cost, is what justifies the
+   cache here — consistent with the §2 principle). No `ProjectFs`
    bindings yet — this is just the substrate. Tested directly.
-7. **`ArchiveProjectFs` (native)** — thin wrapper around `ZipWorkingSet`
+6. **`ArchiveProjectFs` (native)** — thin wrapper around `ZipWorkingSet`
    opened from a file path. `Save` calls `serialize()` and writes
    atomically (temp + fsync + rename). `Save as archive…` is the same
    path with a different destination.
-8. **`App::saveAsArchive` for non-archive modes** — walks the project
+7. **`App::saveAsArchive` for non-archive modes** — walks the project
    via `list()`/`resolve()` into a fresh `ZipWorkingSet`, calls
    `serialize()`, and writes natively or triggers a browser download.
    "Reopen as archive?" follow-up on native (works from filesystem,
    bag, and archive — symmetric).
-9. **`WebBagProjectFs` (ZIP-in-IDB)** — wraps `ZipWorkingSet` opened
-   from bytes loaded out of IDB. `add` and editor commits go to
-   `writeEntry`; debounced `serialize()` writes the blob back to IDB.
-   "Download archive" reuses the same blob — no separate path. Replaces
-   today's web bag flow entirely.
-10. **URL manifest reload semantics + `beforeunload` warning** — lands
+8. **`WebBagProjectFs` (ZIP-in-IDB)** — wraps `ZipWorkingSet` opened
+   from bytes loaded out of IDB. `add` goes to `writeEntry`; debounced
+   `serialize()` writes the blob back to IDB. "Download archive" reuses
+   the same blob — no separate path. Replaces today's web bag flow
+   entirely.
+9. **URL manifest reload semantics + `beforeunload` warning** — lands
     alongside web bag persistence (they share IDB scoping logic).
+10. **Editor windows + per-key dirty buffers** (no save yet) —
+    establishes the edit UX shape across all modes that now exist.
+    Reads via `resolve()` (copying immediately, per the tightened
+    lifetime), writes nowhere. Deliberately lands after all storage
+    backends so the editor isn't dragged through their churn.
+11. **Editor commit path: per-window ⌘S save + filesystem `add`
+    policy** — `App::commitEdit` calls `add` directly (no `planAdd`
+    gate, the user gave consent by pressing save). Filesystem's
+    `planAdd` returns Accept only for keys that already exist on disk
+    (so editor saves work, raw drops onto FS mode stay rejected). Bag
+    and archive backends commit via the same `add` surface; the bag
+    overwrites in its storage dir, archive writes to its working set
+    and waits for the user-initiated `Save`.
 
 ---
 
