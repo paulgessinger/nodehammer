@@ -39,7 +39,6 @@ struct BuildSession::Impl {
     std::string config_key;
     std::string geometry_key;
     BuildPhase phase{BuildPhase::Idle};
-    std::string error;
     std::vector<std::string> missing;
 
     /// Bytes-by-key collected during the walk. Each value is a
@@ -72,7 +71,6 @@ struct BuildSession::Impl {
         work_queue.clear();
         seen.clear();
         missing.clear();
-        error.clear();
         inputs.reset();
         if (config_key.empty() || geometry_key.empty()) {
             phase = BuildPhase::Idle;
@@ -107,8 +105,6 @@ std::span<const std::string> BuildSession::missing() const {
     return {impl_->missing.data(), impl_->missing.size()};
 }
 
-const std::string &BuildSession::errorMessage() const { return impl_->error; }
-
 std::unique_ptr<BuildSessionInputs> BuildSession::takeInputs() {
     if (impl_->phase != BuildPhase::ResolvedReady || !impl_->inputs) {
         return nullptr;
@@ -142,6 +138,11 @@ void BuildSession::poll(ProjectFs *project) {
     if (impl_->phase != BuildPhase::Walking) {
         return;
     }
+
+    auto enter_error = [&](std::string msg) {
+        impl_->phase = BuildPhase::Error;
+        pushError(std::move(msg));
+    };
 
     // One-pass attempt to drain the work queue. Pending keys go to the
     // back; if any remain pending after a full pass, we yield. Missing/
@@ -189,8 +190,7 @@ void BuildSession::poll(ProjectFs *project) {
             retry.push_back(key);
             break;
         case ResolveStatus::Error:
-            impl_->error = result.error.empty() ? ("resolve failed: " + key) : result.error;
-            impl_->phase = BuildPhase::Error;
+            enter_error(result.error.empty() ? ("resolve failed: " + key) : result.error);
             return;
         }
     }
@@ -210,8 +210,7 @@ void BuildSession::poll(ProjectFs *project) {
     auto cfg_it = impl_->bytes_by_key.find(impl_->config_key);
     auto in_it = impl_->bytes_by_key.find(impl_->geometry_key);
     if (cfg_it == impl_->bytes_by_key.end() || in_it == impl_->bytes_by_key.end()) {
-        impl_->error = "internal: bytes missing for known root keys";
-        impl_->phase = BuildPhase::Error;
+        enter_error("internal: bytes missing for known root keys");
         return;
     }
 
@@ -224,28 +223,38 @@ void BuildSession::poll(ProjectFs *project) {
     };
 
     auto cfg = ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
+    for (const auto &d : cfg.diags.items()) {
+        if (d.severity < DiagnosticSeverity::Error) {
+            pushWarning(d.message);
+        }
+    }
     if (cfg.diags.hasErrors()) {
-        impl_->error = "config parse failed";
+        std::string first = "config parse failed";
         for (const auto &d : cfg.diags.items()) {
             if (d.severity >= DiagnosticSeverity::Error) {
-                impl_->error = d.message;
+                first = d.message;
                 break;
             }
         }
-        impl_->phase = BuildPhase::Error;
+        enter_error(std::move(first));
         return;
     }
 
     auto imp = FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
+    for (const auto &d : imp.diags.items()) {
+        if (d.severity < DiagnosticSeverity::Error) {
+            pushWarning(d.message);
+        }
+    }
     if (imp.diags.hasErrors()) {
-        impl_->error = "geometry import failed";
+        std::string first = "geometry import failed";
         for (const auto &d : imp.diags.items()) {
             if (d.severity >= DiagnosticSeverity::Error) {
-                impl_->error = d.message;
+                first = d.message;
                 break;
             }
         }
-        impl_->phase = BuildPhase::Error;
+        enter_error(std::move(first));
         return;
     }
 

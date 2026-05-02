@@ -78,6 +78,9 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     }
 
     viewer::BuildSession session;
+    CapturingLogSink session_diags;
+    session.setLogSink(&session_diags);
+    bag.setLogSink(&session_diags);
     session.setRootKeys(config_key, geometry_key);
 
     while (true) {
@@ -87,8 +90,9 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
             break;
         }
         if (phase == viewer::BuildPhase::Error) {
-            result.diags.error(codes::kErrImportFormatUnknown, session.errorMessage(),
-                               geometry_path.string());
+            const auto msg = session_diags.hasErrors() ? session_diags.errors().front()
+                                                       : std::string{"build session failed"};
+            result.diags.error(codes::kErrImportFormatUnknown, msg, geometry_path.string());
             return result;
         }
         if (phase == viewer::BuildPhase::WaitingForUser) {

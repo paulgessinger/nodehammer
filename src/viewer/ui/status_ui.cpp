@@ -77,8 +77,7 @@ void renderStatusWindow(bool *open, const ViewerUiContext &ctx, const UiActions 
                 }
             } else if (ctx.build_session.phase() == BuildPhase::Error) {
                 show_drag_hint = false;
-                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Build session error:");
-                ImGui::TextWrapped("%s", ctx.build_session.errorMessage().c_str());
+                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Build session error");
             }
 
             if (has_files) {

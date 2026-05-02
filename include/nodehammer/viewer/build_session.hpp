@@ -2,6 +2,7 @@
 
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/ir/semantic/importer.hpp>
+#include <nodehammer/log_sink.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <cstdint>
@@ -25,7 +26,7 @@ enum class BuildPhase {
     WaitingForUser, ///< at least one key is Missing — surface in UI; session holds
     ResolvedReady,  ///< all bytes resolved and parsed; consume via `takeInputs()`
     Consumed,       ///< inputs handed to the App; await invalidation
-    Error,          ///< hard failure (parse error, fetch error, etc.); see `errorMessage()`
+    Error,          ///< hard failure (parse error, fetch error, etc.); message went to the sink
 };
 
 /// Inputs to `SceneBuildJob::start` produced by a successful walk +
@@ -51,10 +52,10 @@ struct BuildSessionInputs {
 /// session in `Walking`; the next poll re-tries. This is what lets the
 /// URL backend's lazy fetches work without the session owning any
 /// fetch logic itself.
-class BuildSession {
+class BuildSession : public LogSinkHolder {
   public:
     BuildSession();
-    ~BuildSession();
+    ~BuildSession() override;
 
     BuildSession(const BuildSession &) = delete;
     BuildSession &operator=(const BuildSession &) = delete;
@@ -84,8 +85,6 @@ class BuildSession {
     /// Error). Empty during normal operation; populated when
     /// `phase() == WaitingForUser` or `Error`.
     std::span<const std::string> missing() const;
-
-    const std::string &errorMessage() const;
 
     /// Move the resolved inputs out of the session. Only valid when
     /// `phase() == ResolvedReady`; transitions to `Consumed`. Returns

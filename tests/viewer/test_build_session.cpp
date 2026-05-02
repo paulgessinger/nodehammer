@@ -152,6 +152,8 @@ TEST_CASE("BuildSession enters Error on malformed FlatBuffer geometry", "[viewer
     bag->addBytes("scene.nhb.zst", stringBytes("not a real flatbuffer payload"));
 
     BuildSession session;
+    CapturingLogSink sink;
+    session.setLogSink(&sink);
     session.setRootKeys("scene.toml", "scene.nhb.zst");
 
     for (int i = 0; i < kPollBudget; ++i) {
@@ -162,5 +164,5 @@ TEST_CASE("BuildSession enters Error on malformed FlatBuffer geometry", "[viewer
     }
 
     REQUIRE(session.phase() == BuildPhase::Error);
-    REQUIRE_FALSE(session.errorMessage().empty());
+    REQUIRE(sink.hasErrors());
 }

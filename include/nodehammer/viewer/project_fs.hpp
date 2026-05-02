@@ -9,8 +9,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <vector>
 
 namespace nodehammer::viewer {
 
@@ -95,9 +93,9 @@ struct ProjectDropDecision {
 /// `App::project()` per frame / per event — never cache a `ProjectFs*` as
 /// a member, because cached pointers from before an upgrade would bypass
 /// the wrapping decorator and silently miss its state.
-class ProjectFs {
+class ProjectFs : public LogSinkHolder {
   public:
-    virtual ~ProjectFs() = default;
+    ~ProjectFs() override = default;
     ProjectFs() = default;
     ProjectFs(const ProjectFs &) = delete;
     ProjectFs &operator=(const ProjectFs &) = delete;
@@ -110,33 +108,6 @@ class ProjectFs {
 
     virtual ProjectFsStatus status() const = 0;
     virtual std::span<const ProjectProgress> progress() const = 0;
-
-    /// Wire the diagnostic sink. Sink lifetime must outlive this filesystem
-    /// (the App owns both the sink and the filesystem, so this is naturally
-    /// satisfied). `nullptr` is fine — subsystems that have no sink stay
-    /// silent and only `status()` reflects error state. Virtual so backends
-    /// with async callbacks (UrlProjectFs's emscripten_fetch onError) can
-    /// mirror the pointer into their Impl where the static callback runs.
-    ///
-    /// On a non-null sink, any diagnostics that subclasses pushed before the
-    /// sink was wired (typically constructor-time failures) flush in order.
-    /// This is what closes the "ctor runs before setLogSink" hole — backends
-    /// just call `pushError`/`pushWarning` and the base does the right thing.
-    virtual void setLogSink(LogSink *sink) noexcept {
-        log_sink_ = sink;
-        if (sink == nullptr) {
-            return;
-        }
-        for (const auto &d : pending_diags_) {
-            if (d.kind == PendingDiag::Kind::Error) {
-                sink->error(d.msg);
-            } else {
-                sink->warning(d.msg);
-            }
-        }
-        pending_diags_.clear();
-        pending_diags_.shrink_to_fit();
-    }
 
     /// Short human-readable backend identifier for debug UI ("bag",
     /// "url", future "archive"/"watched"/"overlay"). No leading caps —
@@ -211,44 +182,6 @@ class ProjectFs {
     /// in-memory backends (bag, URL) have nothing to refresh. Bumps
     /// `generation()` if the backend has anything cached.
     virtual void rescan() {}
-
-  protected:
-    /// Push diagnostics from subclasses. Forwards to the wired `LogSink`
-    /// when one is present, otherwise buffers until `setLogSink` lands.
-    /// This lets constructors emit diagnostics even though the App wires
-    /// the sink only after construction. Bounded buffer (`kPendingCap`):
-    /// excess diagnostics are dropped silently — backends emit at most a
-    /// handful per failure path so this never trips in practice.
-    void pushError(std::string msg) {
-        if (log_sink_ != nullptr) {
-            log_sink_->error(msg);
-            return;
-        }
-        if (pending_diags_.size() < kPendingCap) {
-            pending_diags_.push_back({PendingDiag::Kind::Error, std::move(msg)});
-        }
-    }
-    void pushWarning(std::string msg) {
-        if (log_sink_ != nullptr) {
-            log_sink_->warning(msg);
-            return;
-        }
-        if (pending_diags_.size() < kPendingCap) {
-            pending_diags_.push_back({PendingDiag::Kind::Warning, std::move(msg)});
-        }
-    }
-
-  private:
-    struct PendingDiag {
-        enum class Kind { Warning, Error };
-        Kind kind;
-        std::string msg;
-    };
-
-    static constexpr std::size_t kPendingCap = 64;
-
-    LogSink *log_sink_{nullptr};
-    std::vector<PendingDiag> pending_diags_;
 };
 
 } // namespace nodehammer::viewer

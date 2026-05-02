@@ -254,6 +254,7 @@ void App::Impl::onInit() {
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     ui::Notifications::initializeFonts();
     project_->setLogSink(&notifications);
+    build_session.setLogSink(&notifications);
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
