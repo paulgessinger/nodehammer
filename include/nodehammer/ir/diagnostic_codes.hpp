@@ -21,6 +21,7 @@ inline constexpr std::string_view kErrNegativeTolerance = "NH0003";
 inline constexpr std::string_view kErrMissingOutputPath = "NH0004";
 inline constexpr std::string_view kWarnConfigUnknownKey = "NH0005";
 inline constexpr std::string_view kWarnConfigEmptyScope = "NH0006";
+inline constexpr std::string_view kWarnConfigUnconditionalMaterialRule = "NH0007";
 
 // ── Import (general) ──────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrImportFileNotFound = "NH0100";

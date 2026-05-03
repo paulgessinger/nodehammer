@@ -15,6 +15,7 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
         definedMaterials.insert(mat.name);
     }
 
+    bool sawEarlierMaterialRule = false;
     for (const auto &rule : cfg.rules) {
         // Every referenced material must be defined.
         if (rule.material.has_value() && !definedMaterials.contains(*rule.material)) {
@@ -28,6 +29,22 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
             diags.error(codes::kErrNegativeTolerance,
                         std::format("rule max_segments_circle must be > 0, got {}",
                                     *rule.tessellation->maxSegmentsCircle));
+        }
+
+        // A rule with material set but no match predicate matches every node.
+        // Combined with material's last-match-wins resolution, it silently
+        // shadows every earlier `material` rule (e.g. those merged from
+        // included files). This is almost always unintended.
+        if (rule.material.has_value() && !rule.match.has_value() && sawEarlierMaterialRule) {
+            diags.warn(codes::kWarnConfigUnconditionalMaterialRule,
+                       std::format("rule sets material = '{}' with no match predicate; "
+                                   "it will shadow every earlier material rule "
+                                   "(material resolution is last-match-wins). "
+                                   "Add a `match` predicate to scope it.",
+                                   *rule.material));
+        }
+        if (rule.material.has_value()) {
+            sawEarlierMaterialRule = true;
         }
     }
 
