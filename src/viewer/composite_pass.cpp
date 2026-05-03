@@ -51,8 +51,8 @@ void CompositePass::release() {
     initialized_ = false;
 }
 
-void CompositePass::draw(const SceneRenderTarget &target, DebugView mode, float near_plane,
-                         float far_plane) {
+void CompositePass::draw(const SceneRenderTarget &target, const RenderQualitySettings &quality,
+                         float near_plane, float far_plane) {
     if (!initialized_ || target.color.id == SG_INVALID_ID) {
         return;
     }
@@ -67,13 +67,21 @@ void CompositePass::draw(const SceneRenderTarget &target, DebugView mode, float 
     sg_apply_bindings(&bind);
 
     composite_composite_params_t params{};
-    params.mode_near_far[0] = static_cast<float>(static_cast<int>(mode));
+    params.mode_near_far[0] = static_cast<float>(static_cast<int>(quality.debug_view));
     params.mode_near_far[1] = near_plane;
     params.mode_near_far[2] = far_plane;
     // Flip V on top-left-origin backends (Metal/D3D/WGPU). GL backends
     // (GLCore/GLES3) share the texture's bottom-left origin with the
     // framebuffer NDC y, so the sampled image is already right-side up.
     params.mode_near_far[3] = sg_query_features().origin_top_left ? 1.0f : 0.0f;
+
+    const float inv_w = (target.width > 0) ? 1.0f / static_cast<float>(target.width) : 0.0f;
+    const float inv_h = (target.height > 0) ? 1.0f / static_cast<float>(target.height) : 0.0f;
+    params.fxaa_params[0] = quality.enable_fxaa ? 1.0f : 0.0f;
+    params.fxaa_params[1] = inv_w;
+    params.fxaa_params[2] = inv_h;
+    params.fxaa_params[3] = 0.0f;
+
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);
 

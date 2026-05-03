@@ -85,16 +85,24 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ctx.quality.debug_view = static_cast<DebugView>(debug_idx);
         }
 
-        // The remaining controls advertise the plumbing for HDR/FXAA/MSAA/
-        // bloom/render-scale that lands in later phases. Disabled today so
-        // they show what's coming without misleading the user.
+        // FXAA is live; greyed out only while a depth debug view is active
+        // because the composite FS short-circuits FXAA in those modes.
+        {
+            const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
+            ImGui::BeginDisabled(depth_debug);
+            ImGui::Checkbox("FXAA", &ctx.quality.enable_fxaa);
+            ImGui::SetItemTooltip("Fast Approximate Anti-Aliasing (post-process)");
+            ImGui::EndDisabled();
+        }
+
+        // The remaining controls advertise the plumbing for HDR/MSAA/bloom/
+        // render-scale that lands in later phases. Disabled today so they
+        // show what's coming without misleading the user.
         ImGui::BeginDisabled(true);
         ImGui::SliderFloat("render scale", &ctx.quality.render_scale, 0.5f, 2.0f, "%.2fx");
         ImGui::Checkbox("HDR", &ctx.quality.enable_hdr);
         ImGui::SameLine();
         ImGui::Checkbox("tonemap", &ctx.quality.enable_tonemap);
-        ImGui::SameLine();
-        ImGui::Checkbox("FXAA", &ctx.quality.enable_fxaa);
         ImGui::Checkbox("bloom", &ctx.quality.enable_bloom);
         ImGui::SliderInt("MSAA", &ctx.quality.msaa_samples, 1, 8);
         ImGui::SliderInt("IBL quality", &ctx.quality.ibl_quality, 0, 3);

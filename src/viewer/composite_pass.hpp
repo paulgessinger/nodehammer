@@ -29,8 +29,11 @@ class CompositePass {
 
     /// Issue the composite draw inside the currently-bound pass. The caller
     /// supplies camera near/far so the linearized-depth view can map to a
-    /// uniform [0,1] gradient.
-    void draw(const SceneRenderTarget &target, DebugView mode, float near_plane, float far_plane);
+    /// uniform [0,1] gradient. `quality` carries the debug-view selector and
+    /// FXAA toggle; future composite-FS features (tonemap, dither) plug in
+    /// here without further signature churn.
+    void draw(const SceneRenderTarget &target, const RenderQualitySettings &quality,
+              float near_plane, float far_plane);
 
   private:
     sg_shader shader_{};

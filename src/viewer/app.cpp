@@ -670,7 +670,7 @@ void App::Impl::render() {
     swap_pass.label = "swapchain_pass";
     sg_begin_pass(&swap_pass);
 
-    composite.draw(scene_rt, quality.debug_view, camera.near_plane, camera.far_plane);
+    composite.draw(scene_rt, quality, camera.near_plane, camera.far_plane);
     ImGui_ImplSokol_Render();
 
     sg_end_pass();

@@ -40,6 +40,10 @@ layout(binding=0) uniform composite_params {
     //     texture origin convention differs — without this flag the
     //     composited image is upside-down on top-left-origin backends.
     vec4 mode_near_far;
+    // x = enable_fxaa (0.0 or 1.0), y = 1/render_width, z = 1/render_height,
+    // w = reserved. Appended at the end so existing offsets stay stable
+    // under std140 — sokol-shdc regenerates the C struct in lockstep.
+    vec4 fxaa_params;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -64,6 +68,56 @@ float linearize_reversed_z(float d, float n, float f) {
     return (n * f) / (n + d * (f - n));
 }
 
+// FXAA 3.11 console-quality variant. Five luma taps (center + 4 corners) +
+// edge-direction blend + two final taps. Green-channel luma is the LDR-sRGB
+// approximation from NVIDIA's reference console path; revisit for proper
+// rec.709 luma when HDR/tonemap lands (strategy step 6).
+const float FXAA_EDGE_THRESHOLD     = 0.125;   // 1/8: skip flat regions
+const float FXAA_EDGE_THRESHOLD_MIN = 0.0625;  // 1/16: skip dark noise
+const float FXAA_SPAN_MAX           = 8.0;
+
+vec3 fxaa(vec2 uv, vec2 inv_res) {
+    vec3 rgb_m  = texture(sampler2D(scene_color, smp_color), uv).rgb;
+    vec3 rgb_nw = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2(-1, -1)).rgb;
+    vec3 rgb_ne = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2( 1, -1)).rgb;
+    vec3 rgb_sw = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2(-1,  1)).rgb;
+    vec3 rgb_se = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2( 1,  1)).rgb;
+
+    float luma_m  = rgb_m.g;
+    float luma_nw = rgb_nw.g;
+    float luma_ne = rgb_ne.g;
+    float luma_sw = rgb_sw.g;
+    float luma_se = rgb_se.g;
+
+    float luma_min = min(luma_m, min(min(luma_nw, luma_ne), min(luma_sw, luma_se)));
+    float luma_max = max(luma_m, max(max(luma_nw, luma_ne), max(luma_sw, luma_se)));
+    float range    = luma_max - luma_min;
+
+    if (range < max(FXAA_EDGE_THRESHOLD_MIN, luma_max * FXAA_EDGE_THRESHOLD)) {
+        return rgb_m;
+    }
+
+    vec2 dir;
+    dir.x = -((luma_nw + luma_ne) - (luma_sw + luma_se));
+    dir.y =  ((luma_nw + luma_sw) - (luma_ne + luma_se));
+
+    float dir_reduce = max((luma_nw + luma_ne + luma_sw + luma_se) * 0.25 * 0.5, 1.0/128.0);
+    float rcp_dir_min = 1.0 / (min(abs(dir.x), abs(dir.y)) + dir_reduce);
+    dir = clamp(dir * rcp_dir_min, vec2(-FXAA_SPAN_MAX), vec2(FXAA_SPAN_MAX)) * inv_res;
+
+    vec3 rgb_a = 0.5 * (
+        texture(sampler2D(scene_color, smp_color), uv + dir * (1.0/3.0 - 0.5)).rgb +
+        texture(sampler2D(scene_color, smp_color), uv + dir * (2.0/3.0 - 0.5)).rgb);
+    vec3 rgb_b = rgb_a * 0.5 + 0.25 * (
+        texture(sampler2D(scene_color, smp_color), uv + dir * -0.5).rgb +
+        texture(sampler2D(scene_color, smp_color), uv + dir *  0.5).rgb);
+
+    // If the second-pass luma escapes the corner range, the edge direction
+    // was too oblique — fall back to the first-pass blend.
+    float luma_b = rgb_b.g;
+    return (luma_b < luma_min || luma_b > luma_max) ? rgb_a : rgb_b;
+}
+
 void main() {
     int mode = int(mode_near_far.x);
     float flip_v = mode_near_far.w;
@@ -78,6 +132,8 @@ void main() {
         float zv = linearize_reversed_z(d, n, f);
         float t = clamp((zv - n) / (f - n), 0.0, 1.0);
         frag_color = vec4(vec3(t), 1.0);
+    } else if (fxaa_params.x > 0.5) {
+        frag_color = vec4(fxaa(uv, fxaa_params.yz), 1.0);
     } else {
         frag_color = texture(sampler2D(scene_color, smp_color), uv);
     }
