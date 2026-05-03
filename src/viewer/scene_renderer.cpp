@@ -576,10 +576,9 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     std::memcpy(vs_params.view_proj, glm::value_ptr(view_proj), sizeof(vs_params.view_proj));
     // Log depth (see useLogDepth) overrides gl_Position.z in the VS to give
     // near-uniform precision on backends where reversed-Z doesn't work
-    // (GLES3 today). The XY/W components of the projection are still used,
-    // so the projection itself is the standard non-reversed perspective —
-    // already what useReversedZ()==false produces above.
-    const bool log_depth = useLogDepth();
+    // (GLES3 today). It depends on perspective clip W as a view-distance
+    // proxy, so keep orthographic on the backend's normal depth path.
+    const bool log_depth = useLogDepth() && camera.projection == ProjectionMode::Perspective;
     vs_params.depth_params[0] = log_depth ? 1.0f : 0.0f;
     vs_params.depth_params[1] = camera.far_plane;
     vs_params.depth_params[2] = 0.0f;

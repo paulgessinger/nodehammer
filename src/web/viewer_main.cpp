@@ -46,8 +46,8 @@ constexpr std::array<std::string_view, 17> kKnownOptionKeys = {
     "pbr",       "input",      "config",   "assetBase",      "camera",
 };
 
-constexpr std::array<std::string_view, 6> kKnownCameraKeys = {
-    "targetX", "targetY", "targetZ", "distance", "yawDeg", "pitchDeg",
+constexpr std::array<std::string_view, 7> kKnownCameraKeys = {
+    "targetX", "targetY", "targetZ", "distance", "yawDeg", "pitchDeg", "projection",
 };
 
 template <std::size_t N>
@@ -108,6 +108,14 @@ std::optional<nodehammer::viewer::Camera> parseCamera(const nlohmann::json &j) {
     }
     cam.yaw = glm::radians(c["yawDeg"].get<float>());
     cam.pitch = glm::radians(c["pitchDeg"].get<float>());
+    if (auto proj = c.find("projection"); proj != c.end() && proj->is_string()) {
+        const auto value = proj->get<std::string>();
+        if (value == "orthographic" || value == "ortho") {
+            cam.projection = nodehammer::viewer::ProjectionMode::Orthographic;
+        } else if (value == "perspective") {
+            cam.projection = nodehammer::viewer::ProjectionMode::Perspective;
+        }
+    }
     return cam;
 }
 

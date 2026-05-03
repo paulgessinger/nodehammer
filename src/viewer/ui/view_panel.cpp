@@ -72,6 +72,14 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
 
     ImGui::Separator();
     ImGui::Checkbox("PBR / IBL", &ctx.cfg.enable_pbr);
+    int projection_idx = ctx.camera.projection == ProjectionMode::Orthographic ? 1 : 0;
+    if (ImGui::RadioButton("perspective", &projection_idx, 0)) {
+        ctx.camera.projection = ProjectionMode::Perspective;
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("orthographic", &projection_idx, 1)) {
+        ctx.camera.projection = ProjectionMode::Orthographic;
+    }
     ImGui::Text("Camera: yaw=%.1f pitch=%.1f dist=%.2f", glm::degrees(ctx.camera.yaw),
                 glm::degrees(ctx.camera.pitch), ctx.camera.distance);
     ImGui::Text("        near=%.3f far=%.1f", ctx.camera.near_plane, ctx.camera.far_plane);

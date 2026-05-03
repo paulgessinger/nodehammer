@@ -46,6 +46,10 @@ bool Camera::sanitize() {
     yaw = wrapPi(yaw);
     pitch = std::clamp(finiteOr(pitch, 0.f), -k_pitch_limit, k_pitch_limit);
 
+    if (projection != ProjectionMode::Perspective && projection != ProjectionMode::Orthographic) {
+        projection = ProjectionMode::Perspective;
+    }
+
     fov_deg = std::clamp(finiteOr(fov_deg, 55.f), k_fov_min_deg, k_fov_max_deg);
 
     near_plane = std::max(finiteOr(near_plane, 0.05f), k_min_near);
@@ -55,8 +59,8 @@ bool Camera::sanitize() {
     }
 
     return target != before.target || distance != before.distance || yaw != before.yaw ||
-           pitch != before.pitch || fov_deg != before.fov_deg || near_plane != before.near_plane ||
-           far_plane != before.far_plane;
+           pitch != before.pitch || projection != before.projection || fov_deg != before.fov_deg ||
+           near_plane != before.near_plane || far_plane != before.far_plane;
 }
 
 glm::vec3 Camera::eye() const {
@@ -72,7 +76,14 @@ glm::mat4 Camera::view() const { return glm::lookAt(eye(), target, glm::vec3{0.f
 
 glm::mat4 Camera::proj(float aspect, bool homogeneous_depth, bool reversed_z) const {
     const float f = glm::radians(fov_deg);
-    glm::mat4 p = glm::perspective(f, aspect, near_plane, far_plane);
+    glm::mat4 p(1.f);
+    if (projection == ProjectionMode::Orthographic) {
+        const float half_height = std::max(distance * std::tan(0.5f * f), k_min_distance);
+        const float half_width = half_height * aspect;
+        p = glm::ortho(-half_width, half_width, -half_height, half_height, near_plane, far_plane);
+    } else {
+        p = glm::perspective(f, aspect, near_plane, far_plane);
+    }
     if (!homogeneous_depth) {
         // Convert from [-1, 1] to [0, 1] depth: z' = (z + 1) / 2.
         const glm::mat4 remap = {

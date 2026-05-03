@@ -4,6 +4,11 @@
 
 namespace nodehammer::viewer {
 
+enum class ProjectionMode {
+    Perspective,
+    Orthographic,
+};
+
 /// Simple orbit / arc-ball camera. State is the spherical coordinate around a
 /// target point; view/proj matrices are derived on demand. Designed for
 /// inspection of a static scene rather than first-person navigation.
@@ -13,6 +18,7 @@ namespace nodehammer::viewer {
 ///   distance   — finite, > 0
 ///   yaw        — finite, normalized to (-π, π]
 ///   pitch      — finite, in (-pitch_limit, +pitch_limit) (~±89°)
+///   projection — perspective or orthographic
 ///   fov_deg    — finite, in (1, 179)
 ///   near_plane — finite, > 0
 ///   far_plane  — finite, > near_plane
@@ -26,6 +32,7 @@ struct Camera {
     float distance{10.f};
     float yaw{0.f};   // radians; rotation around world Y
     float pitch{0.f}; // radians; rotation around camera-right axis
+    ProjectionMode projection{ProjectionMode::Perspective};
     float fov_deg{55.f};
     float near_plane{0.05f};
     float far_plane{1000.f};

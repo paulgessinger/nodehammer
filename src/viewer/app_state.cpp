@@ -41,6 +41,26 @@ void readFloat(const toml::table &tbl, std::string_view key, float &out) {
 
 toml::array vec3ToArray(const glm::vec3 &v) { return toml::array{v.x, v.y, v.z}; }
 
+const char *projectionModeName(ProjectionMode mode) {
+    switch (mode) {
+    case ProjectionMode::Perspective:
+        return "perspective";
+    case ProjectionMode::Orthographic:
+        return "orthographic";
+    }
+    return "perspective";
+}
+
+void readProjectionMode(const toml::table &tbl, std::string_view key, ProjectionMode &out) {
+    if (auto value = tbl[key].value<std::string>()) {
+        if (*value == "orthographic" || *value == "ortho") {
+            out = ProjectionMode::Orthographic;
+        } else if (*value == "perspective") {
+            out = ProjectionMode::Perspective;
+        }
+    }
+}
+
 std::optional<glm::vec3> parseVec3(const toml::array &arr) {
     if (arr.size() != 3) {
         return std::nullopt;
@@ -71,6 +91,7 @@ toml::table cameraToTable(const Camera &camera) {
         {"distance", camera.distance},
         {"yaw_deg", glm::degrees(camera.yaw)},
         {"pitch_deg", glm::degrees(camera.pitch)},
+        {"projection", projectionModeName(camera.projection)},
         {"fov_deg", camera.fov_deg},
         {"near_plane", camera.near_plane},
         {"far_plane", camera.far_plane},
@@ -103,6 +124,7 @@ std::optional<Camera> parseCamera(const toml::table &tbl) {
     } else {
         return std::nullopt;
     }
+    readProjectionMode(tbl, "projection", camera.projection);
     readFloat(tbl, "fov_deg", camera.fov_deg);
     readFloat(tbl, "near_plane", camera.near_plane);
     readFloat(tbl, "far_plane", camera.far_plane);

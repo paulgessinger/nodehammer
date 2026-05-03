@@ -111,6 +111,13 @@
                 }
             }
 
+            function setStringOpt(opts, queryName, optKey) {
+                var value = params.get(queryName);
+                if (value !== null && value !== '') {
+                    opts[optKey] = value;
+                }
+            }
+
             // Backend selection: WebGPU when available, WebGL2 otherwise.
             // Force a specific backend with ?backend=wgpu/webgpu or
             // ?backend=gles3/webgl2.
@@ -169,7 +176,10 @@
             setNumberOpt(camera, 'cameraDistance', 'distance');
             setNumberOpt(camera, 'cameraYaw', 'yawDeg');
             setNumberOpt(camera, 'cameraPitch', 'pitchDeg');
-            if (Object.keys(camera).length === 6) {
+            setStringOpt(camera, 'cameraProjection', 'projection');
+            if (camera.targetX !== undefined && camera.targetY !== undefined &&
+                camera.targetZ !== undefined && camera.distance !== undefined &&
+                camera.yawDeg !== undefined && camera.pitchDeg !== undefined) {
                 viewerOpts.camera = camera;
             }
 

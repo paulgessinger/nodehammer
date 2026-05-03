@@ -23,6 +23,7 @@ TEST_CASE("viewer config state round-trips through TOML") {
     camera.distance = 42.f;
     camera.yaw = glm::half_pi<float>();
     camera.pitch = -0.25f;
+    camera.projection = ProjectionMode::Orthographic;
     camera.fov_deg = 45.f;
     camera.near_plane = 0.1f;
     camera.far_plane = 500.f;
@@ -55,6 +56,7 @@ TEST_CASE("viewer config state round-trips through TOML") {
     CHECK(restored_camera.distance == camera.distance);
     CHECK(restored_camera.yaw == Catch::Approx(camera.yaw));
     CHECK(restored_camera.pitch == Catch::Approx(camera.pitch));
+    CHECK(restored_camera.projection == camera.projection);
     CHECK(restored_camera.fov_deg == camera.fov_deg);
     CHECK(restored_camera.near_plane == camera.near_plane);
     CHECK(restored_camera.far_plane == camera.far_plane);

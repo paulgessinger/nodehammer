@@ -697,6 +697,9 @@ std::string App::Impl::browserUrlStateQuery() const {
     appendUrlParam(query, "cameraDistance", formatUrlFloat(camera.distance));
     appendUrlParam(query, "cameraYaw", formatUrlFloat(glm::degrees(camera.yaw)));
     appendUrlParam(query, "cameraPitch", formatUrlFloat(glm::degrees(camera.pitch)));
+    if (camera.projection == ProjectionMode::Orthographic) {
+        appendUrlParam(query, "cameraProjection", "orthographic");
+    }
     return query;
 }
 
@@ -706,7 +709,8 @@ void App::Impl::syncBrowserUrl() const {
         constexpr const char *kManagedKeys =
             "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
             "cutEnd,"
-            "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
+            "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch,"
+            "cameraProjection";
         platform_->commitUrlState(state_query, kManagedKeys);
     }
 }
