@@ -184,6 +184,13 @@ struct App::Impl {
     uint64_t last_time{0};
     double delta_seconds{0.0};
 
+    // Sokol-time stamp of the last user-input-class event. Drives the
+    // idle-throttle decision: a recent input keeps us at full vsync
+    // rate even when the OS reports the window as backgrounded, so
+    // scroll-wheel control and the drag overlay stay reactive. 0 means
+    // "no input observed yet" — treated as idle.
+    uint64_t last_activity_time{0};
+
     uint64_t frame_count{0};
     uint64_t fps_window_start{0};
     float fps{0.f};
@@ -208,6 +215,7 @@ struct App::Impl {
 
     void classifyScroll(float scroll_x, float scroll_y);
     void handleScrollEvent(const sapp_event *ev, bool imgui_handled);
+    [[nodiscard]] bool shouldThrottleIdle() const;
     void updateCameraInput();
     void applyInitialCamera();
     void render();
@@ -296,6 +304,34 @@ void App::Impl::onEvent(const sapp_event *ev) {
         // on web). Lives in platform-specific code.
         platform_->dispatchDroppedFiles();
     }
+
+    // Anything that looks like the user poking at the window bumps the
+    // activity clock — the frame loop reads this to stay at full rate
+    // while interactive, even when another window owns focus.
+    switch (ev->type) {
+    case SAPP_EVENTTYPE_MOUSE_MOVE:
+    case SAPP_EVENTTYPE_MOUSE_DOWN:
+    case SAPP_EVENTTYPE_MOUSE_UP:
+    case SAPP_EVENTTYPE_MOUSE_SCROLL:
+    case SAPP_EVENTTYPE_MOUSE_ENTER:
+    case SAPP_EVENTTYPE_MOUSE_LEAVE:
+    case SAPP_EVENTTYPE_KEY_DOWN:
+    case SAPP_EVENTTYPE_KEY_UP:
+    case SAPP_EVENTTYPE_CHAR:
+    case SAPP_EVENTTYPE_TOUCHES_BEGAN:
+    case SAPP_EVENTTYPE_TOUCHES_MOVED:
+    case SAPP_EVENTTYPE_TOUCHES_ENDED:
+    case SAPP_EVENTTYPE_TOUCHES_CANCELLED:
+    case SAPP_EVENTTYPE_FILES_DROPPED:
+    case SAPP_EVENTTYPE_FOCUSED:
+    case SAPP_EVENTTYPE_RESTORED:
+    case SAPP_EVENTTYPE_RESUMED:
+    case SAPP_EVENTTYPE_RESIZED:
+        last_activity_time = stm_now();
+        break;
+    default:
+        break;
+    }
 }
 
 void App::Impl::classifyScroll(float scroll_x, float scroll_y) {
@@ -353,6 +389,42 @@ void App::Impl::handleScrollEvent(const sapp_event *ev, bool imgui_handled) {
     pending_scroll_x += ev->scroll_x;
     pending_scroll_y += ev->scroll_y;
     pending_scroll_modifiers = ev->modifiers;
+}
+
+bool App::Impl::shouldThrottleIdle() const {
+    if (!cfg.pause_when_unfocused) {
+        return false;
+    }
+    // Foreground stays at vsync. Throttling here would add a frame of
+    // latency on first interaction for no real power saving — vsync
+    // already idles the GPU when nothing is changing.
+    if (window_focused && window_visible) {
+        return false;
+    }
+    // Backgrounded but the user is still interacting. Scroll events,
+    // mouse moves, and keyboard input fire even when another window
+    // owns focus, and onEvent bumps last_activity_time for them — so
+    // a recent bump means the user is driving the camera (or typing
+    // into ImGui) and we should keep up at full rate.
+    constexpr double kIdleAfterInputSeconds = 1.0;
+    if (last_activity_time != 0 &&
+        stm_sec(stm_diff(stm_now(), last_activity_time)) < kIdleAfterInputSeconds) {
+        return false;
+    }
+    // OS-level drag hover. Set asynchronously by AppKit / browser DOM
+    // callbacks (not gated on the frame loop running), so reading the
+    // platform's internal state here picks up "files are dragging
+    // over" before we'd otherwise tick a throttled frame to notice.
+    if (platform_ && platform_->windowState().drag_hover.active) {
+        return false;
+    }
+    // TODO: in-app animation hook. When something like cfg.auto_orbit
+    // is producing motion of its own we want to keep the loop at full
+    // rate even with no user input. Today auto_orbit only ticks
+    // inside onFrame so a throttled frame would still advance the
+    // camera at 2 Hz; once the animation system grows beyond a single
+    // toggle, wire its "is running" signal in here.
+    return true;
 }
 
 void App::Impl::updateCameraInput() {
@@ -612,6 +684,13 @@ void App::Impl::renderActiveModal() {
 }
 
 void App::Impl::onFrame() {
+    // Resolve idle-mode once per frame: shouldThrottleIdle reads
+    // event-loop state (input timestamp, focus, drag hover) that
+    // doesn't change during onFrame, so a single read is fine. Used
+    // by the gate below to either throttle the visible frame to a
+    // heartbeat (jobs running) or skip it entirely (truly idle).
+    const bool idle = shouldThrottleIdle();
+
     // Drive the procedural IBL bake to completion. On native this is a
     // single-flag poll (the bake runs on a worker thread); on web this
     // spends up to ~8 ms doing pixel work on the main thread. We don't
@@ -726,16 +805,34 @@ void App::Impl::onFrame() {
         // build job already has the paths it needs; nothing else to do.
     }
 
-    // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
-    // entirely. Full pause was visible as "drag-and-drop into a
-    // background viewer feels broken": the drop event fired and the
-    // async project/scene-build state advanced, but no frame rendered the
-    // result until focus returned. 5 Hz keeps drag-over feedback and
-    // load progress visible while still cutting GPU cost ~12x vs. the
-    // active 60 Hz path. The flag's URL/persistence name stays
-    // `pauseWhenUnfocused` for backwards compatibility.
-    if (cfg.pause_when_unfocused && (!window_focused || !window_visible)) {
-        constexpr double kIdleFrameInterval = 0.5; // 2 Hz
+    // Idle gate, with a dynamic cadence based on whether there's
+    // anything that wants visible progress. Two cases:
+    //
+    //  • Jobs in flight (bake / build / GPU upload / config walk):
+    //    redraw at ~30 Hz so progress toasts and the build → render
+    //    transition update smoothly. The IBL/build polls already
+    //    ran above with their default per-call budget; this gate
+    //    only governs the visible frame.
+    //
+    //  • Nothing pending: skip the visible frame entirely. On a
+    //    heavy ODD scene the render pass dominates idle GPU usage
+    //    on native — this gives effectively 0% GPU when the viewer
+    //    is parked in the background and there's nothing to show.
+    //
+    // Anything that wants full rate (input, drag hover, future
+    // animations) bypasses this gate via shouldThrottleIdle. Field/
+    // URL/CLI keep the `pauseWhenUnfocused` name for backwards
+    // compatibility even though the rule no longer keys on focus
+    // alone and the cadence is now dynamic.
+    if (idle) {
+        const auto session_phase = build_session.phase();
+        const bool jobs_running =
+            !ibl_installed || build_in_progress || (scene && !scene_uploaded) ||
+            session_phase == BuildPhase::Walking || session_phase == BuildPhase::ResolvedReady;
+        if (!jobs_running) {
+            return;
+        }
+        constexpr double kIdleFrameInterval = 1.0 / 30.0; // 30 Hz
         if (stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
             return;
         }

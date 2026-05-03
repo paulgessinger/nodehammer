@@ -75,7 +75,6 @@ void renderStatusWindow(bool *open, const ViewerUiContext &ctx, const UiActions 
         }
     } else if (!ctx.scene_uploaded) {
         ImGui::Text("Uploading scene to GPU...");
-        ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()), ImVec2(-1.f, 0.f), "");
     } else {
         ImGui::Text("Ready");
     }
