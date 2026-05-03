@@ -656,6 +656,7 @@ void App::Impl::onFrame() {
         auto built = build_job.take();
         for (const auto &d : built.diags.items()) {
             std::println(stderr, "scene_build: {} {}", d.code, d.message);
+            notifications.diagnostic(d);
         }
         if (built.scene) {
             const auto build_ms = std::chrono::duration<double, std::milli>(
@@ -671,6 +672,8 @@ void App::Impl::onFrame() {
             camera_framed = false;
             build_error.clear();
         } else {
+            // Errors are already surfaced as toasts via diagnostic() above;
+            // stash the first one for the persistent status-bar message.
             build_error = "scene build failed";
             for (const auto &d : built.diags.items()) {
                 if (d.severity >= DiagnosticSeverity::Error) {
@@ -678,7 +681,6 @@ void App::Impl::onFrame() {
                     break;
                 }
             }
-            notifications.error(build_error);
         }
         build_in_progress = false;
         // Project is long-lived: we keep it so additional drops/picks

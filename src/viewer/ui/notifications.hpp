@@ -1,5 +1,6 @@
 #pragma once
 
+#include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/log_sink.hpp>
 
 #include <string_view>
@@ -15,6 +16,8 @@ namespace nodehammer::viewer::ui {
 /// to receive backend warnings/errors as toasts.
 class Notifications : public LogSink {
   public:
+    constexpr static std::size_t kDefaultDuration = 3000;
+
     /// Installs the icon font into the global ImGui font atlas. Must run
     /// once during ImGui initialisation, before any frame.
     static void initializeFonts();
@@ -23,10 +26,18 @@ class Notifications : public LogSink {
     Notifications(const Notifications &) = delete;
     Notifications &operator=(const Notifications &) = delete;
 
-    void info(std::string_view message);
-    void success(std::string_view message);
+    void info(std::string_view message, std::size_t duration_ms = kDefaultDuration);
+    void success(std::string_view message, std::size_t duration_ms = kDefaultDuration);
     void warning(std::string_view message) override;
+    void warning(std::string_view message, std::size_t duration_ms);
     void error(std::string_view message) override;
+    void error(std::string_view message, std::size_t duration_ms);
+
+    /// Surface a diagnostic as a toast, mapping its severity to the
+    /// appropriate kind. The toast text is prefixed with the NH code
+    /// (e.g. "NH0007: rule sets material = 'support' …"). Info/Warning/
+    /// Error/Fatal map to info/warning/error toasts respectively.
+    void diagnostic(const Diagnostic &d);
 
     void render();
 };

@@ -7,14 +7,15 @@
 #include <ImGuiNotify.hpp>
 #include <fa-solid-900.h>
 
+#include <format>
 #include <string>
 
 namespace nodehammer::viewer::ui {
 namespace {
 
-void push(ImGuiToastType type, std::string_view message) {
+void push(ImGuiToastType type, std::string_view message, std::size_t duration_ms) {
     std::string copy{message};
-    ImGui::InsertNotification({type, 3000, "%s", copy.c_str()});
+    ImGui::InsertNotification({type, static_cast<int>(duration_ms), "%s", copy.c_str()});
 }
 
 } // namespace
@@ -34,13 +35,41 @@ void Notifications::initializeFonts() {
                                              &icons_config, kIconRanges);
 }
 
-void Notifications::info(std::string_view message) { push(ImGuiToastType::Info, message); }
+void Notifications::info(std::string_view message, std::size_t duration_ms) {
+    push(ImGuiToastType::Info, message, duration_ms);
+}
 
-void Notifications::success(std::string_view message) { push(ImGuiToastType::Success, message); }
+void Notifications::success(std::string_view message, std::size_t duration_ms) {
+    push(ImGuiToastType::Success, message, duration_ms);
+}
 
-void Notifications::warning(std::string_view message) { push(ImGuiToastType::Warning, message); }
+void Notifications::warning(std::string_view message) { warning(message, kDefaultDuration); }
 
-void Notifications::error(std::string_view message) { push(ImGuiToastType::Error, message); }
+void Notifications::warning(std::string_view message, std::size_t duration_ms) {
+    push(ImGuiToastType::Warning, message, duration_ms);
+}
+
+void Notifications::error(std::string_view message) { error(message, kDefaultDuration); }
+
+void Notifications::error(std::string_view message, std::size_t duration_ms) {
+    push(ImGuiToastType::Error, message, duration_ms);
+}
+
+void Notifications::diagnostic(const Diagnostic &d) {
+    const auto msg = std::format("{}: {}", d.code, d.message);
+    switch (d.severity) {
+    case DiagnosticSeverity::Info:
+        info(msg);
+        return;
+    case DiagnosticSeverity::Warning:
+        warning(msg);
+        return;
+    case DiagnosticSeverity::Error:
+    case DiagnosticSeverity::Fatal:
+        error(msg);
+        return;
+    }
+}
 
 void Notifications::render() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.f);
