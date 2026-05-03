@@ -9,7 +9,6 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
-#include <algorithm>
 #include <cfloat>
 
 namespace nodehammer::viewer::ui {
@@ -21,11 +20,6 @@ constexpr const char *kStatusWindowName = "Status";
 constexpr const char *kDebugWindowName = "Debug";
 constexpr const char *kViewWindowName = "View";
 constexpr float kDefaultSidebarWidth = 300.f;
-
-float menuBarHeight() {
-    const ImGuiStyle &style = ImGui::GetStyle();
-    return ImGui::GetFrameHeight() + style.WindowPadding.y * 2.f;
-}
 
 void buildDefaultDockLayout(ImGuiID dockspace_id, const ImVec2 &size) {
     ImGui::DockBuilderRemoveNode(dockspace_id);
@@ -55,9 +49,8 @@ void buildDefaultDockLayout(ImGuiID dockspace_id, const ImVec2 &size) {
 
 void renderDockspace(UiState &state) {
     const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    const float top_offset = menuBarHeight();
-    const ImVec2 pos{viewport->WorkPos.x, viewport->WorkPos.y + top_offset};
-    const ImVec2 size{viewport->WorkSize.x, std::max(0.f, viewport->WorkSize.y - top_offset)};
+    const ImVec2 pos = viewport->WorkPos;
+    const ImVec2 size = viewport->WorkSize;
 
     ImGui::SetNextWindowPos(pos);
     ImGui::SetNextWindowSize(size);

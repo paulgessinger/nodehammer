@@ -7,30 +7,7 @@
 namespace nodehammer::viewer::ui {
 
 void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &actions) {
-    const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    const ImGuiStyle &style = ImGui::GetStyle();
-    const float height = ImGui::GetFrameHeight() + style.WindowPadding.y * 2.f;
-
-    ImGui::SetNextWindowPos(viewport->WorkPos);
-    ImGui::SetNextWindowSize({viewport->WorkSize.x, height});
-    ImGui::SetNextWindowViewport(viewport->ID);
-
-    constexpr ImGuiWindowFlags kFlags = ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar |
-                                        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
-                                        ImGuiWindowFlags_NoScrollbar |
-                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_MenuBar;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
-    const bool window_open = ImGui::Begin("Nodehammer Menu Bar", nullptr, kFlags);
-    ImGui::PopStyleVar(2);
-    if (!window_open) {
-        ImGui::End();
-        return;
-    }
-
-    if (!ImGui::BeginMenuBar()) {
-        ImGui::End();
+    if (!ImGui::BeginMainMenuBar()) {
         return;
     }
 
@@ -78,8 +55,7 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
         }
     }
 
-    ImGui::EndMenuBar();
-    ImGui::End();
+    ImGui::EndMainMenuBar();
 }
 
 } // namespace nodehammer::viewer::ui
