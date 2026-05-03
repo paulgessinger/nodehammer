@@ -14,6 +14,7 @@ class ProjectFs;
 class SceneBuildJob;
 class SceneRenderer;
 struct Camera;
+struct IblSettings;
 
 namespace ui {
 
@@ -34,6 +35,7 @@ struct UiActions {
     std::function<void()> frame_scene;
     std::function<void()> close_project;
     std::function<void()> rescan_project;
+    std::function<void()> rebake_ibl;
     std::function<void(std::string)> select_config_key;
     std::function<void(std::string)> select_geometry_key;
 };
@@ -63,6 +65,7 @@ struct ViewerUiContext {
     bool scene_uploaded{false};
     bool build_in_progress{false};
     bool ibl_installed{false};
+    IblSettings *ibl_settings{nullptr};
 };
 
 } // namespace ui

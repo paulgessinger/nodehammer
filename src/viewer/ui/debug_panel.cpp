@@ -1,5 +1,6 @@
 #include "debug_panel.hpp"
 
+#include "../ibl.hpp"
 #include "notifications.hpp"
 
 #include <nodehammer/viewer/platform.hpp>
@@ -55,6 +56,25 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
     }
 
     ImGui::Checkbox("throttle when idle", &ctx.cfg.pause_when_unfocused);
+
+    if (ctx.ibl_settings != nullptr) {
+        ImGui::SeparatorText("IBL bake");
+        IblSettings &s = *ctx.ibl_settings;
+        ImGui::SliderInt("BRDF samples", &s.brdf_samples, 16, 4096);
+        ImGui::SliderInt("Irradiance samples", &s.irradiance_samples, 16, 4096);
+        ImGui::SliderInt("Prefilter samples", &s.prefilter_samples, 16, 2048);
+        ImGui::ColorEdit3("Zenith", &s.zenith_color.x);
+        ImGui::ColorEdit3("Horizon", &s.horizon_color.x);
+        ImGui::ColorEdit3("Ground", &s.ground_color.x);
+        ImGui::DragFloat3("Sun direction", &s.sun_dir.x, 0.01f, -1.f, 1.f);
+        ImGui::ColorEdit3("Sun color", &s.sun_color.x,
+                          ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+        ImGui::SliderFloat("Sun sharpness", &s.sun_sharpness, 1.f, 1024.f, "%.1f",
+                           ImGuiSliderFlags_Logarithmic);
+        if (ImGui::Button("Rebake IBL") && actions.rebake_ibl) {
+            actions.rebake_ibl();
+        }
+    }
 
     if (ctx.notifications != nullptr) {
         ImGui::SeparatorText("Notifications");

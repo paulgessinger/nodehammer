@@ -117,8 +117,14 @@ struct App::Impl {
 
     // Procedural IBL bake. Runs on the GPU in a single frame the first
     // time `onFrame` ticks; until then `scene_renderer` samples from 1×1
-    // dummy textures created by `IblResources::createDummy()`.
+    // dummy textures created by `IblResources::createDummy()`. The user
+    // can edit `ibl_settings` and click "Rebake IBL" — the action sets
+    // `ibl_rebake_pending` and onFrame consumes it on the next tick (a
+    // bake pass cannot be issued from inside the swapchain pass that
+    // hosts the UI draw).
     bool ibl_installed{false};
+    bool ibl_rebake_pending{false};
+    IblSettings ibl_settings{};
 
     // Off-loop scene tessellation. Native runs the build on a worker
     // thread so the UI stays smooth. Web defers the synchronous build by
@@ -678,14 +684,21 @@ void App::Impl::onFrame() {
     // swapchain pass that draws the scene. Same-frame ordering is fine:
     // sokol guarantees images written by an earlier pass are sampleable in
     // a later pass within the same frame.
-    if (!ibl_installed) {
+    if (!ibl_installed || ibl_rebake_pending) {
+        const bool first = !ibl_installed;
         const auto bake_start = std::chrono::steady_clock::now();
-        scene_renderer.installIbl(bakeIblGpu());
-        ibl_installed = true;
+        scene_renderer.installIbl(bakeIblGpu(ibl_settings));
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bake_start)
                 .count();
-        std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+        if (first) {
+            std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+        } else {
+            std::println("viewer: IBL rebake complete ({:.1f} ms)", elapsed_ms);
+            notifications.info("IBL rebake complete");
+        }
+        ibl_installed = true;
+        ibl_rebake_pending = false;
     }
 
     // Drive the off-loop tessellation. On native this is a poll of an
@@ -858,10 +871,12 @@ void App::Impl::onFrame() {
         .scene_uploaded = scene_uploaded,
         .build_in_progress = build_in_progress,
         .ibl_installed = ibl_installed,
+        .ibl_settings = &ibl_settings,
     };
 
     ui::UiActions ui_actions;
     ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
+    ui_actions.rebake_ibl = [this]() { ibl_rebake_pending = true; };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
     ui_actions.frame_scene = [this]() {

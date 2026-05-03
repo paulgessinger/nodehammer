@@ -1,5 +1,6 @@
 #pragma once
 
+#include <glm/vec3.hpp>
 #include <sokol_gfx.h>
 
 namespace nodehammer::viewer {
@@ -19,13 +20,30 @@ struct IblBakeData {
     int prefilter_mip_count{kPrefilterMips};
 };
 
+/// Tunable parameters fed to the bake shader at rebake time. Defaults match
+/// the original constants from the CPU bake — changing them changes the
+/// procedural sky environment that gets pre-integrated.
+struct IblSettings {
+    int brdf_samples{1024};       ///< GGX importance samples per BRDF LUT pixel
+    int irradiance_samples{1024}; ///< cosine-hemisphere samples per irradiance pixel
+    int prefilter_samples{256};   ///< GGX importance samples per prefilter pixel
+
+    glm::vec3 zenith_color{0.55f, 0.65f, 0.85f};  ///< soft daylight blue
+    glm::vec3 horizon_color{0.85f, 0.80f, 0.72f}; ///< warm haze
+    glm::vec3 ground_color{0.20f, 0.18f, 0.16f};  ///< dim ground
+
+    glm::vec3 sun_dir{0.4f, 0.7f, 0.6f};   ///< toward-sun direction (normalized in shader)
+    glm::vec3 sun_color{1.5f, 1.4f, 1.2f}; ///< HDR sun radiance
+    float sun_sharpness{64.0f};            ///< exponent — higher = tighter disk
+};
+
 /// Run all IBL bake passes synchronously and return the resulting GPU images.
 /// Must be called inside a sokol frame (between sg_begin_pass cycles, before
 /// any pass that samples from the result). Issues:
 ///   - 1 pass for the 256x256 BRDF LUT
 ///   - 6 passes for irradiance (one per cube face)
 ///   - 36 passes for prefilter (6 faces x 6 mips)
-[[nodiscard]] IblBakeData bakeIblGpu();
+[[nodiscard]] IblBakeData bakeIblGpu(const IblSettings &settings = {});
 
 /// Pre-baked image-based lighting resources for the procedural sky
 /// environment.

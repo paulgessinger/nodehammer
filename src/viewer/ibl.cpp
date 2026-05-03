@@ -72,9 +72,33 @@ void runPass(sg_view color_view, sg_pipeline pipe, sg_buffer vbuf, const sg_rang
     sg_end_pass();
 }
 
+ibl_bake_ibl_settings_t makeUniforms(const IblSettings &s, int face, float roughness, int samples) {
+    ibl_bake_ibl_settings_t u{};
+    u.face_rough_samples[0] = static_cast<float>(face);
+    u.face_rough_samples[1] = roughness;
+    u.face_rough_samples[2] = static_cast<float>(samples > 0 ? samples : 1);
+    u.zenith_color[0] = s.zenith_color.r;
+    u.zenith_color[1] = s.zenith_color.g;
+    u.zenith_color[2] = s.zenith_color.b;
+    u.horizon_color[0] = s.horizon_color.r;
+    u.horizon_color[1] = s.horizon_color.g;
+    u.horizon_color[2] = s.horizon_color.b;
+    u.ground_color[0] = s.ground_color.r;
+    u.ground_color[1] = s.ground_color.g;
+    u.ground_color[2] = s.ground_color.b;
+    u.sun_dir[0] = s.sun_dir.x;
+    u.sun_dir[1] = s.sun_dir.y;
+    u.sun_dir[2] = s.sun_dir.z;
+    u.sun_color[0] = s.sun_color.r;
+    u.sun_color[1] = s.sun_color.g;
+    u.sun_color[2] = s.sun_color.b;
+    u.sun_color[3] = s.sun_sharpness;
+    return u;
+}
+
 } // namespace
 
-IblBakeData bakeIblGpu() {
+IblBakeData bakeIblGpu(const IblSettings &settings) {
     IblBakeData out;
     out.brdf_lut = makeColorAttachment(SG_IMAGETYPE_2D, kBrdfLutSize, 1, "ibl_brdf_lut");
     out.irradiance = makeColorAttachment(SG_IMAGETYPE_CUBE, kIrradianceSize, 1, "ibl_irradiance");
@@ -103,20 +127,21 @@ IblBakeData bakeIblGpu() {
     sg_pipeline pipe_irr = makeBakePipeline(sh_irr, ATTR_ibl_bake_ibl_irr_a_pos, "ibl_irr_pipe");
     sg_pipeline pipe_pre = makeBakePipeline(sh_pre, ATTR_ibl_bake_ibl_pre_a_pos, "ibl_pre_pipe");
 
-    // BRDF LUT — single pass.
+    // BRDF LUT — single pass. (Sky params are unused but the shared block is bound anyway.)
     {
+        const auto u = makeUniforms(settings, 0, 0.f, settings.brdf_samples);
+        const sg_range range{&u, sizeof(u)};
         sg_view view = makeColorAttachmentView(out.brdf_lut, 0, 0);
-        runPass(view, pipe_brdf, vbuf, nullptr, 0);
+        runPass(view, pipe_brdf, vbuf, &range, UB_ibl_bake_ibl_settings);
         sg_destroy_view(view);
     }
 
     // Irradiance cubemap — one pass per face.
     for (int face = 0; face < 6; ++face) {
-        ibl_bake_irr_params_t params{};
-        params.face_param[0] = static_cast<float>(face);
+        const auto u = makeUniforms(settings, face, 0.f, settings.irradiance_samples);
+        const sg_range range{&u, sizeof(u)};
         sg_view view = makeColorAttachmentView(out.irradiance, 0, face);
-        const sg_range range{&params, sizeof(params)};
-        runPass(view, pipe_irr, vbuf, &range, UB_ibl_bake_irr_params);
+        runPass(view, pipe_irr, vbuf, &range, UB_ibl_bake_ibl_settings);
         sg_destroy_view(view);
     }
 
@@ -124,12 +149,10 @@ IblBakeData bakeIblGpu() {
     for (int mip = 0; mip < kPrefilterMips; ++mip) {
         const float roughness = static_cast<float>(mip) / static_cast<float>(kPrefilterMips - 1);
         for (int face = 0; face < 6; ++face) {
-            ibl_bake_pre_params_t params{};
-            params.pre_param[0] = static_cast<float>(face);
-            params.pre_param[1] = roughness;
+            const auto u = makeUniforms(settings, face, roughness, settings.prefilter_samples);
+            const sg_range range{&u, sizeof(u)};
             sg_view view = makeColorAttachmentView(out.prefilter, mip, face);
-            const sg_range range{&params, sizeof(params)};
-            runPass(view, pipe_pre, vbuf, &range, UB_ibl_bake_pre_params);
+            runPass(view, pipe_pre, vbuf, &range, UB_ibl_bake_ibl_settings);
             sg_destroy_view(view);
         }
     }

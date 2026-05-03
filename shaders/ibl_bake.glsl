@@ -6,9 +6,8 @@
 // GLCore, GLES3, WGPU). No compute shaders — sokol-shdc compute requires
 // GLSL 310 ES which WebGL2 does not expose.
 //
-// Constants and helpers (sky colours, importance sampling, Smith geometry,
-// Hammersley) mirror the prior CPU bake in src/viewer/ibl_common.cpp byte-
-// for-byte so output is visually identical.
+// Sample counts and sky parameters are uniform-controlled (see `ibl_settings`
+// block) so the viewer UI can tune them without recompile.
 
 @module ibl_bake
 
@@ -21,28 +20,35 @@ void main() {
 }
 @end
 
+@block ibl_settings_block
+// Identical layout in all three FSs so sokol-shdc emits one C struct.
+// `face_rough_samples` packs the per-pass varying parameters; the rest are
+// rebake-time scene parameters fed from the viewer UI.
+layout(binding=0) uniform ibl_settings {
+    vec4 face_rough_samples; // x=face index, y=roughness, z=sample count
+    vec4 zenith_color;       // rgb
+    vec4 horizon_color;      // rgb
+    vec4 ground_color;       // rgb
+    vec4 sun_dir;            // xyz=direction, w unused
+    vec4 sun_color;          // rgb=color, w=sharpness
+};
+@end
+
 @block ibl_helpers
 const float PI = 3.14159265358979323846;
-
-const vec3 kZenithColor  = vec3(0.55, 0.65, 0.85);
-const vec3 kHorizonColor = vec3(0.85, 0.80, 0.72);
-const vec3 kGroundColor  = vec3(0.20, 0.18, 0.16);
-const vec3 kSunDir       = vec3(0.4, 0.7, 0.6);
-const vec3 kSunColor     = vec3(1.5, 1.4, 1.2);
-const float kSunSharpness = 64.0;
 
 vec3 sky(vec3 dir_in) {
     vec3 dir = normalize(dir_in);
     float t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 base;
     if (dir.y >= 0.0) {
-        base = mix(kHorizonColor, kZenithColor, t * t * (3.0 - 2.0 * t));
+        base = mix(horizon_color.rgb, zenith_color.rgb, t * t * (3.0 - 2.0 * t));
     } else {
         float td = clamp(-dir.y, 0.0, 1.0);
-        base = mix(kHorizonColor, kGroundColor, td);
+        base = mix(horizon_color.rgb, ground_color.rgb, td);
     }
-    float s = pow(max(dot(dir, normalize(kSunDir)), 0.0), kSunSharpness);
-    return base + s * kSunColor;
+    float s = pow(max(dot(dir, normalize(sun_dir.xyz)), 0.0), sun_color.w);
+    return base + s * sun_color.rgb;
 }
 
 // Standard sokol cube face order: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.
@@ -90,8 +96,10 @@ float geometrySmithIbl(float ndotv, float ndotl, float roughness) {
 @end
 
 // ── BRDF LUT ───────────────────────────────────────────────────────────────
-// Output: (scale, bias, 0, 1) at (n·v, roughness). 1024 GGX importance samples.
+// Sky parameters are unused here (the LUT is purely a function of roughness
+// and n·v) but the uniform block is shared with the other two FSs.
 @fs brdf_fs
+@include_block ibl_settings_block
 @include_block ibl_helpers
 in vec2 v_uv;
 out vec4 frag_color;
@@ -102,7 +110,7 @@ void main() {
     vec3 v = vec3(sqrt(1.0 - ndotv * ndotv), 0.0, ndotv);
     vec3 n = vec3(0.0, 0.0, 1.0);
 
-    const uint kSamples = 1024u;
+    uint kSamples = uint(max(face_rough_samples.z + 0.5, 1.0));
     float scale = 0.0;
     float bias  = 0.0;
     for (uint i = 0u; i < kSamples; ++i) {
@@ -129,25 +137,21 @@ void main() {
 @program ibl_brdf fullscreen_vs brdf_fs
 
 // ── Irradiance cubemap ─────────────────────────────────────────────────────
-// Cosine-weighted hemisphere integral of `sky(dir)`. One pass per cube face;
-// `face` selects which face this pass writes.
 @fs irradiance_fs
+@include_block ibl_settings_block
 @include_block ibl_helpers
-layout(binding=0) uniform irr_params {
-    vec4 face_param;     // x = face index (0..5), yzw unused
-};
 in vec2 v_uv;
 out vec4 frag_color;
 
 void main() {
-    int face = int(face_param.x + 0.5);
-    vec3 n = normalize(cubeDir(face, v_uv.x, v_uv.y));
+    int face = int(face_rough_samples.x + 0.5);
+    uint kSamples = uint(max(face_rough_samples.z + 0.5, 1.0));
 
+    vec3 n = normalize(cubeDir(face, v_uv.x, v_uv.y));
     vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, n));
     vec3 bitangent = cross(n, tangent);
 
-    const uint kSamples = 1024u;
     vec3 acc = vec3(0.0);
     for (uint i = 0u; i < kSamples; ++i) {
         vec2 xi = hammersley(i, kSamples);
@@ -166,24 +170,21 @@ void main() {
 @program ibl_irr fullscreen_vs irradiance_fs
 
 // ── Prefiltered specular cubemap ───────────────────────────────────────────
-// GGX-importance-sampled split-sum, weighted by n·l. One pass per (face, mip).
-// Roughness is mip / (mips - 1) and is supplied from CPU as a uniform.
 @fs prefilter_fs
+@include_block ibl_settings_block
 @include_block ibl_helpers
-layout(binding=0) uniform pre_params {
-    vec4 pre_param;      // x = face index, y = roughness, zw unused
-};
 in vec2 v_uv;
 out vec4 frag_color;
 
 void main() {
-    int face = int(pre_param.x + 0.5);
-    float roughness = pre_param.y;
+    int face = int(face_rough_samples.x + 0.5);
+    float roughness = face_rough_samples.y;
+    uint kSamples = uint(max(face_rough_samples.z + 0.5, 1.0));
+
     vec3 r = normalize(cubeDir(face, v_uv.x, v_uv.y));
     vec3 n = r;
     vec3 view = r;
 
-    const uint kSamples = 256u;
     vec3 acc = vec3(0.0);
     float weight_sum = 0.0;
     for (uint i = 0u; i < kSamples; ++i) {
