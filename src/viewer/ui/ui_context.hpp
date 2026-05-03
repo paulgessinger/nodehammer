@@ -17,6 +17,8 @@ struct Camera;
 
 namespace ui {
 
+class Notifications;
+
 struct UiState {
     bool show_project{true};
     bool show_status{true};
@@ -44,6 +46,7 @@ struct ViewerUiContext {
     SceneBuildJob &build_job;
     SceneRenderer &scene_renderer;
     Camera &camera;
+    Notifications *notifications;
     const platform::PlatformWindowState &platform_window_state;
 
     std::string &root_config_key;

@@ -3,24 +3,24 @@
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/log_sink.hpp>
 
+#include <chrono>
+#include <cstddef>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace nodehammer::viewer::ui {
 
-/// Toast notification surface. Wraps the process-global ImGuiNotify
-/// backend; the instance shape exists so subsystems can be wired
-/// explicitly (App owns one) and so future per-instance state
-/// (recent-error buffer, dedupe, test capture) has a home.
+/// Toast notification surface. Owns its toast queue; one instance per App.
 ///
-/// Implements `LogSink` so it can be passed to `ProjectFs::setLogSink`
-/// to receive backend warnings/errors as toasts.
+/// Implements `LogSink` so it can be passed to `ProjectFs::setLogSink` to
+/// receive backend warnings/errors as toasts.
+///
+/// Font setup lives in `icon_font::initialize()` — call that once during
+/// ImGui init before constructing or rendering any `Notifications`.
 class Notifications : public LogSink {
   public:
     constexpr static std::size_t kDefaultDuration = 3000;
-
-    /// Installs the icon font into the global ImGui font atlas. Must run
-    /// once during ImGui initialisation, before any frame.
-    static void initializeFonts();
 
     Notifications() = default;
     Notifications(const Notifications &) = delete;
@@ -40,6 +40,22 @@ class Notifications : public LogSink {
     void diagnostic(const Diagnostic &d);
 
     void render();
+
+    enum class Kind { Info, Success, Warning, Error };
+
+  private:
+    struct Toast {
+        Kind kind;
+        std::string message;
+        std::chrono::steady_clock::time_point created;
+        std::size_t dismiss_ms;
+        bool pinned = false;
+        bool dismissed = false;
+    };
+
+    void push(Kind kind, std::string_view message, std::size_t duration_ms);
+
+    std::vector<Toast> toasts_;
 };
 
 } // namespace nodehammer::viewer::ui

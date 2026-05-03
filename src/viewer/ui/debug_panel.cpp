@@ -1,5 +1,7 @@
 #include "debug_panel.hpp"
 
+#include "notifications.hpp"
+
 #include <nodehammer/viewer/platform.hpp>
 
 #include <imgui.h>
@@ -56,6 +58,27 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
 
     if (ImGui::Button("Clear IBL cache") && actions.clear_ibl_cache) {
         actions.clear_ibl_cache();
+    }
+
+    if (ctx.notifications != nullptr) {
+        ImGui::SeparatorText("Notifications");
+        if (ImGui::Button("Info")) {
+            ctx.notifications->info("Info: a short status message.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Success")) {
+            ctx.notifications->success("Success: the operation completed.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Warning")) {
+            ctx.notifications->warning("Warning: something looks off but we kept going.");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Error")) {
+            ctx.notifications->error(
+                "Error: a longer message to show wrapping at one third of the viewport width, "
+                "and to give you something to click on so the auto-dismiss timer pauses.");
+        }
     }
 
     ImGui::End();

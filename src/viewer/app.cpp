@@ -5,6 +5,7 @@
 #include "imgui_backend.hpp"
 #include "scene_build_job.hpp"
 #include "scene_renderer.hpp"
+#include "ui/icon_font.hpp"
 #include "ui/notifications.hpp"
 #include "ui/viewer_ui.hpp"
 
@@ -252,7 +253,7 @@ void App::Impl::onInit() {
     // simgui_shutdown.
     ImGui_ImplSokol_Init();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    ui::Notifications::initializeFonts();
+    ui::icon_font::initialize();
     project_->setLogSink(&notifications);
     build_session.setLogSink(&notifications);
 
@@ -765,6 +766,7 @@ void App::Impl::onFrame() {
         .build_job = build_job,
         .scene_renderer = scene_renderer,
         .camera = camera,
+        .notifications = &notifications,
         .platform_window_state = platform_window_state,
         .root_config_key = root_config_key,
         .root_geometry_key = root_geometry_key,

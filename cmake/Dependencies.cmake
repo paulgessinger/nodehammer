@@ -231,21 +231,16 @@ if(NODEHAMMER_WITH_VIEWER)
         add_library(ImGui::ImGui ALIAS imgui)
     endif()
 
-    FetchContent_Declare(imgui_notify
-        SYSTEM
-        GIT_REPOSITORY https://github.com/TyomaVader/ImGuiNotify.git
-        GIT_TAG        d00e45f8d6b1e094bc9288d20eb3d2840f6a7d73
-    )
-    FetchContent_MakeAvailable(imgui_notify)
-
-    if(NOT TARGET ImGuiNotify::ImGuiNotify)
-        add_library(imgui_notify INTERFACE)
-        target_include_directories(imgui_notify SYSTEM INTERFACE
-            ${imgui_notify_SOURCE_DIR}/unixExample/backends
-            ${imgui_notify_SOURCE_DIR}/unixExample/fonts
+    # Vendored Font Awesome 7 (free-solid). Header from juliettef/IconFontCppHeaders,
+    # compressed font blob generated from the official FA7 desktop OTF via
+    # imgui's misc/fonts/binary_to_compressed_c. Both files live under
+    # third_party/fontawesome7/. INTERFACE-only target — consumers include
+    # `<IconsFontAwesome7.h>` (macros) and `<fa-solid-900.h>` (compressed blob).
+    if(NOT TARGET nh_fontawesome7)
+        add_library(nh_fontawesome7 INTERFACE)
+        target_include_directories(nh_fontawesome7 SYSTEM INTERFACE
+            ${CMAKE_SOURCE_DIR}/third_party/fontawesome7
         )
-        target_link_libraries(imgui_notify INTERFACE ImGui::ImGui)
-        add_library(ImGuiNotify::ImGuiNotify ALIAS imgui_notify)
     endif()
 
     # sokol headers + sokol-shdc resolver + nh_add_sokol_lib + nh_compile_shader.

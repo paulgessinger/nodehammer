@@ -39,6 +39,7 @@ function(nh_add_viewer_lib name sokol_lib)
         ${_dir}/scene_renderer.cpp
         ${_dir}/imgui_backend.cpp
         ${_dir}/ui/debug_panel.cpp
+        ${_dir}/ui/icon_font.cpp
         ${_dir}/ui/menu_bar.cpp
         ${_dir}/ui/notifications.cpp
         ${_dir}/ui/project_panel.cpp
@@ -57,7 +58,7 @@ function(nh_add_viewer_lib name sokol_lib)
         # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
         # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )
-    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} ImGuiNotify::ImGuiNotify)
+    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7)
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
     add_dependencies(${name} nodehammer_shaders)
     nodehammer_set_compiler_options(${name})
