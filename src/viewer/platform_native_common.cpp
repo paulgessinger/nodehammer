@@ -7,12 +7,24 @@
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <nfd.hpp>
+#include <sago/platform_folders.h>
 #include <sokol_app.h>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
+#include <print>
+#include <string>
 
 namespace nodehammer::viewer::platform {
+namespace {
+
+std::filesystem::path persistentTextPath(const std::string &key) {
+    return std::filesystem::path{sago::getConfigHome()} / "nodehammer" / key;
+}
+
+} // namespace
 
 std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<NativeBagProjectFs>(); }
 
@@ -84,6 +96,41 @@ void dispatchNativeDroppedFiles(App &app) {
     for (int i = 0; i < n; ++i) {
         app.addProjectPath(std::filesystem::path{sapp_get_dropped_file_path(i)});
     }
+}
+
+std::optional<std::string> loadNativePersistentText(const std::string &key) {
+    const auto path = persistentTextPath(key);
+    std::ifstream in{path, std::ios::binary | std::ios::ate};
+    if (!in) {
+        return std::nullopt;
+    }
+    const auto size = in.tellg();
+    if (size < 0) {
+        return std::nullopt;
+    }
+    std::string bytes(static_cast<std::size_t>(size), '\0');
+    in.seekg(0, std::ios::beg);
+    if (!bytes.empty() && !in.read(bytes.data(), size)) {
+        return std::nullopt;
+    }
+    return bytes;
+}
+
+void saveNativePersistentText(const std::string &key, const std::string &bytes) {
+    const auto path = persistentTextPath(key);
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    if (ec) {
+        std::println(stderr, "viewer: persistent state mkdir failed ({}): {}",
+                     path.parent_path().string(), ec.message());
+        return;
+    }
+    std::ofstream out{path, std::ios::binary | std::ios::trunc};
+    if (!out) {
+        std::println(stderr, "viewer: persistent state open-for-write failed: {}", path.string());
+        return;
+    }
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
 } // namespace nodehammer::viewer::platform

@@ -132,6 +132,8 @@ add_library(nodehammer_lib STATIC
     src/ir/semantic/exporter_registry.cpp
     src/detail/markup.cpp
     src/scene_build.cpp
+    src/viewer/app_state.cpp
+    src/viewer/camera.cpp
     # ProjectFs-based build orchestration. The bag (in-memory key→bytes
     # store) and BuildSession (resolve→parse→import driver) live under
     # src/viewer/ for organisational reasons but have no sokol/GUI deps,

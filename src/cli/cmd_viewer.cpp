@@ -45,24 +45,31 @@ void registerCmdViewer(CLI::App &app) {
         ->capture_default_str();
     sub->add_option("--title", cfg->title, "Window title")->capture_default_str();
     sub->add_flag("!--no-vsync", cfg->vsync, "Disable vsync (default: vsync on)");
-    sub->add_flag("!--no-cull-back", cfg->cull_back, "Disable backface culling")
-        ->capture_default_str();
-    sub->add_flag("!--no-pause-when-unfocused", cfg->pause_when_unfocused,
-                  "Keep rendering when the viewer is unfocused")
-        ->capture_default_str();
-    sub->add_flag("--auto-orbit", cfg->auto_orbit, "Start with camera auto-orbit enabled")
-        ->capture_default_str();
-    sub->add_option("--orbit-speed", cfg->auto_orbit_speed_deg, "Auto-orbit speed in degrees/s")
-        ->capture_default_str();
-    sub->add_flag("--angle-cut", cfg->angle_cut, "Start with angle cut enabled")
-        ->capture_default_str();
-    sub->add_flag("!--no-shader-angle-cut", cfg->shader_angle_cut, "Disable shader-side angle cut")
-        ->capture_default_str();
-    sub->add_option("--cut-start", cfg->angle_cut_start_deg, "Angle cut start in degrees")
-        ->capture_default_str();
-    sub->add_option("--cut-end", cfg->angle_cut_end_deg, "Angle cut end in degrees")
-        ->capture_default_str();
-    sub->add_flag("!--no-pbr", cfg->enable_pbr, "Disable PBR/IBL shading")->capture_default_str();
+    auto *cullBackOpt = sub->add_flag("!--no-cull-back", cfg->cull_back, "Disable backface culling")
+                            ->capture_default_str();
+    auto *pauseWhenUnfocusedOpt =
+        sub->add_flag("!--no-pause-when-unfocused", cfg->pause_when_unfocused,
+                      "Keep rendering when the viewer is unfocused")
+            ->capture_default_str();
+    auto *autoOrbitOpt =
+        sub->add_flag("--auto-orbit", cfg->auto_orbit, "Start with camera auto-orbit enabled")
+            ->capture_default_str();
+    auto *orbitSpeedOpt =
+        sub->add_option("--orbit-speed", cfg->auto_orbit_speed_deg, "Auto-orbit speed in degrees/s")
+            ->capture_default_str();
+    auto *angleCutOpt = sub->add_flag("--angle-cut", cfg->angle_cut, "Start with angle cut enabled")
+                            ->capture_default_str();
+    auto *shaderAngleCutOpt = sub->add_flag("!--no-shader-angle-cut", cfg->shader_angle_cut,
+                                            "Disable shader-side angle cut")
+                                  ->capture_default_str();
+    auto *cutStartOpt =
+        sub->add_option("--cut-start", cfg->angle_cut_start_deg, "Angle cut start in degrees")
+            ->capture_default_str();
+    auto *cutEndOpt =
+        sub->add_option("--cut-end", cfg->angle_cut_end_deg, "Angle cut end in degrees")
+            ->capture_default_str();
+    auto *pbrOpt = sub->add_flag("!--no-pbr", cfg->enable_pbr, "Disable PBR/IBL shading")
+                       ->capture_default_str();
     auto *cameraTargetXOpt = sub->add_option("--camera-target-x", initialCamera->target.x,
                                              "Initial camera target X coordinate");
     auto *cameraTargetYOpt = sub->add_option("--camera-target-y", initialCamera->target.y,
@@ -79,9 +86,39 @@ void registerCmdViewer(CLI::App &app) {
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
-    sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cameraTargetXOpt,
+    sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullBackOpt,
+                   pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt, angleCutOpt,
+                   shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
                    cameraPitchOpt, inputOpt, configOpt]() {
+        if (*cullBackOpt) {
+            cfg->startup_overrides.cull_back = cfg->cull_back;
+        }
+        if (*pauseWhenUnfocusedOpt) {
+            cfg->startup_overrides.pause_when_unfocused = cfg->pause_when_unfocused;
+        }
+        if (*autoOrbitOpt) {
+            cfg->startup_overrides.auto_orbit = cfg->auto_orbit;
+        }
+        if (*orbitSpeedOpt) {
+            cfg->startup_overrides.auto_orbit_speed_deg = cfg->auto_orbit_speed_deg;
+        }
+        if (*angleCutOpt) {
+            cfg->startup_overrides.angle_cut = cfg->angle_cut;
+        }
+        if (*shaderAngleCutOpt) {
+            cfg->startup_overrides.shader_angle_cut = cfg->shader_angle_cut;
+        }
+        if (*cutStartOpt) {
+            cfg->startup_overrides.angle_cut_start_deg = cfg->angle_cut_start_deg;
+        }
+        if (*cutEndOpt) {
+            cfg->startup_overrides.angle_cut_end_deg = cfg->angle_cut_end_deg;
+        }
+        if (*pbrOpt) {
+            cfg->startup_overrides.enable_pbr = cfg->enable_pbr;
+        }
+
         const bool hasCameraOption = *cameraTargetXOpt || *cameraTargetYOpt || *cameraTargetZOpt ||
                                      *cameraDistanceOpt || *cameraYawOpt || *cameraPitchOpt;
         const bool hasAllCameraOptions = *cameraTargetXOpt && *cameraTargetYOpt &&
@@ -101,6 +138,7 @@ void registerCmdViewer(CLI::App &app) {
             initialCamera->yaw = glm::radians(*cameraYawDeg);
             initialCamera->pitch = glm::radians(*cameraPitchDeg);
             cfg->initial_camera = *initialCamera;
+            cfg->startup_overrides.camera = *initialCamera;
         }
 
         std::string inputPath, configPath;

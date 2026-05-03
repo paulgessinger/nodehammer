@@ -1,5 +1,8 @@
 #pragma once
 
+#include <optional>
+#include <string>
+
 namespace nodehammer::viewer {
 class App;
 }
@@ -21,5 +24,7 @@ class NativePickerState {
 };
 
 void dispatchNativeDroppedFiles(App &app);
+[[nodiscard]] std::optional<std::string> loadNativePersistentText(const std::string &key);
+void saveNativePersistentText(const std::string &key, const std::string &bytes);
 
 } // namespace nodehammer::viewer::platform

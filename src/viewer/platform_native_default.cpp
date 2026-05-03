@@ -48,6 +48,14 @@ std::vector<PlatformGestureEvent> Platform::takeGestureEvents() {
 
 void Platform::dispatchDroppedFiles() { dispatchNativeDroppedFiles(impl_->app); }
 
+std::optional<std::string> Platform::loadPersistentText(const std::string &key) const {
+    return loadNativePersistentText(key);
+}
+
+void Platform::savePersistentText(const std::string &key, const std::string &bytes) {
+    saveNativePersistentText(key, bytes);
+}
+
 void Platform::commitUrlState(const std::string & /*state_query*/,
                               const std::string & /*managed_keys*/) {
     // No browser URL on native.

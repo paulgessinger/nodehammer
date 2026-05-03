@@ -12,6 +12,7 @@
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
+#include <nodehammer/viewer/app_state.hpp>
 #include <nodehammer/viewer/build_session.hpp>
 #include <nodehammer/viewer/camera.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
@@ -98,8 +99,13 @@ void appendUrlFloat(std::string &query, std::string_view name, float value, floa
 
 } // namespace
 
+constexpr const char *kViewerConfigStateKey = "viewer-state.toml";
+constexpr const char *kImGuiStateKey = "imgui.ini";
+constexpr double kPersistenceSaveIntervalSeconds = 1.0;
+
 struct App::Impl {
     Config cfg;
+    bool launch_had_initial_camera{false};
     bool quit{false};
 
     std::shared_ptr<const RenderScene> scene;
@@ -159,6 +165,10 @@ struct App::Impl {
     std::uint64_t next_modal_id{1};
     ui::UiState ui_state;
     ui::Notifications notifications;
+    std::string last_saved_viewer_config_state;
+    std::string last_saved_imgui_state;
+    uint64_t last_persistence_save_time{0};
+    ConfigStartupOverrides startup_overrides;
 
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
@@ -198,12 +208,19 @@ struct App::Impl {
     int smooth_scroll_score{0};
     int wheel_scroll_score{0};
 
-    explicit Impl(Config c) : cfg(std::move(c)), project_(platform::makeEmptyBag()) {}
+    explicit Impl(Config c)
+        : cfg(std::move(c)), launch_had_initial_camera(cfg.initial_camera.has_value()),
+          project_(platform::makeEmptyBag()), startup_overrides(std::move(cfg.startup_overrides)) {}
 
     void onInit();
     void onFrame();
     void onEvent(const sapp_event *ev);
     void onCleanup();
+    void loadViewerConfigState();
+    void applyStartupOverrides();
+    void loadImGuiState();
+    [[nodiscard]] std::string currentViewerConfigStateToml() const;
+    void savePersistentState(bool force);
 
     void classifyScroll(float scroll_x, float scroll_y);
     void handleScrollEvent(const sapp_event *ev, bool imgui_handled);
@@ -227,7 +244,85 @@ struct App::Impl {
     static void cleanupCb(void *user) { static_cast<Impl *>(user)->onCleanup(); }
 };
 
+void App::Impl::loadViewerConfigState() {
+    auto bytes = platform_->loadPersistentText(kViewerConfigStateKey);
+    if (!bytes || bytes->empty()) {
+        return;
+    }
+    auto state = viewerConfigStateFromToml(*bytes);
+    if (!state) {
+        std::println(stderr, "viewer: ignoring invalid persisted viewer state");
+        return;
+    }
+    ui_state.show_project = state->show_project;
+    ui_state.show_status = state->show_status;
+    ui_state.show_view = state->show_view;
+    ui_state.show_debug = state->show_debug;
+
+    const bool keep_launch_camera = launch_had_initial_camera;
+    applyViewerConfigState(*state, cfg, keep_launch_camera ? nullptr : &camera);
+    if (!keep_launch_camera && state->camera.has_value()) {
+        cfg.initial_camera = *state->camera;
+    }
+    last_saved_viewer_config_state = currentViewerConfigStateToml();
+}
+
+void App::Impl::applyStartupOverrides() {
+    applyViewerStartupOverrides(startup_overrides, cfg, &camera);
+    last_saved_viewer_config_state = currentViewerConfigStateToml();
+}
+
+void App::Impl::loadImGuiState() {
+    auto bytes = platform_->loadPersistentText(kImGuiStateKey);
+    if (!bytes || bytes->empty()) {
+        return;
+    }
+    ImGui::LoadIniSettingsFromMemory(bytes->data(), bytes->size());
+    last_saved_imgui_state = *bytes;
+    ui_state.dockspace_built = true;
+}
+
+std::string App::Impl::currentViewerConfigStateToml() const {
+    auto state = viewerConfigStateFrom(cfg, camera);
+    state.show_project = ui_state.show_project;
+    state.show_status = ui_state.show_status;
+    state.show_view = ui_state.show_view;
+    state.show_debug = ui_state.show_debug;
+    return viewerConfigStateToToml(state);
+}
+
+void App::Impl::savePersistentState(bool force) {
+    const uint64_t now = stm_now();
+    if (!force && last_persistence_save_time != 0 &&
+        stm_sec(stm_diff(now, last_persistence_save_time)) < kPersistenceSaveIntervalSeconds) {
+        return;
+    }
+
+    const std::string viewer_state = currentViewerConfigStateToml();
+    if (force || viewer_state != last_saved_viewer_config_state) {
+        platform_->savePersistentText(kViewerConfigStateKey, viewer_state);
+        last_saved_viewer_config_state = viewer_state;
+    }
+
+    ImGuiIO &io = ImGui::GetIO();
+    if (force || io.WantSaveIniSettings) {
+        std::size_t size = 0;
+        const char *data = ImGui::SaveIniSettingsToMemory(&size);
+        std::string imgui_state{data, size};
+        if (force || imgui_state != last_saved_imgui_state) {
+            platform_->savePersistentText(kImGuiStateKey, imgui_state);
+            last_saved_imgui_state = std::move(imgui_state);
+        }
+        io.WantSaveIniSettings = false;
+    }
+
+    last_persistence_save_time = now;
+}
+
 void App::Impl::onInit() {
+    loadViewerConfigState();
+    applyStartupOverrides();
+
     sg_desc gfx_desc{};
     gfx_desc.environment = sglue_environment();
     gfx_desc.logger.func = slog_func;
@@ -256,6 +351,7 @@ void App::Impl::onInit() {
     // simgui_shutdown.
     ImGui_ImplSokol_Init();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    loadImGuiState();
     ui::icon_font::initialize();
     project_->setLogSink(&notifications);
     build_session.setLogSink(&notifications);
@@ -936,9 +1032,12 @@ void App::Impl::onFrame() {
     // pickers dispatch inline at click-time, so this is a no-op
     // there — both platforms are reached through the same call.
     platform_->drainPickers();
+
+    savePersistentState(false);
 }
 
 void App::Impl::onCleanup() {
+    savePersistentState(true);
     scene_renderer.release();
     // simgui_shutdown destroys the ImGui context — don't call
     // ImGui::DestroyContext separately (double-free crash on macOS quit).
