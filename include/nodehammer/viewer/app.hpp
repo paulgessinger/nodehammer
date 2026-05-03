@@ -91,6 +91,11 @@ class App {
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
 
+    /// Flush viewer state immediately. Normal frame/end-of-app saves call this
+    /// internally; platform code uses it for quit/page-unload paths where the
+    /// next frame or regular cleanup may not run.
+    void savePersistentState();
+
     /// Tell the App which project keys are the build's root inputs:
     /// the TOML config and the FlatBuffer geometry file. Used by web
     /// URL mode (the JS layer hands over explicit keys from

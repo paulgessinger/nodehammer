@@ -382,6 +382,7 @@ void App::Impl::onEvent(const sapp_event *ev) {
         fps_window_start = last_time;
         frame_count = 0;
     } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
+        savePersistentState(true);
         quit = true;
     } else if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
         // Platform code pushes the dropped files into the App's existing
@@ -1079,6 +1080,8 @@ void App::addProjectPath(const std::filesystem::path &path) { impl_->addProjectP
 void App::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
     impl_->addProjectBytes(filename, bytes);
 }
+
+void App::savePersistentState() { impl_->savePersistentState(true); }
 
 namespace {
 // Function-local-static slot that owns the singleton App. `App::Handle`

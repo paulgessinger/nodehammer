@@ -123,6 +123,9 @@ EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
         dragDepth = 0;
         setDrag(false, ev);
     });
+    window.addEventListener('beforeunload', function() {
+        Module._nh_viewer_save_persistent_state();
+    });
 
     var gestureScale = 1.0;
     function pushPinch(type, scaleDelta, ev) {
@@ -470,6 +473,14 @@ void nh_viewer_platform_push_pinch(std::uintptr_t handle, int type, float scale_
                                    float y, std::uint32_t modifiers) {
     auto *impl = reinterpret_cast<nodehammer::viewer::platform::Platform::Impl *>(handle);
     nodehammer::viewer::platform::pushWebPinch(impl, type, scale_delta, x, y, modifiers);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_save_persistent_state() {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app != nullptr) {
+        app->savePersistentState();
+    }
 }
 
 } // extern "C"
