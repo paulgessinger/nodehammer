@@ -56,10 +56,6 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
 
     ImGui::Checkbox("throttle when idle", &ctx.cfg.pause_when_unfocused);
 
-    if (ImGui::Button("Clear IBL cache") && actions.clear_ibl_cache) {
-        actions.clear_ibl_cache();
-    }
-
     if (ctx.notifications != nullptr) {
         ImGui::SeparatorText("Notifications");
         if (ImGui::Button("Info")) {

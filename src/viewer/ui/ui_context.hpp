@@ -29,7 +29,6 @@ struct UiState {
 
 struct UiActions {
     std::function<void()> sync_browser_url;
-    std::function<void()> clear_ibl_cache;
     std::function<void()> open_file_picker;
     std::function<void()> open_folder_picker;
     std::function<void()> frame_scene;
@@ -64,7 +63,6 @@ struct ViewerUiContext {
     bool scene_uploaded{false};
     bool build_in_progress{false};
     bool ibl_installed{false};
-    double ibl_progress{0.0};
 };
 
 } // namespace ui

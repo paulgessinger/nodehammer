@@ -190,11 +190,15 @@ function(nh_compile_shader input)
 
     if(NH_DEPENDS_TARGET)
         # Caller wants a target-level dependency so multiple consumers don't
-        # race on the same custom command output.
+        # race on the same custom command output. Each shader gets its own
+        # private custom target wrapping the generated header; the umbrella
+        # NH_DEPENDS_TARGET (created on the first call) depends on all of
+        # them, so consumers only need to depend on the umbrella.
+        set(_per_shader_target "nh_shader_${_stem}")
+        add_custom_target(${_per_shader_target} DEPENDS "${_out_abs}")
         if(NOT TARGET ${NH_DEPENDS_TARGET})
-            add_custom_target(${NH_DEPENDS_TARGET} DEPENDS "${_out_abs}")
-        else()
-            add_dependencies(${NH_DEPENDS_TARGET} "${_out_abs}")
+            add_custom_target(${NH_DEPENDS_TARGET})
         endif()
+        add_dependencies(${NH_DEPENDS_TARGET} ${_per_shader_target})
     endif()
 endfunction()

@@ -58,7 +58,6 @@ include(cmake/CompilerOptions.cmake)
 # ── FlatBuffers code generation ──────────────────────────────────────────────
 set(NH_FBS_SCHEMAS
     ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs
-    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/ibl_cache.fbs
 )
 set(NH_FBS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/flatbuffers)
 
