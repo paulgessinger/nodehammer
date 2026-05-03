@@ -17,6 +17,10 @@
 @vs scene_vs
 layout(binding=0) uniform vs_params {
     mat4 view_proj;
+    // x = log_depth_enable (0.0 or 1.0), y = far_plane (only read when
+    // log depth is on), zw reserved. Appended after view_proj to keep
+    // existing offsets stable under std140.
+    vec4 depth_params;
 };
 
 in vec3 a_position;
@@ -37,6 +41,20 @@ void main() {
         +                inst3;
     v_world_pos = world_pos.xyz;
     gl_Position = view_proj * world_pos;
+
+    // Logarithmic depth (used on GLES3 — see useLogDepth in C++). Replaces
+    // the standard perspective-divide depth with a log distribution that
+    // gives near-uniform precision across the entire near→far range,
+    // regardless of clip-space depth convention. We compute z in NDC
+    // (`[-1, 1]` for GL/GLES, `[0, 1]` for D3D/Metal/WGPU/Vulkan would
+    // need a different remap, but log depth is GLES3-only today). The
+    // multiply by w is undone by the perspective divide so depth ends up
+    // log-distributed in `[-1, 1]`.
+    if (depth_params.x > 0.5) {
+        float w = gl_Position.w;
+        float fc = 2.0 / log2(depth_params.y + 1.0);
+        gl_Position.z = (log2(max(1e-6, 1.0 + w)) * fc - 1.0) * w;
+    }
 
     v_normal_world =
           a_normal.x * inst0.xyz

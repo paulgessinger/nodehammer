@@ -94,6 +94,60 @@ depth-aware post-process must use the same convention unless there is a very
 specific reason not to. Mixing normal-Z and reversed-Z inside the renderer is
 too easy to get wrong.
 
+#### Backend caveat: GLES3 falls back to normal-Z
+
+Reversed-Z's precision benefit relies on a `[0, 1]` clip-space depth range —
+which Metal, D3D11/12, WebGPU, and Vulkan provide natively. Desktop OpenGL
+defaults to `[-1, 1]` but exposes `glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)`
+(GL 4.5 / `ARB_clip_control`) to switch. **GLES3 does not expose
+`glClipControl` at all.** On GLES3 reversed-Z math silently degrades to
+normal-Z precision, and several drivers also disable Hi-Z heuristics under
+reversed-Z — producing both z-fighting on close surfaces and a fragment-bound
+perf regression that scales with on-screen triangle area.
+
+The viewer therefore branches the depth convention by backend at runtime via
+`useReversedZ()` (`include/nodehammer/viewer/backend_caps.hpp`):
+
+- on `[0, 1]` clip-depth backends: reversed-Z, `GREATER_EQUAL`, depth-clear
+  `0.0`, projection maps near→1
+- on GLES3: normal-Z, `LESS_EQUAL`, depth-clear `1.0`, projection maps near→0
+
+This is "one convention per backend at startup", not "convention mixed inside
+a frame". The four convention sites — `Camera::proj()`, the scene pipeline's
+`depth.compare`, the scene pass action's `depth.clear_value`, and the
+composite shader's `linearize_depth()` — all read the same flag and stay
+in lockstep.
+
+#### GLES3 also gets logarithmic depth in the VS
+
+The convention switch alone leaves GLES3 with normal-Z + 32F, which gives
+~24 effective bits roughly uniformly across `[0, 1]`. That's enough for
+most scenes but **not** for legitimately close detector surfaces sitting
+away from the near plane: float density is concentrated near 0.0, so
+normal-Z's "uniform" distribution actually leaves the far half of the
+range with poor precision. Reversed-Z would put the precision in the
+right place, but isn't available on GLES3.
+
+The fallback is logarithmic depth written from the vertex shader:
+`gl_Position.z = (log2(1 + w) * (2 / log2(far + 1)) - 1) * w`. After the
+perspective divide this gives `log2(1 + view_z) / log2(1 + far)` in the
+depth buffer — near-uniform precision across the entire range,
+independent of the clip-space depth convention. Effective precision is
+~32-bit-equivalent everywhere instead of ~24-bit clustered near the
+camera.
+
+Cost: one log per vertex (negligible on every modern GPU). Caveat: depth
+is interpolated linearly across each triangle while the function is
+non-linear, so very large triangles can show artifacts. Not a problem for
+nodehammer's small-triangle detector geometry; would matter for
+large-triangle world-scale terrain. Gated by `useLogDepth()` (also in
+backend_caps.hpp), currently true only on GLES3.
+
+When log depth is on, the underlying depth convention is normal-Z (the
+log formula's output is monotonically increasing from near→far in `[0, 1]`).
+The composite shader's `linearize_depth()` gains a third mode (2.0 = log-Z)
+that inverts the formula via `pow(far + 1, d) - 1`.
+
 ### 2.2 Keep near/far planes tight
 
 Depth precision still depends heavily on camera clip ranges. The camera should

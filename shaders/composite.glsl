@@ -4,8 +4,10 @@
 //
 // Three modes selected by a uniform `mode`:
 //   0 — color passthrough (default; visually identical to direct-to-swapchain)
-//   1 — raw depth (closer fragments brighter under reversed-Z)
-//   2 — linearized depth (uniform near→far gradient)
+//   1 — raw depth (under reversed-Z closer fragments are BRIGHTER; under
+//       normal-Z they are DARKER — the convention is backend-conditional,
+//       see useReversedZ in C++)
+//   2 — linearized depth (uniform near→far gradient regardless of convention)
 //
 // VS uses gl_VertexID to synthesise a fullscreen triangle, so no vertex
 // buffer or input attribute is required at draw time. Caller issues
@@ -44,6 +46,15 @@ layout(binding=0) uniform composite_params {
     // w = reserved. Appended at the end so existing offsets stay stable
     // under std140 — sokol-shdc regenerates the C struct in lockstep.
     vec4 fxaa_params;
+    // x = depth mode for the linear-depth debug view:
+    //     0.0 = normal-Z   (d=0 at near, d=1 at far; LESS_EQUAL, clear=1)
+    //     1.0 = reversed-Z (d=1 at near, d=0 at far; GREATER_EQUAL, clear=0)
+    //     2.0 = log-Z      (d = log2(1+view_z) / log2(1+far_plane); GLES3
+    //                       fallback — see useLogDepth in C++)
+    // y = far_plane (only read in log-Z mode for the pow inversion).
+    // zw reserved. The C++ side picks the mode from useLogDepth /
+    // useReversedZ; the three are mutually exclusive at any moment.
+    vec4 depth_params;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -59,13 +70,22 @@ layout(binding=1) uniform sampler smp_depth;
 in vec2 v_uv;
 out vec4 frag_color;
 
-// Reversed-Z linearization. Under reversed-Z + [0,1] depth range, the
-// sampled depth is 1 at the near plane and 0 at the far plane. The
-// algebra below collapses to the same closed form regardless of GL's
-// [-1,1] vs Metal/D3D/WGPU [0,1] clip-space depth, because the depth
-// *texture* always contains [0,1] values after driver normalization.
-float linearize_reversed_z(float d, float n, float f) {
-    return (n * f) / (n + d * (f - n));
+// Linearize a sampled depth value to view-space Z. Three modes selected
+// by `mode`:
+//   0.0 — normal-Z   (d=0 at near, d=1 at far)
+//   1.0 — reversed-Z (d=1 at near, d=0 at far)
+//   2.0 — log-Z      (d = log2(1+view_z) / log2(1+far))
+// The depth *texture* always contains [0,1] values regardless of the
+// backend's clip-space depth range. For normal/reversed we remap d to its
+// reversed-Z equivalent (1-d) so a single closed form covers both. For
+// log-Z we invert the VS formula directly using the far-plane parameter.
+float linearize_depth(float d, float n, float f, float mode, float far) {
+    if (mode > 1.5) {
+        return pow(far + 1.0, d) - 1.0;
+    }
+    float reversed = step(0.5, mode);
+    float dr = mix(1.0 - d, d, reversed);
+    return (n * f) / (n + dr * (f - n));
 }
 
 // FXAA 3.11 console-quality variant. Five luma taps (center + 4 corners) +
@@ -129,7 +149,7 @@ void main() {
         float n = mode_near_far.y;
         float f = mode_near_far.z;
         float d = texture(sampler2D(scene_depth, smp_depth), uv).r;
-        float zv = linearize_reversed_z(d, n, f);
+        float zv = linearize_depth(d, n, f, depth_params.x, depth_params.y);
         float t = clamp((zv - n) / (f - n), 0.0, 1.0);
         frag_color = vec4(vec3(t), 1.0);
     } else if (fxaa_params.x > 0.5) {

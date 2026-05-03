@@ -10,6 +10,7 @@
 #include "ui/notifications.hpp"
 #include "ui/viewer_ui.hpp"
 
+#include <nodehammer/viewer/backend_caps.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
 
@@ -622,14 +623,15 @@ void App::Impl::render() {
     // callback while a frame may still be in flight.
     ensureSceneTarget(fb_width, fb_height);
 
-    // Pass 1 — scene into offscreen color + depth. Reversed-Z: depth
-    // clear is 0.0 to match scene_renderer's GREATER_EQUAL compare and
-    // the projection matrix that maps near→1, far→0.
+    // Pass 1 — scene into offscreen color + depth. Depth-clear convention
+    // is backend-conditional (see useReversedZ): 0.0 paired with
+    // GREATER_EQUAL on `[0,1]` clip-depth backends, 1.0 paired with
+    // LESS_EQUAL on GLES3.
     sg_pass scene_pass{};
     scene_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
     scene_pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
     scene_pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-    scene_pass.action.depth.clear_value = 0.0f;
+    scene_pass.action.depth.clear_value = useReversedZ() ? 0.0f : 1.0f;
     // STORE so the composite pass's depth-debug view can sample the
     // depth attachment after the scene pass ends.
     scene_pass.action.depth.store_action = SG_STOREACTION_STORE;

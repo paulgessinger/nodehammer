@@ -1,5 +1,6 @@
 #include "scene_renderer.hpp"
 
+#include <nodehammer/viewer/backend_caps.hpp>
 #include <nodehammer/viewer/camera.hpp>
 
 #include <ankerl/unordered_dense.h>
@@ -267,9 +268,13 @@ void SceneRenderer::Impl::ensureInit() {
 
     pdesc.index_type = SG_INDEXTYPE_UINT32;
     pdesc.depth.write_enabled = true;
-    // Reversed-Z: near maps to 1, far maps to 0, so closer fragments have
-    // LARGER depth values. Pair with depth-clear=0 in the pass action.
-    pdesc.depth.compare = SG_COMPAREFUNC_GREATER_EQUAL;
+    // Depth convention is backend-conditional (see useReversedZ): reversed-Z
+    // (GREATER_EQUAL, near→1, depth-clear=0) on `[0,1]` clip-depth backends;
+    // normal-Z (LESS_EQUAL, near→0, depth-clear=1) on GLES3 where reversed-Z
+    // would degrade to normal-Z precision anyway and break Hi-Z. The
+    // projection matrix in render() and the pass-action clear in app.cpp
+    // must use the same flag.
+    pdesc.depth.compare = useReversedZ() ? SG_COMPAREFUNC_GREATER_EQUAL : SG_COMPAREFUNC_LESS_EQUAL;
     pdesc.face_winding = SG_FACEWINDING_CCW;
     pdesc.cull_mode = SG_CULLMODE_NONE;
     pipeline_no_cull = sg_make_pipeline(&pdesc);
@@ -535,9 +540,11 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     const bool homogeneous_depth = (backend == SG_BACKEND_GLCORE) || (backend == SG_BACKEND_GLES3);
     const float aspect = static_cast<float>(fb_width) / static_cast<float>(fb_height);
     const glm::mat4 view = camera.view();
-    // Reversed-Z projection — must match the pipeline's GREATER_EQUAL compare
-    // and the pass action's depth clear of 0.0 in app.cpp.
-    const glm::mat4 proj = camera.proj(aspect, homogeneous_depth, /*reversed_z=*/true);
+    // Projection convention must match the pipeline's depth.compare and the
+    // pass action's depth.clear_value (see useReversedZ for why GLES3
+    // diverges from the other backends).
+    const bool reversed_z = useReversedZ();
+    const glm::mat4 proj = camera.proj(aspect, homogeneous_depth, reversed_z);
     const glm::mat4 view_proj = proj * view;
     const auto planes = frustumPlanes(view_proj);
 
@@ -567,6 +574,16 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
 
     scene_vs_params_t vs_params{};
     std::memcpy(vs_params.view_proj, glm::value_ptr(view_proj), sizeof(vs_params.view_proj));
+    // Log depth (see useLogDepth) overrides gl_Position.z in the VS to give
+    // near-uniform precision on backends where reversed-Z doesn't work
+    // (GLES3 today). The XY/W components of the projection are still used,
+    // so the projection itself is the standard non-reversed perspective —
+    // already what useReversedZ()==false produces above.
+    const bool log_depth = useLogDepth();
+    vs_params.depth_params[0] = log_depth ? 1.0f : 0.0f;
+    vs_params.depth_params[1] = camera.far_plane;
+    vs_params.depth_params[2] = 0.0f;
+    vs_params.depth_params[3] = 0.0f;
     sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
 
     // w = directional light intensity (used by PBR branch only; Lambert ignores).

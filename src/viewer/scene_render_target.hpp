@@ -14,9 +14,11 @@ namespace nodehammer::viewer {
 /// texture view for sampling in the composite pass. Sokol requires this
 /// split — attachment views and texture views are different view types.
 ///
-/// Reversed-Z must be preserved by the caller's pass action: the depth
-/// attachment is cleared to 0.0 (the "farthest" depth) and the scene
-/// pipeline uses `GREATER_EQUAL`. See scene_renderer.cpp.
+/// The depth convention is backend-conditional (see `useReversedZ` in
+/// backend_caps.hpp): reversed-Z (depth-clear 0.0, GREATER_EQUAL) on
+/// `[0,1]` clip-depth backends, normal-Z (depth-clear 1.0, LESS_EQUAL)
+/// on GLES3. The caller's pass action and the scene pipeline must agree.
+/// See scene_renderer.cpp.
 struct SceneRenderTarget {
     sg_image color{};
     sg_image depth{};

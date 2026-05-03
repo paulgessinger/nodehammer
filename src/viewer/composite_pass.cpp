@@ -1,5 +1,7 @@
 #include "composite_pass.hpp"
 
+#include <nodehammer/viewer/backend_caps.hpp>
+
 #include "scene_render_target.hpp"
 
 // sokol-shdc emits a reflection helper that calls strcmp; pull in <cstring>
@@ -81,6 +83,16 @@ void CompositePass::draw(const SceneRenderTarget &target, const RenderQualitySet
     params.fxaa_params[1] = inv_w;
     params.fxaa_params[2] = inv_h;
     params.fxaa_params[3] = 0.0f;
+
+    // Selects the linearization branch in the FS for the linear-depth view.
+    // 0 = normal-Z, 1 = reversed-Z, 2 = log-Z (mutually exclusive). Must
+    // agree with the projection / pipeline / pass-action / scene-VS encoding.
+    // .y carries far_plane for the log-Z pow inversion.
+    const float depth_mode = useLogDepth() ? 2.0f : (useReversedZ() ? 1.0f : 0.0f);
+    params.depth_params[0] = depth_mode;
+    params.depth_params[1] = far_plane;
+    params.depth_params[2] = 0.0f;
+    params.depth_params[3] = 0.0f;
 
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);
