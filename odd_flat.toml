@@ -1,0 +1,1020 @@
+hoist_orphans = true
+
+[defaults.extras]
+opacity = 1.0
+visible = true
+
+[defaults.tessellation]
+fallback = 'skip'
+max_segments_circle = 10
+
+[export.gltf]
+bake_unit_scale = true
+unit_scale = 0.10000000000000001
+
+[export.obj]
+unit_scale = 1.0
+
+[materials.aluminum]
+base_color = [ 0.57758051156997681, 0.57758051156997681, 0.57758051156997681, 1.0 ]
+metallic = 1.0
+roughness = 0.11999999731779099
+
+[materials.beryllium]
+base_color = [ 0.39157256484031677, 0.39157256484031677, 0.3515326976776123, 1.0 ]
+metallic = 0.80000001192092896
+roughness = 0.20000000298023224
+
+[materials.carbon_fiber]
+anisotropy = 0.34999999403953552
+base_color = [ 0.010329823009669781, 0.010329823009669781, 0.010329823009669781, 1.0 ]
+clearcoat = 0.20000000298023224
+clearcoat_roughness = 0.079999998211860657
+metallic = 0.0
+roughness = 0.31999999284744263
+specular = 0.60000002384185791
+
+[materials.carbon_foam]
+base_color = [ 0.079999998211860657, 0.079999998211860657, 0.079999998211860657, 1.0 ]
+metallic = 0.0
+roughness = 0.92000001668930054
+
+[materials.copper]
+base_color = [ 0.46778383851051331, 0.14412848651409149, 0.045186202973127365, 1.0 ]
+metallic = 1.0
+roughness = 0.18000000715255737
+
+[materials.g10]
+base_color = [ 0.46207705140113831, 0.39157256484031677, 0.10224174708127975, 1.0 ]
+metallic = 0.0
+roughness = 0.64999997615814209
+specular = 0.30000001192092896
+
+[materials.ground_or_hv_mix]
+base_color = [ 0.3515326976776123, 0.12213879823684692, 0.0423114113509655, 1.0 ]
+metallic = 1.0
+roughness = 0.55000001192092896
+specular = 0.55000001192092896
+
+[materials.kapton]
+base_color = [ 0.32314324378967285, 0.090841732919216156, 0.0080231921747326851, 1.0 ]
+clearcoat = 0.10000000149011612
+ior = 1.7000000476837158
+metallic = 0.0
+roughness = 0.15999999642372131
+transmission = 0.85000002384185791
+
+[materials.polystyrene]
+base_color = [ 0.80695235729217529, 0.77582234144210815, 0.70110201835632324, 1.0 ]
+clearcoat = 0.05000000074505806
+ior = 1.5900000333786011
+metallic = 0.0
+roughness = 0.5
+transmission = 0.15000000596046448
+
+[materials.si_pcb_mix]
+base_color = [ 0.30498737096786499, 0.11697067320346832, 0.080219827592372894, 1.0 ]
+metallic = 0.85000002384185791
+roughness = 0.60000002384185791
+specular = 0.5
+
+[materials.silicon]
+base_color = [ 0.11697067320346832, 0.13286833465099335, 0.15592646598815918, 1.0 ]
+metallic = 1.0
+roughness = 0.05000000074505806
+
+[materials.steel]
+base_color = [ 0.21223072707653046, 0.23074007034301758, 0.24228119850158691, 1.0 ]
+metallic = 1.0
+roughness = 0.34999999403953552
+specular = 0.5
+
+[materials.support]
+base_color = [ 0.5, 0.5, 0.5, 1.0 ]
+metallic = 0.0
+roughness = 0.69999998807907104
+
+[materials.titanium]
+base_color = [ 0.32314324378967285, 0.33716365694999695, 0.36625269055366516, 1.0 ]
+metallic = 1.0
+roughness = 0.2800000011920929
+
+[materials.tungsten_dens24]
+anisotropy = 0.0
+base_color = [ 0.21586053073406219, 0.21586053073406219, 0.18782076239585876, 1.0 ]
+clearcoat = 0.0
+clearcoat_roughness = 0.0
+metallic = 1.0
+roughness = 0.5
+specular = 0.5
+
+[[rules]]
+material = 'beryllium'
+
+    [rules.match]
+    pattern = 'Beryllium'
+    type = 'material_glob'
+
+[[rules]]
+material = 'silicon'
+
+    [rules.match]
+    pattern = 'Silicon'
+    type = 'material_glob'
+
+[[rules]]
+material = 'kapton'
+
+    [rules.match]
+    pattern = 'Kapton'
+    type = 'material_glob'
+
+[[rules]]
+material = 'aluminum'
+
+    [rules.match]
+    pattern = 'Aluminum'
+    type = 'material_glob'
+
+[[rules]]
+material = 'carbon_fiber'
+
+    [rules.match]
+    pattern = 'CarbonFiber*'
+    type = 'material_glob'
+
+[[rules]]
+material = 'titanium'
+
+    [rules.match]
+    pattern = 'Titanium'
+    type = 'material_glob'
+
+[[rules]]
+material = 'carbon_foam'
+
+    [rules.match]
+    pattern = 'CarbonFoam'
+    type = 'material_glob'
+
+[[rules]]
+material = 'copper'
+
+    [rules.match]
+    pattern = 'Copper'
+    type = 'material_glob'
+
+[[rules]]
+material = 'tungsten_dens24'
+
+    [rules.match]
+    pattern = 'TungstenDens24'
+    type = 'material_glob'
+
+[[rules]]
+material = 'g10'
+
+    [rules.match]
+    pattern = 'G10'
+    type = 'material_glob'
+
+[[rules]]
+material = 'ground_or_hv_mix'
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = 'GroundOrHvMix'
+        type = 'material_glob'
+
+        [[rules.match.operands]]
+        pattern = 'GroundOrHVMix'
+        type = 'material_glob'
+
+[[rules]]
+material = 'si_pcb_mix'
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = 'SiPcbMix'
+        type = 'material_glob'
+
+        [[rules.match.operands]]
+        pattern = 'siPCBMix'
+        type = 'material_glob'
+
+[[rules]]
+material = 'steel'
+
+    [rules.match]
+    pattern = 'Steel*'
+    type = 'material_glob'
+
+[[rules]]
+material = 'polystyrene'
+
+    [rules.match]
+    pattern = 'Polystyrene'
+    type = 'material_glob'
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/Pixels'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/Pixels/*Barrel'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/PixelLayer*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/Pixels/*EndcapN'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/Pixels/*EndcapP'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStrips'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStrips/*Barrel'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStripLayer*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStrips/*EndcapN'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStrips/*EndcapP'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStrips'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStrips/*Barrel'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStripLayer*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStrips/*EndcapN'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStrips/*EndcapP'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    skip_geometry = true
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/PixelLayer*/stave*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/PixelEndcapN*/disk*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/PixelEndcapP*/disk*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStripLayer*/stave*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStripEndcapN*/disk*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ShortStripEndcapP*/disk*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStripEndcapN*/disk*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStripEndcapP*/disk*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/LongStripLayer*/stave*'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    fallback = 'fail'
+    max_segments_circle = 10
+    merge_descendants = true
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/PixelEndcap*/**/DiskSupport_*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/*StripEndcap*/**/RingSupport*'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    max_segments_circle = 48
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/ECal'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/HCal'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    skip_geometry = true
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/ECalBarrel'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ECalEndcap_A'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ECalEndcap_B'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/HCalBarrel'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/HCalEndcap_A'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/HCalEndcap_B'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    skip_geometry = true
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/ECalBarrel/stave*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ECalEndcap_A/stave*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/ECalEndcap_B/stave*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/HCalBarrel/stave*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/HCalEndcap_A/stave*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/HCalEndcap_B/stave*'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    fallback = 'fail'
+    max_segments_circle = 10
+    merge_descendants = true
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerBarrel'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerEndCapN'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerEndCapN/layer*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerEndCapP'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerEndCapP/layer*'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    skip_geometry = true
+
+[[rules]]
+
+    [rules.match]
+    type = 'or'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerBarrel/chamber*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerEndCapN/layer*/chamber*'
+        type = 'path_glob'
+
+        [[rules.match.operands]]
+        pattern = '**/MuonSpectrometerEndCapP/layer*/chamber*'
+        type = 'path_glob'
+
+    [rules.tessellation]
+    max_segments_circle = 10
+    merge_descendants = true
+
+[[rules]]
+
+    [rules.match]
+    pattern = '/world'
+    type = 'path_glob'
+
+    [rules.tessellation]
+    skip_geometry = true
+
+[[rules]]
+
+    [rules.match]
+    pattern = 'Solenoid*'
+    type = 'name_glob'
+
+    [rules.tessellation]
+    max_segments_circle = 48
+
+[[selection_rules]]
+
+    [selection_rules.drop_if]
+    pattern = '*'
+    type = 'name_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/Pixels'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/Pixels/*Barrel'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/Pixels/*EndcapN'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/Pixels/*EndcapP'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStrips'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStrips/*Barrel'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStrips/*EndcapN'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStrips/*EndcapP'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStrips'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStrips/*Barrel'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStrips/*EndcapN'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStrips/*EndcapP'
+        type = 'path_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/PixelLayer*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/PixelLayer*/stave*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/PixelLayer*/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/PixelEndcapN*/disk*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/PixelEndcapN*/disk*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/PixelEndcapP*/disk*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/PixelEndcapP*/disk*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStripLayer*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStripLayer*/stave*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/ShortStripLayer*/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStripEndcapN*/disk*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/ShortStripEndcapN*/disk*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ShortStripEndcapP*/disk*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/ShortStripEndcapP*/disk*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStripLayer*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStripLayer*/stave*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/LongStripLayer*/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStripEndcapN*/disk*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/LongStripEndcapN*/disk*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/LongStripEndcapP*/disk*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/LongStripEndcapP*/disk*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ECal'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ECalBarrel'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ECalEndcap_A'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ECalEndcap_B'
+        type = 'path_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ECalBarrel/stave*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ECalEndcap_A/stave*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/ECalEndcap_B/stave*'
+        type = 'path_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/ECalBarrel/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/ECalEndcap_A/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/ECalEndcap_B/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/HCal'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/HCalBarrel'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/HCalEndcap_A'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/HCalEndcap_B'
+        type = 'path_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/HCalBarrel/stave*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/HCalEndcap_A/stave*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/HCalEndcap_B/stave*'
+        type = 'path_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/HCalBarrel/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/HCalEndcap_A/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/HCalEndcap_B/stave*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerBarrel'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerBarrel/chamber*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerEndCapN'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerEndCapN/layer*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerEndCapN/layer*/chamber*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerEndCapP'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerEndCapP/layer*'
+        type = 'path_glob'
+
+        [[selection_rules.keep_if.operands]]
+        pattern = '**/MuonSpectrometerEndCapP/layer*/chamber*'
+        type = 'path_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    type = 'or'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/MuonSpectrometerBarrel/chamber*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'ArCO2'
+                type = 'material_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/MuonSpectrometerEndCapN/layer*/chamber*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'ArCO2'
+                type = 'material_glob'
+
+        [[selection_rules.keep_if.operands]]
+        type = 'and'
+
+            [[selection_rules.keep_if.operands.operands]]
+            pattern = '**/MuonSpectrometerEndCapP/layer*/chamber*/**'
+            type = 'path_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'is_leaf'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'Air'
+                type = 'material_glob'
+
+            [[selection_rules.keep_if.operands.operands]]
+            type = 'not'
+
+                [selection_rules.keep_if.operands.operands.operand]
+                pattern = 'ArCO2'
+                type = 'material_glob'
+
+[[selection_rules]]
+
+    [selection_rules.keep_if]
+    pattern = 'BeamPipe'
+    type = 'name_glob'
