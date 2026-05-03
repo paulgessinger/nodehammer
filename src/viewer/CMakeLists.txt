@@ -35,7 +35,6 @@ function(nh_add_viewer_lib name sokol_lib)
     set(_dir "${CMAKE_SOURCE_DIR}/src/viewer")
     add_library(${name} STATIC
         ${_dir}/app.cpp
-        ${_dir}/camera.cpp
         ${_dir}/scene_renderer.cpp
         ${_dir}/imgui_backend.cpp
         ${_dir}/ui/debug_panel.cpp

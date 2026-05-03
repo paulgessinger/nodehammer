@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -120,6 +121,13 @@ class Platform {
     /// project independently, so a partial gesture already advances
     /// the build trigger.
     void dispatchDroppedFiles();
+
+    /// Load/save small persistent text blobs owned by the viewer. Native
+    /// stores these under the platform config directory; web stores them in
+    /// browser localStorage. Intended for TOML settings and Dear ImGui ini
+    /// text, not bulk binary caches.
+    [[nodiscard]] std::optional<std::string> loadPersistentText(const std::string &key) const;
+    void savePersistentText(const std::string &key, const std::string &bytes);
 
     /// Push the viewer's persisted state into the browser URL's query
     /// string, replacing any keys named in `managed_keys` (comma-

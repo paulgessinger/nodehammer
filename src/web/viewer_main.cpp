@@ -76,10 +76,12 @@ void warnUnknownKeys(const nlohmann::json &j, const std::array<std::string_view,
     }
 }
 
-template <typename T> void readField(const nlohmann::json &j, const char *key, T &out) {
+template <typename T> bool readField(const nlohmann::json &j, const char *key, T &out) {
     if (auto it = j.find(key); it != j.end() && !it->is_null()) {
         out = it->get<T>();
+        return true;
     }
+    return false;
 }
 
 std::optional<nodehammer::viewer::Camera> parseCamera(const nlohmann::json &j) {
@@ -132,16 +134,35 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
     readField(j, "width", cfg.width);
     readField(j, "height", cfg.height);
     readField(j, "vsync", cfg.vsync);
-    readField(j, "cullBack", cfg.cull_back);
-    readField(j, "pauseWhenUnfocused", cfg.pause_when_unfocused);
-    readField(j, "autoOrbit", cfg.auto_orbit);
-    readField(j, "orbitSpeed", cfg.auto_orbit_speed_deg);
-    readField(j, "angleCut", cfg.angle_cut);
-    readField(j, "shaderAngleCut", cfg.shader_angle_cut);
-    readField(j, "cutStart", cfg.angle_cut_start_deg);
-    readField(j, "cutEnd", cfg.angle_cut_end_deg);
-    readField(j, "pbr", cfg.enable_pbr);
+    if (readField(j, "cullBack", cfg.cull_back)) {
+        cfg.startup_overrides.cull_back = cfg.cull_back;
+    }
+    if (readField(j, "pauseWhenUnfocused", cfg.pause_when_unfocused)) {
+        cfg.startup_overrides.pause_when_unfocused = cfg.pause_when_unfocused;
+    }
+    if (readField(j, "autoOrbit", cfg.auto_orbit)) {
+        cfg.startup_overrides.auto_orbit = cfg.auto_orbit;
+    }
+    if (readField(j, "orbitSpeed", cfg.auto_orbit_speed_deg)) {
+        cfg.startup_overrides.auto_orbit_speed_deg = cfg.auto_orbit_speed_deg;
+    }
+    if (readField(j, "angleCut", cfg.angle_cut)) {
+        cfg.startup_overrides.angle_cut = cfg.angle_cut;
+    }
+    if (readField(j, "shaderAngleCut", cfg.shader_angle_cut)) {
+        cfg.startup_overrides.shader_angle_cut = cfg.shader_angle_cut;
+    }
+    if (readField(j, "cutStart", cfg.angle_cut_start_deg)) {
+        cfg.startup_overrides.angle_cut_start_deg = cfg.angle_cut_start_deg;
+    }
+    if (readField(j, "cutEnd", cfg.angle_cut_end_deg)) {
+        cfg.startup_overrides.angle_cut_end_deg = cfg.angle_cut_end_deg;
+    }
+    if (readField(j, "pbr", cfg.enable_pbr)) {
+        cfg.startup_overrides.enable_pbr = cfg.enable_pbr;
+    }
     cfg.initial_camera = parseCamera(j);
+    cfg.startup_overrides.camera = cfg.initial_camera;
 
     std::string inputPath, configPath, assetBase;
     readField(j, "input", inputPath);

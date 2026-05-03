@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 #include <print>
 #include <span>
@@ -16,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+// clang-format off
 EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
     var url = new URL(window.location.href);
     var p = url.searchParams;
@@ -31,6 +33,33 @@ EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *ma
 
     history.replaceState(null, "", url);
 });
+
+EM_JS(char *, nh_viewer_load_persistent_text, (const char *key), {
+    try {
+        var storageKey = "nodehammer.viewer." + UTF8ToString(key);
+        var value = window.localStorage.getItem(storageKey);
+        if (value === null) {
+            return 0;
+        }
+        var len = lengthBytesUTF8(value) + 1;
+        var ptr = _malloc(len);
+        stringToUTF8(value, ptr, len);
+        return ptr;
+    } catch (e) {
+        console.warn("nodehammer: failed to load persistent text", e);
+        return 0;
+    }
+});
+
+EM_JS(void, nh_viewer_save_persistent_text, (const char *key, const char *bytes), {
+    try {
+        var storageKey = "nodehammer.viewer." + UTF8ToString(key);
+        window.localStorage.setItem(storageKey, UTF8ToString(bytes));
+    } catch (e) {
+        console.warn("nodehammer: failed to save persistent text", e);
+    }
+});
+// clang-format on
 
 // clang-format off
 EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
@@ -328,6 +357,20 @@ void Platform::dispatchDroppedFiles() {
         req.user_data = ctx.release();
         sapp_html5_fetch_dropped_file(&req);
     }
+}
+
+std::optional<std::string> Platform::loadPersistentText(const std::string &key) const {
+    char *bytes = nh_viewer_load_persistent_text(key.c_str());
+    if (bytes == nullptr) {
+        return std::nullopt;
+    }
+    std::string out{bytes};
+    std::free(bytes);
+    return out;
+}
+
+void Platform::savePersistentText(const std::string &key, const std::string &bytes) {
+    nh_viewer_save_persistent_text(key.c_str(), bytes.c_str());
 }
 
 void Platform::commitUrlState(const std::string &state_query, const std::string &managed_keys) {
