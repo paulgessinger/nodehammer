@@ -202,9 +202,10 @@ if(NODEHAMMER_WITH_VIEWER)
     FetchContent_Declare(imgui
         SYSTEM
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        # 1.92 introduced the ImTextureData / RendererHasTextures API that
-        # the pinned sokol_imgui.h requires; bump if sokol moves further.
-        GIT_TAG        v1.92.7
+        # Docking branch commit. 1.92 introduced the ImTextureData /
+        # RendererHasTextures API that the pinned sokol_imgui.h requires;
+        # keep this on/after that surface when bumping.
+        GIT_TAG        ed9d1e742793f7e4333565f891b4e3821b205f09
     )
     FetchContent_MakeAvailable(imgui)
 
@@ -225,6 +226,21 @@ if(NODEHAMMER_WITH_VIEWER)
         elseif(MSVC)
             target_compile_options(imgui PRIVATE /W0)
         endif()
+    endif()
+    if(TARGET imgui AND NOT TARGET ImGui::ImGui)
+        add_library(ImGui::ImGui ALIAS imgui)
+    endif()
+
+    # Vendored Font Awesome 7 (free-solid). Header from juliettef/IconFontCppHeaders,
+    # compressed font blob generated from the official FA7 desktop OTF via
+    # imgui's misc/fonts/binary_to_compressed_c. Both files live under
+    # third_party/fontawesome7/. INTERFACE-only target — consumers include
+    # `<IconsFontAwesome7.h>` (macros) and `<fa-solid-900.h>` (compressed blob).
+    if(NOT TARGET nh_fontawesome7)
+        add_library(nh_fontawesome7 INTERFACE)
+        target_include_directories(nh_fontawesome7 SYSTEM INTERFACE
+            ${CMAKE_SOURCE_DIR}/third_party/fontawesome7
+        )
     endif()
 
     # sokol headers + sokol-shdc resolver + nh_add_sokol_lib + nh_compile_shader.

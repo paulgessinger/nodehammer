@@ -1,17 +1,37 @@
-#include "cli_common.hpp"
-
 #include <CLI/CLI.hpp>
-#include <nodehammer/ir/render.hpp>
-#include <nodehammer/scene_build.hpp>
+#include <nodehammer/detail/file_io.hpp>
 #include <nodehammer/viewer/app.hpp>
+#include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/config.hpp>
+#include <nodehammer/viewer/filesystem_project_fs.hpp>
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <print>
+#include <span>
 #include <string>
 
-using nodehammer::cli::printDiags;
+namespace {
+
+std::optional<std::string> relativeKeyUnder(std::filesystem::path root,
+                                            std::filesystem::path file) {
+    root = root.lexically_normal();
+    file = file.lexically_normal();
+
+    auto rel = file.lexically_relative(root);
+    if (rel.empty() || rel.is_absolute()) {
+        return std::nullopt;
+    }
+    for (const auto &part : rel) {
+        if (part == "..") {
+            return std::nullopt;
+        }
+    }
+    return rel.generic_string();
+}
+
+} // namespace
 
 void registerCmdViewer(CLI::App &app) {
     auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
@@ -56,14 +76,12 @@ void registerCmdViewer(CLI::App &app) {
     auto *cameraPitchOpt =
         sub->add_option("--camera-pitch", *cameraPitchDeg, "Initial camera pitch in degrees");
 
-    auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (semantic IR)");
-    auto *fmtInOpt =
-        sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
+    auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
     sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, inputOpt, fmtInOpt, configOpt]() {
+                   cameraPitchOpt, inputOpt, configOpt]() {
         const bool hasCameraOption = *cameraTargetXOpt || *cameraTargetYOpt || *cameraTargetZOpt ||
                                      *cameraDistanceOpt || *cameraYawOpt || *cameraPitchOpt;
         const bool hasAllCameraOptions = *cameraTargetXOpt && *cameraTargetYOpt &&
@@ -85,37 +103,103 @@ void registerCmdViewer(CLI::App &app) {
             cfg->initial_camera = *initialCamera;
         }
 
-        std::string inputPath, configPath, inputFmt;
+        std::string inputPath, configPath;
         if (*inputOpt) {
             inputOpt->results(inputPath);
         }
         if (*configOpt) {
             configOpt->results(configPath);
         }
-        if (fmtInOpt != nullptr && *fmtInOpt) {
-            fmtInOpt->results(inputFmt);
-        }
 
         nodehammer::viewer::App::Handle application(*cfg);
 
-        // Native flow: if --input is supplied, build synchronously before
-        // the window opens (preserves CLI semantics: errors print + exit
-        // non-zero). Otherwise the App starts with no source — the user's
-        // first drop / Open-files gesture creates one.
+        // Native CLI flow: if both roots live under the launch CWD, mount that
+        // directory as a real filesystem project so the tree can expose
+        // neighbouring includes/assets. Otherwise keep the historical bag path:
+        // read the supplied files into memory and build from those keys.
+        // Existence checks happen here so typos exit before the window opens;
+        // build failures show up as red text in the project panel.
         // The web flow lives in src/web/viewer_main.cpp.
         if (!inputPath.empty()) {
-            auto built = nodehammer::buildSceneFromPaths(
-                configPath, inputPath,
-                inputFmt.empty() ? std::nullopt : std::optional<std::string>(inputFmt));
-            printDiags(built.diags);
-            if (!built.scene) {
-                std::println(stderr, "viewer: scene build failed");
+            const std::filesystem::path config_path{configPath};
+            const std::filesystem::path geometry_path{inputPath};
+            if (!configPath.empty() && !std::filesystem::exists(config_path)) {
+                std::println(stderr, "viewer: config file not found: {}", configPath);
                 std::exit(1);
             }
-            std::println(stderr, "viewer: loaded {} nodes, {} mesh assets, {} materials",
-                         built.scene->nodes.size(), built.scene->meshAssets.size(),
-                         built.scene->materials.size());
-            application->setScene(std::move(built.scene));
+            if (!std::filesystem::exists(geometry_path)) {
+                std::println(stderr, "viewer: input file not found: {}", inputPath);
+                std::exit(1);
+            }
+
+            std::error_code path_ec;
+            const auto launch_cwd = std::filesystem::current_path(path_ec);
+            if (path_ec) {
+                std::println(stderr, "viewer: cannot read current working directory: {}",
+                             path_ec.message());
+                std::exit(1);
+            }
+            const auto cwd = std::filesystem::canonical(launch_cwd, path_ec);
+            if (path_ec) {
+                std::println(stderr, "viewer: cannot resolve current working directory: {}",
+                             path_ec.message());
+                std::exit(1);
+            }
+            const auto geometry_abs = std::filesystem::canonical(geometry_path, path_ec);
+            if (path_ec) {
+                std::println(stderr, "viewer: cannot resolve input file '{}': {}", inputPath,
+                             path_ec.message());
+                std::exit(1);
+            }
+
+            if (!configPath.empty()) {
+                const auto config_abs = std::filesystem::canonical(config_path, path_ec);
+                if (path_ec) {
+                    std::println(stderr, "viewer: cannot resolve config file '{}': {}", configPath,
+                                 path_ec.message());
+                    std::exit(1);
+                }
+                if (config_abs == geometry_abs) {
+                    std::println(stderr, "viewer: --config and --input point at the same file: {}",
+                                 configPath);
+                    std::exit(1);
+                }
+
+                auto config_key = relativeKeyUnder(cwd, config_abs);
+                auto geometry_key = relativeKeyUnder(cwd, geometry_abs);
+                if (config_key && geometry_key) {
+                    application->setProject(
+                        std::make_unique<nodehammer::viewer::FilesystemProjectFs>(cwd));
+                    application->setRootKeys(std::move(*config_key), std::move(*geometry_key));
+                    const int rc = application->run();
+                    if (rc != 0) {
+                        std::println(stderr, "viewer exited with code {}", rc);
+                    }
+                    return;
+                }
+            }
+
+            auto bag = std::make_unique<nodehammer::viewer::BagProjectFs>();
+
+            std::string config_key;
+            if (!configPath.empty()) {
+                auto bytes = nodehammer::file_io::readFile(config_path);
+                config_key = config_path.filename().string();
+                bag->addBytes(config_key, std::span<const std::byte>{bytes});
+            }
+            std::string geometry_key = geometry_path.filename().string();
+            if (geometry_key == config_key) {
+                std::println(stderr, "viewer: --config and --input point at the same file: {}",
+                             configPath);
+                std::exit(1);
+            }
+            {
+                auto bytes = nodehammer::file_io::readFile(geometry_path);
+                bag->addBytes(geometry_key, std::span<const std::byte>{bytes});
+            }
+
+            application->setProject(std::move(bag));
+            application->setRootKeys(std::move(config_key), std::move(geometry_key));
         }
 
         const int rc = application->run();

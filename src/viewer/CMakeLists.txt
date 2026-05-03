@@ -20,7 +20,7 @@
 #   scene_build_job_*   — std::thread (native) or polled state machine (web)
 #   platform_*          — EM_JS / KEEPALIVE shims live in the web variant
 #
-# url_asset_source.cpp is web-only: native already builds synchronously
+# url_project_fs.cpp is web-only: native already builds synchronously
 # from --input/--config in cmd_viewer.cpp, so the network fetch path has
 # no meaning off the browser.
 
@@ -38,17 +38,27 @@ function(nh_add_viewer_lib name sokol_lib)
         ${_dir}/camera.cpp
         ${_dir}/scene_renderer.cpp
         ${_dir}/imgui_backend.cpp
+        ${_dir}/ui/debug_panel.cpp
+        ${_dir}/ui/icon_font.cpp
+        ${_dir}/ui/menu_bar.cpp
+        ${_dir}/ui/notifications.cpp
+        ${_dir}/ui/project_panel.cpp
+        ${_dir}/ui/status_ui.cpp
+        ${_dir}/ui/view_panel.cpp
+        ${_dir}/ui/viewer_ui.cpp
         ${_dir}/ibl_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/ibl_web.cpp,${_dir}/ibl_native.cpp>
         ${_dir}/ibl_cache_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/ibl_cache_web.cpp,${_dir}/ibl_cache_native.cpp>
         ${_dir}/scene_build_job_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
-        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_asset_source_web.cpp,>
-        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,${_dir}/platform_native.cpp>
-        ${_dir}/drop_asset_source.cpp
+        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_project_fs_web.cpp,>
+        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,$<IF:$<BOOL:${APPLE}>,${_dir}/platform_macos.mm,${_dir}/platform_native_default.cpp>>
+        $<$<NOT:$<BOOL:${EMSCRIPTEN}>>:${_dir}/platform_native_common.cpp>
+        # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
+        # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )
-    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib})
+    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7)
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
     add_dependencies(${name} nodehammer_shaders)
     nodehammer_set_compiler_options(${name})

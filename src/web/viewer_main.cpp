@@ -10,11 +10,10 @@
 //   1. JS shell calls `_nh_viewer_start(opts_json)` once.
 //   2. Options JSON populates a viewer::Config + (optionally) an
 //      initial_camera.
-//   3. If both `config` and `input` URL-style paths are supplied, the App
-//      gets a UrlAssetSource that fetches them via emscripten_fetch and
-//      builds the scene once they land. Otherwise it starts sourceless;
-//      drag-drop or the file picker creates a DropAssetSource on the
-//      first user gesture.
+//   3. If both `config` and `input` URL-style paths are supplied, a
+//      UrlProjectFs is mounted on the App and fetches them via
+//      emscripten_fetch. Otherwise the App keeps its eagerly-allocated
+//      BagProjectFs; drag-drop or the file picker push files into it.
 //   4. `App::run()` registers the sokol main loop with emscripten and
 //      unwinds; subsequent frame callbacks fire from the event queue.
 //
@@ -24,7 +23,7 @@
 
 #include <nodehammer/viewer/app.hpp>
 #include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/url_asset_source.hpp>
+#include <nodehammer/viewer/url_project_fs.hpp>
 
 #include <glm/glm.hpp>
 
@@ -152,12 +151,18 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
     nodehammer::viewer::App::Handle application(cfg);
 
     if (!inputPath.empty() && !configPath.empty()) {
-        auto loader = std::make_unique<nodehammer::viewer::UrlAssetSource>();
-        loader->start(configPath, inputPath, assetBase);
-        application->setSource(std::move(loader));
+        auto loader = std::make_unique<nodehammer::viewer::UrlProjectFs>();
+        loader->setAssetBase(assetBase);
+        application->setProject(std::move(loader));
+        // Stage 2: BuildSession resolves these keys lazily through
+        // UrlProjectFs::resolve, which kicks off emscripten_fetch on
+        // first miss. No upfront enqueue needed — the session does it.
+        application->setRootKeys(configPath, inputPath);
     }
-    // Otherwise leave the App sourceless — the user's first drop or
-    // Open-files gesture creates a DropAssetSource and installs it.
+    // Otherwise the App keeps its eagerly-allocated BagProjectFs — the
+    // user's first drop or Open-files gesture pushes into it directly,
+    // and App-side recognition picks the .toml + .nhb/.nhb.zst entries
+    // as the build's root keys.
 
     application->run();
     return 0;

@@ -3,19 +3,22 @@
 #include <nodehammer/scene_build.hpp>
 
 #include <cstdint>
-#include <filesystem>
 #include <memory>
+#include <string>
 
 namespace nodehammer::viewer {
 
-/// Runs `buildSceneFromPaths` off the main loop, with the tessellation
-/// stage broken into cooperative chunks so a long pass doesn't freeze the
-/// frame. On native the whole build executes on a worker `std::thread` and
-/// `poll` is just a flag check. On web (no pthreads) `poll` runs the
-/// upstream stages (config + import + select + dedup) synchronously on
-/// its first call — that's the unavoidable stall — and then drives the
-/// `TessellationJob` iterator across subsequent polls so the UI keeps
-/// rendering during tessellation.
+/// Drives the validate + select + dedup + tessellate stages off the main
+/// loop, with tessellation broken into cooperative chunks so a long pass
+/// doesn't freeze the frame. On native the whole build executes on a
+/// worker `std::thread` and `poll` is just a flag check. On web (no
+/// pthreads) `poll` runs the upstream prep synchronously on its first
+/// call and then drives the `TessellationJob` iterator across subsequent
+/// polls so the UI keeps rendering during tessellation.
+///
+/// The viewer always feeds this through bytes-resolved-through-ProjectFs
+/// — the BuildSession does the resolve + parse + import dance and then
+/// hands the parsed config + imported scene to `start()`.
 class SceneBuildJob {
   public:
     SceneBuildJob();
@@ -25,8 +28,10 @@ class SceneBuildJob {
 
     /// Begin a build. Idempotent — calling `start` a second time before
     /// `take` is invalid; the App is expected to drive a single in-flight
-    /// build at a time.
-    void start(std::filesystem::path config_path, std::filesystem::path input_path);
+    /// build at a time. The two `_label` strings are diagnostic-only —
+    /// they show up in the pre-build log so failures stay attributable.
+    void start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
+               std::string config_label, std::string geometry_label);
 
     /// Drive progress. Returns true once the build has finished (either
     /// with a scene or with diagnostics describing a failure). Until then

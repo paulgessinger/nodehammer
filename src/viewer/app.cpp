@@ -5,13 +5,17 @@
 #include "imgui_backend.hpp"
 #include "scene_build_job.hpp"
 #include "scene_renderer.hpp"
+#include "ui/icon_font.hpp"
+#include "ui/notifications.hpp"
+#include "ui/viewer_ui.hpp"
+
 #include <nodehammer/viewer/platform.hpp>
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
-#include <nodehammer/viewer/asset_source.hpp>
+#include <nodehammer/viewer/build_session.hpp>
 #include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/drop_asset_source.hpp>
+#include <nodehammer/viewer/project_fs.hpp>
 
 #include <imgui.h>
 #include <sokol_app.h>
@@ -20,26 +24,42 @@
 #include <sokol_log.h>
 #include <sokol_time.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <filesystem>
+#include <functional>
 #include <iomanip>
 #include <memory>
+#include <optional>
 #include <print>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace nodehammer::viewer {
 
 namespace {
 
-float wrapDegrees(float angle) {
-    angle = std::fmod(angle, 360.f);
-    if (angle < 0.f) {
-        angle += 360.f;
-    }
-    return angle;
+enum class ScrollInputMode { Wheel, Trackpad };
+
+struct RetainedModal {
+    std::uint64_t id{0};
+    std::string title;
+    std::string message;
+    std::string confirm_label{"OK"};
+    std::string cancel_label{"Cancel"};
+    bool show_cancel{false};
+    bool opened{false};
+    std::function<void()> on_confirm;
+    std::function<void()> on_cancel;
+};
+
+bool isZoomModifier(uint32_t modifiers) {
+    return (modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER)) != 0;
 }
 
 std::string formatUrlFloat(float value) {
@@ -83,7 +103,15 @@ struct App::Impl {
     bool quit{false};
 
     std::shared_ptr<const RenderScene> scene;
-    std::unique_ptr<AssetSource> source;
+    std::unique_ptr<ProjectFs> project_;
+    /// Platform impl: native vs web. Constructed by App's ctor body
+    /// after this Impl is in place, so the impl can hold a back-pointer
+    /// to the live App. State that would otherwise live in file-static
+    /// globals (picker latches, window hooks) lives as platform members.
+    std::unique_ptr<platform::Platform> platform_;
+    platform::WindowCustomizationRequest window_customization;
+    platform::PlatformWindowState platform_window_state;
+    std::vector<platform::PlatformGestureEvent> platform_gesture_events;
     SceneRenderer scene_renderer;
     Camera camera;
 
@@ -112,18 +140,27 @@ struct App::Impl {
     bool build_in_progress{false};
     std::chrono::steady_clock::time_point build_start_time{};
 
-    // Set from inside the imgui frame on native when the user clicks
-    // "Open files…"; drained at end of frame to run NFD modally. NFD
-    // enters nested event loops that would re-enter the active ImGui
-    // frame, so the open-and-drain split is required. Always present but
-    // only meaningful on native — the web picker dispatches inline (the
-    // browser requires `input.click()` from the gesture stack) and never
-    // touches this flag.
-    bool picker_requested{false};
+    // BuildSession drives the include-graph walk against the project's
+    // resolve() interface and produces parsed config + imported geometry
+    // for the build job. App owns it so the frame loop can poll once
+    // per frame.
+    BuildSession build_session;
 
-    // Stashed message after a build failure (so the UI can keep showing it
-    // for more than the one frame the source survives).
+    // Root keys the App last fed to the session. Set by external
+    // entry points via App::setRootKeys (URL JS shell, CLI) and by
+    // double-click in the tree panel. The user can override the
+    // initial selection at any time by clicking a different leaf.
+    std::string root_config_key;
+    std::string root_geometry_key;
+
+    // Stashed message after a build failure so the UI can keep showing
+    // it across frames.
     std::string build_error;
+
+    std::vector<RetainedModal> active_modals;
+    std::uint64_t next_modal_id{1};
+    ui::UiState ui_state;
+    ui::Notifications notifications;
 
     /// Bounding-sphere radius of the loaded scene; live-only state derived
     /// from the scene geometry, not part of persisted camera state. 0 means
@@ -148,17 +185,32 @@ struct App::Impl {
     double render_submit_ms{0.0};
     double scene_submit_ms{0.0};
 
-    explicit Impl(Config c) : cfg(std::move(c)) {}
+    ScrollInputMode scroll_input_mode{ScrollInputMode::Wheel};
+    float pending_scroll_x{0.f};
+    float pending_scroll_y{0.f};
+    uint32_t pending_scroll_modifiers{0};
+    uint64_t last_scroll_time{0};
+    int smooth_scroll_score{0};
+    int wheel_scroll_score{0};
+
+    explicit Impl(Config c) : cfg(std::move(c)), project_(platform::makeEmptyBag()) {}
 
     void onInit();
     void onFrame();
     void onEvent(const sapp_event *ev);
     void onCleanup();
 
+    void classifyScroll(float scroll_x, float scroll_y);
+    void handleScrollEvent(const sapp_event *ev, bool imgui_handled);
     void updateCameraInput();
     void applyInitialCamera();
     void render();
     void syncBrowserUrl() const;
+    void addProjectPath(const std::filesystem::path &path);
+    void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+    void enqueueModal(RetainedModal modal);
+    void enqueueProjectDropModal(ProjectDropDecision decision, std::function<void()> on_confirm);
+    void renderActiveModal();
     [[nodiscard]] std::string browserUrlStateQuery() const;
 
     static void initCb(void *user) { static_cast<Impl *>(user)->onInit(); }
@@ -200,13 +252,22 @@ void App::Impl::onInit() {
     // ImGui::StyleColorsDark here, that would double-init and crash on
     // simgui_shutdown.
     ImGui_ImplSokol_Init();
+    ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    ui::icon_font::initialize();
+    project_->setLogSink(&notifications);
+    build_session.setLogSink(&notifications);
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
+    platform_->attachWindow(window_customization);
 }
 
 void App::Impl::onEvent(const sapp_event *ev) {
-    ImGui_ImplSokol_HandleEvent(ev);
+    platform_->handleWindowEvent(ev);
+    const bool imgui_handled = ImGui_ImplSokol_HandleEvent(ev);
+    if (ev->type == SAPP_EVENTTYPE_MOUSE_SCROLL) {
+        handleScrollEvent(ev, imgui_handled);
+    }
     if (ev->type == SAPP_EVENTTYPE_FOCUSED) {
         window_focused = true;
         last_time = stm_now();
@@ -224,18 +285,75 @@ void App::Impl::onEvent(const sapp_event *ev) {
     } else if (ev->type == SAPP_EVENTTYPE_QUIT_REQUESTED) {
         quit = true;
     } else if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
-        // Platform code allocates a fresh DropAssetSource for the gesture
-        // and installs it on the App when fully populated (synchronously
-        // on native, on the last fetch callback on web). Lives in
-        // platform-specific code.
-        if (auto *app = App::instance()) {
-            platform::dispatchDroppedFiles(*app);
-        }
+        // Platform code pushes the dropped files into the App's existing
+        // project (synchronously on native, via per-file fetch callbacks
+        // on web). Lives in platform-specific code.
+        platform_->dispatchDroppedFiles();
     }
+}
+
+void App::Impl::classifyScroll(float scroll_x, float scroll_y) {
+    constexpr double kQuietSeconds = 0.25;
+    constexpr float kScrollEpsilon = 0.001f;
+    constexpr float kStepEpsilon = 0.025f;
+    constexpr int kTrackpadScoreThreshold = 2;
+    constexpr int kWheelScoreThreshold = 2;
+
+    const uint64_t now = stm_now();
+    if (last_scroll_time != 0 && stm_sec(stm_diff(now, last_scroll_time)) > kQuietSeconds) {
+        smooth_scroll_score = 0;
+        wheel_scroll_score = 0;
+    }
+    last_scroll_time = now;
+
+    const float abs_x = std::abs(scroll_x);
+    const float abs_y = std::abs(scroll_y);
+    const bool has_horizontal = abs_x > kScrollEpsilon;
+    const bool has_vertical = abs_y > kScrollEpsilon;
+    if (!has_horizontal && !has_vertical) {
+        return;
+    }
+
+    const float rounded_y = std::round(abs_y);
+    const bool vertical_step =
+        has_vertical && rounded_y >= 1.f && std::abs(abs_y - rounded_y) <= kStepEpsilon;
+    const bool wheel_like = !has_horizontal && vertical_step;
+    const bool strong_smooth_like = has_horizontal || (has_vertical && abs_y < 1.f - kStepEpsilon);
+    const bool smooth_like = strong_smooth_like || !vertical_step;
+
+    if (smooth_like) {
+        ++smooth_scroll_score;
+        wheel_scroll_score = std::max(0, wheel_scroll_score - 1);
+    } else if (wheel_like) {
+        ++wheel_scroll_score;
+        smooth_scroll_score = std::max(0, smooth_scroll_score - 1);
+    }
+
+    if (strong_smooth_like || smooth_scroll_score >= kTrackpadScoreThreshold) {
+        scroll_input_mode = ScrollInputMode::Trackpad;
+    } else if (wheel_scroll_score >= kWheelScoreThreshold) {
+        scroll_input_mode = ScrollInputMode::Wheel;
+    }
+}
+
+void App::Impl::handleScrollEvent(const sapp_event *ev, bool imgui_handled) {
+    classifyScroll(ev->scroll_x, ev->scroll_y);
+
+    const ImGuiIO &io = ImGui::GetIO();
+    if (imgui_handled || io.WantCaptureMouse) {
+        return;
+    }
+
+    pending_scroll_x += ev->scroll_x;
+    pending_scroll_y += ev->scroll_y;
+    pending_scroll_modifiers = ev->modifiers;
 }
 
 void App::Impl::updateCameraInput() {
     if (!scene) {
+        pending_scroll_x = 0.f;
+        pending_scroll_y = 0.f;
+        platform_gesture_events.clear();
         return;
     }
     ImGuiIO &io = ImGui::GetIO();
@@ -251,11 +369,29 @@ void App::Impl::updateCameraInput() {
             const float scale = camera.distance * 0.001f;
             camera.pan(-d.x * scale, d.y * scale);
         }
+        if (pending_scroll_y != 0.f || pending_scroll_x != 0.f) {
+            // 1.1^wheel: each notch = 10% closer/further. Matches Blender feel.
+            const bool zoom_scroll = scroll_input_mode == ScrollInputMode::Wheel ||
+                                     isZoomModifier(pending_scroll_modifiers);
+            if (zoom_scroll) {
+                const float wheel = pending_scroll_y != 0.f ? pending_scroll_y : pending_scroll_x;
+                camera.dolly(std::pow(1.1f, -wheel), scene_radius);
+            } else {
+
+                constexpr float kTrackpadOrbitSensitivity = platform::kIsWeb ? 0.08f : 0.03f;
+                camera.orbit(pending_scroll_x * kTrackpadOrbitSensitivity,
+                             pending_scroll_y * kTrackpadOrbitSensitivity);
+            }
+        }
+        for (const auto &event : platform_gesture_events) {
+            if (event.type == platform::GestureType::PinchUpdate && event.scale_delta > 0.f) {
+                camera.dolly(1.f / std::clamp(event.scale_delta, 0.05f, 20.f), scene_radius);
+            }
+        }
     }
-    if (io.MouseWheel != 0.f) {
-        // 1.1^wheel: each notch = 10% closer/further. Matches Blender feel.
-        camera.dolly(std::pow(1.1f, -io.MouseWheel), scene_radius);
-    }
+    pending_scroll_x = 0.f;
+    pending_scroll_y = 0.f;
+    platform_gesture_events.clear();
 }
 
 void App::Impl::applyInitialCamera() {
@@ -348,7 +484,124 @@ void App::Impl::syncBrowserUrl() const {
             "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
             "cutEnd,"
             "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch";
-        platform::commitUrlState(state_query, kManagedKeys);
+        platform_->commitUrlState(state_query, kManagedKeys);
+    }
+}
+
+void App::Impl::addProjectPath(const std::filesystem::path &path) {
+    using enum ProjectDropDecision::Kind;
+    if (path.empty() || project_ == nullptr) {
+        return;
+    }
+    auto decision = project_->planAddPath(path);
+    if (decision.kind == Accept) {
+        project_->addPath(path);
+        build_error.clear();
+        return;
+    }
+
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), [this, path = path]() {
+            if (project_ == nullptr) {
+                return;
+            }
+            project_->addPath(path);
+            build_error.clear();
+        });
+    } else {
+        enqueueProjectDropModal(std::move(decision), {});
+    }
+}
+
+void App::Impl::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
+    using enum ProjectDropDecision::Kind;
+    if (filename.empty() || project_ == nullptr) {
+        return;
+    }
+    auto decision = project_->planAddBytes(filename, bytes);
+    if (decision.kind == Accept) {
+        project_->addBytes(filename, bytes);
+        build_error.clear();
+        return;
+    }
+
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), [this, filename = filename, bytes = bytes]() {
+            if (project_ == nullptr) {
+                return;
+            }
+            project_->addBytes(filename, std::span<const std::byte>{bytes.data(), bytes.size()});
+            build_error.clear();
+        });
+    } else {
+        enqueueProjectDropModal(std::move(decision), {});
+    }
+}
+
+void App::Impl::enqueueProjectDropModal(ProjectDropDecision decision,
+                                        std::function<void()> on_confirm) {
+    RetainedModal modal;
+    modal.title = decision.title.empty() ? "Project file drop" : std::move(decision.title);
+    modal.message = std::move(decision.message);
+    modal.confirm_label = decision.confirm_label.empty() ? "OK" : std::move(decision.confirm_label);
+    modal.cancel_label =
+        decision.cancel_label.empty() ? "Cancel" : std::move(decision.cancel_label);
+    modal.show_cancel = decision.kind == ProjectDropDecision::Kind::Confirm;
+    modal.on_confirm = std::move(on_confirm);
+    enqueueModal(std::move(modal));
+}
+
+void App::Impl::enqueueModal(RetainedModal modal) {
+    modal.id = next_modal_id++;
+    active_modals.push_back(std::move(modal));
+}
+
+void App::Impl::renderActiveModal() {
+    if (active_modals.empty()) {
+        return;
+    }
+
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
+    auto &modal = active_modals.back();
+    const std::string popup_id = modal.title + "###modal_" + std::to_string(modal.id);
+    if (!modal.opened) {
+        ImGui::OpenPopup(popup_id.c_str());
+        modal.opened = true;
+    }
+
+    const float max_width = std::min(640.f, viewport->Size.x * 0.85f);
+    const float min_width = std::min(360.f, max_width);
+    ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, {0.5f, 0.5f});
+    ImGui::SetNextWindowSizeConstraints({min_width, 0.f}, {max_width, viewport->Size.y * 0.85f});
+    if (ImGui::BeginPopupModal(popup_id.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("%s", modal.message.c_str());
+        ImGui::Separator();
+
+        if (ImGui::Button(modal.confirm_label.c_str())) {
+            auto on_confirm = std::move(modal.on_confirm);
+            ImGui::CloseCurrentPopup();
+            active_modals.pop_back();
+            if (on_confirm) {
+                on_confirm();
+            }
+            ImGui::EndPopup();
+            return;
+        }
+        if (modal.show_cancel) {
+            ImGui::SameLine();
+            if (ImGui::Button(modal.cancel_label.c_str())) {
+                auto on_cancel = std::move(modal.on_cancel);
+                ImGui::CloseCurrentPopup();
+                active_modals.pop_back();
+                if (on_cancel) {
+                    on_cancel();
+                }
+                ImGui::EndPopup();
+                return;
+            }
+        }
+
+        ImGui::EndPopup();
     }
 }
 
@@ -372,6 +625,7 @@ void App::Impl::onFrame() {
                                                 std::chrono::steady_clock::now() - ibl_start_time)
                                                 .count();
                     std::println("viewer: IBL loaded from cache ({:.1f} ms)", elapsed_ms);
+                    notifications.info("IBL loaded from cache");
                 } else {
                     // Miss — start the real bake now. ibl_start_time stays
                     // anchored at the cache attempt so the reported total
@@ -392,6 +646,7 @@ void App::Impl::onFrame() {
                                         std::chrono::steady_clock::now() - ibl_start_time)
                                         .count();
             std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+            notifications.success("IBL bake complete");
         }
     }
 
@@ -402,6 +657,7 @@ void App::Impl::onFrame() {
         auto built = build_job.take();
         for (const auto &d : built.diags.items()) {
             std::println(stderr, "scene_build: {} {}", d.code, d.message);
+            notifications.diagnostic(d);
         }
         if (built.scene) {
             const auto build_ms = std::chrono::duration<double, std::milli>(
@@ -411,11 +667,14 @@ void App::Impl::onFrame() {
                          "{} materials)",
                          build_ms, built.scene->nodes.size(), built.scene->meshAssets.size(),
                          built.scene->materials.size());
+            notifications.success("Tessellation complete");
             scene = std::move(built.scene);
             scene_uploaded = false;
             camera_framed = false;
             build_error.clear();
         } else {
+            // Errors are already surfaced as toasts via diagnostic() above;
+            // stash the first one for the persistent status-bar message.
             build_error = "scene build failed";
             for (const auto &d : built.diags.items()) {
                 if (d.severity >= DiagnosticSeverity::Error) {
@@ -425,16 +684,16 @@ void App::Impl::onFrame() {
             }
         }
         build_in_progress = false;
-        // The source (UrlAssetSource that resolved, or DropAssetSource
-        // from a gesture) has done its job; drop it. The next gesture
-        // creates a fresh one — no need for a placeholder.
-        source.reset();
+        // Project is long-lived: we keep it so additional drops/picks
+        // accumulate into the existing bag (or so a UrlProjectFs's state
+        // survives in case the user wants to inspect what loaded). The
+        // build job already has the paths it needs; nothing else to do.
     }
 
     // When unfocused, throttle to a low rate (~5 Hz) instead of pausing
     // entirely. Full pause was visible as "drag-and-drop into a
     // background viewer feels broken": the drop event fired and the
-    // async source/scene-build state advanced, but no frame rendered the
+    // async project/scene-build state advanced, but no frame rendered the
     // result until focus returned. 5 Hz keeps drag-over feedback and
     // load progress visible while still cutting GPU cost ~12x vs. the
     // active 60 Hz path. The flag's URL/persistence name stays
@@ -470,252 +729,126 @@ void App::Impl::onFrame() {
     ImGui_ImplSokol_NewFrame(static_cast<int>(fb_width), static_cast<int>(fb_height), delta_seconds,
                              sapp_dpi_scale());
 
+    platform_->beginFrameWindowSync();
+    platform_window_state = platform_->windowState();
+    platform_gesture_events = platform_->takeGestureEvents();
+
     updateCameraInput();
     if (scene && cfg.auto_orbit) {
         camera.orbit(glm::radians(cfg.auto_orbit_speed_deg) * static_cast<float>(delta_seconds),
                      0.f);
     }
 
-    ImGui::Begin("nodehammer viewer");
-    ImGui::Text("Backbuffer: %u x %u", fb_width, fb_height);
-    {
-        const sg_backend backend = sg_query_backend();
-        const char *name = "?";
-        switch (backend) {
-        case SG_BACKEND_GLCORE:
-            name = "GL";
-            break;
-        case SG_BACKEND_GLES3:
-            name = "GLES3 / WebGL2";
-            break;
-        case SG_BACKEND_D3D11:
-            name = "D3D11";
-            break;
-        case SG_BACKEND_METAL_IOS:
-            name = "Metal (iOS)";
-            break;
-        case SG_BACKEND_METAL_MACOS:
-            name = "Metal (macOS)";
-            break;
-        case SG_BACKEND_METAL_SIMULATOR:
-            name = "Metal (sim)";
-            break;
-        case SG_BACKEND_WGPU:
-            name = "WebGPU";
-            break;
-        case SG_BACKEND_VULKAN:
-            name = "Vulkan";
-            break;
-        case SG_BACKEND_DUMMY:
-            name = "dummy";
-            break;
-        }
-        ImGui::Text("Renderer: %s", name);
-    }
-    ImGui::Text("FPS: %.1f", fps);
-    ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", frame_interval_ms,
-                render_submit_ms, scene_submit_ms);
-    if constexpr (platform::kIsWeb) {
-        if (ImGui::Button("Commit settings to URL")) {
-            syncBrowserUrl();
-        }
-    }
-    ImGui::Checkbox("throttle when unfocused", &cfg.pause_when_unfocused);
-    if (!ibl_installed) {
-        const auto frac = static_cast<float>(ibl_job.progress());
-        ImGui::Text("IBL bake: %.0f%%", frac * 100.0f);
-        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-    }
-    // Developer escape hatch: drop the persisted IBL cache. Doesn't touch
-    // the live GPU IBL — only takes effect on the next page load / launch,
-    // which then re-bakes from scratch.
-    if (ImGui::Button("Clear IBL cache")) {
-        clearIblCache();
-    }
-    if (!scene) {
-        ImGui::Separator();
-        // `show_drag_hint` flips off whenever the source has something
-        // concrete to say (loading progress, ready/build status, or a
-        // hard error) — otherwise we encourage the user to drop files.
-        bool show_drag_hint = true;
-        if (source) {
-            source->poll();
-            const auto state = source->state();
-            if (state == LoadState::Error) {
-                ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "Asset load failed:");
-                ImGui::TextWrapped("%s", source->errorMessage().c_str());
-                show_drag_hint = false;
-            } else if (state == LoadState::Ready) {
-                // Hand the paths to the build job. Native immediately spawns
-                // a worker thread; web defers the synchronous build by one
-                // poll so this frame's "Tessellating…" UI paints first.
-                if (!build_in_progress) {
-                    build_start_time = std::chrono::steady_clock::now();
-                    build_job.start(source->configPath(), source->inputPath());
-                    build_in_progress = true;
-                }
-                switch (build_job.phase()) {
-                case SceneBuildJob::Phase::Preparing:
-                    ImGui::Text("Loading config and importing geometry…");
-                    break;
-                case SceneBuildJob::Phase::Tessellating: {
-                    const auto total = build_job.tessellationTotal();
-                    const auto processed = build_job.tessellationProcessed();
-                    if (total > 0) {
-                        ImGui::Text("Tessellating… (%zu / %zu nodes)", processed, total);
-                        const float frac =
-                            static_cast<float>(processed) / static_cast<float>(total);
-                        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-                    } else {
-                        ImGui::Text("Tessellating…");
-                    }
-                    break;
-                }
-                case SceneBuildJob::Phase::Finalizing:
-                    ImGui::Text("Finalising scene…");
-                    break;
-                case SceneBuildJob::Phase::Idle:
-                case SceneBuildJob::Phase::Done:
-                    break;
-                }
-                show_drag_hint = false;
-            } else {
-                // Idle / Fetching: render a source-shaped progress block.
-                // URL-style sources populate `progress()` with active
-                // downloads; drop sources populate it with already-collected
-                // files. Empty progress = no concrete state to show, fall
-                // through to the drag hint below.
-                const auto entries = source->progress();
-                if (!entries.empty()) {
-                    show_drag_hint = false;
-                    ImGui::Text("Loading…");
-                    for (const auto &p : entries) {
-                        if (!p.done && p.bytes_total > 0) {
-                            const float frac =
-                                static_cast<float>(static_cast<double>(p.bytes_done) /
-                                                   static_cast<double>(p.bytes_total));
-                            ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-                        } else if (!p.done) {
-                            ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()),
-                                               ImVec2(-1.f, 0.f), "");
-                        } else {
-                            ImGui::TextColored({0.5f, 0.9f, 0.5f, 1.f}, "[ok]");
-                        }
-                        ImGui::SameLine();
-                        ImGui::Text("%s", p.url.c_str());
-                    }
-                }
-            }
-            // Slot hints — the latest drop/pick gesture didn't include
-            // one of the required files; nudge the user to include both
-            // next time. Source-agnostic: any source can populate these.
-            for (const auto &msg : source->waitingFor()) {
-                ImGui::Text("Still waiting for: %s", msg.c_str());
-            }
-            if (const auto &u = source->unrecognised(); !u.empty()) {
-                ImGui::TextColored({1.f, 0.7f, 0.4f, 1.f}, "Don't know what to do with: %s",
-                                   u.c_str());
+    // Drive the project + build pipeline unconditionally — running this
+    // only when `!scene` means double-clicking a different config in the
+    // tree panel after a scene is already rendered would update the
+    // session's root keys but never actually walk → parse → build the
+    // new selection. The build-job completion above swaps `scene` over
+    // when the new build lands.
+    if (project_) {
+        project_->poll();
+        build_session.poll(project_.get());
+
+        if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
+            if (auto inputs = build_session.takeInputs()) {
+                build_start_time = std::chrono::steady_clock::now();
+                build_job.start(std::move(inputs->config.config), std::move(inputs->import.scene),
+                                std::move(inputs->config_key), std::move(inputs->geometry_key));
+                build_in_progress = true;
             }
         }
-        if (!build_error.empty()) {
-            ImGui::TextColored({1.f, 0.4f, 0.4f, 1.f}, "%s", build_error.c_str());
-        }
-        if (show_drag_hint) {
-            ImGui::Text("Drag a config (.toml) and a geometry file onto the window,");
-            ImGui::Text("or use the Open files button below.");
-        }
-        if (ImGui::Button("Open files…")) {
-            if constexpr (platform::kIsWeb) {
-                // Browser requires input.click() in the user-gesture stack;
-                // the EM_JS shim returns synchronously and bytes arrive
-                // later via the upload-batch C exports.
-                platform::dispatchWebFilePicker();
-            } else {
-                // Latch — drained at end of frame so NFD's nested event
-                // loop doesn't re-enter the active ImGui frame.
-                picker_requested = true;
-            }
-        }
-    } else if (scene && !scene_uploaded) {
-        ImGui::Separator();
-        ImGui::Text("Uploading scene to GPU…");
-        ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()), ImVec2(-1.f, 0.f), "");
     }
 
-    if (scene) {
-        ImGui::Separator();
-        ImGui::Text("Meshes: %u", scene_renderer.meshAssetCount());
-        ImGui::Text("Nodes: %u", scene_renderer.nodeCount());
-        ImGui::Text("Tris (scene): %llu",
-                    static_cast<unsigned long long>(scene_renderer.triangleCount()));
-        const auto fs = scene_renderer.lastFrameStats();
-        ImGui::Text("Draw calls: %u  Instances: %u  Tris/frame: %llu", fs.draw_calls, fs.instances,
-                    static_cast<unsigned long long>(fs.triangles));
-        if (ImGui::Button("Frame scene")) {
-            glm::vec3 bmin{0.f}, bmax{0.f};
-            if (scene_renderer.worldBounds(bmin, bmax)) {
-                scene_radius = camera.frameBounds(bmin, bmax);
-            }
+    ui::ViewerUiContext ui_ctx{
+        .cfg = cfg,
+        .project = project_.get(),
+        .build_session = build_session,
+        .build_job = build_job,
+        .scene_renderer = scene_renderer,
+        .camera = camera,
+        .notifications = &notifications,
+        .platform_window_state = platform_window_state,
+        .root_config_key = root_config_key,
+        .root_geometry_key = root_geometry_key,
+        .build_error = build_error,
+        .fb_width = fb_width,
+        .fb_height = fb_height,
+        .fps = fps,
+        .frame_interval_ms = frame_interval_ms,
+        .render_submit_ms = render_submit_ms,
+        .scene_submit_ms = scene_submit_ms,
+        .has_scene = static_cast<bool>(scene),
+        .scene_uploaded = scene_uploaded,
+        .build_in_progress = build_in_progress,
+        .ibl_installed = ibl_installed,
+        .ibl_progress = ibl_job.progress(),
+    };
+
+    ui::UiActions ui_actions;
+    ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
+    ui_actions.clear_ibl_cache = [this]() {
+        clearIblCache();
+        notifications.info("IBL cache cleared");
+    };
+    ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
+    ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
+    ui_actions.frame_scene = [this]() {
+        if (!scene) {
+            return;
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Clear scene")) {
-            scene_renderer.clearScene();
-            scene.reset();
-            source.reset();
-            scene_uploaded = false;
-            camera_framed = false;
-            scene_radius = 0.f;
+        glm::vec3 bmin{0.f}, bmax{0.f};
+        if (scene_renderer.worldBounds(bmin, bmax)) {
+            scene_radius = camera.frameBounds(bmin, bmax);
+        }
+    };
+    ui_actions.close_project = [this]() {
+        scene_renderer.clearScene();
+        scene.reset();
+        project_ = platform::makeEmptyBag();
+        project_->setLogSink(&notifications);
+        root_config_key.clear();
+        root_geometry_key.clear();
+        build_session.setRootKeys({}, {});
+        active_modals.clear();
+        scene_uploaded = false;
+        camera_framed = false;
+        scene_radius = 0.f;
+        build_error.clear();
+        notifications.info("Project closed");
+    };
+    ui_actions.rescan_project = [this]() {
+        if (project_) {
+            project_->rescan();
             build_error.clear();
+            notifications.info("Project rescan requested");
         }
-        ImGui::Separator();
-        ImGui::Checkbox("backface cull", &cfg.cull_back);
-        ImGui::Checkbox("auto orbit", &cfg.auto_orbit);
-        ImGui::SliderFloat("orbit speed", &cfg.auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
-        ImGui::Checkbox("angle cut", &cfg.angle_cut);
-        ImGui::Checkbox("shader angle cut", &cfg.shader_angle_cut);
-        ImGui::SliderFloat("cut start", &cfg.angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(80.f);
-        if (ImGui::InputFloat("##cut_start_input", &cfg.angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
-            cfg.angle_cut_start_deg = wrapDegrees(cfg.angle_cut_start_deg);
-        }
-        ImGui::SliderFloat("cut end", &cfg.angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(80.f);
-        if (ImGui::InputFloat("##cut_end_input", &cfg.angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
-            cfg.angle_cut_end_deg = wrapDegrees(cfg.angle_cut_end_deg);
-        }
-        ImGui::Separator();
-        ImGui::Checkbox("PBR / IBL", &cfg.enable_pbr);
-        ImGui::Text("Camera: yaw=%.1f° pitch=%.1f° dist=%.2f", glm::degrees(camera.yaw),
-                    glm::degrees(camera.pitch), camera.distance);
-        ImGui::Text("        near=%.3f far=%.1f", camera.near_plane, camera.far_plane);
-    }
-    ImGui::End();
+    };
+    ui_actions.select_config_key = [this](std::string key) {
+        root_config_key = std::move(key);
+        build_session.setRootKeys(root_config_key, root_geometry_key);
+        build_error.clear();
+    };
+    ui_actions.select_geometry_key = [this](std::string key) {
+        root_geometry_key = std::move(key);
+        build_session.setRootKeys(root_config_key, root_geometry_key);
+        build_error.clear();
+    };
+
+    ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
+    renderActiveModal();
+    notifications.render();
 
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
     render();
 
-    // Drain a pending native file picker. The ImGui frame is fully ended
-    // and rendered by this point, sokol's pass is committed, and any
-    // sokol_app frame_cb re-entry from the modal's nested run loop will
-    // hit a clean self-contained frame instead of overlapping with one
-    // already in progress. Web's picker dispatched inline at click-time;
-    // there's nothing to drain here.
-    if constexpr (!platform::kIsWeb) {
-        if (picker_requested) {
-            picker_requested = false;
-            // Per-gesture source: NFD's modal returns synchronously after
-            // the user confirms, so we accumulate paths into a fresh
-            // DropAssetSource and install it once the picker closes.
-            auto fresh = std::make_unique<DropAssetSource>();
-            auto *fresh_ptr = fresh.get();
-            platform::runNativeFilePicker(
-                [fresh_ptr](const std::filesystem::path &path) { fresh_ptr->addPath(path); });
-            source = std::move(fresh);
-        }
-    }
+    // Drain any pending native picker modal. ImGui frame is ended,
+    // sokol pass is committed; if NFD spawns a nested run loop and
+    // re-enters frame_cb, it'll hit a clean self-contained frame
+    // instead of overlapping with one already in progress. Web's
+    // pickers dispatch inline at click-time, so this is a no-op
+    // there — both platforms are reached through the same call.
+    platform_->drainPickers();
 }
 
 void App::Impl::onCleanup() {
@@ -732,13 +865,33 @@ void App::setScene(std::shared_ptr<const RenderScene> scene) {
     impl_->camera_framed = false;
 }
 
-void App::setSource(std::unique_ptr<AssetSource> source) {
-    impl_->source = std::move(source);
-    // The previously-displayed scene (if any) stays on screen; the new
-    // source's `Idle → Ready` transition will trigger a fresh build that
-    // swaps the scene atomically when ready. cmd_viewer's `--input` path
-    // calls setScene + setSource at launch in either order; clearing
-    // scene state here would race with that.
+void App::setProject(std::unique_ptr<ProjectFs> project) {
+    impl_->project_ = std::move(project);
+    if (impl_->project_) {
+        impl_->project_->setLogSink(&impl_->notifications);
+    }
+    // Reset session-side state so the BuildSession doesn't keep walking
+    // an old project's stale keys against a new backend. Root keys
+    // either come back via setRootKeys (URL mode) or via App-side
+    // recognition on the next generation bump (bag mode).
+    impl_->root_config_key.clear();
+    impl_->root_geometry_key.clear();
+    impl_->build_session.setRootKeys({}, {});
+    impl_->active_modals.clear();
+}
+
+void App::setRootKeys(std::string config_key, std::string geometry_key) {
+    impl_->root_config_key = config_key;
+    impl_->root_geometry_key = geometry_key;
+    impl_->build_session.setRootKeys(std::move(config_key), std::move(geometry_key));
+}
+
+ProjectFs *App::project() const noexcept { return impl_->project_.get(); }
+
+void App::addProjectPath(const std::filesystem::path &path) { impl_->addProjectPath(path); }
+
+void App::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
+    impl_->addProjectBytes(filename, bytes);
 }
 
 namespace {
@@ -756,7 +909,13 @@ std::unique_ptr<App> &slot() {
 
 App *App::instance() { return slot().get(); }
 
-App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {}
+App::App(PrivateTag /*tag*/, Config cfg) : impl_(std::make_unique<Impl>(std::move(cfg))) {
+    // Construct Platform after the App body is in place so it can
+    // hold a back-reference to *this. The Platform pImpl is defined
+    // per-TU (platform_macos.mm / platform_native_default.cpp / platform_web.cpp); whichever TU
+    // is linked into this executable supplies the matching ctor.
+    impl_->platform_ = std::make_unique<platform::Platform>(*this);
+}
 
 App::~App() = default;
 
@@ -803,14 +962,14 @@ int App::run() {
     desc.enable_dragndrop = true;
     desc.max_dropped_files = 8;
     desc.max_dropped_file_path_length = 1024;
-    // Tell sokol_app it owns the main loop on emscripten too — sapp_run
-    // internally calls emscripten_set_main_loop and unwinds the stack via
-    // its async exception, mirroring the bgfx App's emscripten_set_main_loop_arg
-    // call. The Impl pointer must outlive that unwind, so detach it: the
-    // wasm runtime takes ownership for the page lifetime.
-    if constexpr (platform::kIsWeb) {
-        impl_.release();
-    }
+    impl_->platform_->configureWindowDesc(desc, impl_->cfg, impl_->window_customization);
+    // sapp_run on emscripten registers the main loop and returns (older
+    // sokol versions did a stack-unwind, current ones don't). The Impl
+    // outlives the unwind anyway because App lives in the static slot()
+    // and impl_ is its member — both heap-resident, both survive stack
+    // unwinding. Don't release impl_ here: doing so leaves
+    // App::project() / App::setProject() (which dereference impl_)
+    // pointing at a null unique_ptr, which silently returns 0 on web.
     sapp_run(&desc);
     return 0;
 }

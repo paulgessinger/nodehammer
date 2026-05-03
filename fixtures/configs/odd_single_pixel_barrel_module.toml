@@ -24,9 +24,6 @@ match = 'path ~= "/world"'
 skip_geometry = true
 
 [[rules]]
-material = "support"
-
-[[rules]]
 match = 'path ~= "**/module_0"'
 [rules.tessellation]
 skip_geometry = true

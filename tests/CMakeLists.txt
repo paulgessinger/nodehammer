@@ -16,9 +16,21 @@ add_executable(nodehammer_tests
     export/test_gltf_exporter.cpp
     export/test_render_exporter_registry.cpp
     export/test_semantic_exporter_registry.cpp
+    viewer/test_bag_project_fs.cpp
+    viewer/test_build_session.cpp
+    viewer/test_byte_buffer.cpp
     test_markup.cpp
     test_timing.cpp
 )
+
+# FilesystemProjectFs and NativeBagProjectFs are native-only; the
+# sources are gated the same way in nodehammer_lib. Tests follow.
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_tests PRIVATE
+        viewer/test_filesystem_project_fs.cpp
+        viewer/test_native_bag_project_fs.cpp
+    )
+endif()
 
 target_compile_definitions(nodehammer_tests PRIVATE
     NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"

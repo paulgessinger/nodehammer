@@ -7,8 +7,8 @@
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 
 #include <cstdint>
-#include <filesystem>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace nodehammer::viewer {
@@ -27,23 +27,28 @@ struct SceneBuildJob::Impl {
     ::nodehammer::ScenePrepResult prep;
     ::nodehammer::TessellationJob tess_job;
 
-    std::filesystem::path config_path;
-    std::filesystem::path input_path;
+    std::string config_label;
+    std::string geometry_label;
+
+    // Pre-prepared inputs handed in by `start`.
+    std::unique_ptr<::nodehammer::NHConfig> preset_config;
+    std::unique_ptr<::nodehammer::SemanticScene> preset_scene;
+
     ::nodehammer::SceneBuildResult result;
 };
 
 SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
 SceneBuildJob::~SceneBuildJob() = default;
 
-void SceneBuildJob::start(std::filesystem::path config_path, std::filesystem::path input_path) {
-    impl_->config_path = std::move(config_path);
-    impl_->input_path = std::move(input_path);
+void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
+                          std::string config_label, std::string geometry_label) {
+    impl_->config_label = std::move(config_label);
+    impl_->geometry_label = std::move(geometry_label);
+    impl_->preset_config = std::make_unique<::nodehammer::NHConfig>(std::move(config));
+    impl_->preset_scene = std::make_unique<::nodehammer::SemanticScene>(std::move(scene));
     impl_->result = {};
     impl_->prep = {};
     impl_->tess_job = ::nodehammer::TessellationJob{};
-
-    // Web: defer all real work by one poll so the caller can paint a
-    // "Tessellating…" frame before the upstream stages run.
     impl_->state = Impl::State::Queued;
 }
 
@@ -59,9 +64,11 @@ bool SceneBuildJob::poll(uint64_t budget_ns) {
         impl_->state = Impl::State::PrepPending;
         return false;
     case Impl::State::PrepPending: {
-        logPreBuild(impl_->config_path, impl_->input_path);
-        impl_->prep =
-            ::nodehammer::prepareSceneForTessellation(impl_->config_path, impl_->input_path);
+        logPreBuild(impl_->config_label, impl_->geometry_label);
+        impl_->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
+            std::move(*impl_->preset_config), std::move(*impl_->preset_scene));
+        impl_->preset_config.reset();
+        impl_->preset_scene.reset();
         if (!impl_->prep.ok) {
             // Upstream stage failed — package the diags and finish.
             impl_->result.scene = nullptr;
@@ -105,8 +112,8 @@ bool SceneBuildJob::poll(uint64_t budget_ns) {
     ::nodehammer::SceneBuildResult out = std::move(impl_->result);
     impl_->result = {};
     impl_->state = Impl::State::Idle;
-    impl_->config_path.clear();
-    impl_->input_path.clear();
+    impl_->config_label.clear();
+    impl_->geometry_label.clear();
     impl_->prep = {};
     impl_->tess_job = ::nodehammer::TessellationJob{};
     return out;

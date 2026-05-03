@@ -1,6 +1,7 @@
 #include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/drop_asset_source.hpp>
+#include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/platform.hpp>
+#include <nodehammer/viewer/project_fs.hpp>
 
 #include <emscripten/emscripten.h>
 #include <sokol_app.h>
@@ -30,6 +31,149 @@ EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *ma
 
     history.replaceState(null, "", url);
 });
+
+// clang-format off
+EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
+    if (Module.__nhWindowObserversInstalled) {
+        return;
+    }
+    Module.__nhWindowObserversInstalled = true;
+
+    var canvas = Module.canvas || document.getElementById('canvas');
+    if (!canvas) {
+        return;
+    }
+
+    var dragDepth = 0;
+    function fileLike(ev) {
+        var types = ev.dataTransfer && ev.dataTransfer.types;
+        if (!types) return false;
+        for (var i = 0; i < types.length; ++i) {
+            if (types[i] === 'Files') return true;
+        }
+        return false;
+    }
+    function fileCount(ev) {
+        var items = ev.dataTransfer && ev.dataTransfer.items;
+        return items ? items.length : 0;
+    }
+    function setDrag(active, ev) {
+        Module._nh_viewer_platform_set_drag_hover(
+            handle,
+            active ? 1 : 0,
+            ev ? ev.clientX : 0,
+            ev ? ev.clientY : 0,
+            ev ? fileCount(ev) : 0,
+            ev && fileLike(ev) ? 1 : 0);
+    }
+    function onDragEnter(ev) {
+        ++dragDepth;
+        setDrag(true, ev);
+    }
+    function onDragOver(ev) {
+        if (fileLike(ev)) {
+            ev.preventDefault();
+        }
+        setDrag(true, ev);
+    }
+    function onDragLeave(ev) {
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) {
+            setDrag(false, ev);
+        }
+    }
+    function onDrop(ev) {
+        dragDepth = 0;
+        setDrag(false, ev);
+    }
+    canvas.addEventListener('dragenter', onDragEnter);
+    canvas.addEventListener('dragover', onDragOver);
+    canvas.addEventListener('dragleave', onDragLeave);
+    canvas.addEventListener('drop', onDrop);
+    window.addEventListener('blur', function(ev) {
+        dragDepth = 0;
+        setDrag(false, ev);
+    });
+
+    var gestureScale = 1.0;
+    function pushPinch(type, scaleDelta, ev) {
+        Module._nh_viewer_platform_push_pinch(
+            handle,
+            type, scaleDelta,
+            ev ? ev.clientX : 0,
+            ev ? ev.clientY : 0,
+            ev ? ((ev.shiftKey ? 1 : 0) | (ev.ctrlKey ? 2 : 0) | (ev.altKey ? 4 : 0) | (ev.metaKey ? 8 : 0)) : 0);
+    }
+    canvas.addEventListener('wheel', function(ev) {
+        if (!(ev.ctrlKey || ev.metaKey)) {
+            return;
+        }
+        ev.preventDefault();
+        pushPinch(1, Math.exp(-ev.deltaY * 0.01), ev);
+    }, { passive: false });
+    canvas.addEventListener('gesturestart', function(ev) {
+        gestureScale = ev.scale || 1.0;
+        ev.preventDefault();
+        pushPinch(0, 1.0, ev);
+    }, { passive: false });
+    canvas.addEventListener('gesturechange', function(ev) {
+        var next = ev.scale || gestureScale;
+        var delta = gestureScale !== 0 ? next / gestureScale : 1.0;
+        gestureScale = next;
+        ev.preventDefault();
+        pushPinch(1, delta, ev);
+    }, { passive: false });
+    canvas.addEventListener('gestureend', function(ev) {
+        ev.preventDefault();
+        pushPinch(2, 1.0, ev);
+    }, { passive: false });
+
+    var touchDistance = 0;
+    function twoTouchDistance(touches) {
+        if (!touches || touches.length < 2) return 0;
+        var dx = touches[0].clientX - touches[1].clientX;
+        var dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    function touchCenter(touches) {
+        return {
+            clientX: (touches[0].clientX + touches[1].clientX) * 0.5,
+            clientY: (touches[0].clientY + touches[1].clientY) * 0.5,
+            ctrlKey: false,
+            shiftKey: false,
+            altKey: false,
+            metaKey: false
+        };
+    }
+    canvas.addEventListener('touchstart', function(ev) {
+        if (ev.touches.length === 2) {
+            touchDistance = twoTouchDistance(ev.touches);
+            ev.preventDefault();
+            pushPinch(0, 1.0, touchCenter(ev.touches));
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchmove', function(ev) {
+        if (ev.touches.length === 2 && touchDistance > 0) {
+            var next = twoTouchDistance(ev.touches);
+            ev.preventDefault();
+            pushPinch(1, next / touchDistance, touchCenter(ev.touches));
+            touchDistance = next;
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchend', function(ev) {
+        if (touchDistance > 0 && ev.touches.length < 2) {
+            touchDistance = 0;
+            pushPinch(2, 1.0, ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0] : ev);
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchcancel', function(ev) {
+        if (touchDistance > 0) {
+            touchDistance = 0;
+            pushPinch(3, 1.0, ev.changedTouches && ev.changedTouches[0] ? ev.changedTouches[0] : ev);
+        }
+    }, { passive: false });
+});
+// clang-format on
 
 // Open a transient <input type=file multiple> picker. After the user
 // selects N files, we wait until every FileReader has resolved (Promise.all)
@@ -81,113 +225,208 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
 
 namespace nodehammer::viewer::platform {
 
-void commitUrlState(const std::string &state_query, const std::string &managed_keys) {
-    nh_viewer_commit_url_state(state_query.c_str(), managed_keys.c_str());
-}
-
-void dispatchWebFilePicker() { nh_viewer_open_file_picker(); }
-
-void runNativeFilePicker(const NativeFilePathHandler & /*handler*/) {
-    // NFD doesn't exist on web; the web picker is dispatched via
-    // dispatchWebFilePicker and bytes arrive through the C upload export.
-}
+std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<BagProjectFs>(); }
 
 namespace {
 
-// Refcounted batch shared across the N in-flight fetches a single drop
-// kicks off. The batch owns the freshly-allocated source while bytes are
-// arriving; only the last completing fetch installs it on the App. The
-// shared_ptr lives in each per-file ctx, so when the last ctx destructs
-// the batch frees itself naturally.
-struct WebDropBatch {
-    std::unique_ptr<DropAssetSource> source;
-    int pending{0};
-    App *app{nullptr};
-};
-
 // Per-file fetch context. sokol writes the file's bytes into `buffer` then
-// invokes the callback; we transfer ownership of the ctx via `release()`
-// into req.user_data and reclaim with a fresh unique_ptr in the callback.
+// invokes the callback; we transfer ownership via `release()` into
+// req.user_data and reclaim with a fresh unique_ptr in the callback. Each
+// file's bytes flow straight into the App's long-lived project, so there
+// is no per-gesture batch object to refcount — the App owns the project,
+// the project lifetime survives any number of in-flight fetches.
 struct WebDropCtx {
     std::vector<std::byte> buffer;
     std::string filename;
-    std::shared_ptr<WebDropBatch> batch;
 };
 
 void webDropFetchCallback(const sapp_html5_fetch_response *response) {
     std::unique_ptr<WebDropCtx> ctx{static_cast<WebDropCtx *>(response->user_data)};
-    if (response->succeeded) {
-        ctx->batch->source->addBytes(
-            ctx->filename, std::span<const std::byte>{
-                               ctx->buffer.data(), static_cast<std::size_t>(response->data.size)});
-    } else {
+    std::println(stderr, "[viewer] drop callback: file='{}' succeeded={} size={}", ctx->filename,
+                 response->succeeded, static_cast<std::size_t>(response->data.size));
+    if (!response->succeeded) {
         std::println(stderr, "viewer: failed to fetch dropped file '{}'", ctx->filename);
+        return;
     }
-    if (--ctx->batch->pending == 0 && ctx->batch->app != nullptr) {
-        ctx->batch->app->setSource(std::move(ctx->batch->source));
+    auto *app = App::instance();
+    if (app == nullptr) {
+        std::println(stderr, "[viewer] drop callback: App::instance() is null");
+        return;
     }
+    if (app->project() == nullptr) {
+        std::println(stderr, "[viewer] drop callback: app->project() is null");
+        return;
+    }
+    app->addProjectBytes(ctx->filename,
+                         std::span<const std::byte>{ctx->buffer.data(),
+                                                    static_cast<std::size_t>(response->data.size)});
 }
 
 } // namespace
 
-void dispatchDroppedFiles(App &app) {
+/// Web platform state. Empty — the browser file picker dispatches
+/// inline at button-click time, byte-fetch callbacks for drops route
+/// through `App::instance()`, and there are no latches to hold. The
+/// `app` back-reference is here for symmetry with the native impl in
+/// case future web flows need it (e.g., a setProject call from a JS
+/// shim that prefers a typed reference over the singleton).
+struct Platform::Impl {
+    App &app;
+    WindowCustomizationRequest window_request;
+    PlatformWindowState window_state;
+    std::vector<PlatformGestureEvent> gesture_events;
+};
+
+Platform::Platform(App &app) : impl_(std::make_unique<Impl>(app)) {}
+Platform::~Platform() = default;
+
+void Platform::configureWindowDesc(sapp_desc & /*desc*/, const Config & /*cfg*/,
+                                   const WindowCustomizationRequest &request) {
+    impl_->window_request = request;
+}
+
+void Platform::attachWindow(const WindowCustomizationRequest &request) {
+    impl_->window_request = request;
+    impl_->window_state.drag_hover.supported = request.track_drag_hover;
+    impl_->window_state.supports_pinch_gesture = request.track_platform_gestures;
+    nh_viewer_install_window_observers(reinterpret_cast<std::uintptr_t>(impl_.get()));
+}
+
+void Platform::handleWindowEvent(const sapp_event *ev) {
+    if (ev->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+        impl_->window_state.drag_hover.active = false;
+    }
+}
+
+void Platform::beginFrameWindowSync() {}
+
+const PlatformWindowState &Platform::windowState() const noexcept { return impl_->window_state; }
+
+std::vector<PlatformGestureEvent> Platform::takeGestureEvents() {
+    return std::exchange(impl_->gesture_events, {});
+}
+
+void Platform::dispatchDroppedFiles() {
     const int n = sapp_get_num_dropped_files();
+    std::println(stderr, "[viewer] dispatchDroppedFiles: n={}", n);
     if (n == 0) {
         return;
     }
-    auto batch = std::make_shared<WebDropBatch>();
-    batch->source = std::make_unique<DropAssetSource>();
-    batch->pending = n;
-    batch->app = &app;
+    // Bytes land asynchronously through `webDropFetchCallback`, which
+    // reaches the App via `App::instance()` — sokol's fetch callbacks
+    // are plain C function pointers and outlive any per-gesture
+    // context, so we don't try to thread `impl_->app` through them.
     for (int i = 0; i < n; ++i) {
         const auto size = sapp_html5_get_dropped_file_size(i);
         auto ctx = std::make_unique<WebDropCtx>();
         ctx->filename = sapp_get_dropped_file_path(i);
         ctx->buffer.resize(static_cast<std::size_t>(size));
-        ctx->batch = batch;
         sapp_html5_fetch_request req{};
         req.dropped_file_index = i;
         req.callback = &webDropFetchCallback;
         req.buffer = sapp_range{ctx->buffer.data(), ctx->buffer.size()};
-        // Ownership transfers to the callback via user_data; callback
-        // reclaims with a unique_ptr on the receiving end.
         req.user_data = ctx.release();
         sapp_html5_fetch_dropped_file(&req);
     }
+}
+
+void Platform::commitUrlState(const std::string &state_query, const std::string &managed_keys) {
+    nh_viewer_commit_url_state(state_query.c_str(), managed_keys.c_str());
+}
+
+void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
+void Platform::openFolderPicker() {} // no folder picker on web today
+void Platform::drainPickers() {}     // web pickers dispatch inline
+
+void setWebDragHover(Platform::Impl *impl, bool active, float x, float y, int file_count,
+                     bool file_like) {
+    if (impl == nullptr) {
+        return;
+    }
+    DragHoverState state{};
+    state.supported = true;
+    state.active = active;
+    state.file_like = file_like;
+    state.file_count = active ? file_count : 0;
+    state.x = x;
+    state.y = y;
+    impl->window_state.drag_hover = state;
+}
+
+void pushWebPinch(Platform::Impl *impl, int type, float scale_delta, float x, float y,
+                  uint32_t modifiers) {
+    if (impl == nullptr) {
+        return;
+    }
+    PlatformGestureEvent event{};
+    switch (type) {
+    case 0:
+        event.type = GestureType::PinchBegin;
+        break;
+    case 2:
+        event.type = GestureType::PinchEnd;
+        break;
+    case 3:
+        event.type = GestureType::PinchCancel;
+        break;
+    case 1:
+    default:
+        event.type = GestureType::PinchUpdate;
+        break;
+    }
+    event.scale_delta = scale_delta > 0.f ? scale_delta : 1.f;
+    event.x = x;
+    event.y = y;
+    event.modifiers = modifiers;
+    impl->gesture_events.push_back(event);
 }
 
 } // namespace nodehammer::viewer::platform
 
 extern "C" {
 
-// JS-picker batch lifecycle. The JS shim holds the returned handle in a
-// closure-local variable, threads it through `add` calls, and passes it to
-// `end`. No file-scope state on the C side; the batch lives on the heap
-// for exactly the duration of the gesture.
+EMSCRIPTEN_KEEPALIVE
+void *nh_viewer_begin_upload_batch() { return reinterpret_cast<void *>(std::uintptr_t{1}); }
 
 EMSCRIPTEN_KEEPALIVE
-void *nh_viewer_begin_upload_batch() { return new nodehammer::viewer::DropAssetSource; }
-
-EMSCRIPTEN_KEEPALIVE
-void nh_viewer_add_upload(void *handle, const char *filename, const std::uint8_t *data,
+void nh_viewer_add_upload(void * /*handle*/, const char *filename, const std::uint8_t *data,
                           std::size_t size) {
-    if (handle == nullptr || filename == nullptr) {
+    std::println(stderr, "[viewer] nh_viewer_add_upload: filename='{}' size={}",
+                 filename != nullptr ? filename : "(null)", size);
+    if (filename == nullptr) {
         return;
     }
-    auto *source = static_cast<nodehammer::viewer::DropAssetSource *>(handle);
-    source->addBytes(filename, std::as_bytes(std::span{data, size}));
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr) {
+        std::println(stderr, "[viewer] nh_viewer_add_upload: App::instance() is null");
+        return;
+    }
+    if (app->project() == nullptr) {
+        std::println(stderr, "[viewer] nh_viewer_add_upload: app->project() is null");
+        return;
+    }
+    app->addProjectBytes(filename, std::as_bytes(std::span{data, size}));
 }
 
 EMSCRIPTEN_KEEPALIVE
-void nh_viewer_end_upload_batch(void *handle) {
-    if (handle == nullptr) {
-        return;
-    }
-    std::unique_ptr<nodehammer::viewer::DropAssetSource> source{
-        static_cast<nodehammer::viewer::DropAssetSource *>(handle)};
-    if (auto *app = nodehammer::viewer::App::instance()) {
-        app->setSource(std::move(source));
-    }
+void nh_viewer_end_upload_batch(void * /*handle*/) {
+    // No-op: each addBytes already updated the project; the build trigger
+    // picks up the new state on the next frame poll.
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_platform_set_drag_hover(std::uintptr_t handle, int active, float x, float y,
+                                       int file_count, int file_like) {
+    auto *impl = reinterpret_cast<nodehammer::viewer::platform::Platform::Impl *>(handle);
+    nodehammer::viewer::platform::setWebDragHover(impl, active != 0, x, y, file_count,
+                                                  file_like != 0);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_platform_push_pinch(std::uintptr_t handle, int type, float scale_delta, float x,
+                                   float y, std::uint32_t modifiers) {
+    auto *impl = reinterpret_cast<nodehammer::viewer::platform::Platform::Impl *>(handle);
+    nodehammer::viewer::platform::pushWebPinch(impl, type, scale_delta, x, y, modifiers);
 }
 
 } // extern "C"

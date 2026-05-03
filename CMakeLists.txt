@@ -133,6 +133,14 @@ add_library(nodehammer_lib STATIC
     src/ir/semantic/exporter_registry.cpp
     src/detail/markup.cpp
     src/scene_build.cpp
+    # ProjectFs-based build orchestration. The bag (in-memory key→bytes
+    # store) and BuildSession (resolve→parse→import driver) live under
+    # src/viewer/ for organisational reasons but have no sokol/GUI deps,
+    # so they belong in nodehammer_lib alongside scene_build.cpp — both
+    # the viewer and the headless `buildSceneFromPaths` shim drive their
+    # builds through this layer.
+    src/viewer/bag_project_fs.cpp
+    src/viewer/build_session.cpp
 )
 
 configure_file(
@@ -210,6 +218,24 @@ endif()
 
 target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
 target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
+
+# FilesystemProjectFs mounts a real on-disk directory; the web sandbox
+# has no equivalent (no recursive_directory_iterator, no readable host
+# fs without NODERAWFS), so the source is native-only. It lives in
+# nodehammer_lib alongside bag/build_session because future
+# `buildSceneFromPaths` callers will want to mount the geometry's
+# parent directory in CLI mode.
+#
+# NativeBagProjectFs (strategy doc step 3) wraps FilesystemProjectFs
+# pointed at a process-owned tmp dir. Native-only for the same reason
+# the underlying FS backend is — and the in-memory BagProjectFs stays
+# as the web bag until WebBagProjectFs lands (step 8).
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_lib PRIVATE
+        src/viewer/filesystem_project_fs.cpp
+        src/viewer/native_bag_project_fs.cpp
+    )
+endif()
 
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
 # When the viewer is on, we build a per-backend sokol STATIC lib + a viewer

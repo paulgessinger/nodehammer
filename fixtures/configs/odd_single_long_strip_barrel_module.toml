@@ -27,10 +27,6 @@ match = 'path ~= "/world"'
 [rules.tessellation]
 skip_geometry = true
 
-# Fallback material.
-[[rules]]
-material = "support"
-
 # Merge the module into a single multi-material mesh.
 [[rules]]
 match = 'path ~= "**/module_0"'
