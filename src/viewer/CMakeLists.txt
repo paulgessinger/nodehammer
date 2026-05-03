@@ -32,6 +32,8 @@ function(nh_add_viewer_lib name sokol_lib)
     add_library(${name} STATIC
         ${_dir}/app.cpp
         ${_dir}/scene_renderer.cpp
+        ${_dir}/scene_render_target.cpp
+        ${_dir}/composite_pass.cpp
         ${_dir}/imgui_backend.cpp
         ${_dir}/ui/debug_panel.cpp
         ${_dir}/ui/icon_font.cpp

@@ -2,6 +2,7 @@
 
 #include "../scene_renderer.hpp"
 #include <nodehammer/viewer/camera.hpp>
+#include <nodehammer/viewer/render_quality.hpp>
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -74,6 +75,34 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
     ImGui::Text("Camera: yaw=%.1f pitch=%.1f dist=%.2f", glm::degrees(ctx.camera.yaw),
                 glm::degrees(ctx.camera.pitch), ctx.camera.distance);
     ImGui::Text("        near=%.3f far=%.1f", ctx.camera.near_plane, ctx.camera.far_plane);
+
+    ImGui::Separator();
+    if (ImGui::CollapsingHeader("Render Quality")) {
+        const char *kDebugViewLabels[] = {"off", "depth (raw)", "depth (linear)"};
+        int debug_idx = static_cast<int>(ctx.quality.debug_view);
+        if (ImGui::Combo("debug view", &debug_idx, kDebugViewLabels,
+                         IM_ARRAYSIZE(kDebugViewLabels))) {
+            ctx.quality.debug_view = static_cast<DebugView>(debug_idx);
+        }
+
+        // The remaining controls advertise the plumbing for HDR/FXAA/MSAA/
+        // bloom/render-scale that lands in later phases. Disabled today so
+        // they show what's coming without misleading the user.
+        ImGui::BeginDisabled(true);
+        ImGui::SliderFloat("render scale", &ctx.quality.render_scale, 0.5f, 2.0f, "%.2fx");
+        ImGui::Checkbox("HDR", &ctx.quality.enable_hdr);
+        ImGui::SameLine();
+        ImGui::Checkbox("tonemap", &ctx.quality.enable_tonemap);
+        ImGui::SameLine();
+        ImGui::Checkbox("FXAA", &ctx.quality.enable_fxaa);
+        ImGui::Checkbox("bloom", &ctx.quality.enable_bloom);
+        ImGui::SliderInt("MSAA", &ctx.quality.msaa_samples, 1, 8);
+        ImGui::SliderInt("IBL quality", &ctx.quality.ibl_quality, 0, 3);
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("wired, not implemented");
+        }
+    }
 
     ImGui::End();
 }

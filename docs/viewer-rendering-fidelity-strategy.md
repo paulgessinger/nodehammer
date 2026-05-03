@@ -7,6 +7,44 @@ surfaces.
 This document is forward-looking. It describes a staged target shape for the
 viewer renderer; it is not an implementation record.
 
+## Status
+
+Steps 1–4 of section 12 are landed. The renderer now runs through an
+offscreen color+depth target with a fullscreen composite pass into the
+swapchain; ImGui still renders in the swapchain pass. Reversed-Z is
+preserved end-to-end. A `RenderQualitySettings` struct + UI panel are in
+place — most fields are no-ops, wired to advertise the next phases without
+implementing them yet:
+
+- `RenderQualitySettings` (`include/nodehammer/viewer/render_quality.hpp`):
+  `render_scale`, `enable_hdr`, `enable_tonemap`, `enable_fxaa`,
+  `msaa_samples`, `ibl_quality`, `enable_bloom`, `debug_view`. Only
+  `debug_view` is live today.
+- `SceneRenderTarget` (`src/viewer/scene_render_target.{hpp,cpp}`): owns
+  the offscreen color (RGBA8) + depth (`SG_PIXELFORMAT_DEPTH`) images,
+  attachment views for the scene pass, texture views + sampler for the
+  composite pass. Lazily (re)allocated by `App::Impl::ensureSceneTarget`
+  on framebuffer-size change.
+- `CompositePass` (`src/viewer/composite_pass.{hpp,cpp}`) +
+  `shaders/composite.glsl`: fullscreen-triangle VS (no vbuf), FS with
+  three modes — color passthrough, raw depth, linearized reversed-Z.
+  Composite pipeline has no depth, no cull. `App::Impl::render` is now
+  scene-pass-into-offscreen → swapchain-pass-with-composite-then-ImGui.
+  Depth-store is enabled on the scene pass so the debug view can sample
+  it.
+- "Render Quality" section in the View panel
+  (`src/viewer/ui/view_panel.cpp`): live debug-view combo
+  (off / depth / linear depth); HDR/tonemap/FXAA/MSAA/bloom/render-scale
+  controls present but disabled, tooltipped "wired, not implemented".
+
+What this unlocks: HDR, tonemap, FXAA, MSAA, render scale, bloom, TAA can
+now land without restructuring the pass topology — they hang off the
+composite shader / target format / sample count.
+
+Remaining (steps 5–11): FXAA, HDR + tonemap, expanded GPU material
+(emissive, alpha mask), IBL quality presets, optional MSAA, adaptive
+quality, then bloom / TAA / shadows / richer PBR.
+
 ---
 
 ## 1. Current rendering shape

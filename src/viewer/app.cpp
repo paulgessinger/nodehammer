@@ -1,14 +1,17 @@
 #include <nodehammer/viewer/app.hpp>
 
+#include "composite_pass.hpp"
 #include "ibl.hpp"
 #include "imgui_backend.hpp"
 #include "scene_build_job.hpp"
+#include "scene_render_target.hpp"
 #include "scene_renderer.hpp"
 #include "ui/icon_font.hpp"
 #include "ui/notifications.hpp"
 #include "ui/viewer_ui.hpp"
 
 #include <nodehammer/viewer/platform.hpp>
+#include <nodehammer/viewer/render_quality.hpp>
 
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/scene_build.hpp>
@@ -119,6 +122,9 @@ struct App::Impl {
     platform::PlatformWindowState platform_window_state;
     std::vector<platform::PlatformGestureEvent> platform_gesture_events;
     SceneRenderer scene_renderer;
+    SceneRenderTarget scene_rt;
+    CompositePass composite;
+    RenderQualitySettings quality;
     Camera camera;
 
     // Procedural IBL bake. Runs on the GPU in a single frame the first
@@ -228,6 +234,7 @@ struct App::Impl {
     void updateCameraInput();
     void applyInitialCamera();
     void render();
+    void ensureSceneTarget(uint32_t width, uint32_t height);
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
@@ -340,6 +347,7 @@ void App::Impl::onInit() {
     // first frame can draw before the GPU bake runs; onFrame swaps in the
     // real result on the first tick.
     scene_renderer.initialize();
+    composite.initialize();
 
     stm_setup();
     last_time = stm_now();
@@ -569,12 +577,23 @@ void App::Impl::applyInitialCamera() {
     camera.dolly(1.f, scene_radius);
 }
 
+void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
+    if (width == 0 || height == 0) {
+        return;
+    }
+    constexpr sg_pixel_format kSceneColorFormat = SG_PIXELFORMAT_RGBA8;
+    const int samples = 1;
+    if (!scene_rt.matches(width, height, kSceneColorFormat, samples)) {
+        scene_rt.create(width, height, kSceneColorFormat, samples);
+    }
+}
+
 void App::Impl::render() {
     const uint64_t render_submit_start = stm_now();
     scene_submit_ms = 0.0;
 
     // Drive the chunked GPU upload BEFORE sg_begin_pass so any new sokol
-    // buffer creation isn't tangled up with the active swapchain pass.
+    // buffer creation isn't tangled up with the active scene pass.
     if (scene && !scene_uploaded) {
         if (!scene_renderer.uploadInProgress()) {
             scene_renderer.beginUpload(scene);
@@ -584,14 +603,26 @@ void App::Impl::render() {
         }
     }
 
-    sg_pass pass{};
-    pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
-    pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-    // Reversed-Z: clear to 0 (the "farthest" depth in our convention).
-    pass.action.depth.clear_value = 0.0f;
-    pass.swapchain = sglue_swapchain();
-    sg_begin_pass(&pass);
+    // Lazily allocate (or reallocate on resize / DPI change / future
+    // MSAA toggle) the offscreen scene target. Doing this here, just
+    // before the pass begins, avoids reallocating from inside an event
+    // callback while a frame may still be in flight.
+    ensureSceneTarget(fb_width, fb_height);
+
+    // Pass 1 — scene into offscreen color + depth. Reversed-Z: depth
+    // clear is 0.0 to match scene_renderer's GREATER_EQUAL compare and
+    // the projection matrix that maps near→1, far→0.
+    sg_pass scene_pass{};
+    scene_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+    scene_pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
+    scene_pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+    scene_pass.action.depth.clear_value = 0.0f;
+    // STORE so the composite pass's depth-debug view can sample the
+    // depth attachment after the scene pass ends.
+    scene_pass.action.depth.store_action = SG_STOREACTION_STORE;
+    scene_pass.attachments = scene_rt.passAttachments();
+    scene_pass.label = "scene_pass";
+    sg_begin_pass(&scene_pass);
 
     if (scene && scene_uploaded) {
         if (!camera_framed) {
@@ -610,10 +641,23 @@ void App::Impl::render() {
         flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
         flags.enable_pbr = cfg.enable_pbr;
         const uint64_t scene_submit_start = stm_now();
-        scene_renderer.render(camera, fb_width, fb_height, flags);
+        scene_renderer.render(camera, scene_rt.width, scene_rt.height, flags);
         scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
     }
 
+    sg_end_pass();
+
+    // Pass 2 — composite the offscreen target into the swapchain, then
+    // ImGui on top. The composite covers the entire viewport so we
+    // don't need to clear color or depth first.
+    sg_pass swap_pass{};
+    swap_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+    swap_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
+    swap_pass.swapchain = sglue_swapchain();
+    swap_pass.label = "swapchain_pass";
+    sg_begin_pass(&swap_pass);
+
+    composite.draw(scene_rt, quality.debug_view, camera.near_plane, camera.far_plane);
     ImGui_ImplSokol_Render();
 
     sg_end_pass();
@@ -948,6 +992,7 @@ void App::Impl::onFrame() {
 
     ui::ViewerUiContext ui_ctx{
         .cfg = cfg,
+        .quality = quality,
         .project = project_.get(),
         .build_session = build_session,
         .build_job = build_job,
@@ -1039,6 +1084,8 @@ void App::Impl::onFrame() {
 
 void App::Impl::onCleanup() {
     savePersistentState(true);
+    composite.release();
+    scene_rt.destroy();
     scene_renderer.release();
     // simgui_shutdown destroys the ImGui context — don't call
     // ImGui::DestroyContext separately (double-free crash on macOS quit).

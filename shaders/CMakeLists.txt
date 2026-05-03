@@ -35,6 +35,12 @@ nh_compile_shader(ibl_bake.glsl
     DEPENDS_TARGET   nodehammer_shaders
 )
 
+nh_compile_shader(composite.glsl
+    OUT_HEADER       NH_SHADER_COMPOSITE_HEADER
+    SLANGS           ${NH_SCENE_SLANGS}
+    DEPENDS_TARGET   nodehammer_shaders
+)
+
 # Expose the generated header's directory for consumers (the viewer lib).
 set(NH_SHADER_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders"
     CACHE INTERNAL "Directory containing sokol-shdc-generated headers")

@@ -2,6 +2,7 @@
 
 #include <nodehammer/viewer/config.hpp>
 #include <nodehammer/viewer/platform.hpp>
+#include <nodehammer/viewer/render_quality.hpp>
 
 #include <cstdint>
 #include <functional>
@@ -42,6 +43,7 @@ struct UiActions {
 
 struct ViewerUiContext {
     Config &cfg;
+    RenderQualitySettings &quality;
     ProjectFs *project;
     BuildSession &build_session;
     SceneBuildJob &build_job;
