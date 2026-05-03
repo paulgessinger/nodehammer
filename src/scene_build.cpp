@@ -1,16 +1,13 @@
 #include <nodehammer/scene_build.hpp>
 
+#include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/detail/file_io.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/ir/semantic/importer.hpp>
 #include <nodehammer/selection/selector.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
-#include <nodehammer/viewer/build_session.hpp>
 
 #include <memory>
-#include <span>
-#include <string>
 #include <utility>
 
 namespace nodehammer {
@@ -55,79 +52,33 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
         return result;
     }
 
-    viewer::BagProjectFs bag;
-    std::string config_key;
+    NHConfig cfg;
     if (!config_path.empty()) {
-        try {
-            auto bytes = file_io::readFile(config_path);
-            config_key = config_path.filename().string();
-            bag.addBytes(config_key, std::span<const std::byte>{bytes});
-        } catch (const std::exception &e) {
-            result.diags.error(codes::kErrImportFormatUnknown, e.what(), config_path.string());
+        auto loaded = ConfigLoader::loadFromFile(config_path);
+        result.diags.append(loaded.diags);
+        if (loaded.diags.hasErrors()) {
             return result;
         }
+        cfg = std::move(loaded.config);
     }
 
-    std::string geometry_key = geometry_path.filename().string();
-    try {
-        auto bytes = file_io::readFile(geometry_path);
-        bag.addBytes(geometry_key, std::span<const std::byte>{bytes});
-    } catch (const std::exception &e) {
-        result.diags.error(codes::kErrImportFormatUnknown, e.what(), geometry_path.string());
-        return result;
-    }
-
-    viewer::BuildSession session;
-    CapturingLogSink session_diags;
-    session.setLogSink(&session_diags);
-    bag.setLogSink(&session_diags);
-    session.setRootKeys(config_key, geometry_key);
-
-    while (true) {
-        session.poll(&bag);
-        const auto phase = session.phase();
-        if (phase == viewer::BuildPhase::ResolvedReady) {
-            break;
-        }
-        if (phase == viewer::BuildPhase::Error) {
-            const auto msg = session_diags.hasErrors() ? session_diags.errors().front()
-                                                       : std::string{"build session failed"};
-            result.diags.error(codes::kErrImportFormatUnknown, msg, geometry_path.string());
-            return result;
-        }
-        if (phase == viewer::BuildPhase::WaitingForUser) {
-            std::string missing_list;
-            for (const auto &k : session.missing()) {
-                if (!missing_list.empty()) {
-                    missing_list += ", ";
-                }
-                missing_list += k;
-            }
-            result.diags.error(codes::kErrImportFormatUnknown,
-                               "buildSceneFromPaths: missing files: " + missing_list,
-                               geometry_path.string());
-            return result;
-        }
-        // Walking / Idle / Consumed: keep polling. The bag is synchronous,
-        // so settle happens within a couple of polls.
-    }
-
-    auto inputs = session.takeInputs();
-    if (!inputs) {
+    const auto importerRegistry = ImporterRegistry::makeDefault();
+    const auto *importer = importerRegistry.resolve(geometry_path);
+    if (importer == nullptr) {
         result.diags.error(codes::kErrImportFormatUnknown,
-                           "buildSceneFromPaths: BuildSession produced no inputs",
+                           "buildSceneFromPaths: no importer for '" + geometry_path.string() + "'",
                            geometry_path.string());
         return result;
     }
 
-    result.diags.append(inputs->config.diags);
-    result.diags.append(inputs->import.diags);
-    if (inputs->config.diags.hasErrors() || inputs->import.diags.hasErrors()) {
+    auto importResult = importer->import(geometry_path);
+    result.diags.append(importResult.diags);
+    if (importResult.diags.hasErrors()) {
         return result;
     }
 
-    auto prep = prepareSceneForTessellationFromInputs(std::move(inputs->config.config),
-                                                      std::move(inputs->import.scene));
+    auto prep =
+        prepareSceneForTessellationFromInputs(std::move(cfg), std::move(importResult.scene));
     result.diags.append(prep.diags);
     if (!prep.ok) {
         return result;

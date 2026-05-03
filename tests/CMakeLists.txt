@@ -85,7 +85,21 @@ if(CMAKE_CROSSCOMPILING)
         NAME nodehammer_tests
         COMMAND "${NODEHAMMER_NODE_EXECUTABLE}" "$<TARGET_FILE:nodehammer_tests>"
     )
+    add_test(
+        NAME nodehammer_bench_smoke
+        COMMAND "${NODEHAMMER_NODE_EXECUTABLE}" "$<TARGET_FILE:nodehammer_bench>"
+                "${CMAKE_SOURCE_DIR}/fixtures/configs/odd.toml"
+                "${CMAKE_SOURCE_DIR}/odd.nhb.zst"
+                "${CMAKE_CURRENT_BINARY_DIR}/bench_smoke.glb"
+    )
 else()
     include(Catch)
     catch_discover_tests(nodehammer_tests)
+    add_test(
+        NAME nodehammer_bench_smoke
+        COMMAND nodehammer_bench
+                "${CMAKE_SOURCE_DIR}/fixtures/configs/odd.toml"
+                "${CMAKE_SOURCE_DIR}/odd.nhb.zst"
+                "${CMAKE_CURRENT_BINARY_DIR}/bench_smoke.glb"
+    )
 endif()

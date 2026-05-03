@@ -29,13 +29,13 @@ struct ScenePrepResult {
     bool ok{false};
 };
 
-/// Synchronous drive-to-completion shim for headless callers (the
-/// `convert` CLI subcommand and `nodehammer_bench`). Reads both files
-/// into a `BagProjectFs`, runs the same `BuildSession` walk the viewer
-/// uses, then tessellates the resulting scene synchronously and returns
-/// the `RenderScene`. Geometry is FlatBuffer-only (`.nhb` / `.nhb.zst`);
-/// the rest of the importer registry is reserved for the `convert`
-/// subcommand.
+/// Synchronous drive-to-completion shim for headless callers
+/// (`nodehammer_bench`). Loads the config straight from the filesystem
+/// (so `include = [...]` is resolved against the config's parent dir),
+/// imports the geometry through the default `ImporterRegistry`, then
+/// validates / selects / dedups / tessellates and returns the
+/// `RenderScene`. Mirrors the `convert` CLI pipeline minus the export
+/// stage and CLI surface.
 SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
                                      const std::filesystem::path &geometry_path);
 

@@ -28,6 +28,11 @@ case "$kind" in
     ;;
 esac
 
+# Smoke-test once with stderr visible — hyperfine suppresses output during
+# warmup, so a broken command otherwise fails with no diagnostics.
+echo "Sanity check: $cmd"
+$cmd
+
 hyperfine --shell=none --warmup 2 --runs 10 \
   --command-name "$command_name" \
   --export-json bench.json \
