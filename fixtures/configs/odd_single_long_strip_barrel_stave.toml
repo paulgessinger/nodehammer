@@ -24,9 +24,6 @@ match = 'path ~= "/world"'
 skip_geometry = true
 
 [[rules]]
-material = "support"
-
-[[rules]]
 match = 'path ~= "**/stave0"'
 [rules.tessellation]
 merge_descendants = true
