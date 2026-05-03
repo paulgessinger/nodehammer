@@ -1,6 +1,5 @@
 #include "status_ui.hpp"
 
-#include "../scene_build_job.hpp"
 #include <nodehammer/viewer/build_session.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
@@ -8,48 +7,11 @@
 #include <imgui.h>
 
 namespace nodehammer::viewer::ui {
-namespace {
-
-void renderBuildProgress(const SceneBuildJob &build_job, bool rebuilding) {
-    const char *prefix = rebuilding ? "Rebuilding: " : "";
-    switch (build_job.phase()) {
-    case SceneBuildJob::Phase::Preparing:
-        ImGui::Text("%sloading config and importing geometry...", prefix);
-        break;
-    case SceneBuildJob::Phase::Tessellating: {
-        const auto total = build_job.tessellationTotal();
-        const auto processed = build_job.tessellationProcessed();
-        if (total > 0) {
-            ImGui::Text("%stessellating... (%zu / %zu nodes)", prefix, processed, total);
-            const float frac = static_cast<float>(processed) / static_cast<float>(total);
-            ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-        } else {
-            ImGui::Text("%stessellating...", prefix);
-        }
-        break;
-    }
-    case SceneBuildJob::Phase::Finalizing:
-        ImGui::Text("%sfinalising scene...", prefix);
-        break;
-    case SceneBuildJob::Phase::Idle:
-    case SceneBuildJob::Phase::Done:
-        break;
-    }
-}
-
-} // namespace
 
 void renderStatusWindow(bool *open, const ViewerUiContext &ctx, const UiActions &actions) {
     if (!ImGui::Begin("Status", open)) {
         ImGui::End();
         return;
-    }
-
-    if (!ctx.ibl_installed) {
-        const auto frac = static_cast<float>(ctx.ibl_progress);
-        ImGui::Text("IBL bake: %.0f%%", frac * 100.0f);
-        ImGui::ProgressBar(frac, ImVec2(-1.f, 0.f));
-        ImGui::Separator();
     }
 
     if (!ctx.has_scene) {
@@ -62,7 +24,6 @@ void renderStatusWindow(bool *open, const ViewerUiContext &ctx, const UiActions 
 
             if (ctx.build_in_progress) {
                 show_drag_hint = false;
-                renderBuildProgress(ctx.build_job, false);
             }
 
             const bool has_files = !ctx.project->list("").empty();
@@ -115,8 +76,6 @@ void renderStatusWindow(bool *open, const ViewerUiContext &ctx, const UiActions 
     } else if (!ctx.scene_uploaded) {
         ImGui::Text("Uploading scene to GPU...");
         ImGui::ProgressBar(-1.f * static_cast<float>(ImGui::GetTime()), ImVec2(-1.f, 0.f), "");
-    } else if (ctx.build_in_progress) {
-        renderBuildProgress(ctx.build_job, true);
     } else {
         ImGui::Text("Ready");
     }

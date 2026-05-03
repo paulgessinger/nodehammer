@@ -30,6 +30,8 @@ const char *iconFor(Notifications::Kind kind) {
         return ICON_FA_TRIANGLE_EXCLAMATION;
     case Notifications::Kind::Error:
         return ICON_FA_CIRCLE_EXCLAMATION;
+    case Notifications::Kind::Progress:
+        return ICON_FA_SPINNER;
     }
     return "";
 }
@@ -44,6 +46,8 @@ ImVec4 colorFor(Notifications::Kind kind) {
         return ImVec4(1.0f, 1.0f, 0.0f, 1.0f);
     case Notifications::Kind::Error:
         return ImVec4(1.0f, 0.0f, 0.0f, 1.0f);
+    case Notifications::Kind::Progress:
+        return ImVec4(0.0f, 0.616f, 1.0f, 1.0f);
     }
     return ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 }
@@ -73,10 +77,72 @@ void Notifications::warning(std::string_view message, std::size_t duration_ms) {
     push(Kind::Warning, message, duration_ms);
 }
 
-void Notifications::error(std::string_view message) { error(message, kDefaultDuration); }
+void Notifications::error(std::string_view message) { error(message, kManualDismiss); }
 
 void Notifications::error(std::string_view message, std::size_t duration_ms) {
     push(Kind::Error, message, duration_ms);
+}
+
+Notifications::Toast *Notifications::findByHandle(ProgressHandle handle) {
+    if (handle == 0) {
+        return nullptr;
+    }
+    for (auto &t : toasts_) {
+        if (t.handle == handle) {
+            return &t;
+        }
+    }
+    return nullptr;
+}
+
+Notifications::ProgressHandle Notifications::startProgress(std::string_view message) {
+    const ProgressHandle handle = next_handle_++;
+    toasts_.push_back(Toast{
+        .kind = Kind::Progress,
+        .message = std::string{message},
+        .created = std::chrono::steady_clock::now(),
+        .dismiss_ms = kDefaultDuration,
+        .handle = handle,
+    });
+    return handle;
+}
+
+void Notifications::updateProgress(ProgressHandle handle, float fraction,
+                                   std::string_view message) {
+    Toast *t = findByHandle(handle);
+    if (t == nullptr || t->kind != Kind::Progress) {
+        return;
+    }
+    t->progress = std::clamp(fraction, 0.0f, 1.0f);
+    if (!message.empty()) {
+        t->message.assign(message);
+    }
+}
+
+void Notifications::finishProgress(ProgressHandle handle, std::string_view final_message) {
+    Toast *t = findByHandle(handle);
+    if (t == nullptr || t->kind != Kind::Progress) {
+        return;
+    }
+    t->kind = Kind::Success;
+    t->progress = 1.0f;
+    t->dismiss_ms = kDefaultDuration;
+    if (!final_message.empty()) {
+        t->message.assign(final_message);
+    }
+    // Reset the auto-hide anchor so the countdown starts now. Pull it back
+    // by one fade-in window so the swap to the success state does not
+    // flicker through opacity 0.
+    t->created = std::chrono::steady_clock::now() - std::chrono::milliseconds(kFadeMs);
+    t->hover_anchor.reset();
+}
+
+void Notifications::cancelProgress(ProgressHandle handle) {
+    Toast *t = findByHandle(handle);
+    if (t == nullptr || t->kind != Kind::Progress) {
+        return;
+    }
+    t->dismissed = true;
 }
 
 void Notifications::diagnostic(const Diagnostic &d) {
@@ -98,8 +164,10 @@ void Notifications::diagnostic(const Diagnostic &d) {
 void Notifications::render() {
     const auto now = std::chrono::steady_clock::now();
 
-    // Drop dismissed-or-expired toasts before rendering. Pinned toasts skip
-    // the expiry check — they hold until the user clicks X.
+    // Drop dismissed-or-expired toasts before rendering. Pinned toasts,
+    // sticky toasts (dismiss_ms == 0, e.g. errors by default), and
+    // still-running progress toasts skip the expiry check — they hold
+    // until the user clicks X or until completion repoints the timer.
     toasts_.erase(
         std::remove_if(
             toasts_.begin(), toasts_.end(),
@@ -107,7 +175,7 @@ void Notifications::render() {
                 if (t.dismissed) {
                     return true;
                 }
-                if (t.pinned) {
+                if (t.pinned || t.dismiss_ms == kManualDismiss || t.kind == Kind::Progress) {
                     return false;
                 }
                 const auto elapsed_ms =
@@ -140,12 +208,18 @@ void Notifications::render() {
         const auto elapsed_ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(now - t.created).count();
 
+        const bool sticky = t.pinned || t.dismiss_ms == kManualDismiss || t.kind == Kind::Progress;
+
         float opacity = 0.0f;
-        if (t.pinned) {
+        if (t.kind == Kind::Progress) {
+            // Progress toasts snap straight to full opacity — the
+            // fade-in looks like a flicker once the progress bar (which
+            // is meant to be readable immediately) is showing through to
+            // the scene behind it.
             opacity = kOpacity;
         } else if (elapsed_ms < kFadeMs) {
             opacity = (static_cast<float>(elapsed_ms) / static_cast<float>(kFadeMs)) * kOpacity;
-        } else if (elapsed_ms < static_cast<long long>(kFadeMs + t.dismiss_ms)) {
+        } else if (sticky || elapsed_ms < static_cast<long long>(kFadeMs + t.dismiss_ms)) {
             opacity = kOpacity;
         } else {
             const float fade_t =
@@ -197,10 +271,36 @@ void Notifications::render() {
             t.dismissed = true;
         }
 
+        // In-flight progress bar, rendered below the message line so the
+        // first row stays the icon + message + dismiss layout the rest of
+        // the toasts share. NewLine drops the cursor to the next line at
+        // the left edge — we just placed the dismiss button, which left
+        // the cursor pinned to the top-right. The bar disappears once
+        // finishProgress flips the kind to Success.
+        if (t.kind == Kind::Progress) {
+            ImGui::NewLine();
+            ImGui::ProgressBar(t.progress, ImVec2(-FLT_MIN, 0.f));
+        }
+
+        const bool window_hovered = ImGui::IsWindowHovered();
+
         // Pin-on-click: anywhere in the toast window that isn't the dismiss button.
-        if (!dismiss_clicked && !t.pinned && ImGui::IsWindowHovered() &&
+        if (!dismiss_clicked && !t.pinned && window_hovered &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
             t.pinned = true;
+        }
+
+        // Hover-pause: while the cursor is over the toast, advance the
+        // `created` anchor in lockstep with `now`, freezing elapsed_ms
+        // so the auto-hide / fade-out timer does not progress. Click
+        // (above) latches this into a permanent pin.
+        if (window_hovered) {
+            if (t.hover_anchor) {
+                t.created += (now - *t.hover_anchor);
+            }
+            t.hover_anchor = now;
+        } else {
+            t.hover_anchor.reset();
         }
 
         stack_height += ImGui::GetWindowHeight() + kPaddingBetween;

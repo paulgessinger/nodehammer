@@ -29,6 +29,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <functional>
 #include <iomanip>
 #include <memory>
@@ -139,6 +140,11 @@ struct App::Impl {
     SceneBuildJob build_job;
     bool build_in_progress{false};
     std::chrono::steady_clock::time_point build_start_time{};
+
+    // Live progress-toast handles. 0 means "no toast in flight"; populated
+    // when we kick off the corresponding job and cleared on finish/cancel.
+    ui::Notifications::ProgressHandle ibl_progress_handle{0};
+    ui::Notifications::ProgressHandle build_progress_handle{0};
 
     // BuildSession drives the include-graph walk against the project's
     // resolve() interface and produces parsed config + imported geometry
@@ -631,28 +637,51 @@ void App::Impl::onFrame() {
                     // anchored at the cache attempt so the reported total
                     // includes both the failed lookup and the bake itself.
                     ibl_job.start();
+                    ibl_progress_handle = notifications.startProgress("Baking IBL...");
                 }
                 ibl_cache_decided = true;
             }
-        } else if (!ibl_cache_hit && ibl_job.advance()) {
-            auto data = ibl_job.take();
-            // Persist before installing so we don't pay the wait twice if
-            // the user reloads while the bake is technically "live" on GPU
-            // but not yet flushed to disk / IDB.
-            saveIblCache(data);
-            scene_renderer.installIbl(data);
-            ibl_installed = true;
-            const auto elapsed_ms = std::chrono::duration<double, std::milli>(
-                                        std::chrono::steady_clock::now() - ibl_start_time)
-                                        .count();
-            std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
-            notifications.success("IBL bake complete");
+        } else if (!ibl_cache_hit) {
+            if (ibl_progress_handle != 0) {
+                notifications.updateProgress(ibl_progress_handle,
+                                             static_cast<float>(ibl_job.progress()));
+            }
+            if (ibl_job.advance()) {
+                auto data = ibl_job.take();
+                // Persist before installing so we don't pay the wait twice if
+                // the user reloads while the bake is technically "live" on GPU
+                // but not yet flushed to disk / IDB.
+                saveIblCache(data);
+                scene_renderer.installIbl(data);
+                ibl_installed = true;
+                const auto elapsed_ms = std::chrono::duration<double, std::milli>(
+                                            std::chrono::steady_clock::now() - ibl_start_time)
+                                            .count();
+                std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+                if (ibl_progress_handle != 0) {
+                    notifications.finishProgress(ibl_progress_handle, "IBL bake complete");
+                    ibl_progress_handle = 0;
+                }
+            }
         }
     }
 
     // Drive the off-loop tessellation. On native this is a poll of an
     // atomic flag set by the worker thread; on web it runs the build
     // synchronously on the second poll (the first paints a frame).
+    if (build_in_progress) {
+        if (build_progress_handle != 0) {
+            const auto total = build_job.tessellationTotal();
+            const auto processed = build_job.tessellationProcessed();
+            const float frac =
+                total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
+            std::string label;
+            if (total > 0) {
+                label = std::format("Tessellating ({}/{} nodes)", processed, total);
+            }
+            notifications.updateProgress(build_progress_handle, frac, label);
+        }
+    }
     if (build_in_progress && build_job.poll()) {
         auto built = build_job.take();
         for (const auto &d : built.diags.items()) {
@@ -667,7 +696,10 @@ void App::Impl::onFrame() {
                          "{} materials)",
                          build_ms, built.scene->nodes.size(), built.scene->meshAssets.size(),
                          built.scene->materials.size());
-            notifications.success("Tessellation complete");
+            if (build_progress_handle != 0) {
+                notifications.finishProgress(build_progress_handle, "Tessellation complete");
+                build_progress_handle = 0;
+            }
             scene = std::move(built.scene);
             scene_uploaded = false;
             camera_framed = false;
@@ -681,6 +713,10 @@ void App::Impl::onFrame() {
                     build_error = d.message;
                     break;
                 }
+            }
+            if (build_progress_handle != 0) {
+                notifications.cancelProgress(build_progress_handle);
+                build_progress_handle = 0;
             }
         }
         build_in_progress = false;
@@ -755,6 +791,7 @@ void App::Impl::onFrame() {
                 build_job.start(std::move(inputs->config.config), std::move(inputs->import.scene),
                                 std::move(inputs->config_key), std::move(inputs->geometry_key));
                 build_in_progress = true;
+                build_progress_handle = notifications.startProgress("Tessellating...");
             }
         }
     }
