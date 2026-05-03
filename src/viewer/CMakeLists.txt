@@ -8,8 +8,8 @@
 # Solution: parameterised STATIC lib. `nh_add_viewer_lib(name sokol_lib)`
 # creates one static lib per backend, links the matching sokol_<backend>
 # PUBLICly so the backend define + sokol headers reach every viewer TU,
-# and pulls in the platform-specific dependencies (NFD) on native.
-# The root CMakeLists then composes one (native) or two (wasm)
+# and pulls in the platform-specific dependencies (NFD, platform_folders)
+# on native. The root CMakeLists then composes one (native) or two (wasm)
 # such libs and links them into thin executable targets.
 #
 # Per-platform splits (selected via $<IF:$<BOOL:${EMSCRIPTEN}>,…,…>):
@@ -61,5 +61,11 @@ function(nh_add_viewer_lib name sokol_lib)
         # dep. nfd::nfd is only declared when NOT EMSCRIPTEN — see
         # cmake/Dependencies.cmake.
         target_link_libraries(${name} PUBLIC nfd::nfd)
+        # PlatformFolders resolves the OS cache/config directory on native.
+        # Web doesn't need it (no on-disk paths). Conan recipe is
+        # `platformfolders`, but it sets cmake_file_name to `platform_folders`
+        # and the target to `sago::platform_folders`.
+        find_package(platform_folders CONFIG REQUIRED)
+        target_link_libraries(${name} PUBLIC sago::platform_folders)
     endif()
 endfunction()

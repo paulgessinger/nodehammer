@@ -33,9 +33,12 @@ class Nodehammer(ConanFile):
         # revision. With the patch applied, manifold's Conan package works
         # for both native and wasm and we can drop the FetchContent fallback.
         self.requires("manifold/3.2.1")
-        # The sokol headers are header-only and come from FetchContent
-        # (cmake/Sokol.cmake); no SDL3 — sokol_app owns the window/event loop
-        # on every platform.
+        # Viewer-only runtime dep. PlatformFolders resolves the OS-appropriate
+        # cache / config directory on native; not needed on web. Skip under
+        # Emscripten — the wasm viewer never links it and the package fails to
+        # build for that target anyway.
+        if self.options.viewer and self.settings.os != "Emscripten":
+            self.requires("platformfolders/4.3.0")
 
     def build_requirements(self):
         # sokol-shdc is the shader compiler: a prebuilt static binary wrapped
