@@ -581,10 +581,23 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     if (width == 0 || height == 0) {
         return;
     }
-    constexpr sg_pixel_format kSceneColorFormat = SG_PIXELFORMAT_RGBA8;
+    // Match the swapchain's color format. The scene pipeline was created
+    // against sg_environment.defaults (set from the swapchain in sg_setup),
+    // so the offscreen target must use the same format or WebGPU rejects
+    // the draw with an "incompatible color attachments" error. Metal is
+    // lenient about this, WebGPU is strict.
+    sg_environment env = sglue_environment();
+    sg_pixel_format color_fmt = env.defaults.color_format;
+    if (color_fmt == SG_PIXELFORMAT_NONE) {
+        color_fmt = SG_PIXELFORMAT_RGBA8;
+    }
+    sg_pixel_format depth_fmt = env.defaults.depth_format;
+    if (depth_fmt == SG_PIXELFORMAT_NONE) {
+        depth_fmt = SG_PIXELFORMAT_DEPTH;
+    }
     const int samples = 1;
-    if (!scene_rt.matches(width, height, kSceneColorFormat, samples)) {
-        scene_rt.create(width, height, kSceneColorFormat, samples);
+    if (!scene_rt.matches(width, height, color_fmt, depth_fmt, samples)) {
+        scene_rt.create(width, height, color_fmt, depth_fmt, samples);
     }
 }
 

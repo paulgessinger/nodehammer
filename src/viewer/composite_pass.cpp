@@ -62,14 +62,18 @@ void CompositePass::draw(const SceneRenderTarget &target, DebugView mode, float 
     sg_bindings bind{};
     bind.views[VIEW_composite_scene_color] = target.color_texture_view;
     bind.views[VIEW_composite_scene_depth] = target.depth_texture_view;
-    bind.samplers[SMP_composite_smp] = target.sampler;
+    bind.samplers[SMP_composite_smp_color] = target.sampler;
+    bind.samplers[SMP_composite_smp_depth] = target.depth_sampler;
     sg_apply_bindings(&bind);
 
     composite_composite_params_t params{};
     params.mode_near_far[0] = static_cast<float>(static_cast<int>(mode));
     params.mode_near_far[1] = near_plane;
     params.mode_near_far[2] = far_plane;
-    params.mode_near_far[3] = 0.0f;
+    // Flip V on top-left-origin backends (Metal/D3D/WGPU). GL backends
+    // (GLCore/GLES3) share the texture's bottom-left origin with the
+    // framebuffer NDC y, so the sampled image is already right-side up.
+    params.mode_near_far[3] = sg_query_features().origin_top_left ? 1.0f : 0.0f;
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);
 
