@@ -9,52 +9,120 @@ viewer renderer; it is not an implementation record.
 
 ## Status
 
-Steps 1–6 of the implementation order are landed: offscreen
-color+depth, composite pass, depth debug, FXAA, and HDR + tonemap
-(scene target promoted to RGBA16F where supported, IBL bake also
-RGBA16F so the sun disc and bright sky can encode values >> 1.0).
-Reversed-Z is preserved end-to-end; ImGui still renders in the
-swapchain pass. A `RenderQualitySettings` struct + UI panel are in
-place — most fields are no-ops, wired to advertise the next phases
-without implementing them yet:
+Steps 1–11 of the implementation order are landed: the full offscreen
+post-process stack (color+depth target, composite pass, depth debug,
+FXAA, HDR + tonemap), the cheap GPU-material wiring (emissive, alpha
+mask, per-material `doubleSided`), screen-space ambient occlusion
+(GTAO, depth-only, full resolution, single FS pass), and a
+Nishita-style procedural sky baked through the IBL pipeline. The
+analytical directional light and the IBL bake share a single
+sun-direction source of truth. Reversed-Z is preserved end-to-end;
+ImGui still renders in the swapchain pass.
 
-- `RenderQualitySettings` (`include/nodehammer/viewer/render_quality.hpp`):
-  `render_scale`, `enable_hdr`, `enable_tonemap`, `enable_fxaa`,
-  `msaa_samples`, `ibl_quality`, `enable_bloom`, `debug_view`.
-  `debug_view` and `enable_fxaa` are live today.
-- `SceneRenderTarget` (`src/viewer/scene_render_target.{hpp,cpp}`): owns
-  the offscreen color (RGBA8) + depth (`SG_PIXELFORMAT_DEPTH`) images,
-  attachment views for the scene pass, texture views + sampler for the
-  composite pass. Lazily (re)allocated by `App::Impl::ensureSceneTarget`
-  on framebuffer-size change.
-- `CompositePass` (`src/viewer/composite_pass.{hpp,cpp}`) +
-  `shaders/composite.glsl`: fullscreen-triangle VS (no vbuf), FS with
-  three modes — color passthrough, raw depth, linearized reversed-Z.
-  Composite pipeline has no depth, no cull. `App::Impl::render` is now
-  scene-pass-into-offscreen → swapchain-pass-with-composite-then-ImGui.
-  Depth-store is enabled on the scene pass so the debug view can sample
-  it. The color-passthrough branch now also runs an FXAA 3.11
-  console-quality variant (green-channel luma, five-tap edge detect +
-  two-tap final blend) gated by `quality.enable_fxaa`; depth debug views
-  always short-circuit FXAA.
-- "Render Quality" section in the View panel
-  (`src/viewer/ui/view_panel.cpp`): live debug-view combo
-  (off / depth / linear depth) and live FXAA toggle (greyed out while a
-  depth debug view is active); HDR/tonemap/MSAA/bloom/render-scale/IBL
-  controls present but disabled, tooltipped "wired, not implemented".
+**Quality settings + UI** (`include/nodehammer/viewer/render_quality.hpp`,
+`src/viewer/ui/view_panel.cpp`). Live: `debug_view`, `enable_fxaa`,
+`enable_hdr`, `enable_tonemap`, `exposure_stops`, `tonemap_mode`,
+`enable_ao`, `ao_intensity`, `ao_radius`, `ao_thickness`. Stubs (wired
+into the UI but no-op): `render_scale`, `msaa_samples`, `ibl_quality`,
+`enable_bloom`. The View panel also exposes the tri-state cull
+override (`auto / force on / force off`) introduced in step 9, and a
+**Lighting** section with sun azimuth/elevation, sun intensity, sky
+model selector (Gradient/Nishita), turbidity, and ground albedo.
+Edits flip `IblSettings` and trigger the existing 300 ms debounced
+rebake.
 
-What this unlocks: HDR, tonemap, MSAA, render scale, bloom, TAA can now
-land without restructuring the pass topology — they hang off the
-composite shader / target format / sample count. The composite UBO has a
-reserved `vec4` slot, so HDR/tonemap (step 6) can slot into the same FS
-without further uniform-block surgery.
+**Pass topology** (`src/viewer/app.cpp::App::Impl::render`):
 
-Remaining (steps 7+): expanded GPU material (emissive, alpha mask),
-IBL quality presets, optional MSAA, adaptive quality, then
-bloom / TAA / shadows / richer PBR. HDR + tonemap on its own gave a
-smaller perceived-quality bump than expected against an offline
-reference render — see section 12 for the gap analysis that should
-shape the next steps.
+```
+scene-pass (offscreen color+depth)
+  → ao-pass (depth-only input → R16F or R8 AO map; skipped when AO is
+             off or while a depth-debug view is active)
+  → swapchain-pass: composite (samples scene_color + scene_depth +
+                               ao_map; AO multiply pre-tonemap;
+                               optional FXAA on the tonemapped color)
+                  → ImGui
+```
+
+**`SceneRenderTarget`** (`src/viewer/scene_render_target.{hpp,cpp}`):
+owns offscreen color (RGBA8 in LDR, RGBA16F in HDR), depth
+(`SG_PIXELFORMAT_DEPTH`), attachment views, texture views, linear color
+sampler, nonfiltering depth sampler (WebGPU constraint). Reallocated by
+`App::Impl::ensureSceneTarget` on size, HDR-toggle, or DPI change.
+
+**`CompositePass`** (`src/viewer/composite_pass.{hpp,cpp}`,
+`shaders/composite.glsl`): fullscreen-triangle VS (no vbuf). FS modes:
+color passthrough, raw depth, linearized depth — the linearizer covers
+all three depth conventions (normal-Z, reversed-Z, log-Z) and is now
+shared with the AO pass via sokol-shdc `@include` from
+`shaders/depth_helpers.glsl.h`. Color path runs FXAA 3.11
+console-quality and the AO multiply (gated by `enable_ao`); both are
+short-circuited under depth-debug views.
+
+**Nishita procedural sky** (`shaders/ibl_bake.glsl`,
+`src/viewer/ibl.{hpp,cpp}`). Single-scattering Rayleigh + Mie
+atmospheric model, 16 primary steps × 8 secondary (sun-direction)
+steps per pixel, baked into the existing IBL pipeline (BRDF LUT,
+irradiance cubemap, prefilter cubemap with 6 mips). Adds a real sun
+disc at the solar angular radius (~0.5°), horizon warming, and
+ground-bounce term driven by `ground_albedo`. `IblSettings` carries a
+`SkyModel` enum so the legacy gradient sky stays available behind the
+selector. **Single-source sun direction**: `IblSettings::sun_dir` is
+the toward-sun direction baked into the cubemaps and is also passed
+through `RenderFlags::sun_dir` to the analytical scene light, so the
+analytical highlight aligns with the reflected sun in the prefilter
+mips. Existing `operator==` cache key picks up the new fields without
+changes; the existing 300 ms debounce drives rebakes on UI edit.
+
+**`AoPass` + `AoRenderTarget`** (`src/viewer/ao_pass.{hpp,cpp}`,
+`src/viewer/ao_render_target.{hpp,cpp}`, `shaders/ao.glsl`). GTAO v1:
+
+- 4 slices × 4 steps per pixel; per-pixel slice rotation via
+  interleaved gradient noise.
+- View-space position reconstructed from depth + projection params;
+  perspective and orthographic both supported via an `is_perspective`
+  flag in the UBO.
+- Face normal from cardinal-tap depth differences with min-fwd/bwd
+  selection (Improved Normal Reconstruction from Depth, Wu/Karis 2014)
+  — stable on silhouettes and grazing surfaces where `dFdx`/`dFdy`
+  alias.
+- Horizon rejection by tangent-plane perpendicular distance
+  (`abs(dot(H, N)) < thickness * radius_world`) instead of total
+  `length(H)`, so grazing surfaces aren't false-rejected.
+- Per-tap sky guard so background pixels don't spuriously occlude.
+- AO target format: R16F when the backend can render+filter it
+  (`pickAoColorFormat()`), R8 fallback. Bayer 4×4 ordered dither at
+  the FS output to break R8 quantization banding on the fallback path
+  (no-op at R16F precision).
+- Composite always binds the AO texture: `AoPass` owns a 1×1 white
+  R8 dummy that's bound when AO is off, so the composite pipeline has
+  one variant regardless of toggle state.
+
+**`@include`-based shader helpers**: `shaders/depth_helpers.glsl.h`
+holds `linearize_depth(...)` and is pulled in by both
+`composite.glsl` and `ao.glsl` via `@include`. `nh_compile_shader`
+(`cmake/Sokol.cmake`) tracks `INCLUDES` as build dependencies so a
+helper edit retriggers every consumer. Future depth-aware passes
+(bent-normal AO, contact shadows, SSR) reuse the helper.
+
+**GPU material** (`src/viewer/scene_renderer.cpp::Impl::GpuMaterial` +
+`shaders/scene.glsl`). Wired through from `RenderMaterial`:
+`baseColorFactor`, `metallicFactor`, `roughnessFactor`,
+`emissiveFactor`, `alphaMode`/`alphaCutoff` (MASK only — `discard`
+in FS), `doubleSided` (per-material cull pipeline selection;
+debug-override knob preserved). BLEND, transmission, specular/IOR,
+clearcoat, anisotropy still on the IR side, not yet uploaded.
+
+What this unlocks: bloom, MSAA, render scale, TAA, contact shadows,
+specular/IOR/clearcoat material upgrades, environment-content work
+(Nishita sky, HDRI, background dome) all hang off the existing pass
+topology, the existing UBO shapes, or the existing `RenderMaterial`
+fields without further structural surgery.
+
+Remaining (steps 11+): environment content (Nishita sky, HDRI,
+visible background dome), specular/IOR/clearcoat material upgrades,
+bloom, multi-scattering BRDF + bent-normal AO into IBL diffuse,
+MSAA, adaptive quality, contact shadows, then BLEND/transmission
+and TAA. See section 13 for the full ordered list.
 
 ---
 
@@ -742,25 +810,34 @@ Done:
 4. Depth debug visualization with reversed-Z reconstruction.
 5. FXAA in the composite pass.
 6. HDR color target plus tonemapping.
+7. `emissiveFactor` wired through `GpuMaterial` and the scene
+   shader.
+8. `alphaMode = MASK` + `alphaCutoff` (FS `discard`).
+9. Per-material `doubleSided` driving the cull pipeline per draw
+   group; the user-facing toggle is now a tri-state debug override
+   (`auto / force on / force off`) instead of a global on/off.
+10. Screen-space AO (GTAO v1) in a dedicated pass between the scene
+    and composite passes. Depth-only, full resolution, single FS
+    pass; cardinal-tap normal reconstruction; perspective and ortho
+    supported; tangent-plane thickness reject; R16F target with R8
+    fallback. `linearize_depth` is now factored into
+    `shaders/depth_helpers.glsl.h` and shared via sokol-shdc
+    `@include`.
+11. Nishita-style procedural sky baked into the existing IBL
+    pipeline. Single-scattering Rayleigh+Mie with 16 primary / 8
+    secondary integration steps; turbidity and ground-albedo
+    parameters; real sun disc at the solar angular radius. Legacy
+    gradient sky kept behind a `SkyModel` selector. Sun direction
+    unified: `IblSettings::sun_dir` is the single source of truth
+    for both the IBL bake and the analytical scene light, so the
+    analytical highlight tracks the reflected sun. Environment
+    "rotation" falls out of moving the sun, since the sun is the
+    only asymmetry in the Nishita sky. View panel gains a
+    **Lighting** section (azimuth/elevation, intensity, sky model,
+    turbidity, ground albedo).
 
-Next, ordered by perceived-quality ROI. The first three are
-near-zero-cost data wiring — all the values are already in
-`RenderMaterial`, just dropped on upload — so they should land
-*before* the bigger environment / AO work even though each individual
-item is smaller.
+Next, ordered by perceived-quality ROI:
 
-7. **Wire `emissiveFactor` through `GpuMaterial`.** One UBO field,
-   one shader add. Self-luminous parts immediately pop and this
-   becomes the input for any later bloom pass.
-8. **Wire `alphaMode = MASK` + `alphaCutoff`.** One UBO field, one
-   `discard` in the FS. No sorting needed.
-9. **Per-material `doubleSided`.** Split draw groups by cull mode and
-   pick the right pipeline per group; retire the global cull toggle.
-10. **Screen-space AO (GTAO or SSAO) in the composite pass.** Highest
-    single-feature impact for cluttered detector geometry; reuses the
-    existing offscreen depth.
-11. **Nishita procedural sky baked into the existing IBL pipeline,**
-    plus environment rotation coupled to sun direction.
 12. **Visible background dome** sampled from the IBL cubemap in the
     composite pass.
 13. **HDRI loading** (`.hdr` / `.exr` equirectangular) with a small

@@ -689,6 +689,11 @@ void App::Impl::render() {
         flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
         flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
         flags.enable_pbr = cfg.enable_pbr;
+        // Single source of truth for sun direction: ibl_settings.sun_dir
+        // drives both the IBL bake and the analytical light, so the baked
+        // reflected sun lines up with the analytical highlight (docs §9.1).
+        flags.sun_dir = ibl_settings.sun_dir;
+        flags.sun_intensity = ibl_settings.sun_intensity;
         const uint64_t scene_submit_start = stm_now();
         scene_renderer.render(camera, scene_rt.width, scene_rt.height, flags);
         scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
@@ -722,7 +727,25 @@ void App::Impl::render() {
     swap_pass.label = "swapchain_pass";
     sg_begin_pass(&swap_pass);
 
-    composite.draw(scene_rt, ao_rt, ao_pass, quality, camera.near_plane, camera.far_plane);
+    {
+        // Match the conventions the scene shader uses (see scene_renderer.cpp):
+        // GL/GLES needs [-1,1] z; everything else [0,1]. Reversed-Z is gated
+        // by useReversedZ(). Compute inv(view_proj) so the composite FS can
+        // turn a screen-space pixel into a world-space view ray for the
+        // background dome.
+        const sg_backend backend = sg_query_backend();
+        const bool homogeneous_depth =
+            (backend == SG_BACKEND_GLCORE) || (backend == SG_BACKEND_GLES3);
+        const float aspect = (scene_rt.height > 0) ? static_cast<float>(scene_rt.width) /
+                                                         static_cast<float>(scene_rt.height)
+                                                   : 1.0f;
+        const glm::mat4 view_proj =
+            camera.proj(aspect, homogeneous_depth, useReversedZ()) * camera.view();
+        const glm::mat4 inv_view_proj = glm::inverse(view_proj);
+        composite.draw(scene_rt, ao_rt, ao_pass, quality, camera.near_plane, camera.far_plane,
+                       scene_renderer.iblPrefilterView(), scene_renderer.iblCubeSampler(),
+                       inv_view_proj, camera.eye());
+    }
     ImGui_ImplSokol_Render();
 
     sg_end_pass();

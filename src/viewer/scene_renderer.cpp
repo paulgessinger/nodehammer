@@ -628,8 +628,12 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     vs_params.depth_params[2] = 0.0f;
     vs_params.depth_params[3] = 0.0f;
 
-    // w = directional light intensity (used by PBR branch only; Lambert ignores).
-    const glm::vec4 light_dir{-0.4f, -0.7f, -0.6f, 3.f};
+    // Shader convention is "from-light direction" (light vector pointing toward
+    // the surface); RenderFlags carries the toward-sun direction (matching the
+    // IBL bake), so negate. w = directional light intensity (used by PBR branch
+    // only; Lambert ignores).
+    const glm::vec3 to_sun = glm::normalize(flags.sun_dir);
+    const glm::vec4 light_dir{-to_sun, flags.sun_intensity};
 
     sg_pipeline current_pipeline{};
     for (const auto &g : impl_->groups) {
@@ -730,5 +734,9 @@ uint32_t SceneRenderer::meshAssetCount() const {
 }
 uint32_t SceneRenderer::nodeCount() const { return impl_->node_count; }
 uint64_t SceneRenderer::triangleCount() const { return impl_->triangle_count; }
+
+sg_view SceneRenderer::iblPrefilterView() const { return impl_->ibl.prefilter_view; }
+
+sg_sampler SceneRenderer::iblCubeSampler() const { return impl_->ibl.cube_sampler; }
 
 } // namespace nodehammer::viewer

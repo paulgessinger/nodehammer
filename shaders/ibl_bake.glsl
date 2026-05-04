@@ -26,19 +26,21 @@ void main() {
 // rebake-time scene parameters fed from the viewer UI.
 layout(binding=0) uniform ibl_settings {
     vec4 face_rough_samples; // x=face index, y=roughness, z=sample count
-    vec4 zenith_color;       // rgb
-    vec4 horizon_color;      // rgb
-    vec4 ground_color;       // rgb
-    vec4 sun_dir;            // xyz=direction, w unused
-    vec4 sun_color;          // rgb=color, w=sharpness
+    vec4 zenith_color;       // rgb (gradient model)
+    vec4 horizon_color;      // rgb (gradient model)
+    vec4 ground_color;       // rgb (gradient model)
+    vec4 sun_dir;            // xyz=toward-sun direction, w=sun_intensity
+    vec4 sun_color;          // rgb=color, w=sharpness (gradient model)
+    vec4 ground_albedo;      // rgb=planet surface reflectance (Nishita)
+    vec4 sky_params;         // x=turbidity, y=sky_model (0=Gradient, 1=Nishita)
 };
 @end
 
 @block ibl_helpers
 const float PI = 3.14159265358979323846;
 
-vec3 sky(vec3 dir_in) {
-    vec3 dir = normalize(dir_in);
+// ── Gradient sky (legacy) ──────────────────────────────────────────────────
+vec3 skyGradient(vec3 dir) {
     float t = clamp(dir.y * 0.5 + 0.5, 0.0, 1.0);
     vec3 base;
     if (dir.y >= 0.0) {
@@ -48,7 +50,155 @@ vec3 sky(vec3 dir_in) {
         base = mix(horizon_color.rgb, ground_color.rgb, td);
     }
     float s = pow(max(dot(dir, normalize(sun_dir.xyz)), 0.0), sun_color.w);
-    return base + s * sun_color.rgb;
+    return base + s * sun_color.rgb * sun_dir.w;
+}
+
+// ── Nishita single-scattering sky ──────────────────────────────────────────
+// Standard Earth-atmosphere model. Coordinates are in metres; the camera
+// sits at sea level (planet centre below). Origin is the planet centre.
+const float kPlanetRadius = 6360e3;
+const float kAtmosRadius  = 6420e3;
+const float kRayleighH    = 8000.0;   // Rayleigh scale height (m)
+const float kMieH         = 1200.0;   // Mie scale height (m)
+const float kSunAngularR  = 0.004675; // ~0.5° solar radius in radians
+const float kSunCosThresh = 0.99998906; // cos(kSunAngularR)
+const vec3  kBetaR        = vec3(5.802e-6, 13.558e-6, 33.1e-6); // Rayleigh extinction (1/m)
+const float kBetaM        = 3.996e-6;  // Mie extinction at turbidity 1 (1/m)
+const float kMieG         = 0.76;
+const float kSunIrradiance = 22.0;     // arbitrary scalar — combines with sun_dir.w
+
+// Ray-sphere intersection with a sphere centred at origin. Returns t for the
+// far hit (t1) and the near hit (t0); caller checks t1 > 0 for a valid hit.
+// Returns vec2(-1) when the ray misses.
+vec2 raySphere(vec3 ro, vec3 rd, float r) {
+    float b = dot(ro, rd);
+    float c = dot(ro, ro) - r * r;
+    float d = b * b - c;
+    if (d < 0.0) return vec2(-1.0);
+    float sd = sqrt(d);
+    return vec2(-b - sd, -b + sd);
+}
+
+// Optical depth along a ray segment of length `t` from `ro` in direction
+// `rd`. Returns vec2(rayleigh, mie) — both scalar densities, multiplied by
+// extinction coefficients at the call site.
+vec2 opticalDepth(vec3 ro, vec3 rd, float t, int steps) {
+    float seg = t / float(steps);
+    vec2 acc = vec2(0.0);
+    for (int i = 0; i < steps; ++i) {
+        vec3 p = ro + rd * (seg * (float(i) + 0.5));
+        float h = length(p) - kPlanetRadius;
+        // Density falls off exponentially with altitude. Negative h (under
+        // the planet surface) shouldn't happen for valid rays but clamp to
+        // avoid blow-up.
+        float dr = exp(-max(h, 0.0) / kRayleighH);
+        float dm = exp(-max(h, 0.0) / kMieH);
+        acc += vec2(dr, dm) * seg;
+    }
+    return acc;
+}
+
+vec3 skyNishita(vec3 dir) {
+    vec3 to_sun = normalize(sun_dir.xyz);
+    // Camera is just above sea level so we always start inside the atmosphere.
+    vec3 ro = vec3(0.0, kPlanetRadius + 1.0, 0.0);
+
+    // Find where the view ray exits the atmosphere (or hits the planet).
+    vec2 t_atmos = raySphere(ro, dir, kAtmosRadius);
+    if (t_atmos.y < 0.0) {
+        // Ray escapes downward without hitting atmosphere — shouldn't happen
+        // from inside the atmosphere shell, but bail safely.
+        return vec3(0.0);
+    }
+    float t_far = t_atmos.y;
+    vec2 t_planet = raySphere(ro, dir, kPlanetRadius);
+    bool hit_planet = (t_planet.x > 0.0);
+    if (hit_planet) {
+        t_far = min(t_far, t_planet.x);
+    }
+
+    const int kPrimarySteps = 16;
+    const int kLightSteps   = 8;
+    float seg = t_far / float(kPrimarySteps);
+
+    vec3 sum_r = vec3(0.0);
+    vec3 sum_m = vec3(0.0);
+    vec2 cum_od = vec2(0.0); // cumulative optical depth along the primary ray
+
+    float mu = dot(dir, to_sun);
+    // Phase functions
+    float phase_r = (3.0 / (16.0 * PI)) * (1.0 + mu * mu);
+    float g = kMieG;
+    float phase_m = (3.0 / (8.0 * PI))
+        * ((1.0 - g * g) * (1.0 + mu * mu))
+        / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
+
+    float turbidity = max(sky_params.x, 1.0);
+    float beta_m = kBetaM * turbidity;
+
+    for (int i = 0; i < kPrimarySteps; ++i) {
+        vec3 p = ro + dir * (seg * (float(i) + 0.5));
+        float h = length(p) - kPlanetRadius;
+        float dr = exp(-max(h, 0.0) / kRayleighH) * seg;
+        float dm = exp(-max(h, 0.0) / kMieH) * seg;
+        cum_od += vec2(dr, dm);
+
+        // Optical depth from sample point toward the sun. If the secondary
+        // ray hits the planet the sample is in shadow → skip its contribution.
+        vec2 t_sun_atmos = raySphere(p, to_sun, kAtmosRadius);
+        vec2 t_sun_planet = raySphere(p, to_sun, kPlanetRadius);
+        bool sun_blocked = (t_sun_planet.x > 0.0);
+        if (!sun_blocked && t_sun_atmos.y > 0.0) {
+            vec2 od_sun = opticalDepth(p, to_sun, t_sun_atmos.y, kLightSteps);
+            vec3 tau = kBetaR * (cum_od.x + od_sun.x)
+                     + vec3(beta_m * 1.1) * (cum_od.y + od_sun.y);
+            vec3 transmittance = exp(-tau);
+            sum_r += dr * transmittance;
+            sum_m += dm * transmittance;
+        }
+    }
+
+    vec3 colour = (sum_r * kBetaR * phase_r + sum_m * vec3(beta_m) * phase_m) * kSunIrradiance;
+
+    // Ground bounce: if we hit the planet, the view ray ends there. Approximate
+    // the ground radiance as Lambertian albedo * direct sun illuminance,
+    // attenuated by the atmosphere transmittance from camera→ground.
+    if (hit_planet) {
+        vec3 g_pos = ro + dir * t_far;
+        vec2 t_sun_atmos = raySphere(g_pos, to_sun, kAtmosRadius);
+        vec2 t_sun_planet = raySphere(g_pos, to_sun, kPlanetRadius);
+        float ndotl = max(to_sun.y, 0.0); // crude — planet normal at ground point ≈ +Y near origin
+        if (t_sun_planet.x < 0.0 && t_sun_atmos.y > 0.0 && ndotl > 0.0) {
+            vec2 od_sun = opticalDepth(g_pos, to_sun, t_sun_atmos.y, kLightSteps);
+            vec3 tau_sun = kBetaR * od_sun.x + vec3(beta_m * 1.1) * od_sun.y;
+            vec3 tau_view = kBetaR * cum_od.x + vec3(beta_m * 1.1) * cum_od.y;
+            vec3 transmittance = exp(-(tau_sun + tau_view));
+            colour += (ground_albedo.rgb / PI) * ndotl * kSunIrradiance * transmittance;
+        }
+    }
+
+    // Direct sun disc — only when the view ray points within the solar angular
+    // radius AND is not blocked by the planet. Multiply by transmittance from
+    // camera through the atmosphere along the view direction (which equals the
+    // total cum_od integrated above).
+    if (!hit_planet && mu > kSunCosThresh) {
+        vec3 tau = kBetaR * cum_od.x + vec3(beta_m * 1.1) * cum_od.y;
+        vec3 transmittance = exp(-tau);
+        // Solar irradiance peak — large multiplier produces a true HDR disc
+        // that survives the prefilter mips and feeds tonemap roll-off.
+        const float kSunDiscPeak = 1500.0;
+        colour += transmittance * sun_color.rgb * kSunDiscPeak;
+    }
+
+    return max(colour, vec3(0.0)) * sun_dir.w;
+}
+
+vec3 sky(vec3 dir_in) {
+    vec3 dir = normalize(dir_in);
+    if (sky_params.y > 0.5) {
+        return skyNishita(dir);
+    }
+    return skyGradient(dir);
 }
 
 // Standard sokol cube face order: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.

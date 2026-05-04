@@ -82,6 +82,12 @@ class SceneRenderer {
         float angle_cut_start_deg{0.f};
         float angle_cut_end_deg{90.f};
         bool enable_pbr{false}; ///< When on: Cook-Torrance + IBL ambient.
+
+        /// Toward-sun direction for the analytical directional light. Should
+        /// match the IBL bake's sun_dir so the analytical highlight aligns
+        /// with the reflected sun in the cubemap (per docs §9.1).
+        glm::vec3 sun_dir{0.4f, 0.7f, 0.6f};
+        float sun_intensity{1.5f};
     };
 
     /// Submit draw calls for the active scene. Caller must have an active
@@ -102,6 +108,12 @@ class SceneRenderer {
     [[nodiscard]] uint32_t meshAssetCount() const;
     [[nodiscard]] uint32_t nodeCount() const;
     [[nodiscard]] uint64_t triangleCount() const;
+
+    /// Accessors for the installed IBL prefilter cubemap, so other passes
+    /// (e.g. composite background dome) can sample the same baked sky the
+    /// scene shader uses for specular reflections.
+    [[nodiscard]] sg_view iblPrefilterView() const;
+    [[nodiscard]] sg_sampler iblCubeSampler() const;
 
   private:
     struct Impl;

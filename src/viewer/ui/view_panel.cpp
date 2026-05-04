@@ -1,13 +1,16 @@
 #include "view_panel.hpp"
 
+#include "../ibl.hpp"
 #include "../scene_renderer.hpp"
 #include <nodehammer/viewer/camera.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
 
+#include <glm/geometric.hpp>
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <imgui.h>
 
+#include <algorithm>
 #include <cmath>
 
 namespace nodehammer::viewer::ui {
@@ -19,6 +22,21 @@ float wrapDegrees(float angle) {
         angle += 360.f;
     }
     return angle;
+}
+
+// Toward-sun direction from azimuth/elevation in degrees. Y is up; azimuth
+// rotates around Y from +Z (north) toward +X (east).
+glm::vec3 sphericalToDir(float az_deg, float el_deg) {
+    const float az = glm::radians(az_deg);
+    const float el = glm::radians(el_deg);
+    const float ce = std::cos(el);
+    return {ce * std::sin(az), std::sin(el), ce * std::cos(az)};
+}
+
+void dirToSpherical(const glm::vec3 &dir, float &az_deg, float &el_deg) {
+    const glm::vec3 d = glm::length(dir) > 0.f ? glm::normalize(dir) : glm::vec3{0.f, 1.f, 0.f};
+    el_deg = glm::degrees(std::asin(std::clamp(d.y, -1.f, 1.f)));
+    az_deg = glm::degrees(std::atan2(d.x, d.z));
 }
 
 } // namespace
@@ -112,6 +130,19 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ImGui::EndDisabled();
         }
 
+        // Background dome — sample the IBL prefilter cubemap as the visible
+        // sky on pixels that haven't been written by scene geometry. Greyed
+        // out under depth-debug for the same reason as FXAA/AO (composite
+        // short-circuits to depth visualization in those modes).
+        {
+            const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
+            ImGui::BeginDisabled(depth_debug);
+            ImGui::Checkbox("background", &ctx.quality.enable_background);
+            ImGui::SetItemTooltip("Show the IBL sky as the visible background "
+                                  "(matches the reflected sky on metallics)");
+            ImGui::EndDisabled();
+        }
+
         // GTAO. Same depth-debug grey-out as FXAA; intensity/radius nest-
         // disable on the AO checkbox so the user can't tweak invisibly.
         {
@@ -168,6 +199,54 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("wired, not implemented");
+        }
+    }
+
+    if (ctx.ibl_settings != nullptr && ImGui::CollapsingHeader("Lighting")) {
+        // Single source of truth: edits here flip ibl_settings, which is the
+        // IBL cache key (operator==), so the debounced rebake loop in
+        // App::onFrame picks up changes after a 300 ms settle. The same
+        // sun_dir feeds the analytical scene light (docs §9.1).
+        IblSettings &s = *ctx.ibl_settings;
+
+        const char *kSkyModelLabels[] = {"gradient (legacy)", "Nishita (atmospheric)"};
+        int sky_idx = static_cast<int>(s.sky_model);
+        if (ImGui::Combo("sky model", &sky_idx, kSkyModelLabels, IM_ARRAYSIZE(kSkyModelLabels))) {
+            s.sky_model = static_cast<SkyModel>(sky_idx);
+        }
+
+        float az_deg = 0.f, el_deg = 0.f;
+        dirToSpherical(s.sun_dir, az_deg, el_deg);
+        bool sun_changed = false;
+        sun_changed |= ImGui::SliderFloat("sun azimuth", &az_deg, -180.f, 180.f, "%.1f deg");
+        sun_changed |= ImGui::SliderFloat("sun elevation", &el_deg, -10.f, 90.f, "%.1f deg");
+        if (sun_changed) {
+            s.sun_dir = sphericalToDir(az_deg, el_deg);
+        }
+        ImGui::SliderFloat("sun intensity", &s.sun_intensity, 0.f, 20.f, "%.2f");
+
+        const bool nishita = (s.sky_model == SkyModel::Nishita);
+        ImGui::BeginDisabled(!nishita);
+        ImGui::SliderFloat("turbidity", &s.turbidity, 1.5f, 10.f, "%.2f");
+        ImGui::SetItemTooltip(
+            "Atmospheric haze. ~2 = clear sky, ~6 = hazy. Drives Mie scattering.");
+        ImGui::ColorEdit3("ground albedo", &s.ground_albedo.x);
+        ImGui::EndDisabled();
+
+        // Reset only the sky/sun-related fields; preserve user-tuned bake
+        // sample counts (those live under "IBL bake" in the debug panel).
+        if (ImGui::Button("Reset sky")) {
+            const IblSettings def{};
+            s.sky_model = def.sky_model;
+            s.sun_dir = def.sun_dir;
+            s.sun_color = def.sun_color;
+            s.sun_intensity = def.sun_intensity;
+            s.sun_sharpness = def.sun_sharpness;
+            s.zenith_color = def.zenith_color;
+            s.horizon_color = def.horizon_color;
+            s.ground_color = def.ground_color;
+            s.turbidity = def.turbidity;
+            s.ground_albedo = def.ground_albedo;
         }
     }
 

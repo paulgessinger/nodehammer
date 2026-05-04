@@ -38,6 +38,13 @@ struct RenderQualitySettings {
     DebugView debug_view{DebugView::Off};
     float exposure_stops{0.0f};
     TonemapMode tonemap_mode{TonemapMode::ACES};
+
+    /// When on, the composite pass samples the IBL prefilter cubemap as a
+    /// fullscreen background on pixels that haven't been written by scene
+    /// geometry (depth = clear value). Driven by the same Nishita/gradient
+    /// bake the IBL specular reflections come from, so the on-screen sky
+    /// matches the reflected sky.
+    bool enable_background{false};
 };
 
 } // namespace nodehammer::viewer

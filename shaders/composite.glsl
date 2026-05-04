@@ -68,6 +68,17 @@ layout(binding=0) uniform composite_params {
     //     anyway, but we still gate to skip the texture fetch on the
     //     hot path. yzw reserved.
     vec4 ao_params;
+    // x = enable_background (0.0 or 1.0). When 1 and a pixel's scene depth
+    //     equals the clear value (no scene geometry), `sampleScene` returns
+    //     the IBL prefilter cubemap sampled along the world-space view ray
+    //     instead of the scene color. yzw reserved.
+    vec4 background_params;
+    // Inverse of the camera's view-projection matrix. Used to reconstruct
+    // a world-space view direction from screen-space NDC for the background
+    // dome. Computed CPU-side as glm::inverse(view_proj).
+    mat4 inv_view_proj;
+    // xyz = world-space camera position. w reserved.
+    vec4 camera_pos;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -80,10 +91,15 @@ layout(binding=1) uniform texture2D scene_depth;
 // disabled the binding is a 1×1 white dummy supplied by AoPass so the
 // pipeline keeps a single variant.
 layout(binding=2) uniform texture2D ao_map;
+// IBL prefilter cubemap reused as the visible background. Always bound
+// (the SceneRenderer's IBL is up by the time the composite runs); gated
+// by background_params.x at sample time.
+layout(binding=3) uniform textureCube background_env;
 layout(binding=0) uniform sampler smp_color;
 @sampler_type smp_depth nonfiltering
 layout(binding=1) uniform sampler smp_depth;
 layout(binding=2) uniform sampler smp_ao;
+layout(binding=3) uniform sampler smp_env;
 
 in vec2 v_uv;
 out vec4 frag_color;
@@ -141,16 +157,56 @@ vec3 tonemap_agx(vec3 x) {
     return clamp(agx_out * v, 0.0, 1.0);
 }
 
+// True when this pixel is "background" — no scene geometry has written depth.
+// The depth-clear value depends on the convention: reversed-Z clears to 0.0,
+// normal-Z and log-Z clear to 1.0 (the log formula maps far→1 by construction).
+bool isBackground(float d) {
+    bool reversed = depth_params.x > 0.5 && depth_params.x < 1.5;
+    float clear_d = reversed ? 0.0 : 1.0;
+    return abs(d - clear_d) < 1e-4;
+}
+
+// Reconstruct a world-space view direction for the background dome from a
+// texture-space UV. Undoes the V-flip if the backend has top-left origin
+// so NDC y stays +up regardless. The cubemap sample direction is independent
+// of clip-space depth, so any z works for the inverse projection.
+vec3 reconstructViewDir(vec2 uv) {
+    float flip_v = mode_near_far.w;
+    vec2 uv_ndc = vec2(uv.x, mix(uv.y, 1.0 - uv.y, flip_v));
+    vec2 ndc = uv_ndc * 2.0 - 1.0;
+    vec4 cs = vec4(ndc, 0.5, 1.0);
+    vec4 ws = inv_view_proj * cs;
+    ws.xyz /= ws.w;
+    return normalize(ws.xyz - camera_pos.xyz);
+}
+
 // Sample the offscreen scene color, apply AO, exposure, then optional tonemap.
 // All color paths (passthrough + FXAA) route through here so FXAA sees the
 // final LDR result and its luma assumptions (rec.709) hold even when the
 // scene target is RGBA16F. AO multiplies the linear scene color *before*
 // exposure so the slider stays consistent with tonemap on/off.
+//
+// Background dome: when enable_background is on AND the pixel has depth ==
+// clear (no scene geometry), `c` is the IBL prefilter cubemap sampled along
+// the world-space view ray. AO is skipped on background pixels (no surface
+// to occlude). Tonemap is applied uniformly so the on-screen sky matches the
+// reflected sky tonally.
 vec3 sampleScene(vec2 uv) {
-    vec3 c = texture(sampler2D(scene_color, smp_color), uv).rgb;
-    if (ao_params.x > 0.5) {
-        float ao = texture(sampler2D(ao_map, smp_ao), uv).r;
-        c *= ao;
+    vec3 c;
+    bool is_bg = false;
+    if (background_params.x > 0.5) {
+        float d = texture(sampler2D(scene_depth, smp_depth), uv).r;
+        is_bg = isBackground(d);
+    }
+    if (is_bg) {
+        vec3 dir = reconstructViewDir(uv);
+        c = textureLod(samplerCube(background_env, smp_env), dir, 0.0).rgb;
+    } else {
+        c = texture(sampler2D(scene_color, smp_color), uv).rgb;
+        if (ao_params.x > 0.5) {
+            float ao = texture(sampler2D(ao_map, smp_ao), uv).r;
+            c *= ao;
+        }
     }
     c *= tonemap_params.x;
     int tm = int(tonemap_params.y + 0.5);

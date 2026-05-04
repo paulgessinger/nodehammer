@@ -2,6 +2,8 @@
 
 #include <nodehammer/viewer/render_quality.hpp>
 
+#include <glm/mat4x4.hpp>
+#include <glm/vec3.hpp>
 #include <sokol_gfx.h>
 
 namespace nodehammer::viewer {
@@ -39,9 +41,15 @@ class CompositePass {
     /// `quality.enable_ao` is false, the composite samples `ao_pass`'s 1×1
     /// white dummy so the pipeline's binding contract stays valid without a
     /// second pipeline variant.
+    ///
+    /// `background_env` and `env_sampler` bind the IBL prefilter cubemap so
+    /// background pixels (depth = clear) can sample the same baked sky the
+    /// scene specular uses. `inv_view_proj` and `camera_pos` reconstruct
+    /// world-space view directions for that sample.
     void draw(const SceneRenderTarget &scene_target, const AoRenderTarget &ao_target,
               const AoPass &ao_pass, const RenderQualitySettings &quality, float near_plane,
-              float far_plane);
+              float far_plane, sg_view background_env, sg_sampler env_sampler,
+              const glm::mat4 &inv_view_proj, const glm::vec3 &camera_pos);
 
   private:
     sg_shader shader_{};

@@ -11,6 +11,8 @@
 #include <cmath>
 #include <cstring>
 
+#include <glm/gtc/type_ptr.hpp>
+
 #include "composite.glsl.h"
 
 namespace nodehammer::viewer {
@@ -58,7 +60,9 @@ void CompositePass::release() {
 
 void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTarget &ao_target,
                          const AoPass &ao_pass, const RenderQualitySettings &quality,
-                         float near_plane, float far_plane) {
+                         float near_plane, float far_plane, sg_view background_env,
+                         sg_sampler env_sampler, const glm::mat4 &inv_view_proj,
+                         const glm::vec3 &camera_pos) {
     if (!initialized_ || scene_target.color.id == SG_INVALID_ID) {
         return;
     }
@@ -76,9 +80,11 @@ void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTa
     bind.views[VIEW_composite_scene_color] = scene_target.color_texture_view;
     bind.views[VIEW_composite_scene_depth] = scene_target.depth_texture_view;
     bind.views[VIEW_composite_ao_map] = ao_view;
+    bind.views[VIEW_composite_background_env] = background_env;
     bind.samplers[SMP_composite_smp_color] = scene_target.sampler;
     bind.samplers[SMP_composite_smp_depth] = scene_target.depth_sampler;
     bind.samplers[SMP_composite_smp_ao] = ao_sampler;
+    bind.samplers[SMP_composite_smp_env] = env_sampler;
     sg_apply_bindings(&bind);
 
     composite_composite_params_t params{};
@@ -136,6 +142,16 @@ void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTa
     params.ao_params[1] = 0.0f;
     params.ao_params[2] = 0.0f;
     params.ao_params[3] = 0.0f;
+
+    params.background_params[0] = quality.enable_background ? 1.0f : 0.0f;
+    params.background_params[1] = 0.0f;
+    params.background_params[2] = 0.0f;
+    params.background_params[3] = 0.0f;
+    std::memcpy(params.inv_view_proj, glm::value_ptr(inv_view_proj), sizeof(params.inv_view_proj));
+    params.camera_pos[0] = camera_pos.x;
+    params.camera_pos[1] = camera_pos.y;
+    params.camera_pos[2] = camera_pos.z;
+    params.camera_pos[3] = 0.0f;
 
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);

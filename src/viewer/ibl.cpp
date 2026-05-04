@@ -102,18 +102,22 @@ ibl_bake_ibl_settings_t makeUniforms(const IblSettings &s, int face, float rough
     u.ground_color[0] = s.ground_color.r;
     u.ground_color[1] = s.ground_color.g;
     u.ground_color[2] = s.ground_color.b;
+    // sun_dir.w carries sun_intensity; both sky models multiply by it as a
+    // global radiance scalar. RGBA16F bake targets let the disc exceed 1.0,
+    // which is what HDR + tonemap responds to.
     u.sun_dir[0] = s.sun_dir.x;
     u.sun_dir[1] = s.sun_dir.y;
     u.sun_dir[2] = s.sun_dir.z;
-    // Premultiply intensity into the radiance the shader sees, so the bake
-    // shader stays a simple `base + s * sun_color.rgb`. With RGBA16F bake
-    // targets the disc can now exceed 1.0 — that's the lever HDR + tonemap
-    // actually responds to.
-    const float si = s.sun_intensity;
-    u.sun_color[0] = s.sun_color.r * si;
-    u.sun_color[1] = s.sun_color.g * si;
-    u.sun_color[2] = s.sun_color.b * si;
+    u.sun_dir[3] = s.sun_intensity;
+    u.sun_color[0] = s.sun_color.r;
+    u.sun_color[1] = s.sun_color.g;
+    u.sun_color[2] = s.sun_color.b;
     u.sun_color[3] = s.sun_sharpness;
+    u.ground_albedo[0] = s.ground_albedo.r;
+    u.ground_albedo[1] = s.ground_albedo.g;
+    u.ground_albedo[2] = s.ground_albedo.b;
+    u.sky_params[0] = s.turbidity;
+    u.sky_params[1] = static_cast<float>(s.sky_model);
     return u;
 }
 

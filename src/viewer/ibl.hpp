@@ -20,22 +20,39 @@ struct IblBakeData {
     int prefilter_mip_count{kPrefilterMips};
 };
 
-/// Tunable parameters fed to the bake shader at rebake time. Defaults match
-/// the original constants from the CPU bake — changing them changes the
-/// procedural sky environment that gets pre-integrated.
+/// Procedural sky model used by the IBL bake. Nishita is single-scattering
+/// Rayleigh+Mie atmospheric scattering — gives a real sun disc, horizon
+/// warming, and turbidity-driven haze. Gradient is the legacy 3-stop vertical
+/// ramp + soft sun spot, kept for fallback / comparison.
+enum class SkyModel : int {
+    Gradient = 0,
+    Nishita = 1,
+};
+
+/// Tunable parameters fed to the bake shader at rebake time. Changing any
+/// field invalidates the in-memory bake cache (operator== drives the
+/// debounced rebake loop in `App::onFrame`).
 struct IblSettings {
     int brdf_samples{1024};       ///< GGX importance samples per BRDF LUT pixel
     int irradiance_samples{1024}; ///< cosine-hemisphere samples per irradiance pixel
-    int prefilter_samples{256};   ///< GGX importance samples per prefilter pixel
+    int prefilter_samples{512};   ///< GGX importance samples per prefilter pixel
 
-    glm::vec3 zenith_color{0.55f, 0.65f, 0.85f};  ///< soft daylight blue
-    glm::vec3 horizon_color{0.85f, 0.80f, 0.72f}; ///< warm haze
-    glm::vec3 ground_color{0.20f, 0.18f, 0.16f};  ///< dim ground
+    SkyModel sky_model{SkyModel::Nishita};
 
+    // Gradient model parameters. Unused under Nishita.
+    glm::vec3 zenith_color{0.55f, 0.65f, 0.85f};
+    glm::vec3 horizon_color{0.85f, 0.80f, 0.72f};
+    glm::vec3 ground_color{0.20f, 0.18f, 0.16f};
+    float sun_sharpness{64.0f}; ///< gradient model: disc exponent
+
+    // Nishita model parameters.
+    float turbidity{2.5f};                     ///< 1.5=clear, ~6=hazy. Drives Mie strength.
+    glm::vec3 ground_albedo{0.3f, 0.3f, 0.3f}; ///< planet-surface reflectance
+
+    // Shared between models (also used by the analytical scene light).
     glm::vec3 sun_dir{0.4f, 0.7f, 0.6f};     ///< toward-sun direction (normalized in shader)
     glm::vec3 sun_color{1.0f, 0.95f, 0.85f}; ///< sun tint (multiplied by sun_intensity)
     float sun_intensity{1.5f};               ///< scalar multiplier — pushes the disc into HDR
-    float sun_sharpness{64.0f};              ///< exponent — higher = tighter disk
 
     bool operator==(const IblSettings &) const = default;
 };
