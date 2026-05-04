@@ -1,5 +1,7 @@
 #include "ibl.hpp"
 
+#include <nodehammer/viewer/backend_caps.hpp>
+
 #include <array>
 #include <cstring>
 
@@ -14,14 +16,27 @@ constexpr int kIrradianceSize = IblBakeData::kIrradianceSize;
 constexpr int kPrefilterSize = IblBakeData::kPrefilterSize;
 constexpr int kPrefilterMips = IblBakeData::kPrefilterMips;
 
-sg_image makeColorAttachment(sg_image_type type, int size, int num_mipmaps, const char *label) {
+// Pick the bake format for the irradiance + prefilter cubemaps. Prefer
+// RGBA16F so the sun disc and bright sky regions can encode values >> 1.0
+// (the difference HDR + tonemap actually relies on); fall back to RGBA8 on
+// backends that can't render+blend+filter half-float (older WebGL2 without
+// EXT_color_buffer_half_float / OES_texture_float_linear). The BRDF LUT
+// stays RGBA8 — it's a [0,1]-bounded function of roughness and n·v.
+sg_pixel_format pickIblBakeFormat() {
+    sg_pixelformat_info info = sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
+    return (info.render && info.blend && info.filter) ? SG_PIXELFORMAT_RGBA16F
+                                                      : SG_PIXELFORMAT_RGBA8;
+}
+
+sg_image makeColorAttachment(sg_image_type type, int size, int num_mipmaps, sg_pixel_format fmt,
+                             const char *label) {
     sg_image_desc desc{};
     desc.type = type;
     desc.usage.color_attachment = true;
     desc.width = size;
     desc.height = size;
     desc.num_mipmaps = num_mipmaps;
-    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.pixel_format = fmt;
     desc.sample_count = 1;
     desc.label = label;
     return sg_make_image(&desc);
@@ -35,7 +50,8 @@ sg_view makeColorAttachmentView(sg_image image, int mip_level, int slice) {
     return sg_make_view(&desc);
 }
 
-sg_pipeline makeBakePipeline(sg_shader shader, int attr_pos_slot, const char *label) {
+sg_pipeline makeBakePipeline(sg_shader shader, int attr_pos_slot, sg_pixel_format fmt,
+                             const char *label) {
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader;
     pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(float) * 2);
@@ -47,7 +63,7 @@ sg_pipeline makeBakePipeline(sg_shader shader, int attr_pos_slot, const char *la
     pdesc.depth.pixel_format = SG_PIXELFORMAT_NONE;
     pdesc.depth.write_enabled = false;
     pdesc.color_count = 1;
-    pdesc.colors[0].pixel_format = SG_PIXELFORMAT_RGBA8;
+    pdesc.colors[0].pixel_format = fmt;
     pdesc.label = label;
     return sg_make_pipeline(&pdesc);
 }
@@ -89,9 +105,14 @@ ibl_bake_ibl_settings_t makeUniforms(const IblSettings &s, int face, float rough
     u.sun_dir[0] = s.sun_dir.x;
     u.sun_dir[1] = s.sun_dir.y;
     u.sun_dir[2] = s.sun_dir.z;
-    u.sun_color[0] = s.sun_color.r;
-    u.sun_color[1] = s.sun_color.g;
-    u.sun_color[2] = s.sun_color.b;
+    // Premultiply intensity into the radiance the shader sees, so the bake
+    // shader stays a simple `base + s * sun_color.rgb`. With RGBA16F bake
+    // targets the disc can now exceed 1.0 — that's the lever HDR + tonemap
+    // actually responds to.
+    const float si = s.sun_intensity;
+    u.sun_color[0] = s.sun_color.r * si;
+    u.sun_color[1] = s.sun_color.g * si;
+    u.sun_color[2] = s.sun_color.b * si;
     u.sun_color[3] = s.sun_sharpness;
     return u;
 }
@@ -100,10 +121,13 @@ ibl_bake_ibl_settings_t makeUniforms(const IblSettings &s, int face, float rough
 
 IblBakeData bakeIblGpu(const IblSettings &settings) {
     IblBakeData out;
-    out.brdf_lut = makeColorAttachment(SG_IMAGETYPE_2D, kBrdfLutSize, 1, "ibl_brdf_lut");
-    out.irradiance = makeColorAttachment(SG_IMAGETYPE_CUBE, kIrradianceSize, 1, "ibl_irradiance");
-    out.prefilter =
-        makeColorAttachment(SG_IMAGETYPE_CUBE, kPrefilterSize, kPrefilterMips, "ibl_prefilter");
+    const sg_pixel_format env_fmt = pickIblBakeFormat();
+    out.brdf_lut =
+        makeColorAttachment(SG_IMAGETYPE_2D, kBrdfLutSize, 1, SG_PIXELFORMAT_RGBA8, "ibl_brdf_lut");
+    out.irradiance =
+        makeColorAttachment(SG_IMAGETYPE_CUBE, kIrradianceSize, 1, env_fmt, "ibl_irradiance");
+    out.prefilter = makeColorAttachment(SG_IMAGETYPE_CUBE, kPrefilterSize, kPrefilterMips, env_fmt,
+                                        "ibl_prefilter");
     out.prefilter_mip_count = kPrefilterMips;
 
     // Fullscreen triangle covering clip-space [-1, 1]^2 — the FS reconstructs
@@ -122,10 +146,12 @@ IblBakeData bakeIblGpu(const IblSettings &settings) {
     sg_shader sh_irr = sg_make_shader(ibl_bake_ibl_irr_shader_desc(backend));
     sg_shader sh_pre = sg_make_shader(ibl_bake_ibl_pre_shader_desc(backend));
 
-    sg_pipeline pipe_brdf =
-        makeBakePipeline(sh_brdf, ATTR_ibl_bake_ibl_brdf_a_pos, "ibl_brdf_pipe");
-    sg_pipeline pipe_irr = makeBakePipeline(sh_irr, ATTR_ibl_bake_ibl_irr_a_pos, "ibl_irr_pipe");
-    sg_pipeline pipe_pre = makeBakePipeline(sh_pre, ATTR_ibl_bake_ibl_pre_a_pos, "ibl_pre_pipe");
+    sg_pipeline pipe_brdf = makeBakePipeline(sh_brdf, ATTR_ibl_bake_ibl_brdf_a_pos,
+                                             SG_PIXELFORMAT_RGBA8, "ibl_brdf_pipe");
+    sg_pipeline pipe_irr =
+        makeBakePipeline(sh_irr, ATTR_ibl_bake_ibl_irr_a_pos, env_fmt, "ibl_irr_pipe");
+    sg_pipeline pipe_pre =
+        makeBakePipeline(sh_pre, ATTR_ibl_bake_ibl_pre_a_pos, env_fmt, "ibl_pre_pipe");
 
     // BRDF LUT — single pass. (Sky params are unused but the shared block is bound anyway.)
     {

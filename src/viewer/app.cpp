@@ -106,6 +106,7 @@ void appendUrlFloat(std::string &query, std::string_view name, float value, floa
 constexpr const char *kViewerConfigStateKey = "viewer-state.toml";
 constexpr const char *kImGuiStateKey = "imgui.ini";
 constexpr double kPersistenceSaveIntervalSeconds = 1.0;
+constexpr std::chrono::milliseconds kIblRebakeDebounce{300};
 
 struct App::Impl {
     Config cfg;
@@ -138,6 +139,13 @@ struct App::Impl {
     bool ibl_installed{false};
     bool ibl_rebake_pending{false};
     IblSettings ibl_settings{};
+    // Debounced auto-rebake: while the user drags an IBL slider, every frame
+    // observes a different value and pushes `ibl_settle_at` forward; the
+    // bake is only triggered after the settings have been stable for
+    // `kIblRebakeDebounce`.
+    IblSettings ibl_last_seen_settings{};
+    IblSettings ibl_last_baked_settings{};
+    std::chrono::steady_clock::time_point ibl_settle_at{};
 
     // Off-loop scene tessellation. Native runs the build on a worker
     // thread so the UI stays smooth. Web defers the synchronous build by
@@ -582,24 +590,27 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     if (width == 0 || height == 0) {
         return;
     }
-    // Match the swapchain's color format. The scene pipeline was created
-    // against sg_environment.defaults (set from the swapchain in sg_setup),
-    // so the offscreen target must use the same format or WebGPU rejects
-    // the draw with an "incompatible color attachments" error. Metal is
-    // lenient about this, WebGPU is strict.
+    // Pick the offscreen color format. LDR mode matches the swapchain's
+    // format; HDR mode promotes to RGBA16F when the backend can render+blend
+    // it. WebGPU is strict about pipeline-vs-attachment format match, so
+    // `setTargetColorFormat` rebuilds the scene pipelines on every change.
     sg_environment env = sglue_environment();
-    sg_pixel_format color_fmt = env.defaults.color_format;
-    if (color_fmt == SG_PIXELFORMAT_NONE) {
-        color_fmt = SG_PIXELFORMAT_RGBA8;
+    sg_pixel_format swap_fmt = env.defaults.color_format;
+    if (swap_fmt == SG_PIXELFORMAT_NONE) {
+        swap_fmt = SG_PIXELFORMAT_RGBA8;
     }
     sg_pixel_format depth_fmt = env.defaults.depth_format;
     if (depth_fmt == SG_PIXELFORMAT_NONE) {
         depth_fmt = SG_PIXELFORMAT_DEPTH;
     }
+    const sg_pixel_format hdr_fmt = pickHdrColorFormat();
+    const sg_pixel_format color_fmt =
+        (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
     const int samples = 1;
     if (!scene_rt.matches(width, height, color_fmt, depth_fmt, samples)) {
         scene_rt.create(width, height, color_fmt, depth_fmt, samples);
     }
+    scene_renderer.setTargetColorFormat(color_fmt);
 }
 
 void App::Impl::render() {
@@ -840,6 +851,23 @@ void App::Impl::onFrame() {
     // heartbeat (jobs running) or skip it entirely (truly idle).
     const bool idle = shouldThrottleIdle();
 
+    // Auto-rebake on settings change, debounced. Each frame we check whether
+    // the user has touched any IBL slider since last frame; if so, reset the
+    // settle timer. Once settings have been stable for `kIblRebakeDebounce`
+    // and differ from the last bake, set `ibl_rebake_pending`. Manual
+    // "Rebake IBL" still works through the same flag.
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (ibl_settings != ibl_last_seen_settings) {
+            ibl_last_seen_settings = ibl_settings;
+            ibl_settle_at = now + kIblRebakeDebounce;
+        }
+        if (ibl_installed && !ibl_rebake_pending && ibl_settings != ibl_last_baked_settings &&
+            now >= ibl_settle_at) {
+            ibl_rebake_pending = true;
+        }
+    }
+
     // Procedural IBL bake — runs on the GPU in the first frame, before the
     // swapchain pass that draws the scene. Same-frame ordering is fine:
     // sokol guarantees images written by an earlier pass are sampleable in
@@ -859,6 +887,8 @@ void App::Impl::onFrame() {
         }
         ibl_installed = true;
         ibl_rebake_pending = false;
+        ibl_last_baked_settings = ibl_settings;
+        ibl_last_seen_settings = ibl_settings;
     }
 
     // Drive the off-loop tessellation. On native this is a poll of an
@@ -1032,6 +1062,7 @@ void App::Impl::onFrame() {
         .scene_uploaded = scene_uploaded,
         .build_in_progress = build_in_progress,
         .ibl_installed = ibl_installed,
+        .hdr_supported = hdrSupported(),
         .ibl_settings = &ibl_settings,
     };
 

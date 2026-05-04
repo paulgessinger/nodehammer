@@ -69,6 +69,10 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
         ImGui::DragFloat3("Sun direction", &s.sun_dir.x, 0.01f, -1.f, 1.f);
         ImGui::ColorEdit3("Sun color", &s.sun_color.x,
                           ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+        ImGui::SliderFloat("Sun intensity", &s.sun_intensity, 0.f, 50.f, "%.2fx",
+                           ImGuiSliderFlags_Logarithmic);
+        ImGui::SetItemTooltip("Scalar multiplier baked into the irradiance + prefilter cubemaps. "
+                              "With HDR on, values >> 1 push the disc into the tonemap shoulder.");
         ImGui::SliderFloat("Sun sharpness", &s.sun_sharpness, 1.f, 1024.f, "%.1f",
                            ImGuiSliderFlags_Logarithmic);
         if (ImGui::Button("Rebake IBL") && actions.rebake_ibl) {

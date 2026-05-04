@@ -47,4 +47,21 @@ inline bool useReversedZ() { return sg_query_backend() != SG_BACKEND_GLES3; }
 /// depth-clear = 1.0) because that's what GLES3 already uses.
 inline bool useLogDepth() { return sg_query_backend() == SG_BACKEND_GLES3; }
 
+/// HDR color format for the offscreen scene target, or `SG_PIXELFORMAT_NONE`
+/// if the backend can't render+blend RGBA16F.
+///
+/// WebGPU mandates RGBA16F as renderable+blendable, so this always returns
+/// RGBA16F there. WebGL2 needs `EXT_color_buffer_half_float` (or the
+/// stronger `EXT_color_buffer_float`, which implies it); sokol probes both
+/// at init and surfaces the result through `sg_query_pixelformat`. On a
+/// constrained context that lacks both extensions, this returns
+/// `SG_PIXELFORMAT_NONE` and the renderer falls back to the swapchain's
+/// LDR format.
+inline sg_pixel_format pickHdrColorFormat() {
+    sg_pixelformat_info info = sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
+    return (info.render && info.blend) ? SG_PIXELFORMAT_RGBA16F : SG_PIXELFORMAT_NONE;
+}
+
+inline bool hdrSupported() { return pickHdrColorFormat() != SG_PIXELFORMAT_NONE; }
+
 } // namespace nodehammer::viewer

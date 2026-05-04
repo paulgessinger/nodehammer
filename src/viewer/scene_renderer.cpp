@@ -175,6 +175,7 @@ struct SceneRenderer::Impl {
     sg_shader shader{};
     sg_pipeline pipeline_no_cull{};
     sg_pipeline pipeline_back_cull{};
+    sg_pixel_format current_color_format{SG_PIXELFORMAT_NONE};
     // Per-group dynamic buffer of mat4 instance transforms. Allocated once
     // at upload() to fit the largest group; reused across frames since the
     // scene is static. Holds GROUPS-worth of data at start of each render().
@@ -221,6 +222,7 @@ struct SceneRenderer::Impl {
     bool upload_busy{false};
 
     void ensureInit();
+    void ensurePipelines(sg_pixel_format color_fmt);
     void destroyGpu();
     void uploadInstanceBuffer();
     void uploadOneMesh(MeshAssetId id, const MeshAsset &asset);
@@ -232,6 +234,30 @@ void SceneRenderer::Impl::ensureInit() {
         return;
     }
     shader = sg_make_shader(scene_scene_shader_desc(sg_query_backend()));
+
+    // IBL bindings start as 1×1 placeholder textures so the shader always
+    // has something to sample from. The App owns the real bake and calls
+    // `installIbl` to swap them in once it finishes.
+    ibl.createDummy();
+
+    initialised = true;
+    // Pipelines are deferred to the first `ensurePipelines` call from
+    // App::ensureSceneTarget, which knows the offscreen target's color
+    // format (LDR swapchain default vs. HDR RGBA16F).
+}
+
+void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
+    if (pipeline_no_cull.id != SG_INVALID_ID && current_color_format == color_fmt) {
+        return;
+    }
+    if (pipeline_no_cull.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(pipeline_no_cull);
+        pipeline_no_cull = sg_pipeline{};
+    }
+    if (pipeline_back_cull.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(pipeline_back_cull);
+        pipeline_back_cull = sg_pipeline{};
+    }
 
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader;
@@ -276,17 +302,20 @@ void SceneRenderer::Impl::ensureInit() {
     // must use the same flag.
     pdesc.depth.compare = useReversedZ() ? SG_COMPAREFUNC_GREATER_EQUAL : SG_COMPAREFUNC_LESS_EQUAL;
     pdesc.face_winding = SG_FACEWINDING_CCW;
+
+    // Pin the offscreen scene-target color format. WebGPU rejects render
+    // passes whose attachment format differs from the pipeline's declared
+    // format, so toggling HDR (RGBA16F) on/off requires rebuilding both
+    // pipelines.
+    pdesc.color_count = 1;
+    pdesc.colors[0].pixel_format = color_fmt;
+
     pdesc.cull_mode = SG_CULLMODE_NONE;
     pipeline_no_cull = sg_make_pipeline(&pdesc);
     pdesc.cull_mode = SG_CULLMODE_BACK;
     pipeline_back_cull = sg_make_pipeline(&pdesc);
 
-    // IBL bindings start as 1×1 placeholder textures so the shader always
-    // has something to sample from. The App owns the real bake and calls
-    // `installIbl` to swap them in once it finishes.
-    ibl.createDummy();
-
-    initialised = true;
+    current_color_format = color_fmt;
 }
 
 void SceneRenderer::Impl::destroyGpu() {
@@ -346,6 +375,11 @@ SceneRenderer::~SceneRenderer() {
 
 void SceneRenderer::initialize() { impl_->ensureInit(); }
 
+void SceneRenderer::setTargetColorFormat(sg_pixel_format fmt) {
+    impl_->ensureInit();
+    impl_->ensurePipelines(fmt);
+}
+
 void SceneRenderer::installIbl(const IblBakeData &data) {
     impl_->ensureInit();
     impl_->ibl.release();
@@ -365,6 +399,7 @@ void SceneRenderer::release() {
         sg_destroy_pipeline(impl_->pipeline_back_cull);
         impl_->pipeline_back_cull = sg_pipeline{};
     }
+    impl_->current_color_format = SG_PIXELFORMAT_NONE;
     impl_->ibl.release();
     if (impl_->shader.id != SG_INVALID_ID) {
         sg_destroy_shader(impl_->shader);

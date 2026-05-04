@@ -103,14 +103,39 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ImGui::EndDisabled();
         }
 
-        // The remaining controls advertise the plumbing for HDR/MSAA/bloom/
-        // render-scale that lands in later phases. Disabled today so they
-        // show what's coming without misleading the user.
-        ImGui::BeginDisabled(true);
-        ImGui::SliderFloat("render scale", &ctx.quality.render_scale, 0.5f, 2.0f, "%.2fx");
-        ImGui::Checkbox("HDR", &ctx.quality.enable_hdr);
+        // HDR + tonemap are live. HDR greys out on backends that don't
+        // expose RGBA16F as render+blend (e.g. WebGL2 without
+        // EXT_color_buffer_half_float).
+        {
+            ImGui::BeginDisabled(!ctx.hdr_supported);
+            ImGui::Checkbox("HDR", &ctx.quality.enable_hdr);
+            ImGui::SetItemTooltip(ctx.hdr_supported
+                                      ? "Render scene into RGBA16F for higher highlight range"
+                                      : "RGBA16F not renderable on this backend");
+            ImGui::EndDisabled();
+        }
         ImGui::SameLine();
         ImGui::Checkbox("tonemap", &ctx.quality.enable_tonemap);
+        ImGui::SetItemTooltip("Apply exposure + curve in composite (most useful with HDR on)");
+
+        ImGui::SliderFloat("exposure", &ctx.quality.exposure_stops, -4.f, 4.f, "%+.1f stops");
+
+        {
+            const char *kTonemapLabels[] = {"ACES", "Reinhard", "AgX"};
+            int tm_idx = static_cast<int>(ctx.quality.tonemap_mode);
+            ImGui::BeginDisabled(!ctx.quality.enable_tonemap);
+            if (ImGui::Combo("tonemap curve", &tm_idx, kTonemapLabels,
+                             IM_ARRAYSIZE(kTonemapLabels))) {
+                ctx.quality.tonemap_mode = static_cast<TonemapMode>(tm_idx);
+            }
+            ImGui::EndDisabled();
+        }
+
+        // The remaining controls advertise the plumbing for MSAA/bloom/
+        // render-scale/IBL-quality that lands in later phases. Disabled
+        // today so they show what's coming without misleading the user.
+        ImGui::BeginDisabled(true);
+        ImGui::SliderFloat("render scale", &ctx.quality.render_scale, 0.5f, 2.0f, "%.2fx");
         ImGui::Checkbox("bloom", &ctx.quality.enable_bloom);
         ImGui::SliderInt("MSAA", &ctx.quality.msaa_samples, 1, 8);
         ImGui::SliderInt("IBL quality", &ctx.quality.ibl_quality, 0, 3);

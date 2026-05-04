@@ -6,6 +6,7 @@
 
 // sokol-shdc emits a reflection helper that calls strcmp; pull in <cstring>
 // before the generated header so the TU compiles standalone.
+#include <cmath>
 #include <cstring>
 
 #include "composite.glsl.h"
@@ -93,6 +94,29 @@ void CompositePass::draw(const SceneRenderTarget &target, const RenderQualitySet
     params.depth_params[1] = far_plane;
     params.depth_params[2] = 0.0f;
     params.depth_params[3] = 0.0f;
+
+    // Exposure is applied unconditionally; tonemap is gated by the bool and
+    // routed by the mode index in the shader (-1 = passthrough). Depth
+    // debug views ignore both.
+    const float exposure = std::exp2f(quality.exposure_stops);
+    float tm_mode = -1.0f;
+    if (quality.enable_tonemap) {
+        switch (quality.tonemap_mode) {
+        case TonemapMode::ACES:
+            tm_mode = 0.0f;
+            break;
+        case TonemapMode::Reinhard:
+            tm_mode = 1.0f;
+            break;
+        case TonemapMode::AgX:
+            tm_mode = 2.0f;
+            break;
+        }
+    }
+    params.tonemap_params[0] = exposure;
+    params.tonemap_params[1] = tm_mode;
+    params.tonemap_params[2] = 0.0f;
+    params.tonemap_params[3] = 0.0f;
 
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);

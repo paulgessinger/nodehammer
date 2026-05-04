@@ -1,13 +1,15 @@
 // Fullscreen composite — samples the offscreen scene color (and optionally
-// depth) into the swapchain. Today this is a passthrough; future HDR /
-// tonemap / FXAA / dither work hangs off this shader's FS.
+// depth) into the swapchain. Applies exposure + tonemap (HDR → LDR) and
+// optional FXAA in the same FS.
 //
 // Three modes selected by a uniform `mode`:
-//   0 — color passthrough (default; visually identical to direct-to-swapchain)
+//   0 — color (default; routes through sampleScene for exposure + tonemap,
+//       and optionally FXAA on the tonemapped result)
 //   1 — raw depth (under reversed-Z closer fragments are BRIGHTER; under
 //       normal-Z they are DARKER — the convention is backend-conditional,
 //       see useReversedZ in C++)
 //   2 — linearized depth (uniform near→far gradient regardless of convention)
+// Depth views bypass exposure and tonemap entirely.
 //
 // VS uses gl_VertexID to synthesise a fullscreen triangle, so no vertex
 // buffer or input attribute is required at draw time. Caller issues
@@ -55,6 +57,12 @@ layout(binding=0) uniform composite_params {
     // zw reserved. The C++ side picks the mode from useLogDepth /
     // useReversedZ; the three are mutually exclusive at any moment.
     vec4 depth_params;
+    // x = exposure (linear scalar = 2^stops, computed CPU-side).
+    // y = tonemap mode (-1.0 = passthrough, 0.0 = ACES, 1.0 = Reinhard,
+    //                   2.0 = AgX). The CPU side packs -1 when the user
+    //                   has tonemap disabled.
+    // zw reserved (bloom / dither parameters land here in later steps).
+    vec4 tonemap_params;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -88,26 +96,93 @@ float linearize_depth(float d, float n, float f, float mode, float far) {
     return (n * f) / (n + dr * (f - n));
 }
 
+// Tonemap operators — convert linear HDR (potentially > 1.0) to LDR in
+// [0,1]. ACES is the default; Reinhard is the diagnostic baseline; AgX is
+// Stephen Hill's polynomial fit (drop-in replacement for ACES with a
+// gentler shoulder and better hue stability).
+vec3 tonemap_aces(vec3 x) {
+    // Krzysztof Narkowicz fit of the ACES curve; cheap, looks good.
+    const float a = 2.51;
+    const float b = 0.03;
+    const float c = 2.43;
+    const float d = 0.59;
+    const float e = 0.14;
+    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+}
+
+vec3 tonemap_reinhard(vec3 x) { return x / (1.0 + x); }
+
+// AgX (Stephen Hill's fit). Input/output color matrices flank a 6th-order
+// polynomial sigmoid; the matrices keep hues stable through the shoulder
+// where naive curves desaturate.
+vec3 agx_default_contrast_polynomial(vec3 x) {
+    // Polynomial coefficients for AgX default contrast (Troy Sobotka /
+    // Stephen Hill). Operates on log2-normalized input in [0,1].
+    const float c0 = -0.00232;
+    const float c1 =  0.07330;
+    const float c2 = -0.31295;
+    const float c3 =  0.53159;
+    const float c4 =  0.26579;
+    const float c5 =  0.43904;
+    vec3 x2 = x * x;
+    vec3 x4 = x2 * x2;
+    return c0 + c1 * x + c2 * x2 + c3 * x2 * x
+              + c4 * x4 + c5 * x4 * x;
+}
+
+vec3 tonemap_agx(vec3 x) {
+    const mat3 agx_in = mat3(
+        0.842479062253094,  0.0423282422610123, 0.0423756549057051,
+        0.0784335999999992, 0.878468636469772,  0.0784336,
+        0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+    const mat3 agx_out = mat3(
+         1.19687900512017,   -0.0528968517574562, -0.0529716355144438,
+        -0.0980208811401368,  1.15190312990417,   -0.0980434501171241,
+        -0.0990297440797205, -0.0989611768448433,  1.15107367264116);
+    const float min_ev = -12.47393;
+    const float max_ev =  4.026069;
+    vec3 v = agx_in * max(x, vec3(0.0));
+    v = clamp((log2(max(v, vec3(1e-10))) - min_ev) / (max_ev - min_ev), 0.0, 1.0);
+    v = agx_default_contrast_polynomial(v);
+    return clamp(agx_out * v, 0.0, 1.0);
+}
+
+// Sample the offscreen scene color, apply exposure, then optional tonemap.
+// All color paths (passthrough + FXAA) route through here so FXAA sees the
+// final LDR result and its luma assumptions (rec.709) hold even when the
+// scene target is RGBA16F.
+vec3 sampleScene(vec2 uv) {
+    vec3 c = texture(sampler2D(scene_color, smp_color), uv).rgb;
+    c *= tonemap_params.x;
+    int tm = int(tonemap_params.y + 0.5);
+    if      (tm == 0) c = tonemap_aces(c);
+    else if (tm == 1) c = tonemap_reinhard(c);
+    else if (tm == 2) c = tonemap_agx(c);
+    return c;
+}
+
+float luma709(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+
 // FXAA 3.11 console-quality variant. Five luma taps (center + 4 corners) +
-// edge-direction blend + two final taps. Green-channel luma is the LDR-sRGB
-// approximation from NVIDIA's reference console path; revisit for proper
-// rec.709 luma when HDR/tonemap lands (strategy step 6).
+// edge-direction blend + two final taps. Operates on the tonemapped LDR
+// output of sampleScene with rec.709 luma — correct for both LDR and HDR
+// scene targets.
 const float FXAA_EDGE_THRESHOLD     = 0.125;   // 1/8: skip flat regions
 const float FXAA_EDGE_THRESHOLD_MIN = 0.0625;  // 1/16: skip dark noise
 const float FXAA_SPAN_MAX           = 8.0;
 
 vec3 fxaa(vec2 uv, vec2 inv_res) {
-    vec3 rgb_m  = texture(sampler2D(scene_color, smp_color), uv).rgb;
-    vec3 rgb_nw = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2(-1, -1)).rgb;
-    vec3 rgb_ne = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2( 1, -1)).rgb;
-    vec3 rgb_sw = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2(-1,  1)).rgb;
-    vec3 rgb_se = textureOffset(sampler2D(scene_color, smp_color), uv, ivec2( 1,  1)).rgb;
+    vec3 rgb_m  = sampleScene(uv);
+    vec3 rgb_nw = sampleScene(uv + inv_res * vec2(-1.0, -1.0));
+    vec3 rgb_ne = sampleScene(uv + inv_res * vec2( 1.0, -1.0));
+    vec3 rgb_sw = sampleScene(uv + inv_res * vec2(-1.0,  1.0));
+    vec3 rgb_se = sampleScene(uv + inv_res * vec2( 1.0,  1.0));
 
-    float luma_m  = rgb_m.g;
-    float luma_nw = rgb_nw.g;
-    float luma_ne = rgb_ne.g;
-    float luma_sw = rgb_sw.g;
-    float luma_se = rgb_se.g;
+    float luma_m  = luma709(rgb_m);
+    float luma_nw = luma709(rgb_nw);
+    float luma_ne = luma709(rgb_ne);
+    float luma_sw = luma709(rgb_sw);
+    float luma_se = luma709(rgb_se);
 
     float luma_min = min(luma_m, min(min(luma_nw, luma_ne), min(luma_sw, luma_se)));
     float luma_max = max(luma_m, max(max(luma_nw, luma_ne), max(luma_sw, luma_se)));
@@ -126,15 +201,15 @@ vec3 fxaa(vec2 uv, vec2 inv_res) {
     dir = clamp(dir * rcp_dir_min, vec2(-FXAA_SPAN_MAX), vec2(FXAA_SPAN_MAX)) * inv_res;
 
     vec3 rgb_a = 0.5 * (
-        texture(sampler2D(scene_color, smp_color), uv + dir * (1.0/3.0 - 0.5)).rgb +
-        texture(sampler2D(scene_color, smp_color), uv + dir * (2.0/3.0 - 0.5)).rgb);
+        sampleScene(uv + dir * (1.0/3.0 - 0.5)) +
+        sampleScene(uv + dir * (2.0/3.0 - 0.5)));
     vec3 rgb_b = rgb_a * 0.5 + 0.25 * (
-        texture(sampler2D(scene_color, smp_color), uv + dir * -0.5).rgb +
-        texture(sampler2D(scene_color, smp_color), uv + dir *  0.5).rgb);
+        sampleScene(uv + dir * -0.5) +
+        sampleScene(uv + dir *  0.5));
 
     // If the second-pass luma escapes the corner range, the edge direction
     // was too oblique — fall back to the first-pass blend.
-    float luma_b = rgb_b.g;
+    float luma_b = luma709(rgb_b);
     return (luma_b < luma_min || luma_b > luma_max) ? rgb_a : rgb_b;
 }
 
@@ -155,7 +230,7 @@ void main() {
     } else if (fxaa_params.x > 0.5) {
         frag_color = vec4(fxaa(uv, fxaa_params.yz), 1.0);
     } else {
-        frag_color = texture(sampler2D(scene_color, smp_color), uv);
+        frag_color = vec4(sampleScene(uv), 1.0);
     }
 }
 @end

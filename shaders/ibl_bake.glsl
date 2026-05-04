@@ -163,7 +163,10 @@ void main() {
         acc += sky(dir);
     }
     acc /= float(kSamples);
-    frag_color = vec4(clamp(acc, 0.0, 1.0), 1.0);
+    // No upper clamp: with an RGBA16F bake target the irradiance can encode
+    // values > 1.0 driven by a bright sun_color, which is the HDR lever
+    // tonemap responds to. Lower clamp keeps zero-dot-product cases sane.
+    frag_color = vec4(max(acc, vec3(0.0)), 1.0);
 }
 @end
 
@@ -198,7 +201,9 @@ void main() {
         }
     }
     vec3 colour = weight_sum > 0.0 ? acc / weight_sum : vec3(0.0);
-    frag_color = vec4(clamp(colour, 0.0, 1.0), 1.0);
+    // No upper clamp — see irradiance_fs. Prefiltered specular benefits
+    // most from HDR: the sun-disc highlights survive into the tonemap.
+    frag_color = vec4(max(colour, vec3(0.0)), 1.0);
 }
 @end
 

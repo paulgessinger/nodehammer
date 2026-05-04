@@ -67,6 +67,7 @@ struct ViewerUiContext {
     bool scene_uploaded{false};
     bool build_in_progress{false};
     bool ibl_installed{false};
+    bool hdr_supported{false};
     IblSettings *ibl_settings{nullptr};
 };
 

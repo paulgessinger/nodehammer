@@ -32,9 +32,12 @@ struct IblSettings {
     glm::vec3 horizon_color{0.85f, 0.80f, 0.72f}; ///< warm haze
     glm::vec3 ground_color{0.20f, 0.18f, 0.16f};  ///< dim ground
 
-    glm::vec3 sun_dir{0.4f, 0.7f, 0.6f};   ///< toward-sun direction (normalized in shader)
-    glm::vec3 sun_color{1.5f, 1.4f, 1.2f}; ///< HDR sun radiance
-    float sun_sharpness{64.0f};            ///< exponent — higher = tighter disk
+    glm::vec3 sun_dir{0.4f, 0.7f, 0.6f};     ///< toward-sun direction (normalized in shader)
+    glm::vec3 sun_color{1.0f, 0.95f, 0.85f}; ///< sun tint (multiplied by sun_intensity)
+    float sun_intensity{1.5f};               ///< scalar multiplier — pushes the disc into HDR
+    float sun_sharpness{64.0f};              ///< exponent — higher = tighter disk
+
+    bool operator==(const IblSettings &) const = default;
 };
 
 /// Run all IBL bake passes synchronously and return the resulting GPU images.

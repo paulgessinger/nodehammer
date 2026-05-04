@@ -52,10 +52,18 @@ bool Camera::sanitize() {
 
     fov_deg = std::clamp(finiteOr(fov_deg, 55.f), k_fov_min_deg, k_fov_max_deg);
 
-    near_plane = std::max(finiteOr(near_plane, 0.05f), k_min_near);
+    near_plane = finiteOr(near_plane, 0.05f);
+    if (projection == ProjectionMode::Perspective) {
+        // Perspective requires near > 0 (the projection diverges at the eye).
+        near_plane = std::max(near_plane, k_min_near);
+    }
+    // Orthographic accepts a negative near (the clip plane sits behind the
+    // eye), which is required when the user dollies in past the scene
+    // centre — geometry on the camera side of the target would otherwise
+    // be clipped even though it's visually in-frame.
     far_plane = finiteOr(far_plane, 1000.f);
     if (far_plane <= near_plane) {
-        far_plane = near_plane * 1000.f;
+        far_plane = near_plane + std::max(std::abs(near_plane) * 1000.f, 1.f);
     }
 
     return target != before.target || distance != before.distance || yaw != before.yaw ||
@@ -126,11 +134,25 @@ void Camera::dolly(float factor, float scene_radius) {
         // Hug the geometry: near just in front of the closest point, far just
         // past the furthest. With reversed-Z this gives ~6 orders of magnitude
         // of usable depth precision instead of the ~3 you get from a wide
-        // distance-relative pair.
-        const float pad = scene_radius * 1.1f;
-        near_plane = std::max(distance - pad, distance * 1e-4f);
-        near_plane = std::max(near_plane, k_min_near);
-        far_plane = distance + pad;
+        // distance-relative pair. The 1.5× multiplier gives ~50% scene-radius
+        // clearance in front of the closest point — close enough to the
+        // camera that scene-relative widgets and overlays don't pop, while
+        // still well above the precision floor.
+        const float pad = scene_radius * 1.5f;
+        if (projection == ProjectionMode::Orthographic) {
+            // Orthographic dolly shrinks `distance` to zoom in, which moves
+            // the eye toward the target. Without a negative near, geometry
+            // on the camera-side of the target gets clipped the moment
+            // distance < scene_radius. glm::ortho accepts a negative near
+            // (the clip plane sits behind the eye), so just envelope the
+            // bounding sphere symmetrically around the target.
+            near_plane = distance - pad;
+            far_plane = distance + pad;
+        } else {
+            near_plane = std::max(distance - pad, distance * 1e-4f);
+            near_plane = std::max(near_plane, k_min_near);
+            far_plane = distance + pad;
+        }
     } else {
         near_plane = std::max(distance * 1e-3f, k_min_distance);
         far_plane = std::max(far_plane, distance * 100.f);
@@ -156,9 +178,15 @@ float Camera::frameBounds(const glm::vec3 &min, const glm::vec3 &max, float marg
     // Bounding-sphere radius (use the longest diagonal half-extent so the
     // near/far envelope still encloses corners when the camera orbits).
     const float scene_radius = glm::length(extent);
-    const float pad = scene_radius * 1.1f;
-    near_plane = std::max(distance - pad, distance * 1e-4f);
-    near_plane = std::max(near_plane, k_min_near);
+    const float pad = scene_radius * 1.5f;
+    if (projection == ProjectionMode::Orthographic) {
+        // See the matching branch in dolly() — ortho needs a (possibly
+        // negative) near so the camera-side half of the scene isn't clipped.
+        near_plane = distance - pad;
+    } else {
+        near_plane = std::max(distance - pad, distance * 1e-4f);
+        near_plane = std::max(near_plane, k_min_near);
+    }
     far_plane = distance + pad;
     sanitize();
     return scene_radius;

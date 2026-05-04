@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include <memory>
+#include <sokol_gfx.h>
 
 namespace nodehammer {
 struct RenderScene;
@@ -27,6 +28,14 @@ class SceneRenderer {
     /// Idempotent. Call once after sg_setup so the renderer can produce a
     /// frame even before any scene is uploaded.
     void initialize();
+
+    /// Set the offscreen scene-target color format the pipelines render into.
+    /// Rebuilds the scene pipelines if the format actually changed (no-op
+    /// otherwise). Required because WebGPU rejects render passes whose
+    /// attachment format differs from the bound pipeline's declared
+    /// `colors[0].pixel_format`. Call after `initialize()` and any time
+    /// `App` switches between LDR and HDR offscreen targets.
+    void setTargetColorFormat(sg_pixel_format fmt);
 
     /// Swap the placeholder IBL bindings for a real baked dataset. Safe to
     /// call any time after `initialize()`. Idempotent on the dummy state —
