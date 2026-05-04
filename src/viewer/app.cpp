@@ -660,7 +660,7 @@ void App::Impl::render() {
             }
         }
         SceneRenderer::RenderFlags flags;
-        flags.cull_back = cfg.cull_back;
+        flags.cull = cfg.cull;
         flags.angle_cut = cfg.angle_cut;
         flags.shader_angle_cut = cfg.shader_angle_cut;
         flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
@@ -693,7 +693,10 @@ void App::Impl::render() {
 
 std::string App::Impl::browserUrlStateQuery() const {
     std::string query;
-    appendUrlBool(query, "cullBack", cfg.cull_back, true);
+    if (cfg.cull != CullOverride::Auto) {
+        appendUrlParam(query, "cull",
+                       cfg.cull == CullOverride::ForceCull ? "force-on" : "force-off");
+    }
     appendUrlBool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
     appendUrlBool(query, "autoOrbit", cfg.auto_orbit, false);
     appendUrlFloat(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
@@ -718,7 +721,7 @@ void App::Impl::syncBrowserUrl() const {
     if constexpr (platform::kIsWeb) {
         const std::string state_query = browserUrlStateQuery();
         constexpr const char *kManagedKeys =
-            "cullBack,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
+            "cull,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
             "cutEnd,"
             "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch,"
             "cameraProjection";

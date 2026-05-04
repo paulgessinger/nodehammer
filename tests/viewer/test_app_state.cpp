@@ -8,7 +8,7 @@ using namespace nodehammer::viewer;
 
 TEST_CASE("viewer config state round-trips through TOML") {
     Config cfg;
-    cfg.cull_back = false;
+    cfg.cull = CullOverride::ForceNoCull;
     cfg.pause_when_unfocused = false;
     cfg.auto_orbit = true;
     cfg.auto_orbit_speed_deg = 22.5f;
@@ -43,7 +43,7 @@ TEST_CASE("viewer config state round-trips through TOML") {
     CHECK(parsed->show_status == true);
     CHECK(parsed->show_view == true);
     CHECK(parsed->show_debug == false);
-    CHECK(restored_cfg.cull_back == false);
+    CHECK(restored_cfg.cull == CullOverride::ForceNoCull);
     CHECK(restored_cfg.pause_when_unfocused == false);
     CHECK(restored_cfg.auto_orbit == true);
     CHECK(restored_cfg.auto_orbit_speed_deg == 22.5f);
@@ -68,24 +68,24 @@ TEST_CASE("invalid viewer config state TOML is rejected") {
 
 TEST_CASE("startup overrides apply after persisted viewer config fields") {
     ViewerConfigState persisted;
-    persisted.cull_back = false;
+    persisted.cull = CullOverride::ForceNoCull;
     persisted.auto_orbit = true;
     persisted.angle_cut = true;
     persisted.enable_pbr = false;
 
     Config cfg;
-    cfg.cull_back = true;
+    cfg.cull = CullOverride::ForceCull;
     cfg.auto_orbit = false;
     cfg.angle_cut = false;
     cfg.enable_pbr = true;
 
     applyViewerConfigState(persisted, cfg, nullptr);
     ConfigStartupOverrides overrides;
-    overrides.cull_back = true;
+    overrides.cull = CullOverride::ForceCull;
     overrides.enable_pbr = true;
     applyViewerStartupOverrides(overrides, cfg, nullptr);
 
-    CHECK(cfg.cull_back == true);
+    CHECK(cfg.cull == CullOverride::ForceCull);
     CHECK(cfg.auto_orbit == true);
     CHECK(cfg.angle_cut == true);
     CHECK(cfg.enable_pbr == true);

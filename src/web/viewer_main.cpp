@@ -41,7 +41,7 @@ namespace {
 // to flag silent typos in JSON keys (the boundary's main weakness vs. a
 // strongly-typed binding like embind).
 constexpr std::array<std::string_view, 17> kKnownOptionKeys = {
-    "title",     "width",      "height",   "vsync",          "cullBack", "pauseWhenUnfocused",
+    "title",     "width",      "height",   "vsync",          "cull",     "pauseWhenUnfocused",
     "autoOrbit", "orbitSpeed", "angleCut", "shaderAngleCut", "cutStart", "cutEnd",
     "pbr",       "input",      "config",   "assetBase",      "camera",
 };
@@ -142,8 +142,16 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
     readField(j, "width", cfg.width);
     readField(j, "height", cfg.height);
     readField(j, "vsync", cfg.vsync);
-    if (readField(j, "cullBack", cfg.cull_back)) {
-        cfg.startup_overrides.cull_back = cfg.cull_back;
+    if (std::string cull_str; readField(j, "cull", cull_str)) {
+        using nodehammer::viewer::CullOverride;
+        if (cull_str == "force-on") {
+            cfg.cull = CullOverride::ForceCull;
+        } else if (cull_str == "force-off") {
+            cfg.cull = CullOverride::ForceNoCull;
+        } else {
+            cfg.cull = CullOverride::Auto;
+        }
+        cfg.startup_overrides.cull = cfg.cull;
     }
     if (readField(j, "pauseWhenUnfocused", cfg.pause_when_unfocused)) {
         cfg.startup_overrides.pause_when_unfocused = cfg.pause_when_unfocused;

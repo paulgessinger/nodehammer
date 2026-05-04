@@ -45,8 +45,11 @@ void registerCmdViewer(CLI::App &app) {
         ->capture_default_str();
     sub->add_option("--title", cfg->title, "Window title")->capture_default_str();
     sub->add_flag("!--no-vsync", cfg->vsync, "Disable vsync (default: vsync on)");
-    auto *cullBackOpt = sub->add_flag("!--no-cull-back", cfg->cull_back, "Disable backface culling")
-                            ->capture_default_str();
+    auto cullModeStr = std::make_shared<std::string>("auto");
+    auto *cullModeOpt =
+        sub->add_option("--cull", *cullModeStr,
+                        "Backface cull override: auto (per material), force-on, force-off")
+            ->capture_default_str();
     auto *pauseWhenUnfocusedOpt =
         sub->add_flag("!--no-pause-when-unfocused", cfg->pause_when_unfocused,
                       "Keep rendering when the viewer is unfocused")
@@ -86,13 +89,23 @@ void registerCmdViewer(CLI::App &app) {
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
-    sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullBackOpt,
+    sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt, cullModeStr,
                    pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt, angleCutOpt,
                    shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
                    cameraPitchOpt, inputOpt, configOpt]() {
-        if (*cullBackOpt) {
-            cfg->startup_overrides.cull_back = cfg->cull_back;
+        if (*cullModeOpt) {
+            using nodehammer::viewer::CullOverride;
+            CullOverride mode = CullOverride::Auto;
+            if (*cullModeStr == "force-on") {
+                mode = CullOverride::ForceCull;
+            } else if (*cullModeStr == "force-off") {
+                mode = CullOverride::ForceNoCull;
+            } else if (*cullModeStr != "auto") {
+                throw CLI::ValidationError("--cull", "must be one of: auto, force-on, force-off");
+            }
+            cfg->cull = mode;
+            cfg->startup_overrides.cull = mode;
         }
         if (*pauseWhenUnfocusedOpt) {
             cfg->startup_overrides.pause_when_unfocused = cfg->pause_when_unfocused;

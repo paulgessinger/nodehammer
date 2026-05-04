@@ -132,11 +132,44 @@ std::optional<Camera> parseCamera(const toml::table &tbl) {
     return camera;
 }
 
+const char *cullOverrideName(CullOverride mode) {
+    switch (mode) {
+    case CullOverride::Auto:
+        return "auto";
+    case CullOverride::ForceCull:
+        return "force-on";
+    case CullOverride::ForceNoCull:
+        return "force-off";
+    }
+    return "auto";
+}
+
+std::optional<CullOverride> parseCullOverride(std::string_view value) {
+    if (value == "auto") {
+        return CullOverride::Auto;
+    }
+    if (value == "force-on" || value == "on" || value == "true" || value == "1") {
+        return CullOverride::ForceCull;
+    }
+    if (value == "force-off" || value == "off" || value == "false" || value == "0") {
+        return CullOverride::ForceNoCull;
+    }
+    return std::nullopt;
+}
+
+void readCullOverride(const toml::table &tbl, std::string_view key, CullOverride &out) {
+    if (auto value = tbl[key].value<std::string>()) {
+        if (auto parsed = parseCullOverride(*value)) {
+            out = *parsed;
+        }
+    }
+}
+
 } // namespace
 
 ViewerConfigState viewerConfigStateFrom(const Config &cfg, const Camera &camera) {
     ViewerConfigState state;
-    state.cull_back = cfg.cull_back;
+    state.cull = cfg.cull;
     state.pause_when_unfocused = cfg.pause_when_unfocused;
     state.auto_orbit = cfg.auto_orbit;
     state.auto_orbit_speed_deg = cfg.auto_orbit_speed_deg;
@@ -150,7 +183,7 @@ ViewerConfigState viewerConfigStateFrom(const Config &cfg, const Camera &camera)
 }
 
 void applyViewerConfigState(const ViewerConfigState &state, Config &cfg, Camera *camera) {
-    cfg.cull_back = state.cull_back;
+    cfg.cull = state.cull;
     cfg.pause_when_unfocused = state.pause_when_unfocused;
     cfg.auto_orbit = state.auto_orbit;
     cfg.auto_orbit_speed_deg = state.auto_orbit_speed_deg;
@@ -166,8 +199,8 @@ void applyViewerConfigState(const ViewerConfigState &state, Config &cfg, Camera 
 
 void applyViewerStartupOverrides(const ConfigStartupOverrides &overrides, Config &cfg,
                                  Camera *camera) {
-    if (overrides.cull_back) {
-        cfg.cull_back = *overrides.cull_back;
+    if (overrides.cull) {
+        cfg.cull = *overrides.cull;
     }
     if (overrides.pause_when_unfocused) {
         cfg.pause_when_unfocused = *overrides.pause_when_unfocused;
@@ -209,7 +242,7 @@ std::string viewerConfigStateToToml(const ViewerConfigState &state) {
         {"show_debug", state.show_debug},
     };
     toml::table view{
-        {"cull_back", state.cull_back},
+        {"cull", cullOverrideName(state.cull)},
         {"pause_when_unfocused", state.pause_when_unfocused},
         {"auto_orbit", state.auto_orbit},
         {"auto_orbit_speed_deg", state.auto_orbit_speed_deg},
@@ -244,7 +277,7 @@ std::optional<ViewerConfigState> viewerConfigStateFromToml(std::string_view byte
         readBool(*ui, "show_debug", state.show_debug);
     }
     if (const auto *view = root["view"].as_table()) {
-        readBool(*view, "cull_back", state.cull_back);
+        readCullOverride(*view, "cull", state.cull);
         readBool(*view, "pause_when_unfocused", state.pause_when_unfocused);
         readBool(*view, "auto_orbit", state.auto_orbit);
         readFloat(*view, "auto_orbit_speed_deg", state.auto_orbit_speed_deg);

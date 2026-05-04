@@ -52,7 +52,16 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
     }
 
     ImGui::Separator();
-    ImGui::Checkbox("backface cull", &ctx.cfg.cull_back);
+    {
+        // Tri-state cull control. `Auto` is the correct-behavior default
+        // (per-material `doubleSided` decides); `ForceCull` / `ForceNoCull`
+        // are debug overrides that ignore the material flag globally.
+        const char *items[] = {"auto (per material)", "force on", "force off"};
+        int current = static_cast<int>(ctx.cfg.cull);
+        if (ImGui::Combo("backface cull", &current, items, IM_ARRAYSIZE(items))) {
+            ctx.cfg.cull = static_cast<CullOverride>(current);
+        }
+    }
     ImGui::Checkbox("auto orbit", &ctx.cfg.auto_orbit);
     ImGui::SliderFloat("orbit speed", &ctx.cfg.auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
     ImGui::Checkbox("angle cut", &ctx.cfg.angle_cut);

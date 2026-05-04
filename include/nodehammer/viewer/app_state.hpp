@@ -14,7 +14,7 @@ struct ViewerConfigState {
     bool show_status{true};
     bool show_view{true};
     bool show_debug{true};
-    bool cull_back{true};
+    CullOverride cull{CullOverride::Auto};
     bool pause_when_unfocused{true};
     bool auto_orbit{false};
     float auto_orbit_speed_deg{15.f};

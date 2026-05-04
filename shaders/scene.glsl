@@ -73,6 +73,8 @@ layout(binding=1) uniform fs_params {
     vec4 material_mr;  // x = metallic, y = roughness, z/w = unused
     vec4 mode_flags;   // x = pbr_enable, y = prefilter_max_lod, z/w = unused
     vec4 camera_pos;   // xyz = world-space camera position
+    vec4 emissive;     // xyz = emissive factor (linear, can be > 1.0), w = unused
+    vec4 alpha_params; // x = alpha_mode (0 = OPAQUE, 1 = MASK), y = alpha_cutoff, z/w = unused
 };
 
 layout(binding=0) uniform textureCube tex_irradiance;
@@ -118,13 +120,17 @@ void main() {
         }
     }
 
+    if (alpha_params.x > 0.5 && base_color.a < alpha_params.y) {
+        discard;
+    }
+
     vec3 n = normalize(v_normal_world);
 
     if (mode_flags.x < 0.5) {
         // Lambert (legacy fast path) — preserved byte-for-byte.
         // Two-sided shading: detector inner/outer faces light regardless of winding.
         float ndl = max(abs(dot(n, -light_dir.xyz)), 0.0);
-        vec3 rgb = base_color.rgb * (0.20 + 0.80 * ndl);
+        vec3 rgb = base_color.rgb * (0.20 + 0.80 * ndl) + emissive.xyz;
         frag_color = vec4(rgb, base_color.a);
         return;
     }
@@ -171,7 +177,7 @@ void main() {
     vec3 ambient = irradiance * kd * base_color.rgb +
                    prefiltered * (F0 * brdf.x + vec3(brdf.y));
 
-    frag_color = vec4(ambient + Lo, base_color.a);
+    frag_color = vec4(ambient + Lo + emissive.xyz, base_color.a);
 }
 @end
 

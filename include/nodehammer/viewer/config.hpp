@@ -8,8 +8,16 @@
 
 namespace nodehammer::viewer {
 
+/// Backface-cull override. `Auto` lets per-material `doubleSided` decide;
+/// the two `Force*` variants are debug knobs that ignore the material flag.
+enum class CullOverride : uint8_t {
+    Auto = 0,
+    ForceCull = 1,
+    ForceNoCull = 2,
+};
+
 struct ConfigStartupOverrides {
-    std::optional<bool> cull_back;
+    std::optional<CullOverride> cull;
     std::optional<bool> pause_when_unfocused;
     std::optional<bool> auto_orbit;
     std::optional<float> auto_orbit_speed_deg;
@@ -26,7 +34,7 @@ struct Config {
     uint32_t width{1280};
     uint32_t height{720};
     bool vsync{true};
-    bool cull_back{true};
+    CullOverride cull{CullOverride::Auto};
     bool pause_when_unfocused{true};
     bool auto_orbit{false};
     float auto_orbit_speed_deg{15.f};

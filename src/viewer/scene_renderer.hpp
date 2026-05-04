@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nodehammer/viewer/config.hpp>
+
 #include <glm/glm.hpp>
 #include <memory>
 #include <sokol_gfx.h>
@@ -71,7 +73,10 @@ class SceneRenderer {
 
     struct RenderFlags {
         bool wireframe{false};
-        bool cull_back{false};
+        /// Tri-state cull control. `Auto` picks per-group cull from
+        /// `RenderMaterial::doubleSided`; the two `Force*` variants are
+        /// debug overrides that ignore the material flag globally.
+        CullOverride cull{CullOverride::Auto};
         bool angle_cut{false};
         bool shader_angle_cut{true};
         float angle_cut_start_deg{0.f};

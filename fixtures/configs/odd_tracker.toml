@@ -1,0 +1,61 @@
+# ODD tracker-only configuration
+#
+# Same structure as odd.toml but includes only the tracker subsystem fragment
+# (pixels, short strips, long strips). Calorimeters and muon spectrometer are
+# omitted.
+#
+# Include order matters: base.toml provides the drop-all rule, then tracker
+# adds keep rules and tessellation settings. Global fallback values live in
+# [defaults] so they never override specific rules regardless of ordering.
+
+include = [
+  "odd/base.toml",
+  "odd/materials.toml",
+  "odd/tracker.toml",
+]
+
+hoist_orphans = true
+
+[export.gltf]
+# unit_scale = 10.0      # phoenix
+unit_scale = 0.1       # blender
+bake_unit_scale = true
+# multi_scene = true # phoenix
+
+[export.obj]
+unit_scale = 1.0
+
+# ── Selection ────────────────────────────────────────────────────────────────
+
+[[selection_rules]]
+keep_if = [
+  'name == "BeamPipe"',
+  #'name ~= "Solenoid*"'
+]
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+# World node: no geometry.
+[[rules]]
+match = 'path ~= "/world"'
+[rules.tessellation]
+skip_geometry = true
+
+# Solenoid: needs more phi segments.
+[[rules]]
+match = 'name ~= "Solenoid*"'
+[rules.tessellation]
+max_segments_circle = 48
+
+
+# ── Defaults ────────────────────────────────────────────────────────────────
+# Global fallback for tessellation and extras — applies when no rule sets a
+# field, so specific rules in subsystem fragments always win.
+
+[defaults.tessellation]
+max_segments_circle = 10
+fallback = "skip"
+
+[defaults.extras]
+visible = true
+opacity = 1.0

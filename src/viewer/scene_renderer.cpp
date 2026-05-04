@@ -185,7 +185,10 @@ struct SceneRenderer::Impl {
     ankerl::unordered_dense::map<MeshAssetId, GpuMesh> meshes;
     struct GpuMaterial {
         glm::vec4 base_color{0.8f, 0.8f, 0.8f, 1.f};
-        glm::vec4 mr{0.f, 0.5f, 0.f, 0.f}; // x=metallic, y=roughness
+        glm::vec4 mr{0.f, 0.5f, 0.f, 0.f};           // x=metallic, y=roughness
+        glm::vec4 emissive{0.f};                     // xyz = emissive factor
+        glm::vec4 alpha_params{0.f, 0.5f, 0.f, 0.f}; // x = alpha mode (0=OPAQUE,1=MASK), y = cutoff
+        bool double_sided{true};
     };
     ankerl::unordered_dense::map<RenderMaterialId, GpuMaterial> materials;
 
@@ -194,6 +197,7 @@ struct SceneRenderer::Impl {
     struct DrawGroup {
         MeshAssetId mesh;
         RenderMaterialId material;
+        bool double_sided{true};
         size_t visible_byte_offset{0}; // where in instance_buf this frame's matrices live
         uint32_t visible_count{0};
         std::vector<glm::mat4> instances;
@@ -451,6 +455,10 @@ void SceneRenderer::Impl::finalizeUpload() {
         GpuMaterial gm;
         gm.base_color = mat.baseColorFactor;
         gm.mr = glm::vec4{mat.metallicFactor, mat.roughnessFactor, 0.f, 0.f};
+        gm.emissive = glm::vec4{mat.emissiveFactor, 0.f};
+        const float alpha_mode = (mat.alphaMode == "MASK") ? 1.f : 0.f;
+        gm.alpha_params = glm::vec4{alpha_mode, mat.alphaCutoff, 0.f, 0.f};
+        gm.double_sided = mat.doubleSided;
         materials.emplace(id, gm);
     }
 
@@ -468,7 +476,11 @@ void SceneRenderer::Impl::finalizeUpload() {
             const InstanceGroupKey key{binding.meshId, binding.materialId};
             auto [it, inserted] = group_idx.try_emplace(key, groups.size());
             if (inserted) {
-                groups.push_back({binding.meshId, binding.materialId, 0, 0, {}, {}, {}});
+                auto mat_it = scene.materials.find(binding.materialId);
+                const bool double_sided =
+                    mat_it != scene.materials.end() ? mat_it->second.doubleSided : true;
+                groups.push_back(
+                    {binding.meshId, binding.materialId, double_sided, 0, 0, {}, {}, {}});
             }
             ++node_count;
             triangle_count += mesh_it->second.triangle_count;
@@ -554,16 +566,13 @@ void SceneRenderer::clearScene() {
 void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_height,
                            RenderFlags flags) {
     impl_->last_stats = {};
-    const sg_pipeline pipeline =
-        flags.cull_back ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
-    if (impl_->groups.empty() || pipeline.id == SG_INVALID_ID) {
+    if (impl_->groups.empty() || impl_->pipeline_no_cull.id == SG_INVALID_ID ||
+        impl_->pipeline_back_cull.id == SG_INVALID_ID) {
         return;
     }
     if (fb_width == 0 || fb_height == 0) {
         return;
     }
-
-    sg_apply_pipeline(pipeline);
 
     (void)flags.wireframe; // wireframe also pipeline-state; same future work.
 
@@ -618,11 +627,11 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     vs_params.depth_params[1] = camera.far_plane;
     vs_params.depth_params[2] = 0.0f;
     vs_params.depth_params[3] = 0.0f;
-    sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
 
     // w = directional light intensity (used by PBR branch only; Lambert ignores).
     const glm::vec4 light_dir{-0.4f, -0.7f, -0.6f, 3.f};
 
+    sg_pipeline current_pipeline{};
     for (const auto &g : impl_->groups) {
         auto mesh_it = impl_->meshes.find(g.mesh);
         if (mesh_it == impl_->meshes.end()) {
@@ -637,6 +646,24 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         auto mat_it = impl_->materials.find(g.material);
         const Impl::GpuMaterial gmat =
             (mat_it != impl_->materials.end()) ? mat_it->second : Impl::GpuMaterial{};
+
+        // Per-material doubleSided picks the cull pipeline by default. The
+        // `cull` override is a debug knob that can force one mode globally.
+        // Switch only when the pipeline actually changes; VS uniforms must
+        // be reapplied after each pipeline change.
+        bool use_back_cull = !g.double_sided;
+        if (flags.cull == CullOverride::ForceCull) {
+            use_back_cull = true;
+        } else if (flags.cull == CullOverride::ForceNoCull) {
+            use_back_cull = false;
+        }
+        const sg_pipeline pipeline =
+            use_back_cull ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
+        if (pipeline.id != current_pipeline.id) {
+            sg_apply_pipeline(pipeline);
+            sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
+            current_pipeline = pipeline;
+        }
 
         scene_fs_params_t fs_params{};
         std::memcpy(fs_params.base_color, glm::value_ptr(gmat.base_color),
@@ -662,6 +689,9 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const glm::vec3 eye = camera.eye();
         const glm::vec4 cam_pos{eye.x, eye.y, eye.z, 0.f};
         std::memcpy(fs_params.camera_pos, glm::value_ptr(cam_pos), sizeof(fs_params.camera_pos));
+        std::memcpy(fs_params.emissive, glm::value_ptr(gmat.emissive), sizeof(fs_params.emissive));
+        std::memcpy(fs_params.alpha_params, glm::value_ptr(gmat.alpha_params),
+                    sizeof(fs_params.alpha_params));
         sg_apply_uniforms(UB_scene_fs_params, SG_RANGE(fs_params));
 
         sg_bindings bind{};
