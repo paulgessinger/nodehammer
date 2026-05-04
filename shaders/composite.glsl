@@ -63,6 +63,11 @@ layout(binding=0) uniform composite_params {
     //                   has tonemap disabled.
     // zw reserved (bloom / dither parameters land here in later steps).
     vec4 tonemap_params;
+    // x = enable_ao (0.0 or 1.0). When 0 the AO map binding is a 1×1 white
+    //     dummy provided by AoPass and the multiply collapses to identity
+    //     anyway, but we still gate to skip the texture fetch on the
+    //     hot path. yzw reserved.
+    vec4 ao_params;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -71,30 +76,19 @@ layout(binding=0) uniform texture2D scene_color;
 // sampler (depth visualizations don't need bilinear filtering anyway).
 @image_sample_type scene_depth unfilterable_float
 layout(binding=1) uniform texture2D scene_depth;
+// AO is a single-channel R8 — filterable, sampled bilinearly. When AO is
+// disabled the binding is a 1×1 white dummy supplied by AoPass so the
+// pipeline keeps a single variant.
+layout(binding=2) uniform texture2D ao_map;
 layout(binding=0) uniform sampler smp_color;
 @sampler_type smp_depth nonfiltering
 layout(binding=1) uniform sampler smp_depth;
+layout(binding=2) uniform sampler smp_ao;
 
 in vec2 v_uv;
 out vec4 frag_color;
 
-// Linearize a sampled depth value to view-space Z. Three modes selected
-// by `mode`:
-//   0.0 — normal-Z   (d=0 at near, d=1 at far)
-//   1.0 — reversed-Z (d=1 at near, d=0 at far)
-//   2.0 — log-Z      (d = log2(1+view_z) / log2(1+far))
-// The depth *texture* always contains [0,1] values regardless of the
-// backend's clip-space depth range. For normal/reversed we remap d to its
-// reversed-Z equivalent (1-d) so a single closed form covers both. For
-// log-Z we invert the VS formula directly using the far-plane parameter.
-float linearize_depth(float d, float n, float f, float mode, float far) {
-    if (mode > 1.5) {
-        return pow(far + 1.0, d) - 1.0;
-    }
-    float reversed = step(0.5, mode);
-    float dr = mix(1.0 - d, d, reversed);
-    return (n * f) / (n + dr * (f - n));
-}
+@include depth_helpers.glsl.h
 
 // Tonemap operators — convert linear HDR (potentially > 1.0) to LDR in
 // [0,1]. ACES is the default; Reinhard is the diagnostic baseline; AgX is
@@ -147,12 +141,17 @@ vec3 tonemap_agx(vec3 x) {
     return clamp(agx_out * v, 0.0, 1.0);
 }
 
-// Sample the offscreen scene color, apply exposure, then optional tonemap.
+// Sample the offscreen scene color, apply AO, exposure, then optional tonemap.
 // All color paths (passthrough + FXAA) route through here so FXAA sees the
 // final LDR result and its luma assumptions (rec.709) hold even when the
-// scene target is RGBA16F.
+// scene target is RGBA16F. AO multiplies the linear scene color *before*
+// exposure so the slider stays consistent with tonemap on/off.
 vec3 sampleScene(vec2 uv) {
     vec3 c = texture(sampler2D(scene_color, smp_color), uv).rgb;
+    if (ao_params.x > 0.5) {
+        float ao = texture(sampler2D(ao_map, smp_ao), uv).r;
+        c *= ao;
+    }
     c *= tonemap_params.x;
     int tm = int(tonemap_params.y + 0.5);
     if      (tm == 0) c = tonemap_aces(c);

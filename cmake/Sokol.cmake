@@ -149,7 +149,7 @@ function(nh_add_sokol_lib name backend_define)
     nh_silence_sokol_warnings(${name})
 endfunction()
 
-# ── nh_compile_shader(<input.glsl> OUT_HEADER <var> SLANGS <slang-list> [DEPENDS_TARGET <tgt>]) ──
+# ── nh_compile_shader(<input.glsl> OUT_HEADER <var> SLANGS <slang-list> [DEPENDS_TARGET <tgt>] [INCLUDES <files...>]) ──
 # Wraps a single sokol-shdc invocation with add_custom_command. Sets ${var} to
 # the absolute path of the generated header, suitable for #include from a
 # viewer source file.
@@ -157,8 +157,13 @@ endfunction()
 # SLANGS is a colon-separated list (sokol-shdc's native syntax) — e.g.
 # "glsl300es:wgsl" produces both backends from one .glsl input, with
 # `--ifdef` wrapping each backend's blob in #if defined(SOKOL_*).
+#
+# INCLUDES lists shared snippet files (typically `*.glsl.h`) the input pulls
+# in via sokol-shdc's `@include` directive. They become build dependencies of
+# the custom command so edits to a helper trigger a rerun of every consumer.
+# Without this an edit silently leaves stale generated headers.
 function(nh_compile_shader input)
-    cmake_parse_arguments(NH "" "OUT_HEADER;DEPENDS_TARGET" "SLANGS" ${ARGN})
+    cmake_parse_arguments(NH "" "OUT_HEADER;DEPENDS_TARGET" "SLANGS;INCLUDES" ${ARGN})
     if(NOT NH_OUT_HEADER OR NOT NH_SLANGS)
         message(FATAL_ERROR "nh_compile_shader: OUT_HEADER and SLANGS are required")
     endif()
@@ -167,6 +172,17 @@ function(nh_compile_shader input)
     set(_in_abs  "${CMAKE_CURRENT_SOURCE_DIR}/${input}")
     set(_out_dir "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders")
     set(_out_abs "${_out_dir}/${_stem}.glsl.h")
+
+    # Resolve INCLUDES (caller may pass relative paths) to absolute paths so
+    # add_custom_command's DEPENDS sees the same path regardless of caller cwd.
+    set(_include_deps "")
+    foreach(_inc IN LISTS NH_INCLUDES)
+        if(IS_ABSOLUTE "${_inc}")
+            list(APPEND _include_deps "${_inc}")
+        else()
+            list(APPEND _include_deps "${CMAKE_CURRENT_SOURCE_DIR}/${_inc}")
+        endif()
+    endforeach()
 
     # Join the slang list with ':' for sokol-shdc.
     string(REPLACE ";" ":" _slang_arg "${NH_SLANGS}")
@@ -181,7 +197,7 @@ function(nh_compile_shader input)
                 -f sokol
                 --ifdef
                 --reflection
-        DEPENDS "${_in_abs}" sokol::shdc
+        DEPENDS "${_in_abs}" ${_include_deps} sokol::shdc
         COMMENT "sokol-shdc ${_stem}.glsl -> ${_stem}.glsl.h (${_slang_arg})"
         VERBATIM
     )

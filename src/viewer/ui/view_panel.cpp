@@ -112,6 +112,23 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ImGui::EndDisabled();
         }
 
+        // GTAO. Same depth-debug grey-out as FXAA; intensity/radius nest-
+        // disable on the AO checkbox so the user can't tweak invisibly.
+        {
+            const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
+            ImGui::BeginDisabled(depth_debug);
+            ImGui::Checkbox("AO", &ctx.quality.enable_ao);
+            ImGui::SetItemTooltip("Screen-space ambient occlusion (GTAO, depth-only)");
+            ImGui::BeginDisabled(!ctx.quality.enable_ao);
+            ImGui::SliderFloat("AO intensity", &ctx.quality.ao_intensity, 0.f, 2.f, "%.2f");
+            ImGui::SliderFloat("AO radius", &ctx.quality.ao_radius, 0.f, 1.f, "%.2f");
+            ImGui::SliderFloat("AO thickness", &ctx.quality.ao_thickness, 0.1f, 4.f, "%.2f");
+            ImGui::SetItemTooltip("Reject horizon samples farther than this many radii away "
+                                  "(reduces silhouette fringe)");
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+        }
+
         // HDR + tonemap are live. HDR greys out on backends that don't
         // expose RGBA16F as render+blend (e.g. WebGL2 without
         // EXT_color_buffer_half_float).

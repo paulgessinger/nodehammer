@@ -23,6 +23,10 @@ else()
     set(NH_SCENE_SLANGS "glsl430")
 endif()
 
+# Shared GLSL snippets pulled in by depth-aware shaders via sokol-shdc's
+# `@include`. Listed here so edits to any helper retrigger every consumer.
+set(NH_SHADER_DEPTH_HELPERS depth_helpers.glsl.h)
+
 nh_compile_shader(scene.glsl
     OUT_HEADER       NH_SHADER_SCENE_HEADER
     SLANGS           ${NH_SCENE_SLANGS}
@@ -39,6 +43,14 @@ nh_compile_shader(composite.glsl
     OUT_HEADER       NH_SHADER_COMPOSITE_HEADER
     SLANGS           ${NH_SCENE_SLANGS}
     DEPENDS_TARGET   nodehammer_shaders
+    INCLUDES         ${NH_SHADER_DEPTH_HELPERS}
+)
+
+nh_compile_shader(ao.glsl
+    OUT_HEADER       NH_SHADER_AO_HEADER
+    SLANGS           ${NH_SCENE_SLANGS}
+    DEPENDS_TARGET   nodehammer_shaders
+    INCLUDES         ${NH_SHADER_DEPTH_HELPERS}
 )
 
 # Expose the generated header's directory for consumers (the viewer lib).

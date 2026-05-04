@@ -2,6 +2,8 @@
 
 #include <nodehammer/viewer/backend_caps.hpp>
 
+#include "ao_pass.hpp"
+#include "ao_render_target.hpp"
 #include "scene_render_target.hpp"
 
 // sokol-shdc emits a reflection helper that calls strcmp; pull in <cstring>
@@ -54,19 +56,29 @@ void CompositePass::release() {
     initialized_ = false;
 }
 
-void CompositePass::draw(const SceneRenderTarget &target, const RenderQualitySettings &quality,
+void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTarget &ao_target,
+                         const AoPass &ao_pass, const RenderQualitySettings &quality,
                          float near_plane, float far_plane) {
-    if (!initialized_ || target.color.id == SG_INVALID_ID) {
+    if (!initialized_ || scene_target.color.id == SG_INVALID_ID) {
         return;
     }
 
     sg_apply_pipeline(pipeline_);
 
+    // AO binding: real AO target view+sampler when AO is on, AoPass's 1×1
+    // white dummy otherwise. Keeping the binding always-valid avoids a
+    // second composite pipeline variant.
+    const bool ao_on = quality.enable_ao && ao_target.color.id != SG_INVALID_ID;
+    const sg_view ao_view = ao_on ? ao_target.color_texture_view : ao_pass.dummyView();
+    const sg_sampler ao_sampler = ao_on ? ao_target.sampler : ao_pass.dummySampler();
+
     sg_bindings bind{};
-    bind.views[VIEW_composite_scene_color] = target.color_texture_view;
-    bind.views[VIEW_composite_scene_depth] = target.depth_texture_view;
-    bind.samplers[SMP_composite_smp_color] = target.sampler;
-    bind.samplers[SMP_composite_smp_depth] = target.depth_sampler;
+    bind.views[VIEW_composite_scene_color] = scene_target.color_texture_view;
+    bind.views[VIEW_composite_scene_depth] = scene_target.depth_texture_view;
+    bind.views[VIEW_composite_ao_map] = ao_view;
+    bind.samplers[SMP_composite_smp_color] = scene_target.sampler;
+    bind.samplers[SMP_composite_smp_depth] = scene_target.depth_sampler;
+    bind.samplers[SMP_composite_smp_ao] = ao_sampler;
     sg_apply_bindings(&bind);
 
     composite_composite_params_t params{};
@@ -78,8 +90,10 @@ void CompositePass::draw(const SceneRenderTarget &target, const RenderQualitySet
     // framebuffer NDC y, so the sampled image is already right-side up.
     params.mode_near_far[3] = sg_query_features().origin_top_left ? 1.0f : 0.0f;
 
-    const float inv_w = (target.width > 0) ? 1.0f / static_cast<float>(target.width) : 0.0f;
-    const float inv_h = (target.height > 0) ? 1.0f / static_cast<float>(target.height) : 0.0f;
+    const float inv_w =
+        (scene_target.width > 0) ? 1.0f / static_cast<float>(scene_target.width) : 0.0f;
+    const float inv_h =
+        (scene_target.height > 0) ? 1.0f / static_cast<float>(scene_target.height) : 0.0f;
     params.fxaa_params[0] = quality.enable_fxaa ? 1.0f : 0.0f;
     params.fxaa_params[1] = inv_w;
     params.fxaa_params[2] = inv_h;
@@ -117,6 +131,11 @@ void CompositePass::draw(const SceneRenderTarget &target, const RenderQualitySet
     params.tonemap_params[1] = tm_mode;
     params.tonemap_params[2] = 0.0f;
     params.tonemap_params[3] = 0.0f;
+
+    params.ao_params[0] = ao_on ? 1.0f : 0.0f;
+    params.ao_params[1] = 0.0f;
+    params.ao_params[2] = 0.0f;
+    params.ao_params[3] = 0.0f;
 
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);

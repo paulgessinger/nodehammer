@@ -24,6 +24,14 @@ struct RenderQualitySettings {
     bool enable_hdr{false};
     bool enable_tonemap{false};
     bool enable_fxaa{false};
+    bool enable_ao{false};
+    float ao_intensity{1.0f};
+    float ao_radius{0.3f};
+    /// Multiplier on `ao_radius` defining the maximum length of a
+    /// horizon-sample offset from the center pixel before the sample is
+    /// rejected as a different surface (kills silhouette fringe). 1.0 ≈
+    /// "samples up to one radius away count"; smaller values are stricter.
+    float ao_thickness{1.0f};
     int msaa_samples{1};
     int ibl_quality{1};
     bool enable_bloom{false};

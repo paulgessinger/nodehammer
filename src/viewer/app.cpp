@@ -1,5 +1,7 @@
 #include <nodehammer/viewer/app.hpp>
 
+#include "ao_pass.hpp"
+#include "ao_render_target.hpp"
 #include "composite_pass.hpp"
 #include "ibl.hpp"
 #include "imgui_backend.hpp"
@@ -125,6 +127,8 @@ struct App::Impl {
     std::vector<platform::PlatformGestureEvent> platform_gesture_events;
     SceneRenderer scene_renderer;
     SceneRenderTarget scene_rt;
+    AoRenderTarget ao_rt;
+    AoPass ao_pass;
     CompositePass composite;
     RenderQualitySettings quality;
     Camera camera;
@@ -356,6 +360,7 @@ void App::Impl::onInit() {
     // first frame can draw before the GPU bake runs; onFrame swaps in the
     // real result on the first tick.
     scene_renderer.initialize();
+    ao_pass.initialize();
     composite.initialize();
 
     stm_setup();
@@ -611,6 +616,24 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
         scene_rt.create(width, height, color_fmt, depth_fmt, samples);
     }
     scene_renderer.setTargetColorFormat(color_fmt);
+
+    // AO target shares dimensions with the scene RT but is allocated only
+    // when AO is enabled. Cached across enable/disable toggles so repeated
+    // toggling doesn't churn the image pool — only resize destroys it.
+    // Format prefers R16F (eliminates the smooth-gradient banding R8 shows
+    // even with dither) and falls back to R8 on backends that can't render
+    // or filter half-floats.
+    const sg_pixel_format ao_fmt = pickAoColorFormat();
+    if (quality.enable_ao) {
+        if (!ao_rt.matches(width, height, ao_fmt)) {
+            ao_rt.create(width, height, ao_fmt);
+        }
+        ao_pass.setTargetColorFormat(ao_fmt);
+    } else if (ao_rt.color.id != SG_INVALID_ID && !ao_rt.matches(width, height, ao_fmt)) {
+        // AO is off but the cached target is stale (resize or format-pick
+        // change). Drop it; next enable will reallocate.
+        ao_rt.destroy();
+    }
 }
 
 void App::Impl::render() {
@@ -673,7 +696,23 @@ void App::Impl::render() {
 
     sg_end_pass();
 
-    // Pass 2 — composite the offscreen target into the swapchain, then
+    // Pass 2 (optional) — GTAO into the AO target, sampling the scene depth
+    // we just stored. Skipped entirely when disabled or while a depth-debug
+    // view is active (the composite short-circuits AO in those modes anyway,
+    // but skipping the pass saves the work).
+    const bool ao_active = quality.enable_ao && quality.debug_view == DebugView::Off &&
+                           ao_rt.color.id != SG_INVALID_ID && scene_uploaded;
+    if (ao_active) {
+        sg_pass ao_pass_desc{};
+        ao_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+        ao_pass_desc.attachments = ao_rt.passAttachments();
+        ao_pass_desc.label = "ao_pass";
+        sg_begin_pass(&ao_pass_desc);
+        ao_pass.draw(scene_rt, camera, ao_rt.width, ao_rt.height, quality);
+        sg_end_pass();
+    }
+
+    // Pass 3 — composite the offscreen target into the swapchain, then
     // ImGui on top. The composite covers the entire viewport so we
     // don't need to clear color or depth first.
     sg_pass swap_pass{};
@@ -683,7 +722,7 @@ void App::Impl::render() {
     swap_pass.label = "swapchain_pass";
     sg_begin_pass(&swap_pass);
 
-    composite.draw(scene_rt, quality, camera.near_plane, camera.far_plane);
+    composite.draw(scene_rt, ao_rt, ao_pass, quality, camera.near_plane, camera.far_plane);
     ImGui_ImplSokol_Render();
 
     sg_end_pass();
@@ -1138,6 +1177,8 @@ void App::Impl::onFrame() {
 void App::Impl::onCleanup() {
     savePersistentState(true);
     composite.release();
+    ao_pass.release();
+    ao_rt.destroy();
     scene_rt.destroy();
     scene_renderer.release();
     // simgui_shutdown destroys the ImGui context — don't call
