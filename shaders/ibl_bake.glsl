@@ -25,7 +25,17 @@ void main() {
 // `face_rough_samples` packs the per-pass varying parameters; the rest are
 // rebake-time scene parameters fed from the viewer UI.
 layout(binding=0) uniform ibl_settings {
-    vec4 face_rough_samples; // x=face index, y=roughness, z=sample count
+    // x = face index (0..5)
+    // y = roughness (prefilter)
+    // z = sample count (irradiance / prefilter)
+    // w = flip_cube_v: 1.0 on backends whose framebuffer origin disagrees
+    //     with the cubemap-face texture origin (WebGL2/GLES3/desktop GL —
+    //     framebuffer is bottom-left, cubemap face is top-left per
+    //     RenderMan convention, so writing into a face FBO produces a
+    //     V-flipped texture). 0.0 on Metal/D3D/WebGPU which agree.
+    //     Applied per-face by negating `v` before cubeDir(); restores
+    //     identical sky orientation across backends.
+    vec4 face_rough_samples;
     vec4 zenith_color;       // rgb (gradient model)
     vec4 horizon_color;      // rgb (gradient model)
     vec4 ground_color;       // rgb (gradient model)
@@ -54,18 +64,23 @@ vec3 skyGradient(vec3 dir) {
 }
 
 // ── Nishita single-scattering sky ──────────────────────────────────────────
-// Standard Earth-atmosphere model. Coordinates are in metres; the camera
-// sits at sea level (planet centre below). Origin is the planet centre.
-const float kPlanetRadius = 6360e3;
-const float kAtmosRadius  = 6420e3;
-const float kRayleighH    = 8000.0;   // Rayleigh scale height (m)
-const float kMieH         = 1200.0;   // Mie scale height (m)
-const float kSunAngularR  = 0.004675; // ~0.5° solar radius in radians
-const float kSunCosThresh = 0.99998906; // cos(kSunAngularR)
-const vec3  kBetaR        = vec3(5.802e-6, 13.558e-6, 33.1e-6); // Rayleigh extinction (1/m)
-const float kBetaM        = 3.996e-6;  // Mie extinction at turbidity 1 (1/m)
+// Earth-atmosphere model in NORMALIZED units: planet radius = 1.0, all
+// distances are scaled by 1/R_earth (1/6.36e6 m). This keeps every
+// intermediate value in unit-magnitude range — important for backends that
+// effectively run with reduced precision (GLES3 / WebGL2) where the raw
+// metre-scale dot products (~4e13) blow past representable range and the
+// scattering integral collapses to NaN.
+const float kPlanetRadius = 1.0;
+const float kAtmosRadius  = 1.009434;        // 6420 / 6360
+const float kRayleighH    = 0.001257862;     // 8000 / 6.36e6
+const float kMieH         = 0.000188679;     // 1200 / 6.36e6
+const float kSunCosThresh = 0.99998906;      // cos(~0.5°)
+// Rayleigh / Mie coefficients are 1/m; multiply by R_earth to get them in
+// 1/(planet radii) — same dimensional rescale as the geometry.
+const vec3  kBetaR        = vec3(36.901, 86.249, 210.516); // 1/(planet radii)
+const float kBetaM        = 25.41;          // turbidity-1 extinction in 1/(planet radii)
 const float kMieG         = 0.76;
-const float kSunIrradiance = 22.0;     // arbitrary scalar — combines with sun_dir.w
+const float kSunIrradiance = 22.0;          // arbitrary — combines with sun_dir.w
 
 // Ray-sphere intersection with a sphere centred at origin. Returns t for the
 // far hit (t1) and the near hit (t0); caller checks t1 > 0 for a valid hit.
@@ -101,7 +116,10 @@ vec2 opticalDepth(vec3 ro, vec3 rd, float t, int steps) {
 vec3 skyNishita(vec3 dir) {
     vec3 to_sun = normalize(sun_dir.xyz);
     // Camera is just above sea level so we always start inside the atmosphere.
-    vec3 ro = vec3(0.0, kPlanetRadius + 1.0, 0.0);
+    // Camera ~6 m above the planet surface (1e-6 planet radii). Lifts the
+    // ray origin off the surface so raySphere(planet) gives a clean
+    // "no-hit-going-up" result for upward view rays.
+    vec3 ro = vec3(0.0, kPlanetRadius + 1e-6, 0.0);
 
     // Find where the view ray exits the atmosphere (or hits the planet).
     vec2 t_atmos = raySphere(ro, dir, kAtmosRadius);
@@ -249,6 +267,10 @@ float geometrySmithIbl(float ndotv, float ndotl, float roughness) {
 // Sky parameters are unused here (the LUT is purely a function of roughness
 // and n·v) but the uniform block is shared with the other two FSs.
 @fs brdf_fs
+// Force highp on GLES3 / WebGL2: Nishita uses Earth-radius constants
+// (6.36e6 m) and dot products of the same order (~4e13), both far outside
+// mediump's range. No-op on backends without precision modifiers.
+precision highp float;
 @include_block ibl_settings_block
 @include_block ibl_helpers
 in vec2 v_uv;
@@ -288,6 +310,7 @@ void main() {
 
 // ── Irradiance cubemap ─────────────────────────────────────────────────────
 @fs irradiance_fs
+precision highp float;
 @include_block ibl_settings_block
 @include_block ibl_helpers
 in vec2 v_uv;
@@ -297,7 +320,8 @@ void main() {
     int face = int(face_rough_samples.x + 0.5);
     uint kSamples = uint(max(face_rough_samples.z + 0.5, 1.0));
 
-    vec3 n = normalize(cubeDir(face, v_uv.x, v_uv.y));
+    float v_local = mix(v_uv.y, -v_uv.y, face_rough_samples.w);
+    vec3 n = normalize(cubeDir(face, v_uv.x, v_local));
     vec3 up = abs(n.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, n));
     vec3 bitangent = cross(n, tangent);
@@ -324,6 +348,7 @@ void main() {
 
 // ── Prefiltered specular cubemap ───────────────────────────────────────────
 @fs prefilter_fs
+precision highp float;
 @include_block ibl_settings_block
 @include_block ibl_helpers
 in vec2 v_uv;
@@ -334,7 +359,8 @@ void main() {
     float roughness = face_rough_samples.y;
     uint kSamples = uint(max(face_rough_samples.z + 0.5, 1.0));
 
-    vec3 r = normalize(cubeDir(face, v_uv.x, v_uv.y));
+    float v_local = mix(v_uv.y, -v_uv.y, face_rough_samples.w);
+    vec3 r = normalize(cubeDir(face, v_uv.x, v_local));
     vec3 n = r;
     vec3 view = r;
 

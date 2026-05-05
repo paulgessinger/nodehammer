@@ -16,16 +16,39 @@ constexpr int kIrradianceSize = IblBakeData::kIrradianceSize;
 constexpr int kPrefilterSize = IblBakeData::kPrefilterSize;
 constexpr int kPrefilterMips = IblBakeData::kPrefilterMips;
 
-// Pick the bake format for the irradiance + prefilter cubemaps. Prefer
-// RGBA16F so the sun disc and bright sky regions can encode values >> 1.0
-// (the difference HDR + tonemap actually relies on); fall back to RGBA8 on
-// backends that can't render+blend+filter half-float (older WebGL2 without
-// EXT_color_buffer_half_float / OES_texture_float_linear). The BRDF LUT
-// stays RGBA8 — it's a [0,1]-bounded function of roughness and n·v.
+// Pick the bake format for the irradiance + prefilter cubemaps. Order of
+// preference: RGBA32F → RGBA16F → RGBA8.
+//
+// RGBA32F is preferred so the GGX importance sampling integration runs
+// against a *full-fp32* hardware filter — fp16 filtering on RGBA16F has
+// per-tap rounding error that biases differently across Chrome's
+// WebGL2/ANGLE→Metal and WebGPU→Metal driver paths, producing a visible
+// color cast between backends after 1000+ samples per output texel.
+// RGBA32F filtering keeps the bake bit-equivalent across backends.
+//
+// RGBA32F filterability requires:
+//   - WebGL2: OES_texture_float_linear extension
+//   - WebGPU: the `float32-filterable` feature
+// Where unavailable, fall back to RGBA16F (still HDR-capable, just with
+// the per-backend variance). RGBA8 is the last-resort LDR fallback.
+//
+// The BRDF LUT stays RGBA8 — it's a [0,1]-bounded function of roughness
+// and n·v with no cubemap filtering involved.
 sg_pixel_format pickIblBakeFormat() {
-    sg_pixelformat_info info = sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
-    return (info.render && info.blend && info.filter) ? SG_PIXELFORMAT_RGBA16F
-                                                      : SG_PIXELFORMAT_RGBA8;
+    // The bake does single-write fullscreen passes per face/mip with the
+    // default-off pipeline blend state, so `info.blend` is intentionally
+    // not part of the gate — it would falsely disqualify RGBA32F on WebGPU
+    // where the `float32-blendable` feature is rarely enabled even when
+    // `float32-filterable` (the cap we actually need) is present.
+    sg_pixelformat_info info32 = sg_query_pixelformat(SG_PIXELFORMAT_RGBA32F);
+    if (info32.render && info32.filter) {
+        return SG_PIXELFORMAT_RGBA32F;
+    }
+    sg_pixelformat_info info16 = sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
+    if (info16.render && info16.filter) {
+        return SG_PIXELFORMAT_RGBA16F;
+    }
+    return SG_PIXELFORMAT_RGBA8;
 }
 
 sg_image makeColorAttachment(sg_image_type type, int size, int num_mipmaps, sg_pixel_format fmt,
@@ -93,6 +116,12 @@ ibl_bake_ibl_settings_t makeUniforms(const IblSettings &s, int face, float rough
     u.face_rough_samples[0] = static_cast<float>(face);
     u.face_rough_samples[1] = roughness;
     u.face_rough_samples[2] = static_cast<float>(samples > 0 ? samples : 1);
+    // Cubemap face V-flip: GL backends (WebGL2/GLES3/desktop GL) have
+    // origin_top_left=false, so rendering into a cube face FBO writes
+    // V-flipped data relative to the RenderMan-style top-left convention
+    // the cubemap sampler expects. The bake FS undoes this by negating v
+    // before cubeDir() when this flag is 1.
+    u.face_rough_samples[3] = sg_query_features().origin_top_left ? 0.0f : 1.0f;
     u.zenith_color[0] = s.zenith_color.r;
     u.zenith_color[1] = s.zenith_color.g;
     u.zenith_color[2] = s.zenith_color.b;

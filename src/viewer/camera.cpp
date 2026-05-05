@@ -138,7 +138,11 @@ void Camera::dolly(float factor, float scene_radius) {
         // clearance in front of the closest point — close enough to the
         // camera that scene-relative widgets and overlays don't pop, while
         // still well above the precision floor.
-        const float pad = scene_radius * 1.5f;
+        // 3× scene-radius pad: 1× envelopes the bounding sphere from any
+        // orbit position, the rest gives clearance so geometry never lands at
+        // exactly the depth-clear value (the composite background dome
+        // detects background by `d == clear_d`).
+        const float pad = scene_radius * 3.0f;
         if (projection == ProjectionMode::Orthographic) {
             // Orthographic dolly shrinks `distance` to zoom in, which moves
             // the eye toward the target. Without a negative near, geometry

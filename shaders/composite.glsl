@@ -160,10 +160,16 @@ vec3 tonemap_agx(vec3 x) {
 // True when this pixel is "background" — no scene geometry has written depth.
 // The depth-clear value depends on the convention: reversed-Z clears to 0.0,
 // normal-Z and log-Z clear to 1.0 (the log formula maps far→1 by construction).
+//
+// Use exact equality, not a tolerance. With reversed-Z and a small near plane,
+// the depth distribution clusters legitimate far-plane geometry within tiny
+// epsilons of 0.0, so any non-zero tolerance falsely classifies real geometry
+// as background. The far_plane pad in Camera ensures geometry never sits at
+// exactly the clear value.
 bool isBackground(float d) {
     bool reversed = depth_params.x > 0.5 && depth_params.x < 1.5;
     float clear_d = reversed ? 0.0 : 1.0;
-    return abs(d - clear_d) < 1e-4;
+    return d == clear_d;
 }
 
 // Reconstruct a world-space view direction for the background dome from a

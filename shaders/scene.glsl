@@ -170,10 +170,10 @@ void main() {
     // Image-based lighting (split-sum approximation) — always on in PBR mode.
     vec3 R = reflect(-V, n);
     float max_lod = mode_flags.y;
-    vec3 irradiance = texture(samplerCube(tex_irradiance, smp_cube), n).rgb;
+    vec3 irradiance = textureLod(samplerCube(tex_irradiance, smp_cube), n, 0.0).rgb;
     vec3 prefiltered =
         textureLod(samplerCube(tex_prefilter, smp_cube), R, roughness * max_lod).rgb;
-    vec2 brdf = texture(sampler2D(tex_brdf_lut, smp_lut), vec2(NdotV, roughness)).rg;
+    vec2 brdf = textureLod(sampler2D(tex_brdf_lut, smp_lut), vec2(NdotV, roughness), 0.0).rg;
     vec3 ambient = irradiance * kd * base_color.rgb +
                    prefiltered * (F0 * brdf.x + vec3(brdf.y));
 

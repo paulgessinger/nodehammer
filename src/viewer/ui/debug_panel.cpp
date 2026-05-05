@@ -1,6 +1,7 @@
 #include "debug_panel.hpp"
 
 #include "../ibl.hpp"
+#include "icon_font.hpp"
 #include "notifications.hpp"
 
 #include <nodehammer/viewer/platform.hpp>
@@ -45,6 +46,21 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
 
     ImGui::Text("Backbuffer: %u x %u", ctx.fb_width, ctx.fb_height);
     ImGui::Text("Renderer: %s", backendName());
+    if (sg_query_backend() == SG_BACKEND_GLES3) {
+        // Sub-pixel barycentric rounding in WebGL2/ANGLE→Metal differs from
+        // Metal/WebGPU's native rasterizer, so per-pixel `v_normal_world`
+        // and `v_world_pos` come out infinitesimally different on GLES3.
+        // Each cubemap sample (irradiance / prefilter / reflection) lands at
+        // a slightly different world direction, which integrates across the
+        // image into a visible global hue cast vs WebGPU. Not patchable in
+        // shader code — the rasterizer choice is below the GLSL layer.
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 200, 60, 255));
+        ImGui::TextUnformatted(ICON_FA_TRIANGLE_EXCLAMATION);
+        ImGui::PopStyleColor();
+        ImGui::SetItemTooltip("GLES3 / WebGL2 has output that differs from other backends. Go to "
+                              "WebGPU if your browser supports it for optimal rendering.");
+    }
     ImGui::Text("FPS: %.1f", ctx.fps);
     ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", ctx.frame_interval_ms,
                 ctx.render_submit_ms, ctx.scene_submit_ms);

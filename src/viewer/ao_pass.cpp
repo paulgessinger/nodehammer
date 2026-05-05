@@ -73,6 +73,10 @@ void AoPass::setTargetColorFormat(sg_pixel_format fmt) {
     pdesc.cull_mode = SG_CULLMODE_NONE;
     pdesc.depth.write_enabled = false;
     pdesc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    // The AO pass renders into a color-only attachment (no depth/stencil).
+    // Sokol's pipeline default is DEPTH_STENCIL, which WebGPU rejects as
+    // incompatible with the depthless render pass. Pin to NONE explicitly.
+    pdesc.depth.pixel_format = SG_PIXELFORMAT_NONE;
     pdesc.color_count = 1;
     pdesc.colors[0].pixel_format = fmt;
     pdesc.label = "ao_pipeline";
