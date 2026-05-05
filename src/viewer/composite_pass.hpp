@@ -14,8 +14,10 @@ struct SceneRenderTarget;
 
 /// Fullscreen passthrough composite of the offscreen scene target into the
 /// active swapchain pass. Optionally renders a depth debug view selected by
-/// `DebugView`. No depth, no cull, no vertex buffer — issues sg_draw(0,3,1)
-/// against a VS that synthesises a fullscreen triangle from gl_VertexIndex.
+/// `DebugView`. No depth, no cull. Owns a tiny static VBO with three NDC
+/// positions for the fullscreen triangle (a real vertex attribute, vs
+/// synthesising from gl_VertexIndex, avoids a WebGL2 attrib-0 emulation
+/// warning).
 class CompositePass {
   public:
     CompositePass();
@@ -54,6 +56,7 @@ class CompositePass {
   private:
     sg_shader shader_{};
     sg_pipeline pipeline_{};
+    sg_buffer vbuf_{};
     bool initialized_{false};
 };
 

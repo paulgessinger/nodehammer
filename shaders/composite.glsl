@@ -11,26 +11,27 @@
 //   2 — linearized depth (uniform near→far gradient regardless of convention)
 // Depth views bypass exposure and tonemap entirely.
 //
-// VS uses gl_VertexID to synthesise a fullscreen triangle, so no vertex
-// buffer or input attribute is required at draw time. Caller issues
-// sg_draw(0, 3, 1).
+// VS reads NDC positions for a fullscreen triangle from a tiny static VBO
+// owned by CompositePass. Caller issues sg_draw(0, 3, 1) with that VBO bound
+// at vertex_buffers[0]. We could synthesise positions from gl_VertexIndex
+// instead, but on WebGL2 a draw with no enabled vertex attribute at
+// location 0 forces the browser into expensive emulation — having a real
+// attribute avoids that warning at the cost of one 24-byte buffer per pass.
+//
+// The V flip required for top-left-origin backends is applied in the FS
+// based on a uniform flag (see mode_near_far.w in composite_fs).
 
 @module composite
 
 @vs composite_vs
+in vec2 a_pos;
 out vec2 v_uv;
 void main() {
-    // gl_VertexIndex ∈ {0,1,2} → (0,0), (2,0), (0,2). The triangle covers
-    // [-1,1]^2 in NDC; v_uv ∈ [0,2] across the triangle so the sampled
-    // [0,1]^2 region tiles cleanly with no scaling math in the FS.
-    // sokol-shdc uses Vulkan-flavored GLSL (gl_VertexIndex, not gl_VertexID);
-    // it cross-compiles to gl_VertexID on GL backends.
-    //
-    // The V flip required for top-left-origin backends is applied in the
-    // FS based on a uniform flag (see mode_near_far.w in composite_fs).
-    vec2 p = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));
-    v_uv = p;
-    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+    // VBO holds (-1,-1), (3,-1), (-1,3) — a triangle covering [-1,1]^2 in
+    // NDC. v_uv = a_pos*0.5 + 0.5 maps the visible region to [0,1]^2 with
+    // [0,2] across the full triangle, so the FS samples without scaling.
+    v_uv = a_pos * 0.5 + 0.5;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
 }
 @end
 

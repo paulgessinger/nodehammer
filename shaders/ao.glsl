@@ -22,13 +22,14 @@
 @module ao
 
 @vs ao_vs
+in vec2 a_pos;
 out vec2 v_uv;
 void main() {
-    // Same fullscreen-triangle synthesis as composite.glsl. v_uv tiles
-    // [0,2] across the triangle so the [0,1] sampled region is correct.
-    vec2 p = vec2(float((gl_VertexIndex << 1) & 2), float(gl_VertexIndex & 2));
-    v_uv = p;
-    gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+    // VBO holds (-1,-1), (3,-1), (-1,3). Real attribute (vs synthesising
+    // from gl_VertexIndex) so WebGL2 doesn't fall into emulation for an
+    // unenabled vertex-attrib-0 array. See composite.glsl for the rationale.
+    v_uv = a_pos * 0.5 + 0.5;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
 }
 @end
 

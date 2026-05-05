@@ -27,9 +27,23 @@ void CompositePass::initialize() {
     }
     shader_ = sg_make_shader(composite_composite_shader_desc(sg_query_backend()));
 
+    // Fullscreen triangle in NDC. Bound at vertex_buffers[0] so attribute 0
+    // has an enabled array — WebGL2 otherwise warns about expensive emulation.
+    static const float fullscreen_tri[6] = {
+        -1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f,
+    };
+    sg_buffer_desc bdesc{};
+    bdesc.usage.vertex_buffer = true;
+    bdesc.data = SG_RANGE(fullscreen_tri);
+    bdesc.label = "composite_fullscreen_tri";
+    vbuf_ = sg_make_buffer(&bdesc);
+
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader_;
-    // No vertex buffers — VS reads gl_VertexIndex.
+    pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(float) * 2);
+    pdesc.layout.attrs[ATTR_composite_composite_a_pos].buffer_index = 0;
+    pdesc.layout.attrs[ATTR_composite_composite_a_pos].format = SG_VERTEXFORMAT_FLOAT2;
+    pdesc.layout.attrs[ATTR_composite_composite_a_pos].offset = 0;
     pdesc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     pdesc.cull_mode = SG_CULLMODE_NONE;
     // Composite writes color only; the swapchain pass owns its own depth
@@ -50,6 +64,10 @@ void CompositePass::release() {
     if (pipeline_.id != SG_INVALID_ID) {
         sg_destroy_pipeline(pipeline_);
         pipeline_ = sg_pipeline{};
+    }
+    if (vbuf_.id != SG_INVALID_ID) {
+        sg_destroy_buffer(vbuf_);
+        vbuf_ = sg_buffer{};
     }
     if (shader_.id != SG_INVALID_ID) {
         sg_destroy_shader(shader_);
@@ -77,6 +95,7 @@ void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTa
     const sg_sampler ao_sampler = ao_on ? ao_target.sampler : ao_pass.dummySampler();
 
     sg_bindings bind{};
+    bind.vertex_buffers[0] = vbuf_;
     bind.views[VIEW_composite_scene_color] = scene_target.color_texture_view;
     bind.views[VIEW_composite_scene_depth] = scene_target.depth_texture_view;
     bind.views[VIEW_composite_ao_map] = ao_view;

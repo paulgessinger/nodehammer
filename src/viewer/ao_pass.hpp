@@ -58,6 +58,7 @@ class AoPass {
     sg_shader shader_{};
     sg_pipeline pipeline_{};
     sg_pixel_format current_color_format_{SG_PIXELFORMAT_NONE};
+    sg_buffer vbuf_{};
     sg_image dummy_image_{};
     sg_view dummy_view_{};
     sg_sampler dummy_sampler_{};

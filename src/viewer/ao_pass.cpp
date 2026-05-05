@@ -24,6 +24,17 @@ void AoPass::initialize() {
     // attachment format on a pipeline, so we can't build it until the App
     // side has picked R16F vs R8.
 
+    // Fullscreen triangle in NDC. Bound at vertex_buffers[0] so attribute 0
+    // has an enabled array — WebGL2 otherwise warns about expensive emulation.
+    static const float fullscreen_tri[6] = {
+        -1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f,
+    };
+    sg_buffer_desc bdesc{};
+    bdesc.usage.vertex_buffer = true;
+    bdesc.data = SG_RANGE(fullscreen_tri);
+    bdesc.label = "ao_fullscreen_tri";
+    vbuf_ = sg_make_buffer(&bdesc);
+
     // 1×1 white R8 dummy. Bound by the composite when AO is disabled so the
     // pipeline keeps a single binding contract regardless of toggle state.
     static const uint8_t white = 0xff;
@@ -69,6 +80,10 @@ void AoPass::setTargetColorFormat(sg_pixel_format fmt) {
 
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader_;
+    pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(float) * 2);
+    pdesc.layout.attrs[ATTR_ao_ao_a_pos].buffer_index = 0;
+    pdesc.layout.attrs[ATTR_ao_ao_a_pos].format = SG_VERTEXFORMAT_FLOAT2;
+    pdesc.layout.attrs[ATTR_ao_ao_a_pos].offset = 0;
     pdesc.primitive_type = SG_PRIMITIVETYPE_TRIANGLES;
     pdesc.cull_mode = SG_CULLMODE_NONE;
     pdesc.depth.write_enabled = false;
@@ -105,6 +120,10 @@ void AoPass::release() {
         pipeline_ = sg_pipeline{};
     }
     current_color_format_ = SG_PIXELFORMAT_NONE;
+    if (vbuf_.id != SG_INVALID_ID) {
+        sg_destroy_buffer(vbuf_);
+        vbuf_ = sg_buffer{};
+    }
     if (shader_.id != SG_INVALID_ID) {
         sg_destroy_shader(shader_);
         shader_ = sg_shader{};
@@ -122,6 +141,7 @@ void AoPass::draw(const SceneRenderTarget &scene_rt, const Camera &camera, uint3
     sg_apply_pipeline(pipeline_);
 
     sg_bindings bind{};
+    bind.vertex_buffers[0] = vbuf_;
     bind.views[VIEW_ao_scene_depth] = scene_rt.depth_texture_view;
     bind.samplers[SMP_ao_smp_depth] = scene_rt.depth_sampler;
     sg_apply_bindings(&bind);
