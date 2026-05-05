@@ -47,6 +47,7 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
     ImGui::Text("Backbuffer: %u x %u", ctx.fb_width, ctx.fb_height);
     ImGui::Text("Renderer: %s", backendName());
     if (sg_query_backend() == SG_BACKEND_GLES3) {
+        static constexpr const char *kWebGpuCanIUseUrl = "https://caniuse.com/webgpu";
         // Sub-pixel barycentric rounding in WebGL2/ANGLE→Metal differs from
         // Metal/WebGPU's native rasterizer, so per-pixel `v_normal_world`
         // and `v_world_pos` come out infinitesimally different on GLES3.
@@ -58,8 +59,15 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
         ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255, 200, 60, 255));
         ImGui::TextUnformatted(ICON_FA_TRIANGLE_EXCLAMATION);
         ImGui::PopStyleColor();
-        ImGui::SetItemTooltip("GLES3 / WebGL2 has output that differs from other backends. Go to "
-                              "WebGPU if your browser supports it for optimal rendering.");
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        }
+        if (ImGui::IsItemClicked() && actions.open_url) {
+            actions.open_url(kWebGpuCanIUseUrl);
+        }
+        ImGui::SetItemTooltip("GLES3 / WebGL2 has output that differs from other backends. Go to \n"
+                              "WebGPU if your browser supports it for optimal rendering.\n"
+                              "Click the icon to open compatibility info.");
     }
     ImGui::Text("FPS: %.1f", ctx.fps);
     ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", ctx.frame_interval_ms,

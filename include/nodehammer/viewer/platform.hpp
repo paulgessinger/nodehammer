@@ -136,6 +136,10 @@ class Platform {
     /// @TODO: Evolve this to a uniform UI state persistence model
     void commitUrlState(const std::string &state_query, const std::string &managed_keys);
 
+    /// Open an external URL. Web opens a new tab/window; native is
+    /// currently a no-op.
+    void openUrl(const std::string &url);
+
     /// Request a "pick files" gesture. Web dispatches the browser's
     /// transient `<input type=file multiple>` inline (the browser
     /// requires `input.click()` to run from the user-gesture stack);

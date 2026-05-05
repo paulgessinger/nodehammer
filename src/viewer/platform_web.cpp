@@ -59,6 +59,14 @@ EM_JS(void, nh_viewer_save_persistent_text, (const char *key, const char *bytes)
         console.warn("nodehammer: failed to save persistent text", e);
     }
 });
+
+EM_JS(void, nh_viewer_open_url, (const char *url), {
+    var u = UTF8ToString(url);
+    if (!u) {
+        return;
+    }
+    window.open(u, "_blank", "noopener,noreferrer");
+});
 // clang-format on
 
 // clang-format off
@@ -379,6 +387,8 @@ void Platform::savePersistentText(const std::string &key, const std::string &byt
 void Platform::commitUrlState(const std::string &state_query, const std::string &managed_keys) {
     nh_viewer_commit_url_state(state_query.c_str(), managed_keys.c_str());
 }
+
+void Platform::openUrl(const std::string &url) { nh_viewer_open_url(url.c_str()); }
 
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
 void Platform::openFolderPicker() {} // no folder picker on web today

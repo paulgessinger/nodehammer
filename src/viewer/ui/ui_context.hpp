@@ -31,6 +31,7 @@ struct UiState {
 
 struct UiActions {
     std::function<void()> sync_browser_url;
+    std::function<void(const std::string &)> open_url;
     std::function<void()> open_file_picker;
     std::function<void()> open_folder_picker;
     std::function<void()> frame_scene;

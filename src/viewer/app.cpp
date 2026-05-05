@@ -1133,6 +1133,7 @@ void App::Impl::onFrame() {
 
     ui::UiActions ui_actions;
     ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
+    ui_actions.open_url = [this](const std::string &url) { platform_->openUrl(url); };
     ui_actions.rebake_ibl = [this]() { ibl_rebake_pending = true; };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };

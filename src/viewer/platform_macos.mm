@@ -556,6 +556,10 @@ void Platform::commitUrlState(const std::string & /*state_query*/,
     // No browser URL on native.
 }
 
+void Platform::openUrl(const std::string & /*url*/) {
+    // TODO: native URL opener intentionally deferred.
+}
+
 void Platform::openFilePicker() { impl_->pickers.openFilePicker(); }
 void Platform::openFolderPicker() { impl_->pickers.openFolderPicker(); }
 void Platform::drainPickers() { impl_->pickers.drainPickers(impl_->app); }
