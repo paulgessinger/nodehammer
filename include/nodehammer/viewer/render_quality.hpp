@@ -21,10 +21,10 @@ enum class TonemapMode : int {
 /// the UI plumbing path is established before HDR/FXAA/MSAA/etc. are wired.
 struct RenderQualitySettings {
     float render_scale{1.0f};
-    bool enable_hdr{false};
-    bool enable_tonemap{false};
-    bool enable_fxaa{false};
-    bool enable_ao{false};
+    bool enable_hdr{true};
+    bool enable_tonemap{true};
+    bool enable_fxaa{true};
+    bool enable_ao{true};
     float ao_intensity{1.0f};
     float ao_radius{0.3f};
     /// Multiplier on `ao_radius` defining the maximum length of a
@@ -36,15 +36,25 @@ struct RenderQualitySettings {
     int ibl_quality{1};
     bool enable_bloom{false};
     DebugView debug_view{DebugView::Off};
-    float exposure_stops{0.0f};
-    TonemapMode tonemap_mode{TonemapMode::ACES};
+    float exposure_stops{1.3f};
+    /// AgX has more contrast than the Narkowicz ACES fit at neutral
+    /// exposure, so diffuse-lit interior scenes (typical detector views)
+    /// look less flat out of the box. Users can switch back via the UI.
+    TonemapMode tonemap_mode{TonemapMode::AgX};
+    /// Pre-tonemap "look" knobs applied in linear HDR space, after
+    /// exposure and before the tonemap curve. Defaults are no-ops.
+    /// Contrast pivots around perceptual mid-gray (0.18); >1 increases
+    /// contrast, <1 flattens. Saturation lerps between rec.709 luma and
+    /// color; 0 = grayscale, 1 = identity, >1 boosts.
+    float contrast{1.9f};
+    float saturation{1.0f};
 
     /// When on, the composite pass samples the IBL prefilter cubemap as a
     /// fullscreen background on pixels that haven't been written by scene
     /// geometry (depth = clear value). Driven by the same Nishita/gradient
     /// bake the IBL specular reflections come from, so the on-screen sky
     /// matches the reflected sky.
-    bool enable_background{false};
+    bool enable_background{true};
 };
 
 } // namespace nodehammer::viewer

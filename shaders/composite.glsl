@@ -80,6 +80,12 @@ layout(binding=0) uniform composite_params {
     mat4 inv_view_proj;
     // xyz = world-space camera position. w reserved.
     vec4 camera_pos;
+    // Pre-tonemap "look" knobs applied in linear HDR space, after
+    // exposure and before the tonemap curve.
+    // x = contrast (1.0 = identity, pivot around perceptual mid-gray 0.18)
+    // y = saturation (1.0 = identity, 0.0 = grayscale)
+    // zw reserved.
+    vec4 look_params;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -122,6 +128,23 @@ vec3 tonemap_aces(vec3 x) {
 }
 
 vec3 tonemap_reinhard(vec3 x) { return x / (1.0 + x); }
+
+// Pre-tonemap "look" pass. Operates on linear HDR data after exposure and
+// before the tonemap curve, so the operator's roll-off still does its work
+// on the punched-up values. Contrast pivots around 0.18 (perceptual
+// mid-gray): values above 0.18 brighten and below 0.18 darken when
+// contrast > 1, both pulled toward 0.18 when contrast < 1. Saturation
+// lerps between rec.709 luma and color: 0 = grayscale, 1 = identity,
+// >1 boosts color. Default contrast=1, saturation=1 collapses to a
+// near-identity pair of ops (one pow with exponent 1, one mix at t=1).
+vec3 apply_look(vec3 c, float contrast, float saturation) {
+    c = max(c, vec3(0.0));
+    const float mid = 0.18;
+    c = pow(c / mid, vec3(contrast)) * mid;
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    c = mix(vec3(l), c, saturation);
+    return max(c, vec3(0.0));
+}
 
 // AgX (Stephen Hill's fit). Input/output color matrices flank a 6th-order
 // polynomial sigmoid; the matrices keep hues stable through the shoulder
@@ -216,6 +239,7 @@ vec3 sampleScene(vec2 uv) {
         }
     }
     c *= tonemap_params.x;
+    c = apply_look(c, look_params.x, look_params.y);
     int tm = int(tonemap_params.y + 0.5);
     if      (tm == 0) c = tonemap_aces(c);
     else if (tm == 1) c = tonemap_reinhard(c);

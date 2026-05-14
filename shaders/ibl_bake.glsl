@@ -180,7 +180,9 @@ vec3 skyNishita(vec3 dir) {
 
     // Ground bounce: if we hit the planet, the view ray ends there. Approximate
     // the ground radiance as Lambertian albedo * direct sun illuminance,
-    // attenuated by the atmosphere transmittance from camera→ground.
+    // attenuated by the atmosphere transmittance from camera→ground. A
+    // pow(-dir.y, 0.5) fade darkens straight-down vs. near-horizon so the
+    // visible dome reads as a soft ground rather than a saturated bright disc.
     if (hit_planet) {
         vec3 g_pos = ro + dir * t_far;
         vec2 t_sun_atmos = raySphere(g_pos, to_sun, kAtmosRadius);
@@ -191,7 +193,8 @@ vec3 skyNishita(vec3 dir) {
             vec3 tau_sun = kBetaR * od_sun.x + vec3(beta_m * 1.1) * od_sun.y;
             vec3 tau_view = kBetaR * cum_od.x + vec3(beta_m * 1.1) * cum_od.y;
             vec3 transmittance = exp(-(tau_sun + tau_view));
-            colour += (ground_albedo.rgb / PI) * ndotl * kSunIrradiance * transmittance;
+            float ground_fade = sqrt(max(-dir.y, 0.0));
+            colour += (ground_albedo.rgb / PI) * ndotl * kSunIrradiance * transmittance * ground_fade;
         }
     }
 

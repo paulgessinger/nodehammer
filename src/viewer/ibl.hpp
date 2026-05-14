@@ -46,13 +46,13 @@ struct IblSettings {
     float sun_sharpness{64.0f}; ///< gradient model: disc exponent
 
     // Nishita model parameters.
-    float turbidity{2.5f};                     ///< 1.5=clear, ~6=hazy. Drives Mie strength.
-    glm::vec3 ground_albedo{0.3f, 0.3f, 0.3f}; ///< planet-surface reflectance
+    float turbidity{2.5f};                        ///< 1.5=clear, ~6=hazy. Drives Mie strength.
+    glm::vec3 ground_albedo{0.08f, 0.08f, 0.08f}; ///< planet-surface reflectance
 
     // Shared between models (also used by the analytical scene light).
     glm::vec3 sun_dir{0.4f, 0.7f, 0.6f};     ///< toward-sun direction (normalized in shader)
     glm::vec3 sun_color{1.0f, 0.95f, 0.85f}; ///< sun tint (multiplied by sun_intensity)
-    float sun_intensity{1.5f};               ///< scalar multiplier — pushes the disc into HDR
+    float sun_intensity{1.8f};               ///< scalar multiplier — pushes the disc into HDR
 
     bool operator==(const IblSettings &) const = default;
 };

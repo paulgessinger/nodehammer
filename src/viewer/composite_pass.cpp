@@ -172,6 +172,13 @@ void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTa
     params.camera_pos[2] = camera_pos.z;
     params.camera_pos[3] = 0.0f;
 
+    // "Look" knobs apply in linear HDR after exposure, before tonemap.
+    // Defaults (1.0, 1.0) collapse to near-identity in the shader.
+    params.look_params[0] = quality.contrast;
+    params.look_params[1] = quality.saturation;
+    params.look_params[2] = 0.0f;
+    params.look_params[3] = 0.0f;
+
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);
 

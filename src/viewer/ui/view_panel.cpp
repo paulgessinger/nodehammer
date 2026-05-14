@@ -188,6 +188,19 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ImGui::EndDisabled();
         }
 
+        // Pre-tonemap "look" knobs. Apply in linear HDR space regardless
+        // of whether the tonemap is on, so they remain useful for raw
+        // passthrough viewing too. Defaults of 1.0 are no-ops.
+        ImGui::SliderFloat("contrast", &ctx.quality.contrast, 0.5f, 2.0f, "%.2f");
+        ImGui::SetItemTooltip("Pre-tonemap pow around 0.18 mid-gray. >1 punches contrast.");
+        ImGui::SliderFloat("saturation", &ctx.quality.saturation, 0.0f, 2.0f, "%.2f");
+        ImGui::SetItemTooltip("0 = grayscale, 1 = identity, >1 boosts color.");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("reset##look")) {
+            ctx.quality.contrast = 1.0f;
+            ctx.quality.saturation = 1.0f;
+        }
+
         // The remaining controls advertise the plumbing for MSAA/bloom/
         // render-scale/IBL-quality that lands in later phases. Disabled
         // today so they show what's coming without misleading the user.

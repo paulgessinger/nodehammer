@@ -116,12 +116,16 @@ ibl_bake_ibl_settings_t makeUniforms(const IblSettings &s, int face, float rough
     u.face_rough_samples[0] = static_cast<float>(face);
     u.face_rough_samples[1] = roughness;
     u.face_rough_samples[2] = static_cast<float>(samples > 0 ? samples : 1);
-    // Cubemap face V-flip: GL backends (WebGL2/GLES3/desktop GL) have
-    // origin_top_left=false, so rendering into a cube face FBO writes
-    // V-flipped data relative to the RenderMan-style top-left convention
-    // the cubemap sampler expects. The bake FS undoes this by negating v
-    // before cubeDir() when this flag is 1.
-    u.face_rough_samples[3] = sg_query_features().origin_top_left ? 0.0f : 1.0f;
+    // Cubemap face V-flip. The cube sampler's t-axis runs top→bottom of the
+    // face per RenderMan convention (Vulkan/D3D/Metal +Y face: t=0 ↔ rz=-1,
+    // t=1 ↔ rz=+1). On origin_top_left backends (Metal/D3D/WGPU) NDC v=+1
+    // writes to texture row t=0, so cubeDir(2, u, +1) — which produces
+    // rz=+1 — ends up at the row the sampler reads for rz=-1, giving the
+    // upside-down sky symptom on wall faces. The bake FS negates v before
+    // cubeDir to compensate. On origin_top_left=false (GL family) NDC v=+1
+    // writes to memory row y=max which the cube sampler addresses as t=1,
+    // matching cubeDir's rz=+1 directly — no flip needed.
+    u.face_rough_samples[3] = sg_query_features().origin_top_left ? 1.0f : 0.0f;
     u.zenith_color[0] = s.zenith_color.r;
     u.zenith_color[1] = s.zenith_color.g;
     u.zenith_color[2] = s.zenith_color.b;
