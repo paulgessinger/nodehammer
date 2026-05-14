@@ -9,27 +9,28 @@ viewer renderer; it is not an implementation record.
 
 ## Status
 
-Steps 1–11 of the implementation order are landed: the full offscreen
+Steps 1–12 of the implementation order are landed: the full offscreen
 post-process stack (color+depth target, composite pass, depth debug,
-FXAA, HDR + tonemap), the cheap GPU-material wiring (emissive, alpha
-mask, per-material `doubleSided`), screen-space ambient occlusion
-(GTAO, depth-only, full resolution, single FS pass), and a
-Nishita-style procedural sky baked through the IBL pipeline. The
-analytical directional light and the IBL bake share a single
-sun-direction source of truth. Reversed-Z is preserved end-to-end;
-ImGui still renders in the swapchain pass.
+FXAA, HDR + tonemap with ACES/Reinhard/AgX selector), the cheap
+GPU-material wiring (emissive, alpha mask, per-material `doubleSided`),
+screen-space ambient occlusion (GTAO, depth-only, full resolution,
+single FS pass), a Nishita-style procedural sky baked through the IBL
+pipeline, and a visible background dome sampled from the IBL prefilter
+cubemap in the composite pass. The analytical directional light and
+the IBL bake share a single sun-direction source of truth. Reversed-Z
+is preserved end-to-end; ImGui still renders in the swapchain pass.
 
 **Quality settings + UI** (`include/nodehammer/viewer/render_quality.hpp`,
 `src/viewer/ui/view_panel.cpp`). Live: `debug_view`, `enable_fxaa`,
-`enable_hdr`, `enable_tonemap`, `exposure_stops`, `tonemap_mode`,
-`enable_ao`, `ao_intensity`, `ao_radius`, `ao_thickness`. Stubs (wired
-into the UI but no-op): `render_scale`, `msaa_samples`, `ibl_quality`,
-`enable_bloom`. The View panel also exposes the tri-state cull
-override (`auto / force on / force off`) introduced in step 9, and a
-**Lighting** section with sun azimuth/elevation, sun intensity, sky
-model selector (Gradient/Nishita), turbidity, and ground albedo.
-Edits flip `IblSettings` and trigger the existing 300 ms debounced
-rebake.
+`enable_hdr`, `enable_tonemap`, `exposure_stops`, `tonemap_mode`
+(ACES/Reinhard/AgX), `enable_ao`, `ao_intensity`, `ao_radius`,
+`ao_thickness`, `enable_background`. Stubs (wired into the UI but
+no-op): `render_scale`, `msaa_samples`, `ibl_quality`, `enable_bloom`.
+The View panel also exposes the tri-state cull override (`auto / force
+on / force off`) introduced in step 9, and a **Lighting** section with
+sun azimuth/elevation, sun intensity, sky model selector
+(Gradient/Nishita), turbidity, and ground albedo. Edits flip
+`IblSettings` and trigger the existing 300 ms debounced rebake.
 
 **Pass topology** (`src/viewer/app.cpp::App::Impl::render`):
 
@@ -38,7 +39,9 @@ scene-pass (offscreen color+depth)
   → ao-pass (depth-only input → R16F or R8 AO map; skipped when AO is
              off or while a depth-debug view is active)
   → swapchain-pass: composite (samples scene_color + scene_depth +
-                               ao_map; AO multiply pre-tonemap;
+                               ao_map + IBL prefilter cubemap as the
+                               background dome; AO multiply pre-tonemap;
+                               background dome on depth==clear pixels;
                                optional FXAA on the tonemapped color)
                   → ImGui
 ```
@@ -55,8 +58,16 @@ color passthrough, raw depth, linearized depth — the linearizer covers
 all three depth conventions (normal-Z, reversed-Z, log-Z) and is now
 shared with the AO pass via sokol-shdc `@include` from
 `shaders/depth_helpers.glsl.h`. Color path runs FXAA 3.11
-console-quality and the AO multiply (gated by `enable_ao`); both are
-short-circuited under depth-debug views.
+console-quality, the AO multiply (gated by `enable_ao`), tonemap with
+ACES/Reinhard/AgX selectable per frame (gated by `enable_tonemap`;
+passthrough when off), and the background dome (gated by
+`enable_background`); all are short-circuited under depth-debug views.
+The background dome samples the IBL prefilter cubemap along a
+world-space view direction reconstructed from `inv(view_proj)` on
+pixels with depth equal to the clear value, so the on-screen sky
+matches the reflected sky. AO is skipped on background pixels (no
+surface to occlude), and tonemap is applied uniformly so dome and
+scene share the same operator.
 
 **Nishita procedural sky** (`shaders/ibl_bake.glsl`,
 `src/viewer/ibl.{hpp,cpp}`). Single-scattering Rayleigh + Mie
@@ -113,16 +124,17 @@ debug-override knob preserved). BLEND, transmission, specular/IOR,
 clearcoat, anisotropy still on the IR side, not yet uploaded.
 
 What this unlocks: bloom, MSAA, render scale, TAA, contact shadows,
-specular/IOR/clearcoat material upgrades, environment-content work
-(Nishita sky, HDRI, background dome) all hang off the existing pass
+specular/IOR/clearcoat material upgrades, and the remaining
+environment-content work (HDRI loading, look-dev split between visible
+background and lighting environment) all hang off the existing pass
 topology, the existing UBO shapes, or the existing `RenderMaterial`
 fields without further structural surgery.
 
-Remaining (steps 11+): environment content (Nishita sky, HDRI,
-visible background dome), specular/IOR/clearcoat material upgrades,
-bloom, multi-scattering BRDF + bent-normal AO into IBL diffuse,
-MSAA, adaptive quality, contact shadows, then BLEND/transmission
-and TAA. See section 13 for the full ordered list.
+Remaining (steps 13+): HDRI loading (`.hdr`/`.exr` equirectangular),
+specular/IOR/clearcoat material upgrades, bloom, multi-scattering BRDF
++ bent-normal AO into IBL diffuse, MSAA, adaptive quality, contact
+shadows, then BLEND/transmission and TAA. See section 13 for the full
+ordered list.
 
 ---
 
@@ -661,14 +673,18 @@ the analytical directional light; both should run together.
 
 ### 12.3 Visible background dome
 
-The reference uses a graduated dark background; ours is a flat clear
-color, which makes the scene feel "cut out". Once a real cubemap
-exists (12.2), sampling it as a fullscreen background in the composite
-pass is essentially free and immediately makes scenes feel framed.
+The reference uses a graduated dark background; ours used to be a flat
+clear color, which made the scene feel "cut out". **Landed in step 12**:
+the composite pass now samples the IBL prefilter cubemap as a
+fullscreen background on pixels with depth equal to the clear value,
+gated by `enable_background`.
 
-Optional: decouple the *visible* background from the *lighting*
-environment so a user can light with a real HDRI but display a neutral
-gradient on screen — this is the standard look-dev pattern.
+Still optional, **not yet done**: decouple the *visible* background
+from the *lighting* environment so a user can light with a real HDRI
+but display a neutral gradient on screen — this is the standard
+look-dev pattern. Scheduled as step 18 (after HDRI loading and the
+material-fidelity passes); the current single-cubemap behavior matches
+the simpler "what you light with is what you see" mode.
 
 ### 12.4 Bounce-light approximation
 
@@ -835,14 +851,28 @@ Done:
     only asymmetry in the Nishita sky. View panel gains a
     **Lighting** section (azimuth/elevation, intensity, sky model,
     turbidity, ground albedo).
+12. **Visible background dome** sampled from the IBL prefilter
+    cubemap in the composite pass. World-space view direction is
+    reconstructed from `inv(view_proj)`; background pixels are
+    selected by exact equality against the depth clear value
+    (convention-aware: 0.0 under reversed-Z, 1.0 under normal-Z /
+    log-Z). AO is skipped on background pixels; tonemap is applied
+    uniformly so the on-screen sky matches the reflected sky
+    tonally. The IBL prefilter cubemap is always bound to the
+    composite pipeline so the toggle is UBO-only with no pipeline
+    variant. Tonemap operator selector (ACES / Reinhard / AgX)
+    landed in the same pass: all three operators live in
+    `composite.glsl` and the CPU side packs `tonemap_mode` into
+    `tonemap_params.y` (-1 for passthrough when tonemap is off).
+    **Look-dev split** (decouple visible background from lighting
+    environment) is *not* yet implemented; the dome currently always
+    shows the same content that drives the IBL.
 
 Next, ordered by perceived-quality ROI:
 
-12. **Visible background dome** sampled from the IBL cubemap in the
-    composite pass.
 13. **HDRI loading** (`.hdr` / `.exr` equirectangular) with a small
-    built-in set; reuse the same bake path. Adds tonemap operator
-    selector while we're in the composite shader.
+    built-in set; reuse the existing IBL bake path. (Tonemap
+    operator selector already landed alongside step 12.)
 14. **`specularFactor` + `specularColorFactor` + `ior`-driven F0.**
     Two UBO floats, one F0 line. Makes dielectrics actually look like
     dielectrics; the ODD config already sets these on most materials.
@@ -852,14 +882,17 @@ Next, ordered by perceived-quality ROI:
 16. **Bloom** in the composite pass.
 17. **BRDF multi-scattering compensation** + bent-normal AO feeding
     IBL diffuse, once both AO and the high-range environment are in.
-18. Optional MSAA target allocation and resolve.
-19. Adaptive quality controller.
-20. Screen-space contact shadows; then optional single-cascade
+18. **Look-dev background/lighting split** — second cubemap (or a
+    neutral gradient generator) that drives the visible dome while
+    the IBL keeps using the lit environment.
+19. Optional MSAA target allocation and resolve.
+20. Adaptive quality controller.
+21. Screen-space contact shadows; then optional single-cascade
     directional shadow map.
-21. **`alphaMode = BLEND`** (needs sorting or OIT) and
+22. **`alphaMode = BLEND`** (needs sorting or OIT) and
     **`transmissionFactor`** (needs an opaque-color resolve target);
     land after the composite pass infrastructure can host them.
-22. TAA and **anisotropy** (needs a stable tangent frame from
+23. TAA and **anisotropy** (needs a stable tangent frame from
     generated geometry) once the core path is stable.
 
 The important sequencing rule still holds: any feature that touches
