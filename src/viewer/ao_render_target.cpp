@@ -15,6 +15,9 @@ void AoRenderTarget::create(uint32_t w, uint32_t h, sg_pixel_format fmt) {
     cdesc.height = static_cast<int>(h);
     cdesc.pixel_format = fmt;
     cdesc.sample_count = 1;
+    // Two AO targets coexist (raw + denoised history). Labels stay generic
+    // here; the App-side caller relabels its allocations via debug groups
+    // when more granularity is needed in a GPU trace.
     cdesc.label = "ao_color";
     color = sg_make_image(&cdesc);
 
@@ -29,6 +32,13 @@ void AoRenderTarget::create(uint32_t w, uint32_t h, sg_pixel_format fmt) {
     color_texture_view = sg_make_view(&tex_desc);
 
     sg_sampler_desc sdesc{};
+    // LINEAR for AO (composite + scene shader sample bilinearly). The
+    // octahedral-encoded bent normal channels also sample with LINEAR; this
+    // is slightly wrong (interpolating octahedral coords doesn't strictly
+    // equal interpolating the unit vector and re-encoding), but the
+    // post-decode normalize() in the consumer absorbs the small error, and
+    // the alternative (nearest sampling on the GB channels alone) requires
+    // a second sampler binding for no visible win.
     sdesc.min_filter = SG_FILTER_LINEAR;
     sdesc.mag_filter = SG_FILTER_LINEAR;
     sdesc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
@@ -70,16 +80,13 @@ sg_attachments AoRenderTarget::passAttachments() const {
 }
 
 sg_pixel_format pickAoColorFormat() {
-    // Prefer R16F when both renderable and filterable (~10-bit precision in
-    // [0,1] vs R8's 256 levels — eliminates the gradient banding visible on
-    // smooth surfaces under R8). Fall back to R8 on backends that can't
-    // render or filter half-floats (typically WebGL2 without
-    // EXT_color_buffer_half_float / OES_texture_half_float_linear).
-    const sg_pixelformat_info f16 = sg_query_pixelformat(SG_PIXELFORMAT_R16F);
-    if (f16.render && f16.filter) {
-        return SG_PIXELFORMAT_R16F;
-    }
-    return SG_PIXELFORMAT_R8;
+    // RGBA8 is the universally-supported, renderable + filterable choice.
+    // We previously preferred R16F for AO-gradient precision, but bent
+    // normals (octahedral, 2 bytes) now share the target — the precision
+    // gain from R16F doesn't extend to the GB channels we'd have to add
+    // anyway, and RGBA16F doubles the bandwidth for marginal AO benefit.
+    // Bayer dither in the AO FS hides the R8 quantization artifacts.
+    return SG_PIXELFORMAT_RGBA8;
 }
 
 } // namespace nodehammer::viewer

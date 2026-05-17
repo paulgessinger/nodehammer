@@ -143,20 +143,61 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ImGui::EndDisabled();
         }
 
-        // GTAO. Same depth-debug grey-out as FXAA; intensity/radius nest-
-        // disable on the AO checkbox so the user can't tweak invisibly.
+        // GTAO. Sub-controls collapse entirely when the master AO toggle
+        // is off — saves panel real estate and makes "is this knob active?"
+        // unambiguous (vs the BeginDisabled grey-out pattern, which leaves
+        // sliders visible but un-clickable). Bent-strength has the same
+        // pattern nested under enable_advanced_ao.
         {
             const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
             ImGui::BeginDisabled(depth_debug);
             ImGui::Checkbox("AO", &ctx.quality.enable_ao);
             ImGui::SetItemTooltip("Screen-space ambient occlusion (GTAO, depth-only)");
-            ImGui::BeginDisabled(!ctx.quality.enable_ao);
-            ImGui::SliderFloat("AO intensity", &ctx.quality.ao_intensity, 0.f, 2.f, "%.2f");
-            ImGui::SliderFloat("AO radius", &ctx.quality.ao_radius, 0.f, 1.f, "%.2f");
-            ImGui::SliderFloat("AO thickness", &ctx.quality.ao_thickness, 0.1f, 4.f, "%.2f");
-            ImGui::SetItemTooltip("Reject horizon samples farther than this many radii away "
-                                  "(reduces silhouette fringe)");
-            ImGui::EndDisabled();
+            if (ctx.quality.enable_ao) {
+                ImGui::Indent();
+                ImGui::SliderFloat("intensity", &ctx.quality.ao_intensity, 0.f, 2.f, "%.2f");
+                ImGui::SliderFloat("radius", &ctx.quality.ao_radius, 0.f, 1.f, "%.2f");
+                ImGui::SliderFloat("thickness", &ctx.quality.ao_thickness, 0.1f, 4.f, "%.2f");
+                ImGui::SetItemTooltip("Reject horizon samples farther than this many radii away "
+                                      "(reduces silhouette fringe)");
+                // Sample-count preset. Drives (slices, steps) in the GTAO
+                // FS; see AoPass::draw for the per-preset values. Higher =
+                // less jitter at linear cost.
+                static const char *kAoQualityLabels[] = {"Low (4×3)", "Medium (4×4)", "High (6×6)",
+                                                         "Ultra (8×8)"};
+                int ao_quality_idx = static_cast<int>(ctx.quality.ao_quality);
+                if (ImGui::Combo("samples", &ao_quality_idx, kAoQualityLabels,
+                                 IM_ARRAYSIZE(kAoQualityLabels))) {
+                    ctx.quality.ao_quality = static_cast<AoQualityPreset>(ao_quality_idx);
+                }
+                ImGui::SetItemTooltip("GTAO sample count per pixel — slices × steps. More samples\n"
+                                      "= less per-pixel jitter before the denoise pass eats it.");
+                // Denoise toggle. Strict quality win when on; exposed so
+                // the user can A/B the raw GTAO jitter vs the denoised
+                // result.
+                ImGui::Checkbox("denoise", &ctx.quality.enable_ao_denoise);
+                ImGui::SetItemTooltip("Bilateral 5×5 depth-aware denoise on the raw GTAO\n"
+                                      "(off = scene/composite sample the raw noisy AO)");
+                // Advanced AO toggle and bent-normal strength. Advanced
+                // wires bent normal + multi-bounce + specular occlusion
+                // into the scene shader's PBR IBL term. Off → composite
+                // does the legacy single-multiply on the AO scalar.
+                ImGui::Checkbox("advanced (PBR)", &ctx.quality.enable_advanced_ao);
+                ImGui::SetItemTooltip("On: scene PBR applies multi-bounce, bent-normal IBL,\n"
+                                      "and specular occlusion. Off: composite single-multiply.\n"
+                                      "Only affects the PBR shading path.");
+                if (ctx.quality.enable_advanced_ao) {
+                    ImGui::Indent();
+                    ImGui::SliderFloat("bent strength", &ctx.quality.ao_bent_strength, 0.f, 1.f,
+                                       "%.2f");
+                    ImGui::SetItemTooltip(
+                        "Blend bent normal toward N. 0 = no bent-normal effect\n"
+                        "(multi-bounce + SO still apply); 1 = full bent normal.\n"
+                        "Pull down if cavities look noisy or IBL drifts with camera.");
+                    ImGui::Unindent();
+                }
+                ImGui::Unindent();
+            }
             ImGui::EndDisabled();
         }
 
@@ -177,15 +218,18 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
 
         ImGui::SliderFloat("exposure", &ctx.quality.exposure_stops, -4.f, 4.f, "%+.1f stops");
 
-        {
+        // Tonemap curve combo only makes sense when tonemap is enabled —
+        // collapse the row when off rather than grey-greying out, matching
+        // the AO/advanced-AO pattern above.
+        if (ctx.quality.enable_tonemap) {
             const char *kTonemapLabels[] = {"ACES", "Reinhard", "AgX"};
             int tm_idx = static_cast<int>(ctx.quality.tonemap_mode);
-            ImGui::BeginDisabled(!ctx.quality.enable_tonemap);
+            ImGui::Indent();
             if (ImGui::Combo("tonemap curve", &tm_idx, kTonemapLabels,
                              IM_ARRAYSIZE(kTonemapLabels))) {
                 ctx.quality.tonemap_mode = static_cast<TonemapMode>(tm_idx);
             }
-            ImGui::EndDisabled();
+            ImGui::Unindent();
         }
 
         // Pre-tonemap "look" knobs. Apply in linear HDR space regardless

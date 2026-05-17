@@ -696,6 +696,21 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         std::memcpy(fs_params.emissive, glm::value_ptr(gmat.emissive), sizeof(fs_params.emissive));
         std::memcpy(fs_params.alpha_params, glm::value_ptr(gmat.alpha_params),
                     sizeof(fs_params.alpha_params));
+        // AO history uniform: enable + texel size (1/w, 1/h) so the FS can
+        // turn gl_FragCoord into a UV. When the caller hasn't provided a
+        // valid AO history (first frame, AO disabled, no PBR), enable is 0
+        // and the FS collapses to no-AO defaults — but we still pass valid
+        // inv-size values so the calc is harmless either way.
+        const bool ao_history_ok = flags.ao_history_enable &&
+                                   flags.ao_history_view.id != SG_INVALID_ID &&
+                                   flags.ao_history_sampler.id != SG_INVALID_ID;
+        const float ao_enable_f = ao_history_ok ? 1.0f : 0.0f;
+        const float ao_inv_w = (fb_width > 0) ? 1.0f / static_cast<float>(fb_width) : 0.0f;
+        const float ao_inv_h = (fb_height > 0) ? 1.0f / static_cast<float>(fb_height) : 0.0f;
+        const float bent_strength = glm::clamp(flags.ao_bent_strength, 0.f, 1.f);
+        const glm::vec4 ao_params{ao_enable_f, ao_inv_w, ao_inv_h, bent_strength};
+        std::memcpy(fs_params.ao_history_params, glm::value_ptr(ao_params),
+                    sizeof(fs_params.ao_history_params));
         sg_apply_uniforms(UB_scene_fs_params, SG_RANGE(fs_params));
 
         sg_bindings bind{};
@@ -706,8 +721,17 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         bind.views[VIEW_scene_tex_irradiance] = impl_->ibl.irradiance_view;
         bind.views[VIEW_scene_tex_prefilter] = impl_->ibl.prefilter_view;
         bind.views[VIEW_scene_tex_brdf_lut] = impl_->ibl.brdf_lut_view;
+        // AO history binding: real history view + sampler when available,
+        // BRDF LUT view + LUT sampler otherwise. We use the BRDF LUT as a
+        // placeholder because it's guaranteed bound and the FS gates the
+        // sample behind ao_history_params.x — the binding contract stays
+        // satisfied without allocating a dedicated 1×1 dummy texture.
+        bind.views[VIEW_scene_tex_ao_history] =
+            ao_history_ok ? flags.ao_history_view : impl_->ibl.brdf_lut_view;
         bind.samplers[SMP_scene_smp_cube] = impl_->ibl.cube_sampler;
         bind.samplers[SMP_scene_smp_lut] = impl_->ibl.lut_sampler;
+        bind.samplers[SMP_scene_smp_ao_history] =
+            ao_history_ok ? flags.ao_history_sampler : impl_->ibl.lut_sampler;
         sg_apply_bindings(&bind);
 
         sg_draw(0, static_cast<int>(mesh.index_count), inst_count);

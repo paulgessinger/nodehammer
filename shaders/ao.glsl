@@ -1,19 +1,34 @@
-// Screen-space ambient occlusion (GTAO v1) — depth-only, full resolution,
-// single FS pass. No spatial denoise, no temporal, no normal target.
+// Screen-space ambient occlusion (GTAO v2) — depth-only, full resolution,
+// single FS pass. Now also produces a *bent normal* (mean unoccluded
+// direction) packed into the same target, consumed by the scene shader on
+// the next frame for bent-normal IBL diffuse lookup and specular occlusion.
 //
 // Reference: Jiménez et al. 2016, "Practical Realtime Strategies for Accurate
-// Indirect Occlusion" (Activision). The formulation here is a compact
-// horizon-based variant: 4 slices uniformly rotated, 4 steps per slice in
-// each direction, integrating a cosine-weighted horizon angle.
+// Indirect Occlusion" (Activision). Horizon-based, 4 slices uniformly
+// rotated, 4 steps per slice in each direction, integrating a cosine-
+// weighted horizon angle. The bent-normal accumulation follows the same
+// paper's §4.6 (per-slice midpoint of the unoccluded arc).
 //
 // Inputs: scene depth view from SceneRenderTarget. Reconstructs view-space
 // position from depth + projection params and face normal from screen-space
 // derivatives of view-space position (no normal target — derivatives are
-// noisier on uniform surfaces but the multiplier makes that a v1.x problem,
-// not a v1 blocker).
+// noisier on uniform surfaces but the bilateral denoise pass downstream
+// hides residual jitter).
 //
-// Output: single R channel with 1.0 = fully unoccluded, 0.0 = fully
-// occluded. Composite multiplies this into the scene color.
+// Output (RGBA8):
+//   R    — ambient occlusion (1.0 = unoccluded, 0.0 = fully occluded).
+//   G, B — octahedral-encoded bent normal in *world space*. Encoded with the
+//          standard "fold negative-Z hemisphere via |yx| swap" octahedron,
+//          remapped to [0,1]. 8 bits per axis gives ~1° angular accuracy —
+//          well below GTAO's own bent-normal estimate error.
+//   A    — reserved (left at 1.0; future: cone aperture / confidence).
+//
+// The bent normal is the mean direction over the (estimated) unoccluded
+// hemisphere. When fully open it collapses to the surface normal; in deep
+// cavities it tilts toward the opening. The scene shader uses it to bias
+// the diffuse-IBL lookup so cavities pull their fill light from the
+// direction they're actually open to, rather than from the wall they face
+// into.
 //
 // Backend caveat: dFdx/dFdy are core-in-FS at `#version 300 es` (WebGL2)
 // and on every other slang sokol-shdc emits, so no extension declaration
@@ -53,6 +68,15 @@ layout(binding=0) uniform ao_params_block {
     //     on-screen sample spread bounded across depth).
     // z = 1/render_width, w = 1/render_height (texel size).
     vec4 ao_params;
+    // Sample-count control, set from `RenderQualitySettings::ao_quality`.
+    // x = num_slices (integer in [1, NUM_SLICES_MAX])
+    // y = num_steps  (integer in [1, NUM_STEPS_MAX])
+    // The shader loops up to the compile-time maxima and breaks once the
+    // current iteration exceeds the per-frame values — keeps loop bounds
+    // constant for old shader compilers while still letting a runtime
+    // uniform drive the effective count.
+    // z/w reserved.
+    vec4 ao_quality;
     // x = flip_v (1.0 on top-left-origin backends — applied to v_uv before
     //     sampling depth; the AO target is consumed by the composite which
     //     applies the same flip to scene_color so they stay co-aligned).
@@ -62,6 +86,13 @@ layout(binding=0) uniform ao_params_block {
     //     silhouette fringes around the scene's outline).
     // w = reserved.
     vec4 frame_params;
+    // World-from-view matrix (i.e. inv(view)). Used to convert the
+    // view-space bent normal we accumulate into world space before
+    // octahedral-encoding into the output. We do the conversion in this
+    // pass (rather than in the scene shader downstream) so the AO target
+    // is self-contained and consumers don't have to plumb a view matrix
+    // alongside their AO sampler.
+    mat4 inv_view;
 };
 
 layout(binding=0) uniform texture2D scene_depth;
@@ -76,8 +107,13 @@ in vec2 v_uv;
 out vec4 frag_color;
 
 const float PI = 3.14159265358979323846;
-const int   NUM_SLICES = 4;
-const int   NUM_STEPS  = 4;
+// Compile-time caps on the loop bounds. The Ultra quality preset sets the
+// per-frame counts to these values; lower presets break out of the loops
+// early via the `num_slices` / `num_steps` uniforms. Static caps keep the
+// for-loop bounds constant for shader compilers that don't unroll runtime
+// loops well (older WebGL2 drivers in particular).
+const int NUM_SLICES_MAX = 8;
+const int NUM_STEPS_MAX  = 8;
 
 // Reconstruct the view-space position of a pixel given its UV and the
 // linearized view Z. Camera looks down -Z in view space.
@@ -109,15 +145,36 @@ float ign(vec2 px) {
     return fract(52.9829189 * fract(0.06711056 * px.x + 0.00583715 * px.y));
 }
 
+// Octahedral encode of a unit vector to a 2-component value in [0,1]^2.
+// Folds the lower hemisphere across the diamond's edges (the |yx| swap with
+// sign-of-original) so the encoding is continuous and symmetric across the
+// equator. 8 bits per axis → ~1° angular precision, well below GTAO's own
+// bent-normal estimation error so it's not the limiting factor on the
+// final quality.
+vec2 octEncode(vec3 n) {
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+    vec2 e = n.xy;
+    if (n.z < 0.0) {
+        vec2 sn = vec2(e.x >= 0.0 ? 1.0 : -1.0, e.y >= 0.0 ? 1.0 : -1.0);
+        e = (1.0 - abs(e.yx)) * sn;
+    }
+    return e * 0.5 + 0.5;
+}
+
 void main() {
     float flip_v = frame_params.x;
     vec2 uv = vec2(v_uv.x, mix(v_uv.y, 1.0 - v_uv.y, flip_v));
 
     // Center sample. Reject background — depth at the far plane has no
-    // meaningful occluders, so write fully-unoccluded and bail.
+    // meaningful occluders, so write fully-unoccluded and bail. Bent normal
+    // is meaningless on background pixels; encode straight-up world Z as a
+    // neutral default — the scene shader never reads AO on background
+    // anyway (the composite handles background separately), so the GB
+    // contents here only matter for visualizers.
     float center_d = texture(sampler2D(scene_depth, smp_depth), uv).r;
     if (isFarSample(center_d)) {
-        frag_color = vec4(1.0, 0.0, 0.0, 1.0);
+        vec2 bg_oct = octEncode(vec3(0.0, 0.0, 1.0));
+        frag_color = vec4(1.0, bg_oct, 1.0);
         return;
     }
     float center_z = linearize_depth(center_d, depth_params.z, depth_params.y,
@@ -182,13 +239,19 @@ void main() {
     // off the surface and bake the slice direction into the output. Cap at
     // ~5% of the screen so banding stays sub-perceptual at any zoom.
     radius_uv = clamp(radius_uv, ao_params.z * 2.0, 0.05);
-    float step_len = radius_uv / float(NUM_STEPS);
 
-    // Per-pixel slice rotation. Without this the 4 hardcoded slice azimuths
+    // Per-frame loop counts (from the AO quality preset). Clamp to the
+    // compile-time caps and to a minimum of 1 so the inner loops do at
+    // least one iteration even if a bogus value sneaks through.
+    int num_slices = int(clamp(ao_quality.x, 1.0, float(NUM_SLICES_MAX)));
+    int num_steps  = int(clamp(ao_quality.y, 1.0, float(NUM_STEPS_MAX)));
+    float step_len = radius_uv / float(num_steps);
+
+    // Per-pixel slice rotation. Without this the hardcoded slice azimuths
     // bake into visible streaks on uniform surfaces at large radius_uv. IGN
-    // is cheap and decorrelates neighbors enough that a 2-pixel bilateral
-    // blur (v1.x follow-up) would erase residual noise entirely.
-    float jitter_phi = ign(gl_FragCoord.xy) * (PI / float(NUM_SLICES));
+    // is cheap and decorrelates neighbors enough that the bilateral denoise
+    // downstream cleans up the residual noise.
+    float jitter_phi = ign(gl_FragCoord.xy) * (PI / float(num_slices));
 
     // Thickness cap: reject horizon samples whose perpendicular distance to
     // the local tangent plane exceeds `thickness * radius_world`. Testing
@@ -202,9 +265,17 @@ void main() {
 
     float occlusion = 0.0;
     float weight_sum = 0.0;
+    // Accumulate the view-space bent normal alongside the AO integral.
+    // For each slice we compute the midpoint angle of the unoccluded arc
+    // (between the two horizon angles, both measured from V) and turn that
+    // into a direction in 3D as `V*cos(theta_mid) + slice_dir*sin(theta_mid)`.
+    // Summed with the same `n_proj` weight as the occlusion integral, then
+    // normalized. Falls back to N if every slice was discarded.
+    vec3 bent_view = vec3(0.0);
 
-    for (int s = 0; s < NUM_SLICES; ++s) {
-        float phi = (float(s) + 0.5) * (PI / float(NUM_SLICES)) + jitter_phi;
+    for (int s = 0; s < NUM_SLICES_MAX; ++s) {
+        if (s >= num_slices) break;
+        float phi = (float(s) + 0.5) * (PI / float(num_slices)) + jitter_phi;
         vec2 dir = vec2(cos(phi), sin(phi));
 
         // Slice plane axis (the projection of the sampling direction onto
@@ -221,7 +292,8 @@ void main() {
         // farther than `thickness` away (different surface, not a horizon).
         float max_cos_pos = -1.0;
         float max_cos_neg = -1.0;
-        for (int i = 1; i <= NUM_STEPS; ++i) {
+        for (int i = 1; i <= NUM_STEPS_MAX; ++i) {
+            if (i > num_steps) break;
             vec2 du = dir * step_len * float(i);
 
             vec2 uv_p = uv + du;
@@ -261,8 +333,24 @@ void main() {
         float t_neg = max(max_cos_neg, 0.0);
         float slice_visibility = 1.0 - 0.5 * (t_pos * t_pos + t_neg * t_neg);
 
+        // Bent normal contribution from this slice. Horizon angles are
+        // h_pos = acos(t_pos) on +dir side and h_neg = acos(t_neg) on
+        // -dir side, measured from V toward +dir and -dir respectively.
+        // The unoccluded arc spans [-h_neg, +h_pos] around V (positive
+        // angles toward +dir). Its midpoint is `(h_pos - h_neg) * 0.5`,
+        // and the direction at that midpoint within the slice plane is:
+        //   V * cos(theta_mid) + slice_dir * sin(theta_mid)
+        // We use float trig (acos+sin/cos) here once per slice — it's
+        // cheap relative to the tap loop and avoids a half-angle identity
+        // that would need branchless sign handling for the slice_dir term.
+        float h_pos = acos(t_pos);
+        float h_neg = acos(t_neg);
+        float theta_mid = (h_pos - h_neg) * 0.5;
+        vec3 slice_bent = V * cos(theta_mid) + slice_dir * sin(theta_mid);
+
         float w = max(n_proj, 0.0);
         occlusion += slice_visibility * w;
+        bent_view += slice_bent * w;
         weight_sum += w;
     }
 
@@ -270,10 +358,20 @@ void main() {
     ao = clamp(ao, 0.0, 1.0);
     ao = pow(ao, max(ao_params.x, 1e-3));
 
+    // Finalize bent normal: normalize the weighted sum and convert to world
+    // space. If every slice was rejected (degenerate geometry, all-sky
+    // neighborhood), fall back to the surface normal so the consumer still
+    // sees a sane direction.
+    vec3 bent_n_view = (length(bent_view) > 1e-5) ? normalize(bent_view) : N;
+    vec3 bent_n_world = normalize(mat3(inv_view) * bent_n_view);
+    vec2 oct = octEncode(bent_n_world);
+
     // R8 storage gives 256 levels — a smooth AO gradient over a uniform
     // surface visibly bands at ~5–6 step transitions. Bayer 4×4 ordered
     // dither converts the quantization staircase into a high-frequency
-    // noise pattern that the eye averages out.
+    // noise pattern that the eye averages out. Dither AO only (R), not the
+    // octahedral GB channels — dithering encoded coordinates corrupts the
+    // decoded direction.
     const float bayer4[16] = float[16](
          0.0/16.0,  8.0/16.0,  2.0/16.0, 10.0/16.0,
         12.0/16.0,  4.0/16.0, 14.0/16.0,  6.0/16.0,
@@ -284,7 +382,7 @@ void main() {
     float bias = bayer4[(px.y & 3) * 4 + (px.x & 3)] - 0.5;
     ao = clamp(ao + bias * (1.0 / 255.0), 0.0, 1.0);
 
-    frag_color = vec4(ao, 0.0, 0.0, 1.0);
+    frag_color = vec4(ao, oct, 1.0);
 }
 @end
 

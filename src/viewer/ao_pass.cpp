@@ -8,6 +8,9 @@
 #include <cmath>
 #include <cstring>
 
+#include <glm/gtc/matrix_inverse.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
 #include "ao.glsl.h"
 
 namespace nodehammer::viewer {
@@ -186,6 +189,36 @@ void AoPass::draw(const SceneRenderTarget &scene_rt, const Camera &camera, uint3
     params.ao_params[2] = inv_w;
     params.ao_params[3] = inv_h;
 
+    // Map the preset enum onto (slices, steps) pairs. Keep this table in
+    // sync with the preset enum doc-comment in render_quality.hpp. The
+    // shader caps both values at compile-time constants (NUM_SLICES_MAX,
+    // NUM_STEPS_MAX = 8), so anything beyond Ultra would be silently
+    // clamped — we don't expose options past that for a reason.
+    int slices = 4;
+    int steps = 4;
+    switch (quality.ao_quality) {
+    case AoQualityPreset::Low:
+        slices = 4;
+        steps = 3;
+        break;
+    case AoQualityPreset::Medium:
+        slices = 4;
+        steps = 4;
+        break;
+    case AoQualityPreset::High:
+        slices = 6;
+        steps = 6;
+        break;
+    case AoQualityPreset::Ultra:
+        slices = 8;
+        steps = 8;
+        break;
+    }
+    params.ao_quality[0] = static_cast<float>(slices);
+    params.ao_quality[1] = static_cast<float>(steps);
+    params.ao_quality[2] = 0.0f;
+    params.ao_quality[3] = 0.0f;
+
     // Match composite's flip_v so the AO map and scene_color stay aligned
     // when the composite samples them with a single uv. is_perspective and
     // thickness drive the horizon-rejection logic in the FS.
@@ -193,6 +226,15 @@ void AoPass::draw(const SceneRenderTarget &scene_rt, const Camera &camera, uint3
     params.frame_params[1] = is_perspective ? 1.0f : 0.0f;
     params.frame_params[2] = quality.ao_thickness;
     params.frame_params[3] = 0.0f;
+
+    // World-from-view matrix. The FS accumulates the bent normal in view
+    // space (the natural frame of the GTAO integration) and converts to
+    // world before octahedral-encoding, so downstream consumers can sample
+    // it without a view matrix in hand. glm::affineInverse is safe here
+    // because the view matrix is a rigid transform.
+    const glm::mat4 view = camera.view();
+    const glm::mat4 inv_view = glm::affineInverse(view);
+    std::memcpy(params.inv_view, glm::value_ptr(inv_view), sizeof(params.inv_view));
 
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_ao_ao_params_block, &u);

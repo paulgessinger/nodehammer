@@ -78,9 +78,9 @@ void CompositePass::release() {
 
 void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTarget &ao_target,
                          const AoPass &ao_pass, const RenderQualitySettings &quality,
-                         float near_plane, float far_plane, sg_view background_env,
-                         sg_sampler env_sampler, const glm::mat4 &inv_view_proj,
-                         const glm::vec3 &camera_pos) {
+                         bool ao_already_applied_in_scene, float near_plane, float far_plane,
+                         sg_view background_env, sg_sampler env_sampler,
+                         const glm::mat4 &inv_view_proj, const glm::vec3 &camera_pos) {
     if (!initialized_ || scene_target.color.id == SG_INVALID_ID) {
         return;
     }
@@ -157,7 +157,13 @@ void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTa
     params.tonemap_params[2] = 0.0f;
     params.tonemap_params[3] = 0.0f;
 
-    params.ao_params[0] = ao_on ? 1.0f : 0.0f;
+    // When the scene shader's PBR branch already consumed AO (with multi-
+    // bounce + bent normal + specular occlusion), the composite skips its
+    // single-multiply path to avoid double-darkening. Lambert mode keeps
+    // the legacy composite multiply because it doesn't sample AO inside
+    // the scene shader.
+    const bool composite_applies_ao = ao_on && !ao_already_applied_in_scene;
+    params.ao_params[0] = composite_applies_ao ? 1.0f : 0.0f;
     params.ao_params[1] = 0.0f;
     params.ao_params[2] = 0.0f;
     params.ao_params[3] = 0.0f;

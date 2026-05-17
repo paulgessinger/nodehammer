@@ -44,14 +44,22 @@ class CompositePass {
     /// white dummy so the pipeline's binding contract stays valid without a
     /// second pipeline variant.
     ///
+    /// `ao_already_applied_in_scene` tells the composite to skip its AO
+    /// multiply because the scene shader already consumed AO (with multi-
+    /// bounce, bent normal IBL, and specular occlusion) in its PBR path.
+    /// In Lambert mode the scene shader doesn't read AO, so the composite
+    /// performs the legacy single-multiply path against the AO map's R
+    /// channel.
+    ///
     /// `background_env` and `env_sampler` bind the IBL prefilter cubemap so
     /// background pixels (depth = clear) can sample the same baked sky the
     /// scene specular uses. `inv_view_proj` and `camera_pos` reconstruct
     /// world-space view directions for that sample.
     void draw(const SceneRenderTarget &scene_target, const AoRenderTarget &ao_target,
-              const AoPass &ao_pass, const RenderQualitySettings &quality, float near_plane,
-              float far_plane, sg_view background_env, sg_sampler env_sampler,
-              const glm::mat4 &inv_view_proj, const glm::vec3 &camera_pos);
+              const AoPass &ao_pass, const RenderQualitySettings &quality,
+              bool ao_already_applied_in_scene, float near_plane, float far_plane,
+              sg_view background_env, sg_sampler env_sampler, const glm::mat4 &inv_view_proj,
+              const glm::vec3 &camera_pos);
 
   private:
     sg_shader shader_{};

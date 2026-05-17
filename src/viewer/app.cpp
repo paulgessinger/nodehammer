@@ -1,5 +1,6 @@
 #include <nodehammer/viewer/app.hpp>
 
+#include "ao_denoise_pass.hpp"
 #include "ao_pass.hpp"
 #include "ao_render_target.hpp"
 #include "composite_pass.hpp"
@@ -127,8 +128,25 @@ struct App::Impl {
     std::vector<platform::PlatformGestureEvent> platform_gesture_events;
     SceneRenderer scene_renderer;
     SceneRenderTarget scene_rt;
-    AoRenderTarget ao_rt;
+    // Two AO targets: GTAO writes raw into ao_rt_raw; the bilateral denoise
+    // pass reads from raw + scene depth and writes the denoised result into
+    // ao_rt_history. The *next* frame's scene pass samples ao_rt_history
+    // for the bent-normal IBL / multi-bounce / specular-occlusion path,
+    // and the current frame's composite samples it for the Lambert AO
+    // fallback. `ao_history_valid` gates the scene-side sample on the
+    // first frame (before any denoise has run).
+    AoRenderTarget ao_rt_raw;
+    AoRenderTarget ao_rt_history;
+    bool ao_history_valid{false};
+    /// True when the previous frame ran with denoise disabled and so the
+    /// "history" data actually lives in `ao_rt_raw` rather than
+    /// `ao_rt_history`. The scene shader reads last frame's AO, so this
+    /// bit decides which texture *this* frame's scene pass binds. Updated
+    /// at the end of every frame after the AO+denoise (or AO-only) passes
+    /// have run.
+    bool ao_history_was_raw{false};
     AoPass ao_pass;
+    AoDenoisePass ao_denoise_pass;
     CompositePass composite;
     RenderQualitySettings quality;
     Camera camera;
@@ -361,6 +379,7 @@ void App::Impl::onInit() {
     // real result on the first tick.
     scene_renderer.initialize();
     ao_pass.initialize();
+    ao_denoise_pass.initialize();
     composite.initialize();
 
     stm_setup();
@@ -617,28 +636,43 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     }
     scene_renderer.setTargetColorFormat(color_fmt);
 
-    // AO target shares dimensions with the scene RT but is allocated only
-    // when AO is enabled. Cached across enable/disable toggles so repeated
-    // toggling doesn't churn the image pool — only resize destroys it.
-    // Format prefers R16F (eliminates the smooth-gradient banding R8 shows
-    // even with dither) and falls back to R8 on backends that can't render
-    // or filter half-floats.
+    // AO targets share dimensions with the scene RT but are allocated only
+    // when AO is enabled. Two targets coexist: `ao_rt_raw` (GTAO writes
+    // here) and `ao_rt_history` (denoise writes here; sampled by next
+    // frame's scene shader and by this frame's composite-Lambert path).
+    // Cached across enable/disable toggles so repeated toggling doesn't
+    // churn the image pool — only a resize destroys them. A resize also
+    // invalidates the history target's contents (different dimensions =
+    // different per-pixel samples), so flip the validity bit.
     const sg_pixel_format ao_fmt = pickAoColorFormat();
     if (quality.enable_ao) {
-        if (!ao_rt.matches(width, height, ao_fmt)) {
-            ao_rt.create(width, height, ao_fmt);
+        if (!ao_rt_raw.matches(width, height, ao_fmt)) {
+            ao_rt_raw.create(width, height, ao_fmt);
+            ao_history_valid = false; // raw + history were paired by dimension
+        }
+        if (!ao_rt_history.matches(width, height, ao_fmt)) {
+            ao_rt_history.create(width, height, ao_fmt);
+            ao_history_valid = false;
         }
         ao_pass.setTargetColorFormat(ao_fmt);
-    } else if (ao_rt.color.id != SG_INVALID_ID && !ao_rt.matches(width, height, ao_fmt)) {
-        // AO is off but the cached target is stale (resize or format-pick
-        // change). Drop it; next enable will reallocate.
-        ao_rt.destroy();
+        ao_denoise_pass.setTargetColorFormat(ao_fmt);
+    } else {
+        if (ao_rt_raw.color.id != SG_INVALID_ID && !ao_rt_raw.matches(width, height, ao_fmt)) {
+            ao_rt_raw.destroy();
+        }
+        if (ao_rt_history.color.id != SG_INVALID_ID &&
+            !ao_rt_history.matches(width, height, ao_fmt)) {
+            ao_rt_history.destroy();
+        }
+        // AO is off — next enable will start fresh and rebuild history.
+        ao_history_valid = false;
     }
 }
 
 void App::Impl::render() {
     const uint64_t render_submit_start = stm_now();
     scene_submit_ms = 0.0;
+    bool scene_consumed_ao_this_frame = false;
 
     // Drive the chunked GPU upload BEFORE sg_begin_pass so any new sokol
     // buffer creation isn't tangled up with the active scene pass.
@@ -694,6 +728,38 @@ void App::Impl::render() {
         // reflected sun lines up with the analytical highlight (docs §9.1).
         flags.sun_dir = ibl_settings.sun_dir;
         flags.sun_intensity = ibl_settings.sun_intensity;
+        // Feed previous frame's denoised AO+bent-normal map into the scene
+        // shader's PBR IBL path. Gated on:
+        //   * PBR (Lambert ignores AO inside the scene shader)
+        //   * `enable_advanced_ao` — the user-facing A/B toggle. When off,
+        //     the scene shader falls back to no-AO defaults and the
+        //     composite does the legacy single-multiply on the AO scalar.
+        //   * History validity (first frame after enable / resize)
+        //   * Non-debug view
+        // When any gate fails the binding still points at a valid texture
+        // (BRDF LUT as placeholder, see scene_renderer.cpp) but the FS
+        // uniform disables the sample — keeps the binding contract trivial.
+        const bool ao_history_pbr = cfg.enable_pbr && quality.enable_ao &&
+                                    quality.enable_advanced_ao &&
+                                    quality.debug_view == DebugView::Off && ao_history_valid;
+        // Pick the right "history" target based on what last frame produced:
+        // either the denoised target (normal case) or the raw target (last
+        // frame had denoise toggled off). Falls back to a null view when
+        // history isn't usable; scene shader's enable bit gates the sample.
+        const AoRenderTarget &history_src = ao_history_was_raw ? ao_rt_raw : ao_rt_history;
+        const bool history_src_valid = history_src.color.id != SG_INVALID_ID;
+        const bool ao_history_active = ao_history_pbr && history_src_valid;
+        flags.ao_history_view = ao_history_active ? history_src.color_texture_view : sg_view{};
+        flags.ao_history_sampler = ao_history_active ? history_src.sampler : sg_sampler{};
+        flags.ao_history_enable = ao_history_active;
+        flags.ao_bent_strength = quality.ao_bent_strength;
+        // Remember the actual decision the scene path made so the composite
+        // gate matches. Naively re-deriving from `ao_history_valid` later
+        // would mis-fire on the first frame after enable (history flips
+        // valid *between* the scene render and the composite, so a re-
+        // computed gate would tell the composite "scene applied AO" when
+        // it actually did not).
+        scene_consumed_ao_this_frame = ao_history_pbr;
         const uint64_t scene_submit_start = stm_now();
         scene_renderer.render(camera, scene_rt.width, scene_rt.height, flags);
         scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
@@ -701,20 +767,52 @@ void App::Impl::render() {
 
     sg_end_pass();
 
-    // Pass 2 (optional) — GTAO into the AO target, sampling the scene depth
-    // we just stored. Skipped entirely when disabled or while a depth-debug
-    // view is active (the composite short-circuits AO in those modes anyway,
-    // but skipping the pass saves the work).
+    // Pass 2 (optional) — GTAO into the raw AO target, then a bilateral
+    // denoise from raw into the history target. Skipped entirely when
+    // disabled or while a depth-debug view is active (the composite short-
+    // circuits AO in those modes anyway, but skipping the passes saves the
+    // work). The denoise output (history) is read by *next* frame's scene
+    // shader (PBR IBL) and by this frame's composite Lambert-AO path.
+    //
+    // When `enable_ao_denoise` is off, the denoise pass is skipped and the
+    // raw target stands in as "history" — scene/composite both rebind to
+    // `ao_rt_raw` via the gating below so they see the un-denoised data
+    // (useful as a diagnostic A/B against the denoised path).
     const bool ao_active = quality.enable_ao && quality.debug_view == DebugView::Off &&
-                           ao_rt.color.id != SG_INVALID_ID && scene_uploaded;
+                           ao_rt_raw.color.id != SG_INVALID_ID &&
+                           ao_rt_history.color.id != SG_INVALID_ID && scene_uploaded;
+    bool ao_history_target_is_raw = false;
     if (ao_active) {
         sg_pass ao_pass_desc{};
         ao_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
-        ao_pass_desc.attachments = ao_rt.passAttachments();
+        ao_pass_desc.attachments = ao_rt_raw.passAttachments();
         ao_pass_desc.label = "ao_pass";
         sg_begin_pass(&ao_pass_desc);
-        ao_pass.draw(scene_rt, camera, ao_rt.width, ao_rt.height, quality);
+        ao_pass.draw(scene_rt, camera, ao_rt_raw.width, ao_rt_raw.height, quality);
         sg_end_pass();
+
+        if (quality.enable_ao_denoise) {
+            sg_pass denoise_pass_desc{};
+            denoise_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+            denoise_pass_desc.attachments = ao_rt_history.passAttachments();
+            denoise_pass_desc.label = "ao_denoise_pass";
+            sg_begin_pass(&denoise_pass_desc);
+            ao_denoise_pass.draw(ao_rt_raw, scene_rt, camera, ao_rt_history.width,
+                                 ao_rt_history.height);
+            sg_end_pass();
+        } else {
+            // Denoise toggle is off — leave ao_rt_history un-updated and
+            // let downstream consumers rebind to the raw target. The
+            // history-validity bit is still flipped on because the raw
+            // target's contents are valid (just noisier than denoised).
+            ao_history_target_is_raw = true;
+        }
+
+        // AO output is populated and safe for next frame's scene sample
+        // (either the just-denoised history target or, when denoise is
+        // off, the raw target — see the rebind below).
+        ao_history_valid = true;
+        ao_history_was_raw = ao_history_target_is_raw;
     }
 
     // Pass 3 — composite the offscreen target into the swapchain, then
@@ -742,7 +840,31 @@ void App::Impl::render() {
         const glm::mat4 view_proj =
             camera.proj(aspect, homogeneous_depth, useReversedZ()) * camera.view();
         const glm::mat4 inv_view_proj = glm::inverse(view_proj);
-        composite.draw(scene_rt, ao_rt, ao_pass, quality, camera.near_plane, camera.far_plane,
+        // Composite samples the *denoised* target (ao_rt_history) for its
+        // Lambert AO multiply — that's the same data the next frame's
+        // scene-shader PBR path will sample, kept consistent so toggling
+        // PBR on/off doesn't introduce a frame of mismatched AO. The
+        // `ao_already_applied_in_scene` flag mirrors the actual scene
+        // decision (captured above before the AO+denoise passes ran) so
+        // the first frame after enable — where history flips valid mid-
+        // frame — still gets a composite AO multiply rather than no AO at
+        // all.
+        //
+        // When the history target hasn't been written yet (very first frame
+        // after enable, or before the scene has finished uploading), pass
+        // an empty render target — composite's internal `ao_on` check
+        // gates on a valid color id and falls back to its 1×1 white dummy
+        // so we never sample undefined data. When denoise is off this
+        // frame, the raw target is what the composite should sample.
+        const AoRenderTarget *composite_ao_src = nullptr;
+        if (ao_history_valid) {
+            composite_ao_src = ao_history_target_is_raw ? &ao_rt_raw : &ao_rt_history;
+        }
+        const AoRenderTarget composite_ao_empty{};
+        const AoRenderTarget &composite_ao_target =
+            composite_ao_src ? *composite_ao_src : composite_ao_empty;
+        composite.draw(scene_rt, composite_ao_target, ao_pass, quality,
+                       scene_consumed_ao_this_frame, camera.near_plane, camera.far_plane,
                        scene_renderer.iblPrefilterView(), scene_renderer.iblCubeSampler(),
                        inv_view_proj, camera.eye());
     }
@@ -1201,8 +1323,10 @@ void App::Impl::onFrame() {
 void App::Impl::onCleanup() {
     savePersistentState(true);
     composite.release();
+    ao_denoise_pass.release();
     ao_pass.release();
-    ao_rt.destroy();
+    ao_rt_history.destroy();
+    ao_rt_raw.destroy();
     scene_rt.destroy();
     scene_renderer.release();
     // simgui_shutdown destroys the ImGui context — don't call
