@@ -20,6 +20,7 @@ struct IblSettings;
 namespace ui {
 
 class Notifications;
+struct PerfHistory;
 
 struct UiState {
     bool show_project{true};
@@ -67,6 +68,9 @@ struct ViewerUiContext {
     double frame_interval_ms{0.0};
     double render_submit_ms{0.0};
     double scene_submit_ms{0.0};
+    /// Rolling timing history for the Debug panel's live perf graphs. Owned by
+    /// the App; null only in contexts that don't track frame timings.
+    PerfHistory *perf_history{nullptr};
 
     bool has_scene{false};
     bool scene_uploaded{false};

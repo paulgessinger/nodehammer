@@ -11,6 +11,7 @@
 #include "scene_renderer.hpp"
 #include "ui/icon_font.hpp"
 #include "ui/notifications.hpp"
+#include "ui/perf_history.hpp"
 #include "ui/viewer_ui.hpp"
 
 #include <nodehammer/viewer/backend_caps.hpp>
@@ -268,6 +269,8 @@ struct App::Impl {
     double frame_interval_ms{0.0};
     double render_submit_ms{0.0};
     double scene_submit_ms{0.0};
+    // Rolling per-frame timing history feeding the Debug panel's live graphs.
+    ui::PerfHistory perf_history;
 
     ScrollInputMode scroll_input_mode{ScrollInputMode::Wheel};
     float pending_scroll_x{0.f};
@@ -1334,6 +1337,11 @@ void App::Impl::onFrame() {
         }
     }
 
+    // Sample the rolling timing history once per rendered frame. The submit
+    // timings still hold last frame's values here (they're measured during
+    // render() further down), which is harmless for a scrolling graph.
+    perf_history.push(delta_seconds, frame_interval_ms, render_submit_ms, scene_submit_ms, fps);
+
     // simgui_new_frame internally calls ImGui::NewFrame after configuring
     // io display size + delta time. Don't double-call NewFrame.
     ImGui_ImplSokol_NewFrame(static_cast<int>(fb_width), static_cast<int>(fb_height), delta_seconds,
@@ -1437,6 +1445,7 @@ void App::Impl::onFrame() {
         .frame_interval_ms = frame_interval_ms,
         .render_submit_ms = render_submit_ms,
         .scene_submit_ms = scene_submit_ms,
+        .perf_history = &perf_history,
         .has_scene = static_cast<bool>(scene),
         .scene_uploaded = scene_uploaded,
         .build_in_progress = build_in_progress,

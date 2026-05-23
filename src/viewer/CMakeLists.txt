@@ -55,7 +55,7 @@ function(nh_add_viewer_lib name sokol_lib)
         # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
         # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )
-    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7)
+    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7 implot)
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
     add_dependencies(${name} nodehammer_shaders)
     nodehammer_set_compiler_options(${name})

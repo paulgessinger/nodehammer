@@ -231,6 +231,37 @@ if(NODEHAMMER_WITH_VIEWER)
         add_library(ImGui::ImGui ALIAS imgui)
     endif()
 
+    # ── ImPlot ───────────────────────────────────────────────────────────────
+    # Plotting widgets for Dear ImGui (live perf graphs in the Debug panel).
+    # No upstream CMake — fetch sources and build the core lib against imgui,
+    # mirroring the imgui block above. Master HEAD guards the recent imgui
+    # texture / ImDrawList API changes with IMGUI_VERSION_NUM, so it builds
+    # against the pinned docking imgui above.
+    FetchContent_Declare(implot
+        SYSTEM
+        GIT_REPOSITORY https://github.com/epezent/implot.git
+        GIT_TAG        1351ab2c46d7a05a60f3533047bfba8a953520a1
+    )
+    FetchContent_MakeAvailable(implot)
+
+    if(NOT TARGET implot)
+        add_library(implot STATIC
+            ${implot_SOURCE_DIR}/implot.cpp
+            ${implot_SOURCE_DIR}/implot_items.cpp
+            ${implot_SOURCE_DIR}/implot_demo.cpp
+        )
+        target_include_directories(implot SYSTEM PUBLIC ${implot_SOURCE_DIR})
+        target_link_libraries(implot PUBLIC imgui)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+            target_compile_options(implot PRIVATE -w)
+        elseif(MSVC)
+            target_compile_options(implot PRIVATE /W0)
+        endif()
+    endif()
+    if(TARGET implot AND NOT TARGET ImPlot::ImPlot)
+        add_library(ImPlot::ImPlot ALIAS implot)
+    endif()
+
     # Vendored Font Awesome 7 (free-solid). Header from juliettef/IconFontCppHeaders,
     # compressed font blob generated from the official FA7 desktop OTF via
     # imgui's misc/fonts/binary_to_compressed_c. Both files live under

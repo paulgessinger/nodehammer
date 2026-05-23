@@ -3,14 +3,27 @@
 #include "../ibl.hpp"
 #include "icon_font.hpp"
 #include "notifications.hpp"
+#include "perf_history.hpp"
 
 #include <nodehammer/viewer/platform.hpp>
 
 #include <imgui.h>
+#include <implot.h>
 #include <sokol_gfx.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 
 namespace nodehammer::viewer::ui {
 namespace {
+
+// Series colors shared between the numeric readouts and the plot lines so the
+// two read as one unit.
+constexpr ImVec4 kFrameColor{0.95f, 0.77f, 0.06f, 1.f}; // amber
+constexpr ImVec4 kCpuColor{0.16f, 0.63f, 0.93f, 1.f};   // blue
+constexpr ImVec4 kSceneColor{0.36f, 0.86f, 0.30f, 1.f}; // green
+constexpr ImVec4 kFpsColor{0.85f, 0.85f, 0.85f, 1.f};   // light grey
 
 const char *backendName() {
     switch (sg_query_backend()) {
@@ -34,6 +47,133 @@ const char *backendName() {
         return "dummy";
     }
     return "?";
+}
+
+// A label + right-aligned, fixed-width value on one line. The value column is
+// pre-formatted into a padded field by the caller so the digits don't shift the
+// layout as the number changes (the default ImGui font is monospaced).
+void readoutRow(const ImVec4 &color, const char *label, const char *value) {
+    ImGui::PushStyleColor(ImGuiCol_Text, color);
+    ImGui::TextUnformatted(label);
+    ImGui::PopStyleColor();
+    ImGui::SameLine(150.f);
+    ImGui::TextUnformatted(value);
+}
+
+void plotSeries(const char *label, const ScrollingBuffer &buf, const ImVec4 &color) {
+    if (buf.data.empty()) {
+        return;
+    }
+    ImPlotSpec spec;
+    spec.LineColor = color;
+    spec.LineWeight = 1.5f;
+    // The ring buffer stores interleaved (x, y) ImVec2s; Offset tells ImPlot
+    // where the oldest sample is so the wrapped line stays contiguous in time.
+    spec.Offset = buf.offset;
+    spec.Stride = sizeof(ImVec2);
+    ImPlot::PlotLine(label, &buf.data[0].x, &buf.data[0].y, buf.data.size(), spec);
+}
+
+// Largest sample value at or after x_min (i.e. within the visible window).
+float windowMax(const ScrollingBuffer &buf, float x_min) {
+    float m = 0.f;
+    for (const ImVec2 &p : buf.data) {
+        if (p.x >= x_min) {
+            m = std::max(m, p.y);
+        }
+    }
+    return m;
+}
+
+// Round up to a "nice" number (1, 1.5, 2, 3, 4, 5, 6, 8, 10 × 10^n) so axis
+// bounds — and therefore the tick labels — land on readable values.
+float niceCeil(float v) {
+    if (v <= 0.f) {
+        return 1.f;
+    }
+    const float base = std::pow(10.f, std::floor(std::log10(v)));
+    const float f = v / base; // in [1, 10)
+    for (const float step : {1.f, 1.5f, 2.f, 3.f, 4.f, 5.f, 6.f, 8.f}) {
+        if (f <= step + 1e-4f) {
+            return step * base;
+        }
+    }
+    return 10.f * base;
+}
+
+// Per-plot smoothed peak. Persisted across frames so the y-axis ratchets up
+// instantly on a spike but eases back down, instead of rescaling every frame.
+struct AxisTracker {
+    float smoothed = 0.f;
+};
+
+// Stable upper bound for a zero-anchored y-axis: fast attack on new peaks, slow
+// exponential release toward the current window max, then a 10% headroom and a
+// nice-number round-up. `min_top` guards the degenerate near-zero case.
+float stableTop(AxisTracker &tr, float window_max, float min_top, float dt) {
+    if (window_max > tr.smoothed) {
+        tr.smoothed = window_max;
+    } else {
+        constexpr float kReleaseTau = 2.f; // seconds to relax toward lower peaks
+        const float a = 1.f - std::exp(-std::clamp(dt, 0.f, 0.1f) / kReleaseTau);
+        tr.smoothed += (window_max - tr.smoothed) * a;
+    }
+    return niceCeil(std::max(tr.smoothed, min_top) * 1.1f);
+}
+
+void renderPerfSection(const ViewerUiContext &ctx) {
+    ImGui::SeparatorText("Performance");
+
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%7.1f", static_cast<double>(ctx.fps));
+    readoutRow(kFpsColor, "FPS", buf);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", ctx.frame_interval_ms);
+    readoutRow(kFrameColor, "Frame", buf);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", ctx.render_submit_ms);
+    readoutRow(kCpuColor, "CPU submit", buf);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", ctx.scene_submit_ms);
+    readoutRow(kSceneColor, "Scene submit", buf);
+
+    if (ctx.perf_history == nullptr) {
+        return;
+    }
+    const PerfHistory &h = *ctx.perf_history;
+
+    // Rolling window (seconds) of history kept on screen.
+    constexpr float kHistorySecs = 8.f;
+    constexpr ImPlotFlags kPlotFlags = ImPlotFlags_NoInputs;
+    const float x_min = h.t - kHistorySecs;
+    const float dt = ImGui::GetIO().DeltaTime;
+
+    // Zero-anchored y-axes with a stabilized upper bound (see stableTop): they
+    // ratchet up on spikes and ease back down, rounded to nice tick values.
+    static AxisTracker timing_axis;
+    const float timing_max =
+        std::max({windowMax(h.frame_ms, x_min), windowMax(h.cpu_submit_ms, x_min),
+                  windowMax(h.scene_submit_ms, x_min)});
+    const float timing_top = stableTop(timing_axis, timing_max, 2.f, dt);
+
+    if (ImPlot::BeginPlot("Frame timing (ms)", ImVec2(-1.f, 140.f), kPlotFlags)) {
+        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
+        ImPlot::SetupAxisLimits(ImAxis_X1, x_min, h.t, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, timing_top, ImPlotCond_Always);
+        ImPlot::SetupLegend(ImPlotLocation_NorthWest, ImPlotLegendFlags_Horizontal);
+        plotSeries("Frame", h.frame_ms, kFrameColor);
+        plotSeries("CPU submit", h.cpu_submit_ms, kCpuColor);
+        plotSeries("Scene submit", h.scene_submit_ms, kSceneColor);
+        ImPlot::EndPlot();
+    }
+
+    static AxisTracker fps_axis;
+    const float fps_top = stableTop(fps_axis, windowMax(h.fps, x_min), 30.f, dt);
+
+    if (ImPlot::BeginPlot("FPS", ImVec2(-1.f, 100.f), kPlotFlags)) {
+        ImPlot::SetupAxes(nullptr, nullptr, ImPlotAxisFlags_NoTickLabels, 0);
+        ImPlot::SetupAxisLimits(ImAxis_X1, x_min, h.t, ImPlotCond_Always);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, fps_top, ImPlotCond_Always);
+        plotSeries("FPS", h.fps, kFpsColor);
+        ImPlot::EndPlot();
+    }
 }
 
 } // namespace
@@ -69,9 +209,7 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
                               "WebGPU if your browser supports it for optimal rendering.\n"
                               "Click the icon to open compatibility info.");
     }
-    ImGui::Text("FPS: %.1f", ctx.fps);
-    ImGui::Text("Frame: %.2f ms  CPU submit: %.2f ms  Scene submit: %.2f ms", ctx.frame_interval_ms,
-                ctx.render_submit_ms, ctx.scene_submit_ms);
+    renderPerfSection(ctx);
 
     if constexpr (platform::kIsWeb) {
         if (ImGui::Button("Commit settings to URL") && actions.sync_browser_url) {
