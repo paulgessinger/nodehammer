@@ -70,6 +70,8 @@ bool isZoomModifier(uint32_t modifiers) {
     return (modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_SUPER)) != 0;
 }
 
+bool isPanModifier(uint32_t modifiers) { return (modifiers & SAPP_MODIFIER_SHIFT) != 0; }
+
 std::string formatUrlFloat(float value) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(3) << value;
@@ -274,6 +276,9 @@ struct App::Impl {
     uint64_t last_scroll_time{0};
     int smooth_scroll_score{0};
     int wheel_scroll_score{0};
+    bool scroll_seq_pan{false};      // gesture mode at sequence start: Shift (pan) held
+    bool scroll_seq_zoom{false};     // gesture mode at sequence start: Ctrl/Super (zoom) held
+    bool scroll_seq_canceled{false}; // a modifier changed mid-sequence — swallow the kinetic tail
 
     explicit Impl(Config c)
         : cfg(std::move(c)), launch_had_initial_camera(cfg.initial_camera.has_value()),
@@ -538,10 +543,39 @@ void App::Impl::classifyScroll(float scroll_x, float scroll_y) {
 }
 
 void App::Impl::handleScrollEvent(const sapp_event *ev, bool imgui_handled) {
+    // A scroll "sequence" is a run of events less than kScrollSequenceGap apart:
+    // one continuous physical gesture plus the momentum (kinetic) tail macOS
+    // keeps emitting after the fingers lift. Capture the gap before
+    // classifyScroll() overwrites last_scroll_time.
+    constexpr double kScrollSequenceGap = 0.1;
+    const bool new_sequence = last_scroll_time == 0 ||
+                              stm_sec(stm_diff(stm_now(), last_scroll_time)) > kScrollSequenceGap;
+
     classifyScroll(ev->scroll_x, ev->scroll_y);
 
     const ImGuiIO &io = ImGui::GetIO();
     if (imgui_handled || io.WantCaptureMouse) {
+        return;
+    }
+
+    // A continuous scroll = one gesture = one mode. Lock the mode (pan / zoom /
+    // orbit, set by the held modifiers) at the sequence start. macOS keeps
+    // emitting decaying momentum events after the fingers lift, so if the
+    // modifiers change during that tail the mode would flip mid-glide and lurch
+    // the camera — e.g. ending a Shift pan drops into orbit, or pressing Shift
+    // into an orbit's tail jumps into a pan. Once the modifiers diverge from the
+    // sequence start, swallow the rest of the tail in either direction.
+    const bool pan_now = isPanModifier(ev->modifiers);
+    const bool zoom_now = isZoomModifier(ev->modifiers);
+    if (new_sequence) {
+        scroll_seq_pan = pan_now;
+        scroll_seq_zoom = zoom_now;
+        scroll_seq_canceled = false;
+    }
+    if (pan_now != scroll_seq_pan || zoom_now != scroll_seq_zoom) {
+        scroll_seq_canceled = true;
+    }
+    if (scroll_seq_canceled) {
         return;
     }
 
@@ -613,9 +647,15 @@ void App::Impl::updateCameraInput() {
             if (zoom_scroll) {
                 const float wheel = pending_scroll_y != 0.f ? pending_scroll_y : pending_scroll_x;
                 camera.dolly(std::pow(1.1f, -wheel), scene_radius);
+            } else if (isPanModifier(pending_scroll_modifiers)) {
+                // Shift + trackpad scroll: pan, mirroring Blender. World-space
+                // scale tracks zoom distance so motion feels constant at any
+                // range, matching the middle-drag pan above. Signs mirror that
+                // path too (negate x so the scene tracks the gesture).
+                const float scale = camera.distance * (platform::kIsWeb ? 0.1f : 0.02f);
+                camera.pan(-pending_scroll_x * scale, pending_scroll_y * scale);
             } else {
-
-                constexpr float kTrackpadOrbitSensitivity = platform::kIsWeb ? 0.08f : 0.03f;
+                constexpr float kTrackpadOrbitSensitivity = platform::kIsWeb ? 0.1f : 0.03f;
                 camera.orbit(pending_scroll_x * kTrackpadOrbitSensitivity,
                              pending_scroll_y * kTrackpadOrbitSensitivity);
             }
