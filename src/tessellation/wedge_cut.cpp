@@ -7,8 +7,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <limits>
+#include <memory>
 #include <numbers>
 #include <variant>
 #include <vector>
@@ -283,36 +287,78 @@ struct CutKeyHash {
 
 } // namespace
 
-WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) {
+// ── Cooperative wedge-cut job ─────────────────────────────────────────────────
+//
+// The original single-shot pass is split into three resumable phases so the
+// caller can spread the work across `advance()` calls:
+//   * Bounds   — sweep every placement to size the cutting solid (pass 1);
+//   * Classify — sweep every placement, rewriting its logVol to empty / cut /
+//                kept and building cut shapes on demand (pass 2);
+//   * Prune    — drop fully-cut-away subtrees (pass 3), run as one final slice.
+// Progress (`processed` / `total`) tracks the classify sweep, the dominant and
+// user-meaningful "applying the cut to N placements" work.
+
+struct WedgeCutJob::Impl {
+    enum class Phase : std::uint8_t { Idle, Bounds, Classify, Prune };
+
+    SemanticScene *scene{nullptr};
+
+    double startRad{0.0};
+    double endRad{0.0};
+    double removedWidth{0.0};
+    double margin{2.0};
+
+    // Stable placement snapshot taken at start: Bounds and Classify only mutate
+    // node *values* and insert into the shapes/logVols maps (never scene.nodes),
+    // so iterating this id list across advance() calls stays valid. Prune is the
+    // only phase that erases nodes, and it runs after the snapshot is consumed.
+    std::vector<SemanticNodeId> nodeIds;
+    std::size_t idx{0};
+    Phase phase{Phase::Idle};
+    bool started{false};
+    bool done{false};
+
+    // Pass-1 accumulators.
+    double maxR{0.0};
+    double maxZ{0.0};
+    bool anyBounds{false};
+
+    // Built once Bounds completes, consumed during Classify.
+    SemanticShapeId wedgeId{};
+    SemanticLogVolId emptyLvId{};
+    glm::dvec4 planeStart{};
+    glm::dvec4 planeEnd{};
+
+    // Cut-shape dedup cache: identical (shape, local-frame wedge) → shared cut
+    // logVol, so instances that need the same cut stay instanced.
+    ankerl::unordered_dense::map<CutKey, SemanticLogVolId, CutKeyHash> cutCache;
+    // Per-node "produces its own geometry" flag (kept or cut), used by Prune.
+    // Emptied/skipped nodes produce no mesh; unclassified nodes default to "has
+    // geometry" (never pruned).
+    ankerl::unordered_dense::map<SemanticNodeId, bool> hasOwnGeom;
+
     WedgeCutStats stats;
+    // Counters are atomic so the SceneBuildJob's native worker thread can bump
+    // `processed` while the main thread reads it for the UI bar (relaxed — the
+    // bar tolerates a frame of staleness).
+    std::atomic<std::size_t> total{0};
+    std::atomic<std::size_t> processed{0};
 
-    const double startRad = params.startDeg * kPi / 180.0;
-    const double endRad = params.endDeg * kPi / 180.0;
-    const double removedWidth = sectorSpan(startRad, endRad);
-
-    // Degenerate sector: nothing (or everything) removed → leave scene untouched.
-    if (removedWidth < 1e-6 || removedWidth > kTau - 1e-6) {
-        return stats;
-    }
-
-    scene.computeWorldTransforms();
-    // Loaded scenes carry stale ID counters; ensure our new shapes/logVols get
-    // fresh IDs rather than overwriting existing entries.
-    scene.reseedIdCounters();
-
-    // ── Pass 1: global bounds for sizing the cutting solid ────────────────────
-    double maxR = 0.0;
-    double maxZ = 0.0;
-    bool anyBounds = false;
-    for (const auto &[id, node] : scene.nodes) {
-        const auto lvIt = scene.logVols.find(node.logVolId);
-        if (lvIt == scene.logVols.end()) {
-            continue;
+    // ── Pass 1 (per node): grow the global radius/z bounds. ──────────────────
+    void stepBounds(SemanticNodeId id) {
+        const auto nit = scene->nodes.find(id);
+        if (nit == scene->nodes.end()) {
+            return;
+        }
+        const SemanticNode &node = nit->second;
+        const auto lvIt = scene->logVols.find(node.logVolId);
+        if (lvIt == scene->logVols.end()) {
+            return;
         }
         const Aabb world =
-            transformAabb(localAabbById(lvIt->second.shapeId, scene, 0), node.worldTransform);
+            transformAabb(localAabbById(lvIt->second.shapeId, *scene, 0), node.worldTransform);
         if (!world.valid) {
-            continue;
+            return;
         }
         for (int i = 0; i < 4; ++i) {
             const double x = (i & 1) ? world.hi.x : world.lo.x;
@@ -322,61 +368,64 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) 
         maxZ = std::max({maxZ, std::abs(world.lo.z), std::abs(world.hi.z)});
         anyBounds = true;
     }
-    if (!anyBounds) {
-        return stats;
+
+    // Build the shared cutting solid + empty shape once bounds are known, then
+    // advance into the classify phase (or finish if there was no geometry).
+    void finishBounds() {
+        if (!anyBounds) {
+            done = true; // nothing bounded → leave scene untouched
+            return;
+        }
+        const double m = std::max(margin, 1.0);
+        const double cutR = std::max(m * maxR, 1.0);
+        const double cutZ = std::max(m * maxZ, 1.0);
+
+        // Shared cutting solid: a phi-sector tube covering the removed wedge.
+        wedgeId = scene->nextShapeId();
+        scene->shapes[wedgeId] =
+            SemanticShape{wedgeId, TubeShape{0.0, cutR, cutZ, startRad, removedWidth}};
+
+        // Shared empty shape for placements fully inside the removed sector.
+        const SemanticShapeId emptyShapeId = scene->nextShapeId();
+        scene->shapes[emptyShapeId] = SemanticShape{emptyShapeId, TessellatedShape{}};
+        const SemanticMaterialId fillerMat =
+            scene->materials.empty() ? SemanticMaterialId{} : scene->materials.begin()->first;
+        emptyLvId = scene->nextLogVolId();
+        scene->logVols[emptyLvId] = SemanticLogicalVolume{
+            emptyLvId, std::string{kWedgeEmptyLogVolName}, emptyShapeId, fillerMat};
+
+        // The two bounding half-planes of the removed sector, through the global
+        // z-axis (normal in xy, d = 0). Used to build per-placement cut sigs.
+        planeStart = glm::dvec4{-std::sin(startRad), std::cos(startRad), 0.0, 0.0};
+        planeEnd = glm::dvec4{-std::sin(endRad), std::cos(endRad), 0.0, 0.0};
+
+        phase = Phase::Classify;
+        idx = 0;
     }
 
-    const double margin = std::max(params.margin, 1.0);
-    const double cutR = std::max(margin * maxR, 1.0);
-    const double cutZ = std::max(margin * maxZ, 1.0);
-
-    // ── Shared cutting solid: a phi-sector tube covering the removed wedge ─────
-    const SemanticShapeId wedgeId = scene.nextShapeId();
-    scene.shapes[wedgeId] =
-        SemanticShape{wedgeId, TubeShape{0.0, cutR, cutZ, startRad, removedWidth}};
-
-    // ── Shared empty shape for placements fully inside the removed sector ─────
-    const SemanticShapeId emptyShapeId = scene.nextShapeId();
-    scene.shapes[emptyShapeId] = SemanticShape{emptyShapeId, TessellatedShape{}};
-    const SemanticMaterialId fillerMat =
-        scene.materials.empty() ? SemanticMaterialId{} : scene.materials.begin()->first;
-    const SemanticLogVolId emptyLvId = scene.nextLogVolId();
-    scene.logVols[emptyLvId] = SemanticLogicalVolume{emptyLvId, std::string{kWedgeEmptyLogVolName},
-                                                     emptyShapeId, fillerMat};
-
-    // The two bounding half-planes of the removed sector, through the global
-    // z-axis (normal in xy, d = 0). Used to build per-placement cut signatures.
-    const glm::dvec4 planeStart{-std::sin(startRad), std::cos(startRad), 0.0, 0.0};
-    const glm::dvec4 planeEnd{-std::sin(endRad), std::cos(endRad), 0.0, 0.0};
-
-    // Cut-shape dedup cache: identical (shape, local-frame wedge) → shared cut
-    // logVol, so instances that need the same cut stay instanced.
-    ankerl::unordered_dense::map<CutKey, SemanticLogVolId, CutKeyHash> cutCache;
-
-    // Per-node "produces its own geometry" flag (kept or cut), used afterwards to
-    // prune subtrees the cut removes entirely. Emptied/skipped nodes produce no
-    // mesh; nodes we cannot classify default to "has geometry" (never pruned).
-    ankerl::unordered_dense::map<SemanticNodeId, bool> hasOwnGeom;
-
-    // ── Pass 2: classify each placement and rewrite its logVol binding ────────
+    // ── Pass 2 (per node): classify and rewrite the placement's logVol. ──────
     // We only mutate scene.nodes values (logVolId) in place and *insert* into
-    // scene.shapes / scene.logVols — iterating scene.nodes stays valid. Fields
-    // read from the (reference-returning) maps are copied out before any insert
-    // that could rehash them.
-    for (auto &[id, node] : scene.nodes) {
-        const auto lvIt = scene.logVols.find(node.logVolId);
-        if (lvIt == scene.logVols.end()) {
-            continue;
+    // scene.shapes / scene.logVols. Fields read from the (reference-returning)
+    // maps are copied out before any insert that could rehash them.
+    void stepClassify(SemanticNodeId id) {
+        const auto nit = scene->nodes.find(id);
+        if (nit == scene->nodes.end()) {
+            return;
+        }
+        SemanticNode &node = nit->second;
+        const auto lvIt = scene->logVols.find(node.logVolId);
+        if (lvIt == scene->logVols.end()) {
+            return;
         }
         const SemanticShapeId origShapeId = lvIt->second.shapeId;
         const SemanticMaterialId origMat = lvIt->second.materialId;
         const std::string lvName = lvIt->second.name;
 
-        const Aabb local = localAabbById(origShapeId, scene, 0);
+        const Aabb local = localAabbById(origShapeId, *scene, 0);
         if (!local.valid) {
             ++stats.skipped;
             hasOwnGeom[id] = false; // unbounded shapes produce no tessellatable mesh
-            continue;
+            return;
         }
         const Aabb world = transformAabb(local, node.worldTransform);
 
@@ -393,20 +442,19 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) 
             // Straddles the boundary → boolean-subtraction cut. Reuse an existing
             // cut shape when this placement's (shape, local-frame wedge) matches
             // one already created, so instanced copies needing the same cut stay
-            // instanced; otherwise create a fresh cut shape in this placement's
-            // local frame.
+            // instanced; otherwise create a fresh cut shape in this local frame.
             const CutKey key{origShapeId.value, planeSignature(planeStart, node.worldTransform),
                              planeSignature(planeEnd, node.worldTransform)};
             ++stats.cut;
             if (auto it = cutCache.find(key); it != cutCache.end()) {
                 node.logVolId = it->second;
             } else {
-                const SemanticShapeId cutShapeId = scene.nextShapeId();
-                scene.shapes[cutShapeId] = SemanticShape{
+                const SemanticShapeId cutShapeId = scene->nextShapeId();
+                scene->shapes[cutShapeId] = SemanticShape{
                     cutShapeId,
                     BooleanSubtraction{origShapeId, wedgeId, glm::inverse(node.worldTransform)}};
-                const SemanticLogVolId cutLvId = scene.nextLogVolId();
-                scene.logVols[cutLvId] =
+                const SemanticLogVolId cutLvId = scene->nextLogVolId();
+                scene->logVols[cutLvId] =
                     SemanticLogicalVolume{cutLvId, lvName + "_wedgecut", cutShapeId, origMat};
                 cutCache.emplace(key, cutLvId);
                 node.logVolId = cutLvId;
@@ -416,16 +464,19 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) 
         }
     }
 
-    // ── Prune fully-cut-away subtrees ─────────────────────────────────────────
+    // ── Pass 3: prune fully-cut-away subtrees ────────────────────────────────
     // A subtree that contains no kept/cut node produces nothing; removing it
     // keeps the render tree clean and, importantly, prevents merge_descendants
     // parents (e.g. a stave entirely inside the removed wedge) from being asked
     // to merge an all-empty set of children (which would emit NH0505).
-    if (scene.nodes.contains(scene.rootId)) {
+    void runPrune() {
+        if (!scene->nodes.contains(scene->rootId)) {
+            return;
+        }
         ankerl::unordered_dense::map<SemanticNodeId, bool> subtreeGeom;
         auto computeGeom = [&](auto &&self, SemanticNodeId nid) -> bool {
-            const auto it = scene.nodes.find(nid);
-            if (it == scene.nodes.end()) {
+            const auto it = scene->nodes.find(nid);
+            if (it == scene->nodes.end()) {
                 return false;
             }
             // Default to "has geometry" for nodes we never classified (e.g. logVol
@@ -437,17 +488,17 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) 
             subtreeGeom[nid] = g;
             return g;
         };
-        computeGeom(computeGeom, scene.rootId);
+        computeGeom(computeGeom, scene->rootId);
 
         // Collect maximal empty subtree roots: an empty node whose parent keeps
         // geometry. (The root itself is never removed.)
         std::vector<SemanticNodeId> removalRoots;
         for (const auto &[id, geom] : subtreeGeom) {
-            if (geom || id == scene.rootId) {
+            if (geom || id == scene->rootId) {
                 continue;
             }
-            const auto nit = scene.nodes.find(id);
-            if (nit == scene.nodes.end() || !nit->second.parentId) {
+            const auto nit = scene->nodes.find(id);
+            if (nit == scene->nodes.end() || !nit->second.parentId) {
                 continue;
             }
             const auto pit = subtreeGeom.find(*nit->second.parentId);
@@ -457,14 +508,14 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) 
         }
 
         for (const auto rootOfEmpty : removalRoots) {
-            const auto nit = scene.nodes.find(rootOfEmpty);
-            if (nit == scene.nodes.end()) {
+            const auto nit = scene->nodes.find(rootOfEmpty);
+            if (nit == scene->nodes.end()) {
                 continue;
             }
             // Detach from parent.
             if (nit->second.parentId) {
-                auto pit = scene.nodes.find(*nit->second.parentId);
-                if (pit != scene.nodes.end()) {
+                auto pit = scene->nodes.find(*nit->second.parentId);
+                if (pit != scene->nodes.end()) {
                     auto &kids = pit->second.children;
                     kids.erase(std::remove(kids.begin(), kids.end(), rootOfEmpty), kids.end());
                 }
@@ -474,20 +525,125 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) 
             while (!stack.empty()) {
                 const auto cur = stack.back();
                 stack.pop_back();
-                const auto cit = scene.nodes.find(cur);
-                if (cit == scene.nodes.end()) {
+                const auto cit = scene->nodes.find(cur);
+                if (cit == scene->nodes.end()) {
                     continue;
                 }
                 for (const auto childId : cit->second.children) {
                     stack.push_back(childId);
                 }
-                scene.nodes.erase(cit);
+                scene->nodes.erase(cit);
                 ++stats.pruned;
             }
         }
     }
+};
 
-    return stats;
+WedgeCutJob::WedgeCutJob() : impl_(std::make_unique<Impl>()) {}
+WedgeCutJob::~WedgeCutJob() = default;
+WedgeCutJob::WedgeCutJob(WedgeCutJob &&) noexcept = default;
+WedgeCutJob &WedgeCutJob::operator=(WedgeCutJob &&) noexcept = default;
+
+void WedgeCutJob::start(SemanticScene &scene, const WedgeCutParams &params) {
+    // std::atomic members make Impl non-assignable; replace the unique_ptr
+    // wholesale to reset the job between runs.
+    impl_ = std::make_unique<Impl>();
+    Impl &im = *impl_;
+    im.scene = &scene;
+    im.startRad = params.startDeg * kPi / 180.0;
+    im.endRad = params.endDeg * kPi / 180.0;
+    im.removedWidth = sectorSpan(im.startRad, im.endRad);
+    im.margin = params.margin;
+    im.started = true;
+
+    // Degenerate sector: nothing (or everything) removed → leave scene untouched.
+    if (im.removedWidth < 1e-6 || im.removedWidth > kTau - 1e-6) {
+        im.done = true;
+        return;
+    }
+
+    scene.computeWorldTransforms();
+    // Loaded scenes carry stale ID counters; ensure our new shapes/logVols get
+    // fresh IDs rather than overwriting existing entries.
+    scene.reseedIdCounters();
+
+    im.nodeIds.reserve(scene.nodes.size());
+    for (const auto &[id, node] : scene.nodes) {
+        (void)node;
+        im.nodeIds.push_back(id);
+    }
+    im.total.store(im.nodeIds.size(), std::memory_order_relaxed);
+    im.phase = Impl::Phase::Bounds;
+    im.idx = 0;
+}
+
+bool WedgeCutJob::advance(std::uint64_t budget_ns) {
+    Impl &im = *impl_;
+    if (!im.started) {
+        im.done = true;
+        return true;
+    }
+    if (im.done) {
+        return true;
+    }
+    const auto start_time = std::chrono::steady_clock::now();
+    while (!im.done) {
+        switch (im.phase) {
+        case Impl::Phase::Bounds:
+            if (im.idx >= im.nodeIds.size()) {
+                im.finishBounds(); // builds the cutter + flips to Classify, or finishes
+            } else {
+                im.stepBounds(im.nodeIds[im.idx]);
+                ++im.idx;
+            }
+            break;
+        case Impl::Phase::Classify:
+            if (im.idx >= im.nodeIds.size()) {
+                im.phase = Impl::Phase::Prune;
+            } else {
+                im.stepClassify(im.nodeIds[im.idx]);
+                ++im.idx;
+                im.processed.fetch_add(1, std::memory_order_relaxed);
+            }
+            break;
+        case Impl::Phase::Prune:
+            im.runPrune(); // single slice — may exceed the budget, like a big node
+            im.done = true;
+            break;
+        case Impl::Phase::Idle:
+            im.done = true;
+            break;
+        }
+        if (im.done) {
+            break;
+        }
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                 std::chrono::steady_clock::now() - start_time)
+                                 .count();
+        if (static_cast<std::uint64_t>(elapsed) >= budget_ns) {
+            break;
+        }
+    }
+    return im.done;
+}
+
+WedgeCutStats WedgeCutJob::take() { return impl_->stats; }
+
+std::size_t WedgeCutJob::totalPlacements() const {
+    return impl_->total.load(std::memory_order_relaxed);
+}
+std::size_t WedgeCutJob::processedPlacements() const {
+    return impl_->processed.load(std::memory_order_relaxed);
+}
+
+// ── applyWedgeCut (run-to-completion shim) ────────────────────────────────────
+
+WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) {
+    WedgeCutJob job;
+    job.start(scene, params);
+    while (!job.advance(std::numeric_limits<std::uint64_t>::max())) {
+    }
+    return job.take();
 }
 
 } // namespace nodehammer

@@ -55,12 +55,19 @@ class SceneBuildJob {
     [[nodiscard]] size_t tessellationTotal() const;
     [[nodiscard]] size_t tessellationProcessed() const;
 
+    /// Wedge-cut progress for UI feedback. Both return 0 unless a wedge cut
+    /// was requested and the `Cutting` phase has been reached; `total` is the
+    /// placement count and `processed` grows as the cut is applied.
+    [[nodiscard]] size_t wedgeCutTotal() const;
+    [[nodiscard]] size_t wedgeCutProcessed() const;
+
     /// High-level phase the job is in, so UI can describe what's going on
     /// instead of falling back to an indeterminate animated bar.
     /// `Preparing` covers the (synchronous) config-load / import / select /
-    /// dedup stages; `Tessellating` covers the cooperative iterator;
-    /// `Finalizing` is the brief packaging step.
-    enum class Phase : uint8_t { Idle, Preparing, Tessellating, Finalizing, Done };
+    /// dedup stages; `Cutting` covers the cooperative azimuthal wedge cut
+    /// (only when one was requested); `Tessellating` covers the cooperative
+    /// iterator; `Finalizing` is the brief packaging step.
+    enum class Phase : uint8_t { Idle, Preparing, Cutting, Tessellating, Finalizing, Done };
     [[nodiscard]] Phase phase() const;
 
   private:

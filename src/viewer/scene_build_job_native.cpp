@@ -5,6 +5,7 @@
 #include <nodehammer/scene_build.hpp>
 #include <nodehammer/tessellation/tessellation_job.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <nodehammer/tessellation/wedge_cut.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -22,10 +23,15 @@ struct SceneBuildJob::Impl {
     State state{State::Idle};
     std::thread worker;
     std::atomic<bool> done{false};
+    // Finer-grained phase published by the worker so the UI can distinguish the
+    // (cooperative) wedge cut from tessellation. Read by the main thread while
+    // `state == Running`; relaxed ordering — the label tolerates staleness.
+    std::atomic<Phase> worker_phase{Phase::Preparing};
 
     // Owned by the worker thread while running; main thread reads only the
     // atomics until the worker has signalled `done`.
     ::nodehammer::ScenePrepResult prep;
+    ::nodehammer::WedgeCutJob wedge_job;
     ::nodehammer::TessellationJob tess_job;
 
     // Diagnostic labels for the pre-build log. The byte-driven build job
@@ -62,14 +68,19 @@ void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticS
     impl_->result = {};
 
     impl_->prep = {};
+    impl_->wedge_job = ::nodehammer::WedgeCutJob{};
     impl_->tess_job = ::nodehammer::TessellationJob{};
 
     impl_->done.store(false, std::memory_order_release);
+    impl_->worker_phase.store(Phase::Preparing, std::memory_order_relaxed);
     impl_->state = Impl::State::Running;
     logPreBuild(impl_->config_label, impl_->geometry_label);
     impl_->worker = std::thread([impl = impl_.get()] {
+        // Prep (validate / select / dedup) runs without the wedge cut — the cut
+        // is driven cooperatively below so we can publish its progress, matching
+        // the web path. Tests / CLI still get the synchronous cut via prep.
         impl->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
-            std::move(*impl->preset_config), std::move(*impl->preset_scene), impl->wedge_cut);
+            std::move(*impl->preset_config), std::move(*impl->preset_scene), std::nullopt);
         impl->preset_config.reset();
         impl->preset_scene.reset();
         if (!impl->prep.ok) {
@@ -78,6 +89,14 @@ void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticS
             impl->done.store(true, std::memory_order_release);
             return;
         }
+        if (impl->wedge_cut) {
+            impl->worker_phase.store(Phase::Cutting, std::memory_order_relaxed);
+            impl->wedge_job.start(impl->prep.scene, *impl->wedge_cut);
+            while (!impl->wedge_job.advance(std::numeric_limits<uint64_t>::max())) {
+            }
+            (void)impl->wedge_job.take();
+        }
+        impl->worker_phase.store(Phase::Tessellating, std::memory_order_relaxed);
         impl->tess_job.start(impl->prep.config, impl->prep.scene);
         while (!impl->tess_job.advance(std::numeric_limits<uint64_t>::max())) {
         }
@@ -117,6 +136,7 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
     impl_->config_label.clear();
     impl_->geometry_label.clear();
     impl_->prep = {};
+    impl_->wedge_job = ::nodehammer::WedgeCutJob{};
     impl_->tess_job = ::nodehammer::TessellationJob{};
     return out;
 }
@@ -124,15 +144,18 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
 size_t SceneBuildJob::tessellationTotal() const { return impl_->tess_job.totalNodes(); }
 size_t SceneBuildJob::tessellationProcessed() const { return impl_->tess_job.processedNodes(); }
 
+size_t SceneBuildJob::wedgeCutTotal() const { return impl_->wedge_job.totalPlacements(); }
+size_t SceneBuildJob::wedgeCutProcessed() const { return impl_->wedge_job.processedPlacements(); }
+
 SceneBuildJob::Phase SceneBuildJob::phase() const {
     switch (impl_->state) {
     case Impl::State::Idle:
         return Phase::Idle;
     case Impl::State::Running:
-        // Native runs the whole pipeline on a worker thread — collapse
-        // it under "Tessellating" since that's by far the longest stage
-        // and the UI doesn't have visibility into the thread's progress.
-        return Phase::Tessellating;
+        // The whole pipeline runs on a worker thread; the worker publishes its
+        // current stage (Preparing → Cutting → Tessellating) into an atomic so
+        // the UI can label and bar each phase from the matching counters.
+        return impl_->worker_phase.load(std::memory_order_relaxed);
     case Impl::State::Done:
         return Phase::Done;
     }

@@ -3,6 +3,8 @@
 #include <nodehammer/ir/semantic.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <string_view>
 
 namespace nodehammer {
@@ -61,5 +63,50 @@ struct WedgeCutStats {
 /// value is returned. Outcome counts are reported via the returned stats; the
 /// CLI/viewer summarise them — the pass itself emits no diagnostics.
 [[nodiscard]] WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params);
+
+/// Cooperative, iterator-driven version of `applyWedgeCut`. The cut walks every
+/// placement twice — once to size the cutting solid, once to classify and
+/// rewrite it — plus a final prune sweep; this class lets the caller spread that
+/// work across multiple `advance()` calls so the main thread (web build) stays
+/// responsive, and exposes progress counters for UI feedback.
+///
+/// Usage: `start(scene, params)`, then call `advance(budget_ns)` until it
+/// returns true, then `take()` the stats. The cut is applied to `scene`
+/// *in place*, so `scene` must outlive the job until `advance` returns true.
+/// A degenerate sector (≈0°/≈360°) leaves the scene untouched and makes the
+/// first `advance` return true immediately. `applyWedgeCut` is now a thin
+/// drive-to-completion shim over this class.
+class WedgeCutJob {
+  public:
+    WedgeCutJob();
+    ~WedgeCutJob();
+    WedgeCutJob(const WedgeCutJob &) = delete;
+    WedgeCutJob &operator=(const WedgeCutJob &) = delete;
+    WedgeCutJob(WedgeCutJob &&) noexcept;
+    WedgeCutJob &operator=(WedgeCutJob &&) noexcept;
+
+    /// Initialise the job: validate the sector, recompute world transforms and
+    /// snapshot the placement list. `scene` is mutated as the job advances.
+    void start(SemanticScene &scene, const WedgeCutParams &params);
+
+    /// Apply the cut to pending placements for up to `budget_ns` of wall-clock
+    /// time. The atomic unit is one placement (classification plus any cut-shape
+    /// build it triggers); the final subtree prune runs as a single slice.
+    /// Returns true once the cut is complete and the stats are ready.
+    bool advance(std::uint64_t budget_ns = 8'000'000);
+
+    /// Move out the outcome counts. Valid only after `advance` returns true.
+    [[nodiscard]] WedgeCutStats take();
+
+    /// Progress for UI feedback. `total` is the placement count (set after
+    /// `start`); `processed` grows as the classification sweep runs. Both are
+    /// 0 for a degenerate (no-op) cut.
+    [[nodiscard]] std::size_t totalPlacements() const;
+    [[nodiscard]] std::size_t processedPlacements() const;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 
 } // namespace nodehammer

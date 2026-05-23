@@ -1162,13 +1162,22 @@ void App::Impl::onFrame() {
     // synchronously on the second poll (the first paints a frame).
     if (build_in_progress) {
         if (build_progress_handle != 0) {
-            const auto total = build_job.tessellationTotal();
-            const auto processed = build_job.tessellationProcessed();
-            const float frac =
-                total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
             std::string label;
-            if (total > 0) {
-                label = std::format("Tessellating ({}/{} nodes)", processed, total);
+            float frac = 0.0f;
+            if (build_job.phase() == SceneBuildJob::Phase::Cutting) {
+                // Cooperative wedge cut — bar the placement-classification sweep.
+                const auto total = build_job.wedgeCutTotal();
+                const auto processed = build_job.wedgeCutProcessed();
+                frac = total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
+                label = total > 0 ? std::format("Applying cut ({}/{} placements)", processed, total)
+                                  : std::string{"Applying cut..."};
+            } else {
+                const auto total = build_job.tessellationTotal();
+                const auto processed = build_job.tessellationProcessed();
+                frac = total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
+                if (total > 0) {
+                    label = std::format("Tessellating ({}/{} nodes)", processed, total);
+                }
             }
             notifications.updateProgress(build_progress_handle, frac, label);
         }
