@@ -191,17 +191,32 @@ void main() {
 
     // ---- PBR (glTF 2.0 metallic-roughness) ----
     vec3 V = normalize(camera_pos.xyz - v_world_pos);
-    // Two-sided: flip the normal if it faces away from the viewer. Mirrors
-    // the abs() in the Lambert branch so inner detector faces still light.
-    if (dot(n, V) < 0.0) {
-        n = -n;
-    }
+
+    // Two-sided shading needs *some* notion of "the side facing the
+    // viewer," but we deliberately keep two normals around:
+    //   * `n_geom` — the unflipped geometric normal. Used for the diffuse
+    //     IBL lookup below, where we sample the irradiance cubemap at both
+    //     `+lookup_dir` and `-lookup_dir` and blend by the facing weight.
+    //     The smooth blend means there's no abrupt color change at the
+    //     dot(n, V) = 0 silhouette — fixes the long-standing "AO color
+    //     snaps across a curved surface at the silhouette" artifact.
+    //   * `n_shade` — flipped to always face the viewer. Used for the
+    //     analytical Lo term (so inner detector faces still light) and
+    //     for the specular reflection vector (so specular shows on the
+    //     visible side). The hard flip in `n_shade` is still discontinuous
+    //     at the silhouette, but Lo and specular both vanish there
+    //     (NdotL → 0, specular falls off), so the visible artifact in
+    //     those terms is much smaller than in diffuse IBL.
+    vec3 n_geom = n;
+    float face_dot = dot(n_geom, V);
+    vec3 n_shade = face_dot < 0.0 ? -n_geom : n_geom;
+
     vec3 L = normalize(-light_dir.xyz);
     vec3 H = normalize(V + L);
 
-    float NdotV = max(dot(n, V), 1e-4);
-    float NdotL = max(dot(n, L), 0.0);
-    float NdotH = max(dot(n, H), 0.0);
+    float NdotV = max(dot(n_shade, V), 1e-4);
+    float NdotL = max(dot(n_shade, L), 0.0);
+    float NdotH = max(dot(n_shade, H), 0.0);
     float VdotH = max(dot(V, H), 0.0);
 
     float metallic  = clamp(material_mr.x, 0.0, 1.0);
@@ -234,32 +249,60 @@ void main() {
     //
     // First frame (and any frame the History target is invalid) gets
     // ao_history_params.x == 0 and the shader collapses to no-AO defaults.
+    //
+    // The lookup direction is built in *unflipped* (geometric) space:
+    // `n_geom` is the geometric normal as the surface defines it (may point
+    // away from V on backfacing pixels of two-sided geometry), and
+    // `bent_raw` is the GTAO bent normal in world space. Neither gets a
+    // V-sign flip here — the smooth two-sided IBL blend below absorbs
+    // whatever sign the lookup direction has without introducing a hard
+    // discontinuity at the silhouette.
     float ao = 1.0;
-    vec3 bent_n = n;
+    vec3 ibl_lookup_dir = n_geom;
     if (ao_history_params.x > 0.5) {
         vec2 ao_uv = gl_FragCoord.xy * ao_history_params.yz;
         vec4 ao_sample = texture(sampler2D(tex_ao_history, smp_ao_history), ao_uv);
         ao = ao_sample.r;
         vec3 bent_raw = octDecodeBent(ao_sample.gb);
-        // Two-sided shading already flipped `n` above when it faced away
-        // from V. Flip the bent normal to match so the irradiance sample
-        // happens on the visible hemisphere; the bent direction is otherwise
-        // independent of N's sign convention.
-        if (dot(bent_raw, V) < 0.0) {
-            bent_raw = -bent_raw;
-        }
-        // Blend bent toward N by the strength dial. The slice-based GTAO
-        // bent normal estimate has a known bias toward V (per-slice
-        // averaging shares V across slices) and visible direction noise
-        // on uniform surfaces — blending with N at strength < 1 trades
-        // some of the "cavities feel grounded" effect for stability.
+        // No `if (dot(bent_raw, V) < 0) flip` here — that flip was the
+        // second contributor to the silhouette color snap. GTAO produces a
+        // camera-facing bent normal by construction (per-slice integration
+        // accumulates V*cos(theta_mid) + slice_dir*sin(theta_mid), and the
+        // V component is always positive for theta_mid ∈ (-π/2, π/2)), so
+        // the defensive flip almost never fired in practice anyway. In the
+        // rare degenerate case (fully-occluded backfacing pixel where bent
+        // falls back to N in ao.glsl), the smooth two-sided blend below
+        // handles whatever direction we end up with.
+        //
+        // Blend bent toward `n_geom` by the strength dial. The slice-based
+        // GTAO bent normal estimate has a known bias toward V (per-slice
+        // averaging shares V across slices) and visible direction noise on
+        // uniform surfaces — blending with N at strength < 1 trades some
+        // of the "cavities feel grounded" effect for stability. Done in
+        // unflipped space so the mix is itself continuous across the
+        // silhouette.
         float bent_t = clamp(ao_history_params.w, 0.0, 1.0);
-        bent_n = normalize(mix(n, bent_raw, bent_t));
+        ibl_lookup_dir = normalize(mix(n_geom, bent_raw, bent_t));
     }
 
-    vec3 R = reflect(-V, n);
+    vec3 R = reflect(-V, n_shade);
     float max_lod = mode_flags.y;
-    vec3 irradiance = textureLod(samplerCube(tex_irradiance, smp_cube), bent_n, 0.0).rgb;
+    // Smooth two-sided IBL diffuse: sample the irradiance cubemap on both
+    // sides of the lookup direction and weight by the facing dot via
+    // smoothstep. Pixels well inside the visible hemisphere (face_dot >
+    // 0.2) collapse to ~100% irr_pos; pixels at the silhouette get a
+    // 50/50 blend; backfacing pixels (face_dot < -0.2) collapse to ~100%
+    // irr_neg. Cost: one extra cubemap tap per pixel, which is essentially
+    // free on the tiny irradiance cubemaps (32² per face typical). Fixes
+    // the "AO color of a surface abruptly changes" artifact that the prior
+    // hard `if (dot(n, V) < 0) n = -n` flip produced at silhouettes.
+    vec3 irr_pos =
+        textureLod(samplerCube(tex_irradiance, smp_cube), ibl_lookup_dir, 0.0).rgb;
+    vec3 irr_neg =
+        textureLod(samplerCube(tex_irradiance, smp_cube), -ibl_lookup_dir, 0.0).rgb;
+    float facing = smoothstep(-0.2, 0.2, face_dot);
+    vec3 irradiance = mix(irr_neg, irr_pos, facing);
+
     vec3 prefiltered =
         textureLod(samplerCube(tex_prefilter, smp_cube), R, roughness * max_lod).rgb;
     vec2 brdf = textureLod(sampler2D(tex_brdf_lut, smp_lut), vec2(NdotV, roughness), 0.0).rg;

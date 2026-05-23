@@ -216,7 +216,17 @@ void main() {
     vec3 dx = (abs(z_l - center_z) < abs(z_r - center_z)) ? (P - P_l) : (P_r - P);
     vec3 dy = (abs(z_dn - center_z) < abs(z_up - center_z)) ? (P - P_dn) : (P_up - P);
     vec3 N = normalize(cross(dy, dx));
-    if (N.z < 0.0) N = -N;
+    // No `if (N.z < 0.0) N = -N` here. That flip was a source of the
+    // "whole flat quad changes AO color abruptly during orbit" artifact:
+    // for a flat quad every pixel shares the same N, so N.z crosses 0
+    // for the entire quad at the same camera angle. Before the flip the
+    // slice weights `max(dot(N, slice_normal), 0)` picked one set of
+    // hemisphere-aligned slices; after, they picked the *opposite* set,
+    // and the bent-normal direction (a weighted sum) jumped. The fix is
+    // below (we use abs() on the slice weight so the integration is
+    // sign-invariant under N → -N) and removing the flip is the matching
+    // half of that pair — we never need N to point at the camera, only
+    // to define the slice plane's projection axis up to sign.
 
     // View vector. In ortho V is constant +Z (camera looks down -Z, viewer
     // direction toward eye is +Z); in perspective V varies per pixel.
@@ -348,7 +358,21 @@ void main() {
         float theta_mid = (h_pos - h_neg) * 0.5;
         vec3 slice_bent = V * cos(theta_mid) + slice_dir * sin(theta_mid);
 
-        float w = max(n_proj, 0.0);
+        // Sign-invariant slice weight. Was `max(n_proj, 0)`, which weighted
+        // the slice by how aligned its in-plane normal direction was with N
+        // (one hemisphere only). That made the integration dependent on N's
+        // sign — and since N from depth-derivative reconstruction can flip
+        // its sign as the camera orbits past `N.z = 0`, the whole flat-quad
+        // surface would abruptly switch which slices it counted, jumping
+        // the bent-normal direction and the irradiance lookup color.
+        //
+        // `abs(n_proj)` makes the integration symmetric under N → -N: both
+        // hemispheres' slices contribute. The bent direction itself depends
+        // only on V and slice_dir (not on N), so it's now genuinely
+        // invariant to the N flip. Two-sided viewer geometry (detector
+        // plates rendered from either side) gets the same AO result either
+        // way, which is what we actually want.
+        float w = abs(n_proj);
         occlusion += slice_visibility * w;
         bent_view += slice_bent * w;
         weight_sum += w;
