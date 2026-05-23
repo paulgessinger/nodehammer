@@ -3,7 +3,7 @@ set -euo pipefail
 shopt -s nullglob
 
 usage() {
-    echo "usage: $0 <link|copy> <odd|none> <target-dir> [src-dir]" >&2
+    echo "usage: $0 <link|copy> <odd|odd_simple|none> <target-dir> [src-dir]" >&2
 }
 
 if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
@@ -88,8 +88,24 @@ case "$scene" in
             > "$out/nh_manifest.json"
         scene_mode="autoload (odd)"
         ;;
+    odd_simple)
+        stage_file "$root/odd.nhb.zst" "$out/odd.nhb.zst"
+        stage_file "$root/fixtures/configs/odd_simple.toml" "$out/odd_simple.toml"
+        mkdir -p "$out/odd"
+        for f in base.toml materials.toml simple_materials.toml; do
+            stage_file "$root/fixtures/configs/odd/$f" "$out/odd/$f"
+        done
+        printf '%s\n' \
+            '{' \
+            '  "input": "odd.nhb.zst",' \
+            '  "config": "odd_simple.toml",' \
+            '  "title": "Open Data Detector (simplified)"' \
+            '}' \
+            > "$out/nh_manifest.json"
+        scene_mode="autoload (odd_simple)"
+        ;;
     *)
-        echo "unknown scene '$scene' - known: odd, none" >&2
+        echo "unknown scene '$scene' - known: odd, odd_simple, none" >&2
         exit 1
         ;;
 esac

@@ -116,7 +116,14 @@ struct App::Impl {
     bool launch_had_initial_camera{false};
     bool quit{false};
 
+    // The viewer keeps two scenes GPU-resident at once so the angle cut can flip
+    // instantly between an interactive shader preview and the baked Boolean cut
+    // without re-uploading: `scene` is the uncut base (shown with the render-time
+    // shader cut while dragging), `cut_scene` is the watertight Boolean-cut bake
+    // (shown once the angle settles). They never apply both cuts at the same time
+    // (that z-fights the shader's discard plane against the Boolean cut faces).
     std::shared_ptr<const RenderScene> scene;
+    std::shared_ptr<const RenderScene> cut_scene;
     std::unique_ptr<ProjectFs> project_;
     /// Platform impl: native vs web. Constructed by App's ctor body
     /// after this Impl is in place, so the impl can hold a back-pointer
@@ -126,7 +133,9 @@ struct App::Impl {
     platform::WindowCustomizationRequest window_customization;
     platform::PlatformWindowState platform_window_state;
     std::vector<platform::PlatformGestureEvent> platform_gesture_events;
-    SceneRenderer scene_renderer;
+    SceneRenderer scene_renderer;     ///< draws the uncut base scene
+    SceneRenderer cut_renderer;       ///< draws the Boolean-cut scene
+    SceneRenderer *active_renderer{}; ///< last renderer drawn; for UI stats
     SceneRenderTarget scene_rt;
     // Two AO targets: GTAO writes raw into ao_rt_raw; the bilateral denoise
     // pass reads from raw + scene depth and writes the denoised result into
@@ -187,9 +196,16 @@ struct App::Impl {
     std::string pristine_config_label;
     std::string pristine_geometry_label;
 
-    // Set by the UI when the Boolean cut is toggled or its angle committed;
-    // consumed by the build-drive loop to kick off a re-tessellation.
-    bool rebuild_requested{false};
+    // Boolean-cut build state. The base build runs once per project load; the
+    // cut build runs on demand (toggle/commit) from the pristine scene.
+    bool cut_uploaded{false};
+    bool building_cut{false};        ///< the in-flight build is a cut (vs base) build
+    bool pending_cut_rebuild{false}; ///< a cut (re)build was requested
+    bool last_shown_cut{false};      ///< whether last frame drew the cut scene (AO flip reset)
+    float cut_built_start_deg{0.f};  ///< angle the resident cut scene was built at
+    float cut_built_end_deg{0.f};
+    float in_flight_cut_start_deg{0.f}; ///< angle the in-flight cut build is using
+    float in_flight_cut_end_deg{0.f};
 
     // Live progress-toast handle for the build. 0 means "no toast in flight";
     // populated when we kick off the build and cleared on finish/cancel.
@@ -392,6 +408,8 @@ void App::Impl::onInit() {
     // first frame can draw before the GPU bake runs; onFrame swaps in the
     // real result on the first tick.
     scene_renderer.initialize();
+    cut_renderer.initialize();
+    active_renderer = &scene_renderer;
     ao_pass.initialize();
     ao_denoise_pass.initialize();
     composite.initialize();
@@ -649,6 +667,7 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
         scene_rt.create(width, height, color_fmt, depth_fmt, samples);
     }
     scene_renderer.setTargetColorFormat(color_fmt);
+    cut_renderer.setTargetColorFormat(color_fmt);
 
     // AO targets share dimensions with the scene RT but are allocated only
     // when AO is enabled. Two targets coexist: `ao_rt_raw` (GTAO writes
@@ -688,14 +707,23 @@ void App::Impl::render() {
     scene_submit_ms = 0.0;
     bool scene_consumed_ao_this_frame = false;
 
-    // Drive the chunked GPU upload BEFORE sg_begin_pass so any new sokol
-    // buffer creation isn't tangled up with the active scene pass.
+    // Drive the chunked GPU uploads BEFORE sg_begin_pass so any new sokol
+    // buffer creation isn't tangled up with the active scene pass. The base and
+    // cut scenes live in separate renderers, so their uploads run independently.
     if (scene && !scene_uploaded) {
         if (!scene_renderer.uploadInProgress()) {
             scene_renderer.beginUpload(scene);
         }
         if (scene_renderer.advanceUpload()) {
             scene_uploaded = true;
+        }
+    }
+    if (cut_scene && !cut_uploaded) {
+        if (!cut_renderer.uploadInProgress()) {
+            cut_renderer.beginUpload(cut_scene);
+        }
+        if (cut_renderer.advanceUpload()) {
+            cut_uploaded = true;
         }
     }
 
@@ -730,10 +758,40 @@ void App::Impl::render() {
                 camera_framed = true;
             }
         }
+        // Choose between the base scene (interactive shader-cut preview) and the
+        // baked Boolean-cut scene. The cut scene is shown only when the Boolean
+        // cut is enabled and a resident bake matches the committed angle —
+        // otherwise (cut disabled, mid-drag, or a rebuild in flight) we show the
+        // base scene with the live shader cut. The two cut methods are never
+        // active together, which is what avoids the discard-vs-cut-face z-fight.
+        const bool cut_ready = cfg.boolean_cut && cut_uploaded &&
+                               cut_built_start_deg == cfg.angle_cut_start_deg &&
+                               cut_built_end_deg == cfg.angle_cut_end_deg;
+        SceneRenderer &renderer = cut_ready ? cut_renderer : scene_renderer;
+        active_renderer = &renderer;
+        // Flipping which scene is drawn changes the geometry under the temporal
+        // AO history, so invalidate it for one frame to avoid ghosting.
+        if (cut_ready != last_shown_cut) {
+            ao_history_valid = false;
+            last_shown_cut = cut_ready;
+        }
+
         SceneRenderer::RenderFlags flags;
         flags.cull = cfg.cull;
-        flags.angle_cut = cfg.angle_cut;
-        flags.shader_angle_cut = cfg.shader_angle_cut;
+        if (cut_ready) {
+            // Geometry already carries watertight cut faces — no shader discard.
+            flags.angle_cut = false;
+            flags.shader_angle_cut = false;
+        } else if (cfg.boolean_cut) {
+            // Boolean cut enabled but its bake isn't current (dragging / baking):
+            // preview the cut interactively with the shader discard.
+            flags.angle_cut = true;
+            flags.shader_angle_cut = true;
+        } else {
+            // No Boolean cut — honour the standalone shader/instance cut toggles.
+            flags.angle_cut = cfg.angle_cut;
+            flags.shader_angle_cut = cfg.shader_angle_cut;
+        }
         flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
         flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
         flags.enable_pbr = cfg.enable_pbr;
@@ -775,7 +833,7 @@ void App::Impl::render() {
         // it actually did not).
         scene_consumed_ao_this_frame = ao_history_pbr;
         const uint64_t scene_submit_start = stm_now();
-        scene_renderer.render(camera, scene_rt.width, scene_rt.height, flags);
+        renderer.render(camera, scene_rt.width, scene_rt.height, flags);
         scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
     }
 
@@ -1078,7 +1136,12 @@ void App::Impl::onFrame() {
     if (!ibl_installed || ibl_rebake_pending) {
         const bool first = !ibl_installed;
         const auto bake_start = std::chrono::steady_clock::now();
-        scene_renderer.installIbl(bakeIblGpu(ibl_settings));
+        // Bake once and install into both renderers; the IBL images are
+        // reference-counted (SharedImage), so the two installs share one bake
+        // and the GPU images free when the last renderer releases.
+        const auto baked = bakeIblGpu(ibl_settings);
+        scene_renderer.installIbl(baked);
+        cut_renderer.installIbl(baked);
         const auto elapsed_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bake_start)
                 .count();
@@ -1128,9 +1191,24 @@ void App::Impl::onFrame() {
                 notifications.finishProgress(build_progress_handle, "Tessellation complete");
                 build_progress_handle = 0;
             }
-            scene = std::move(built.scene);
-            scene_uploaded = false;
-            camera_framed = false;
+            if (building_cut) {
+                // Boolean-cut bake → cut renderer. Record the angle it was built
+                // at (not the live cfg, which may have moved during the build) so
+                // the render selector knows whether it's still fresh.
+                cut_scene = std::move(built.scene);
+                cut_uploaded = false;
+                cut_built_start_deg = in_flight_cut_start_deg;
+                cut_built_end_deg = in_flight_cut_end_deg;
+            } else {
+                scene = std::move(built.scene);
+                scene_uploaded = false;
+                camera_framed = false;
+                // The freshly loaded base scene needs a cut bake if the Boolean
+                // cut is already enabled (e.g. from persisted state / URL).
+                if (cfg.boolean_cut) {
+                    pending_cut_rebuild = true;
+                }
+            }
             build_error.clear();
         } else {
             // Errors are already surfaced as toasts via diagnostic() above;
@@ -1175,9 +1253,10 @@ void App::Impl::onFrame() {
     // alone and the cadence is now dynamic.
     if (idle) {
         const auto session_phase = build_session.phase();
-        const bool jobs_running =
-            !ibl_installed || build_in_progress || (scene && !scene_uploaded) ||
-            session_phase == BuildPhase::Walking || session_phase == BuildPhase::ResolvedReady;
+        const bool jobs_running = !ibl_installed || build_in_progress ||
+                                  (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
+                                  pending_cut_rebuild || session_phase == BuildPhase::Walking ||
+                                  session_phase == BuildPhase::ResolvedReady;
         if (!jobs_running) {
             return;
         }
@@ -1227,21 +1306,25 @@ void App::Impl::onFrame() {
     // session's root keys but never actually walk → parse → build the
     // new selection. The build-job completion above swaps `scene` over
     // when the new build lands.
-    // Kick off a (re)build, deriving the Boolean wedge cut from the live config.
-    // Takes the inputs by value so the caller can hand over either fresh
-    // BuildSession inputs or copies of the cached pristine scene.
+    // Kick off a build. `wedge` is nullopt for the uncut base scene and set for
+    // a Boolean-cut bake; `building_cut` records which so completion routes the
+    // result to `scene` vs `cut_scene`. Takes inputs by value so the caller can
+    // hand over either fresh BuildSession inputs or copies of the pristine scene.
     auto start_build = [this](::nodehammer::NHConfig config,
                               ::nodehammer::SemanticScene semantic_scene, std::string config_label,
-                              std::string geometry_label) {
+                              std::string geometry_label,
+                              std::optional<::nodehammer::WedgeCutParams> wedge) {
         build_start_time = std::chrono::steady_clock::now();
-        std::optional<::nodehammer::WedgeCutParams> wedge;
-        if (cfg.boolean_cut) {
-            wedge = ::nodehammer::WedgeCutParams{cfg.angle_cut_start_deg, cfg.angle_cut_end_deg};
+        building_cut = wedge.has_value();
+        if (building_cut) {
+            in_flight_cut_start_deg = cfg.angle_cut_start_deg;
+            in_flight_cut_end_deg = cfg.angle_cut_end_deg;
         }
         build_job.start(std::move(config), std::move(semantic_scene), std::move(config_label),
                         std::move(geometry_label), wedge);
         build_in_progress = true;
-        build_progress_handle = notifications.startProgress("Tessellating...");
+        build_progress_handle =
+            notifications.startProgress(building_cut ? "Applying cut..." : "Tessellating...");
     };
 
     if (project_) {
@@ -1250,25 +1333,38 @@ void App::Impl::onFrame() {
 
         if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
             if (auto inputs = build_session.takeInputs()) {
-                // Cache pristine (uncut) inputs so a later cut re-derives cleanly.
+                // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
                 pristine_config = inputs->config.config;
                 pristine_scene =
                     std::make_shared<const ::nodehammer::SemanticScene>(inputs->import.scene);
                 pristine_config_label = inputs->config_key;
                 pristine_geometry_label = inputs->geometry_key;
-                rebuild_requested = false; // fresh build already reflects current cfg
+                // A new base build invalidates any resident cut bake.
+                cut_scene.reset();
+                cut_uploaded = false;
+                cut_renderer.clearScene();
+                pending_cut_rebuild = false;
+                // The base scene is always uncut (wedge = nullopt); the cut bake
+                // follows once the base lands (see completion handler).
                 start_build(std::move(inputs->config.config), std::move(inputs->import.scene),
-                            std::move(inputs->config_key), std::move(inputs->geometry_key));
+                            std::move(inputs->config_key), std::move(inputs->geometry_key),
+                            std::nullopt);
             }
         }
     }
 
-    // Boolean-cut change requested by the UI: re-prep + re-tessellate from the
-    // cached pristine scene (never from already-cut geometry).
-    if (rebuild_requested && !build_in_progress && pristine_scene) {
-        rebuild_requested = false;
-        start_build(pristine_config, *pristine_scene, pristine_config_label,
-                    pristine_geometry_label);
+    // Boolean-cut (re)build: re-prep + re-tessellate the wedge cut from the
+    // cached pristine scene (never from already-cut geometry). Skipped if a
+    // resident cut already matches the committed angle.
+    const bool cut_fresh = cut_uploaded && cut_built_start_deg == cfg.angle_cut_start_deg &&
+                           cut_built_end_deg == cfg.angle_cut_end_deg;
+    if (pending_cut_rebuild && !build_in_progress && pristine_scene) {
+        pending_cut_rebuild = false;
+        if (cfg.boolean_cut && !cut_fresh) {
+            start_build(
+                pristine_config, *pristine_scene, pristine_config_label, pristine_geometry_label,
+                ::nodehammer::WedgeCutParams{cfg.angle_cut_start_deg, cfg.angle_cut_end_deg});
+        }
     }
 
     ui::ViewerUiContext ui_ctx{
@@ -1277,7 +1373,9 @@ void App::Impl::onFrame() {
         .project = project_.get(),
         .build_session = build_session,
         .build_job = build_job,
-        .scene_renderer = scene_renderer,
+        // Stats reflect the renderer drawn last frame (base or cut). active_
+        // renderer is updated in render(); a one-frame lag here is harmless.
+        .scene_renderer = (active_renderer != nullptr) ? *active_renderer : scene_renderer,
         .camera = camera,
         .notifications = &notifications,
         .platform_window_state = platform_window_state,
@@ -1302,7 +1400,7 @@ void App::Impl::onFrame() {
     ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
     ui_actions.open_url = [this](const std::string &url) { platform_->openUrl(url); };
     ui_actions.rebake_ibl = [this]() { ibl_rebake_pending = true; };
-    ui_actions.request_scene_rebuild = [this]() { rebuild_requested = true; };
+    ui_actions.request_scene_rebuild = [this]() { pending_cut_rebuild = true; };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
     ui_actions.frame_scene = [this]() {
@@ -1316,7 +1414,10 @@ void App::Impl::onFrame() {
     };
     ui_actions.close_project = [this]() {
         scene_renderer.clearScene();
+        cut_renderer.clearScene();
         scene.reset();
+        cut_scene.reset();
+        pristine_scene.reset();
         project_ = platform::makeEmptyBag();
         project_->setLogSink(&notifications);
         root_config_key.clear();
@@ -1324,6 +1425,8 @@ void App::Impl::onFrame() {
         build_session.setRootKeys({}, {});
         active_modals.clear();
         scene_uploaded = false;
+        cut_uploaded = false;
+        pending_cut_rebuild = false;
         camera_framed = false;
         scene_radius = 0.f;
         build_error.clear();
@@ -1375,6 +1478,7 @@ void App::Impl::onCleanup() {
     ao_rt_raw.destroy();
     scene_rt.destroy();
     scene_renderer.release();
+    cut_renderer.release();
     // simgui_shutdown destroys the ImGui context — don't call
     // ImGui::DestroyContext separately (double-free crash on macOS quit).
     ImGui_ImplSokol_Shutdown();

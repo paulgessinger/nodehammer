@@ -159,12 +159,12 @@ ibl_bake_ibl_settings_t makeUniforms(const IblSettings &s, int face, float rough
 IblBakeData bakeIblGpu(const IblSettings &settings) {
     IblBakeData out;
     const sg_pixel_format env_fmt = pickIblBakeFormat();
-    out.brdf_lut =
-        makeColorAttachment(SG_IMAGETYPE_2D, kBrdfLutSize, 1, SG_PIXELFORMAT_RGBA8, "ibl_brdf_lut");
-    out.irradiance =
-        makeColorAttachment(SG_IMAGETYPE_CUBE, kIrradianceSize, 1, env_fmt, "ibl_irradiance");
-    out.prefilter = makeColorAttachment(SG_IMAGETYPE_CUBE, kPrefilterSize, kPrefilterMips, env_fmt,
-                                        "ibl_prefilter");
+    out.brdf_lut = SharedImage{makeColorAttachment(SG_IMAGETYPE_2D, kBrdfLutSize, 1,
+                                                   SG_PIXELFORMAT_RGBA8, "ibl_brdf_lut")};
+    out.irradiance = SharedImage{
+        makeColorAttachment(SG_IMAGETYPE_CUBE, kIrradianceSize, 1, env_fmt, "ibl_irradiance")};
+    out.prefilter = SharedImage{makeColorAttachment(SG_IMAGETYPE_CUBE, kPrefilterSize,
+                                                    kPrefilterMips, env_fmt, "ibl_prefilter")};
     out.prefilter_mip_count = kPrefilterMips;
 
     // Fullscreen triangle covering clip-space [-1, 1]^2 — the FS reconstructs
@@ -194,7 +194,7 @@ IblBakeData bakeIblGpu(const IblSettings &settings) {
     {
         const auto u = makeUniforms(settings, 0, 0.f, settings.brdf_samples);
         const sg_range range{&u, sizeof(u)};
-        sg_view view = makeColorAttachmentView(out.brdf_lut, 0, 0);
+        sg_view view = makeColorAttachmentView(out.brdf_lut.get(), 0, 0);
         runPass(view, pipe_brdf, vbuf, &range, UB_ibl_bake_ibl_settings);
         sg_destroy_view(view);
     }
@@ -203,7 +203,7 @@ IblBakeData bakeIblGpu(const IblSettings &settings) {
     for (int face = 0; face < 6; ++face) {
         const auto u = makeUniforms(settings, face, 0.f, settings.irradiance_samples);
         const sg_range range{&u, sizeof(u)};
-        sg_view view = makeColorAttachmentView(out.irradiance, 0, face);
+        sg_view view = makeColorAttachmentView(out.irradiance.get(), 0, face);
         runPass(view, pipe_irr, vbuf, &range, UB_ibl_bake_ibl_settings);
         sg_destroy_view(view);
     }
@@ -214,7 +214,7 @@ IblBakeData bakeIblGpu(const IblSettings &settings) {
         for (int face = 0; face < 6; ++face) {
             const auto u = makeUniforms(settings, face, roughness, settings.prefilter_samples);
             const sg_range range{&u, sizeof(u)};
-            sg_view view = makeColorAttachmentView(out.prefilter, mip, face);
+            sg_view view = makeColorAttachmentView(out.prefilter.get(), mip, face);
             runPass(view, pipe_pre, vbuf, &range, UB_ibl_bake_ibl_settings);
             sg_destroy_view(view);
         }
@@ -248,7 +248,7 @@ void IblResources::createDummy() {
     lut_desc.data.mip_levels[0].ptr = lut_pixel.data();
     lut_desc.data.mip_levels[0].size = lut_pixel.size();
     lut_desc.label = "ibl_brdf_lut_dummy";
-    brdf_lut = sg_make_image(&lut_desc);
+    brdf_lut = SharedImage{sg_make_image(&lut_desc)};
 
     std::array<std::byte, 4 * 6> irr_pixels{};
     for (size_t f = 0; f < 6; ++f) {
@@ -266,7 +266,7 @@ void IblResources::createDummy() {
     irr_desc.data.mip_levels[0].ptr = irr_pixels.data();
     irr_desc.data.mip_levels[0].size = irr_pixels.size();
     irr_desc.label = "ibl_irradiance_dummy";
-    irradiance = sg_make_image(&irr_desc);
+    irradiance = SharedImage{sg_make_image(&irr_desc)};
 
     sg_image_desc pre_desc{};
     pre_desc.type = SG_IMAGETYPE_CUBE;
@@ -277,21 +277,21 @@ void IblResources::createDummy() {
     pre_desc.data.mip_levels[0].ptr = irr_pixels.data();
     pre_desc.data.mip_levels[0].size = irr_pixels.size();
     pre_desc.label = "ibl_prefilter_dummy";
-    prefilter = sg_make_image(&pre_desc);
+    prefilter = SharedImage{sg_make_image(&pre_desc)};
     prefilter_mip_count = 1;
 
     sg_view_desc irr_view{};
-    irr_view.texture.image = irradiance;
+    irr_view.texture.image = irradiance.get();
     irr_view.label = "ibl_irradiance_view";
     irradiance_view = sg_make_view(&irr_view);
 
     sg_view_desc pre_view{};
-    pre_view.texture.image = prefilter;
+    pre_view.texture.image = prefilter.get();
     pre_view.label = "ibl_prefilter_view";
     prefilter_view = sg_make_view(&pre_view);
 
     sg_view_desc lut_view{};
-    lut_view.texture.image = brdf_lut;
+    lut_view.texture.image = brdf_lut.get();
     lut_view.label = "ibl_brdf_lut_view";
     brdf_lut_view = sg_make_view(&lut_view);
 
@@ -316,23 +316,25 @@ void IblResources::createDummy() {
 }
 
 void IblResources::upload(const IblBakeData &data) {
+    // Share ownership of the baked images (refcount bump) — this same bake may
+    // also be installed in another renderer's IblResources.
     brdf_lut = data.brdf_lut;
     irradiance = data.irradiance;
     prefilter = data.prefilter;
     prefilter_mip_count = data.prefilter_mip_count;
 
     sg_view_desc irr_view{};
-    irr_view.texture.image = irradiance;
+    irr_view.texture.image = irradiance.get();
     irr_view.label = "ibl_irradiance_view";
     irradiance_view = sg_make_view(&irr_view);
 
     sg_view_desc pre_view{};
-    pre_view.texture.image = prefilter;
+    pre_view.texture.image = prefilter.get();
     pre_view.label = "ibl_prefilter_view";
     prefilter_view = sg_make_view(&pre_view);
 
     sg_view_desc lut_view{};
-    lut_view.texture.image = brdf_lut;
+    lut_view.texture.image = brdf_lut.get();
     lut_view.label = "ibl_brdf_lut_view";
     brdf_lut_view = sg_make_view(&lut_view);
 
@@ -369,18 +371,12 @@ void IblResources::release() {
         sg_destroy_view(brdf_lut_view);
         brdf_lut_view = sg_view{};
     }
-    if (irradiance.id != SG_INVALID_ID) {
-        sg_destroy_image(irradiance);
-        irradiance = sg_image{};
-    }
-    if (prefilter.id != SG_INVALID_ID) {
-        sg_destroy_image(prefilter);
-        prefilter = sg_image{};
-    }
-    if (brdf_lut.id != SG_INVALID_ID) {
-        sg_destroy_image(brdf_lut);
-        brdf_lut = sg_image{};
-    }
+    // Drop our references to the images; sg_destroy_image fires only when the
+    // last SharedImage (across all renderers sharing this bake) is released.
+    // Views above are destroyed first so no view outlives its image.
+    irradiance.reset();
+    prefilter.reset();
+    brdf_lut.reset();
     if (cube_sampler.id != SG_INVALID_ID) {
         sg_destroy_sampler(cube_sampler);
         cube_sampler = sg_sampler{};

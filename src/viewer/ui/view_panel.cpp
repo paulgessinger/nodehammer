@@ -88,8 +88,6 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
         }
     };
 
-    ImGui::Checkbox("angle cut", &ctx.cfg.angle_cut);
-    ImGui::Checkbox("shader angle cut", &ctx.cfg.shader_angle_cut);
     // The Boolean cut produces real watertight cut faces but needs a full
     // re-tessellation, so toggling it (or committing a new angle below) kicks
     // off an async rebuild rather than updating live like the shader cut.
@@ -98,6 +96,14 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
     }
     ImGui::SameLine();
     ImGui::TextDisabled("(rebuilds)");
+
+    // When the Boolean cut is on, the shader cut is driven automatically (it
+    // previews while dragging, then the bake takes over once the angle settles),
+    // so the manual shader-cut toggles don't apply — grey them out.
+    ImGui::BeginDisabled(ctx.cfg.boolean_cut);
+    ImGui::Checkbox("angle cut", &ctx.cfg.angle_cut);
+    ImGui::Checkbox("shader angle cut", &ctx.cfg.shader_angle_cut);
+    ImGui::EndDisabled();
 
     // Mid-drag the shader cut previews the angle; on release/commit we rebuild
     // the Boolean cut at the committed angle (only when boolean cut is enabled).

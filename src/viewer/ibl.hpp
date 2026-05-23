@@ -1,22 +1,25 @@
 #pragma once
 
+#include "shared_image.hpp"
+
 #include <glm/vec3.hpp>
 #include <sokol_gfx.h>
 
 namespace nodehammer::viewer {
 
-/// Result of a GPU IBL bake. The three images are owned by the caller after
-/// `bakeIblGpu()` returns and must eventually be released (typically via
-/// `IblResources::release()` once installed).
+/// Result of a GPU IBL bake. The three images are reference-counted, so the
+/// bake can be installed into more than one `IblResources` (e.g. the base and
+/// Boolean-cut renderers) and the GPU images are freed once the last holder
+/// releases — no double-bake, no double-free.
 struct IblBakeData {
     static constexpr int kIrradianceSize = 32;
     static constexpr int kPrefilterSize = 128;
     static constexpr int kPrefilterMips = 6; // 128, 64, 32, 16, 8, 4
     static constexpr int kBrdfLutSize = 256;
 
-    sg_image brdf_lut{};   ///< 2D, 256x256, RG packed as RGBA8
-    sg_image irradiance{}; ///< Cube, 32x32x6, no mips
-    sg_image prefilter{};  ///< Cube, 128x128x6, 6 mips
+    SharedImage brdf_lut;   ///< 2D, 256x256, RG packed as RGBA8
+    SharedImage irradiance; ///< Cube, 32x32x6, no mips
+    SharedImage prefilter;  ///< Cube, 128x128x6, 6 mips
     int prefilter_mip_count{kPrefilterMips};
 };
 
@@ -68,9 +71,11 @@ struct IblSettings {
 /// Pre-baked image-based lighting resources for the procedural sky
 /// environment.
 struct IblResources {
-    sg_image irradiance{};     ///< Cube, 32x32x6, no mips. Diffuse term.
-    sg_image prefilter{};      ///< Cube, 128x128x6, 6 mips. Specular split-sum.
-    sg_image brdf_lut{};       ///< 2D, 256x256, RG channels packed as RGBA8.
+    // Images are reference-counted so an installed bake can be shared across
+    // renderers; views and samplers are owned per-IblResources instance.
+    SharedImage irradiance;    ///< Cube, 32x32x6, no mips. Diffuse term.
+    SharedImage prefilter;     ///< Cube, 128x128x6, 6 mips. Specular split-sum.
+    SharedImage brdf_lut;      ///< 2D, 256x256, RG channels packed as RGBA8.
     sg_view irradiance_view{}; ///< texture-view of irradiance for sg_bindings
     sg_view prefilter_view{};
     sg_view brdf_lut_view{};

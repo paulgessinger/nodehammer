@@ -182,6 +182,40 @@ TEST_CASE("wedge cut: removes the geometry on the requested side", "[tessellatio
     CHECK(minY < -0.9f);
 }
 
+TEST_CASE("wedge cut: a narrow sector inside a wide AABB still cuts", "[tessellation][wedgecut]") {
+    // Regression for the ODD muon-endcap-wedge failure, in miniature. A wide box
+    // whose world AABB subtends a large angle is cut by a *narrow* sector that
+    // lies between the AABB's corner angles. The old corner-membership test saw
+    // no corner inside the removed sector and wrongly classified the box as
+    // fully kept (so it was never cut); the angular-arc test classifies it as
+    // straddling, as it must.
+    SemanticScene scene;
+    const SemanticMaterialId mat = scene.nextMaterialId();
+    scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
+    // World AABB x∈[9,11], y∈[-8,8] → angular span ≈ ±42°, corners near ±36/±42°,
+    // none in the [10°,20°] sector we remove (which the box nonetheless covers).
+    const SemanticShapeId box = scene.nextShapeId();
+    scene.shapes[box] = {box, BoxShape{1, 8, 1}};
+    const SemanticLogVolId lv = scene.nextLogVolId();
+    scene.logVols[lv] = {lv, "wide", box, mat};
+
+    const SemanticNodeId root = scene.nextNodeId();
+    SemanticNode n;
+    n.id = root;
+    n.name = "wide";
+    n.logVolId = lv;
+    n.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0});
+    scene.nodes[root] = std::move(n);
+    scene.rootId = root;
+    scene.computeWorldTransforms();
+
+    DiagnosticList diags;
+    const auto stats = applyWedgeCut(scene, {10.0, 20.0}, diags);
+    CHECK(stats.cut == 1); // straddles → boolean-cut
+    CHECK(stats.kept == 0);
+    CHECK(stats.emptied == 0);
+}
+
 TEST_CASE("wedge cut: degenerate sectors are a no-op", "[tessellation][wedgecut]") {
     DiagnosticList diags;
 

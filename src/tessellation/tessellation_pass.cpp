@@ -4,6 +4,7 @@
 #include <nodehammer/tessellation/primitive_tessellator.hpp>
 #include <nodehammer/tessellation/tessellation_job.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <nodehammer/tessellation/wedge_cut.hpp>
 
 #include <nodehammer/tessellation/boolean_tessellator.hpp>
 
@@ -432,6 +433,10 @@ TessellationPass::TessellationPass(const NHConfig &config) : config_(config) {}
 struct TessellationJob::Impl {
     const NHConfig *config{nullptr};
     const SemanticScene *scene{nullptr};
+    /// True when the scene carries the wedge-cut marker logVol, i.e. an
+    /// azimuthal cut was applied upstream. An empty merge_descendants result is
+    /// then an expected consequence of the cut, not a selection/config error.
+    bool wedgeCutApplied{false};
 
     TessellationPassResult result;
 
@@ -825,7 +830,12 @@ bool TessellationJob::Impl::stepOneNode() {
             }
         }
 
-        if (groups.empty()) {
+        if (groups.empty() && !wedgeCutApplied) {
+            // With a wedge cut applied, an empty merge is expected: the cut can
+            // empty (and the prune can remove) every descendant of a stave whose
+            // envelope straddled the cut. Rendering nothing is correct, so only
+            // warn when no cut is in play — i.e. the genuine "selection removed
+            // them" config case this diagnostic was meant to catch.
             result.diags.warn(
                 codes::kWarnTessMergeEmpty,
                 std::format("merge_descendants on '{}' produced no geometry — node has no "
@@ -1024,6 +1034,9 @@ void TessellationJob::start(const NHConfig &config, const SemanticScene &scene) 
     impl_ = std::make_unique<Impl>();
     impl_->config = &config;
     impl_->scene = &scene;
+    impl_->wedgeCutApplied =
+        std::any_of(scene.logVols.begin(), scene.logVols.end(),
+                    [](const auto &kv) { return kv.second.name == kWedgeEmptyLogVolName; });
     // Compile rule match predicates once up front, reused across every resolver
     // call. The resolve* helpers each iterate every rule for every node, so
     // compiling per-call dominated the tessellation profile.

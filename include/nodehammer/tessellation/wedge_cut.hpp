@@ -4,8 +4,17 @@
 #include <nodehammer/ir/semantic.hpp>
 
 #include <cstddef>
+#include <string_view>
 
 namespace nodehammer {
+
+/// Name of the shared logical volume `applyWedgeCut` binds placements to when
+/// they fall entirely inside the removed sector (an empty shape that renders
+/// nothing). Its presence in a scene's logVols also serves as a marker that a
+/// (non-degenerate) wedge cut was applied — used downstream to recognise that an
+/// empty `merge_descendants` result is an expected consequence of the cut rather
+/// than a selection/config error.
+inline constexpr std::string_view kWedgeEmptyLogVolName = "__wedge_empty";
 
 /// Parameters for an azimuthal "wedge" cut about the global z-axis.
 ///

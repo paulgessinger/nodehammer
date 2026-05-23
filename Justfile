@@ -139,10 +139,11 @@ wasm-release: wasm-deps-release wasm-configure-release wasm-build-release
 #     file-picker uploads.
 #
 # Usage:
-#   just wasm-serve            # ODD scene, autoload (default)
-#   just wasm-serve odd        # explicit ODD scene, autoload
-#   just wasm-serve none       # no manifest; upload-only deployment
-#   just wasm-serve odd 9000   # ODD scene on a custom port
+#   just wasm-serve                 # ODD scene, autoload (default)
+#   just wasm-serve odd             # explicit ODD scene, autoload
+#   just wasm-serve odd_simple      # simplified ODD scene, autoload
+#   just wasm-serve none            # no manifest; upload-only deployment
+#   just wasm-serve odd 9000        # ODD scene on a custom port
 wasm-serve scene='odd' port='8000':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -161,9 +162,10 @@ wasm-serve scene='odd' port='8000':
 # with `just wasm-release`.
 #
 # Usage:
-#   just wasm-copy                         # copy ODD autoload bundle to build/wasm-viewer
-#   just wasm-copy odd public/viewer       # copy ODD autoload bundle to a custom directory
-#   just wasm-copy none public/viewer      # copy upload-only bundle
+#   just wasm-copy                              # copy ODD autoload bundle to build/wasm-viewer
+#   just wasm-copy odd public/viewer            # copy ODD autoload bundle to a custom directory
+#   just wasm-copy odd_simple public/viewer     # copy simplified ODD autoload bundle
+#   just wasm-copy none public/viewer           # copy upload-only bundle
 wasm-copy scene='odd' target='build/wasm-viewer':
     #!/usr/bin/env bash
     set -euo pipefail

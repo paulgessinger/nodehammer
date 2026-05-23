@@ -39,55 +39,66 @@ double sectorSpan(double start, double end) {
     return s > 0.0 ? s : s + kTau;
 }
 
-bool angleInRange(double angle, double start, double end) {
-    angle = normAngle(angle);
-    start = normAngle(start);
-    end = normAngle(end);
-    if (std::abs(start - end) < 1e-9) {
-        return false;
-    }
-    if (start <= end) {
-        return angle >= start && angle <= end;
-    }
-    return angle >= start || angle <= end;
-}
-
-/// True iff the xy projection of the AABB lies entirely within the angular
-/// sector [start, end] (CCW). Conservative: a box spanning the z-axis covers
-/// all angles and is never "fully inside" any proper sector.
-bool aabbFullyInsideSector(const glm::dvec3 &lo, const glm::dvec3 &hi, double start, double end) {
-    if (std::abs(normAngle(start) - normAngle(end)) < 1e-9) {
-        return false;
-    }
+/// Angular arc [arcLo, arcLo+arcWidth] (CCW) subtended by the xy projection of
+/// an AABB, as seen from the z-axis. Returns false if the box straddles the
+/// z-axis (then it covers every angle and has no finite arc). A convex region
+/// not enclosing the origin spans < pi, so the four corner directions all lie on
+/// a single arc < pi — found as the complement of the largest circular gap
+/// between adjacent corner angles. This is exact for the box's true angular
+/// extent, unlike testing whether individual corners fall inside a sector (which
+/// misses a sector narrower than the box that slips between two corners).
+bool aabbAngularArc(const glm::dvec3 &lo, const glm::dvec3 &hi, double &arcLo, double &arcWidth) {
     if (lo.x <= 0.0 && hi.x >= 0.0 && lo.y <= 0.0 && hi.y >= 0.0) {
         return false; // contains the z-axis → spans every angle
     }
-
-    // For sectors wider than a half-turn, testing the (narrow) complementary
-    // sector is numerically cleaner: "inside the wide sector" == "no corner in
-    // the narrow complement".
-    const double width = sectorSpan(start, end);
-    const bool testKept = width > 0.5 * kTau;
-    const double tStart = testKept ? end : start;
-    const double tEnd = testKept ? start : end;
-
-    const std::array<glm::dvec2, 4> corners{{
-        {lo.x, lo.y},
-        {lo.x, hi.y},
-        {hi.x, lo.y},
-        {hi.x, hi.y},
+    std::array<double, 4> a{{
+        normAngle(std::atan2(lo.y, lo.x)),
+        normAngle(std::atan2(lo.y, hi.x)),
+        normAngle(std::atan2(hi.y, lo.x)),
+        normAngle(std::atan2(hi.y, hi.x)),
     }};
-    for (const auto &c : corners) {
-        const bool inTest = angleInRange(std::atan2(c.y, c.x), tStart, tEnd);
-        if (testKept) {
-            if (inTest) {
-                return false;
-            }
-        } else if (!inTest) {
-            return false;
+    std::sort(a.begin(), a.end());
+    // Largest gap between consecutive corner angles (including the wrap gap from
+    // the last back to the first). The arc is everything except that gap.
+    double maxGap = (a[0] + kTau) - a[3];
+    std::size_t gapIdx = 3; // wrap gap sits "after" a[3]
+    for (std::size_t i = 0; i < 3; ++i) {
+        const double g = a[i + 1] - a[i];
+        if (g > maxGap) {
+            maxGap = g;
+            gapIdx = i;
         }
     }
+    arcLo = a[(gapIdx + 1) % 4];
+    arcWidth = kTau - maxGap;
     return true;
+}
+
+/// True iff the AABB's angular arc lies entirely within the CCW removed sector
+/// [start, start+removedWidth]. Conservative: a box straddling the z-axis (no
+/// finite arc) is never "fully inside" a proper sector.
+bool aabbArcInsideRemoved(const glm::dvec3 &lo, const glm::dvec3 &hi, double start,
+                          double removedWidth) {
+    double arcLo = 0.0, arcWidth = 0.0;
+    if (!aabbAngularArc(lo, hi, arcLo, arcWidth)) {
+        return false;
+    }
+    const double off = normAngle(arcLo - start); // arc start relative to sector start
+    return off + arcWidth <= removedWidth + 1e-9;
+}
+
+/// True iff the AABB's angular arc is disjoint from the removed sector, i.e. it
+/// lies entirely within the kept sector [start+removedWidth, start+tau].
+bool aabbArcInsideKept(const glm::dvec3 &lo, const glm::dvec3 &hi, double start,
+                       double removedWidth) {
+    double arcLo = 0.0, arcWidth = 0.0;
+    if (!aabbAngularArc(lo, hi, arcLo, arcWidth)) {
+        return false;
+    }
+    const double keptStart = normAngle(start + removedWidth);
+    const double keptWidth = kTau - removedWidth;
+    const double off = normAngle(arcLo - keptStart);
+    return off + arcWidth <= keptWidth + 1e-9;
 }
 
 // ── Conservative local-frame AABB per shape ───────────────────────────────────
@@ -333,8 +344,8 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params,
     const SemanticMaterialId fillerMat =
         scene.materials.empty() ? SemanticMaterialId{} : scene.materials.begin()->first;
     const SemanticLogVolId emptyLvId = scene.nextLogVolId();
-    scene.logVols[emptyLvId] =
-        SemanticLogicalVolume{emptyLvId, "__wedge_empty", emptyShapeId, fillerMat};
+    scene.logVols[emptyLvId] = SemanticLogicalVolume{emptyLvId, std::string{kWedgeEmptyLogVolName},
+                                                     emptyShapeId, fillerMat};
 
     // The two bounding half-planes of the removed sector, through the global
     // z-axis (normal in xy, d = 0). Used to build per-placement cut signatures.
@@ -372,12 +383,12 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params,
         }
         const Aabb world = transformAabb(local, node.worldTransform);
 
-        if (aabbFullyInsideSector(world.lo, world.hi, startRad, endRad)) {
+        if (aabbArcInsideRemoved(world.lo, world.hi, startRad, removedWidth)) {
             // Fully inside the removed sector → render nothing.
             node.logVolId = emptyLvId;
             ++stats.emptied;
             hasOwnGeom[id] = false;
-        } else if (aabbFullyInsideSector(world.lo, world.hi, endRad, startRad)) {
+        } else if (aabbArcInsideKept(world.lo, world.hi, startRad, removedWidth)) {
             // Fully inside the kept sector → leave shared (instanced).
             ++stats.kept;
             hasOwnGeom[id] = true;
