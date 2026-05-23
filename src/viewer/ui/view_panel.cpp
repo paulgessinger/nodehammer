@@ -82,19 +82,45 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
     }
     ImGui::Checkbox("auto orbit", &ctx.cfg.auto_orbit);
     ImGui::SliderFloat("orbit speed", &ctx.cfg.auto_orbit_speed_deg, -90.f, 90.f, "%.1f deg/s");
+    auto request_rebuild = [&]() {
+        if (actions.request_scene_rebuild) {
+            actions.request_scene_rebuild();
+        }
+    };
+
     ImGui::Checkbox("angle cut", &ctx.cfg.angle_cut);
     ImGui::Checkbox("shader angle cut", &ctx.cfg.shader_angle_cut);
+    // The Boolean cut produces real watertight cut faces but needs a full
+    // re-tessellation, so toggling it (or committing a new angle below) kicks
+    // off an async rebuild rather than updating live like the shader cut.
+    if (ImGui::Checkbox("boolean cut", &ctx.cfg.boolean_cut)) {
+        request_rebuild();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("(rebuilds)");
+
+    // Mid-drag the shader cut previews the angle; on release/commit we rebuild
+    // the Boolean cut at the committed angle (only when boolean cut is enabled).
+    bool cut_committed = false;
     ImGui::SliderFloat("cut start", &ctx.cfg.angle_cut_start_deg, 0.f, 360.f, "%.1f deg");
+    cut_committed |= ImGui::IsItemDeactivatedAfterEdit();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80.f);
     if (ImGui::InputFloat("##cut_start_input", &ctx.cfg.angle_cut_start_deg, 1.f, 15.f, "%.1f")) {
         ctx.cfg.angle_cut_start_deg = wrapDegrees(ctx.cfg.angle_cut_start_deg);
     }
+    cut_committed |= ImGui::IsItemDeactivatedAfterEdit();
     ImGui::SliderFloat("cut end", &ctx.cfg.angle_cut_end_deg, 0.f, 360.f, "%.1f deg");
+    cut_committed |= ImGui::IsItemDeactivatedAfterEdit();
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80.f);
     if (ImGui::InputFloat("##cut_end_input", &ctx.cfg.angle_cut_end_deg, 1.f, 15.f, "%.1f")) {
         ctx.cfg.angle_cut_end_deg = wrapDegrees(ctx.cfg.angle_cut_end_deg);
+    }
+    cut_committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+    if (ctx.cfg.boolean_cut && cut_committed) {
+        request_rebuild();
     }
 
     ImGui::Separator();

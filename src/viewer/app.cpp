@@ -177,6 +177,20 @@ struct App::Impl {
     bool build_in_progress{false};
     std::chrono::steady_clock::time_point build_start_time{};
 
+    // Pristine (pre-cut) build inputs, cached on each fresh BuildSession build
+    // so toggling or re-aiming the Boolean angle cut can re-prep + re-tessellate
+    // from uncut geometry without re-walking the project. The cut is applied in
+    // the prep stage, which mutates the scene, so we must always re-derive from
+    // this clean copy rather than from the already-cut result.
+    std::shared_ptr<const ::nodehammer::SemanticScene> pristine_scene;
+    ::nodehammer::NHConfig pristine_config;
+    std::string pristine_config_label;
+    std::string pristine_geometry_label;
+
+    // Set by the UI when the Boolean cut is toggled or its angle committed;
+    // consumed by the build-drive loop to kick off a re-tessellation.
+    bool rebuild_requested{false};
+
     // Live progress-toast handle for the build. 0 means "no toast in flight";
     // populated when we kick off the build and cleared on finish/cancel.
     ui::Notifications::ProgressHandle build_progress_handle{0};
@@ -886,6 +900,7 @@ std::string App::Impl::browserUrlStateQuery() const {
     appendUrlFloat(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
     appendUrlBool(query, "angleCut", cfg.angle_cut, false);
     appendUrlBool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
+    appendUrlBool(query, "booleanCut", cfg.boolean_cut, false);
     appendUrlFloat(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
     appendUrlFloat(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
     appendUrlBool(query, "pbr", cfg.enable_pbr, true);
@@ -905,7 +920,8 @@ void App::Impl::syncBrowserUrl() const {
     if constexpr (platform::kIsWeb) {
         const std::string state_query = browserUrlStateQuery();
         constexpr const char *kManagedKeys =
-            "cull,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,cutStart,"
+            "cull,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,booleanCut,"
+            "cutStart,"
             "cutEnd,"
             "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch,"
             "cameraProjection";
@@ -1211,19 +1227,48 @@ void App::Impl::onFrame() {
     // session's root keys but never actually walk → parse → build the
     // new selection. The build-job completion above swaps `scene` over
     // when the new build lands.
+    // Kick off a (re)build, deriving the Boolean wedge cut from the live config.
+    // Takes the inputs by value so the caller can hand over either fresh
+    // BuildSession inputs or copies of the cached pristine scene.
+    auto start_build = [this](::nodehammer::NHConfig config,
+                              ::nodehammer::SemanticScene semantic_scene, std::string config_label,
+                              std::string geometry_label) {
+        build_start_time = std::chrono::steady_clock::now();
+        std::optional<::nodehammer::WedgeCutParams> wedge;
+        if (cfg.boolean_cut) {
+            wedge = ::nodehammer::WedgeCutParams{cfg.angle_cut_start_deg, cfg.angle_cut_end_deg};
+        }
+        build_job.start(std::move(config), std::move(semantic_scene), std::move(config_label),
+                        std::move(geometry_label), wedge);
+        build_in_progress = true;
+        build_progress_handle = notifications.startProgress("Tessellating...");
+    };
+
     if (project_) {
         project_->poll();
         build_session.poll(project_.get());
 
         if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
             if (auto inputs = build_session.takeInputs()) {
-                build_start_time = std::chrono::steady_clock::now();
-                build_job.start(std::move(inputs->config.config), std::move(inputs->import.scene),
-                                std::move(inputs->config_key), std::move(inputs->geometry_key));
-                build_in_progress = true;
-                build_progress_handle = notifications.startProgress("Tessellating...");
+                // Cache pristine (uncut) inputs so a later cut re-derives cleanly.
+                pristine_config = inputs->config.config;
+                pristine_scene =
+                    std::make_shared<const ::nodehammer::SemanticScene>(inputs->import.scene);
+                pristine_config_label = inputs->config_key;
+                pristine_geometry_label = inputs->geometry_key;
+                rebuild_requested = false; // fresh build already reflects current cfg
+                start_build(std::move(inputs->config.config), std::move(inputs->import.scene),
+                            std::move(inputs->config_key), std::move(inputs->geometry_key));
             }
         }
+    }
+
+    // Boolean-cut change requested by the UI: re-prep + re-tessellate from the
+    // cached pristine scene (never from already-cut geometry).
+    if (rebuild_requested && !build_in_progress && pristine_scene) {
+        rebuild_requested = false;
+        start_build(pristine_config, *pristine_scene, pristine_config_label,
+                    pristine_geometry_label);
     }
 
     ui::ViewerUiContext ui_ctx{
@@ -1257,6 +1302,7 @@ void App::Impl::onFrame() {
     ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
     ui_actions.open_url = [this](const std::string &url) { platform_->openUrl(url); };
     ui_actions.rebake_ibl = [this]() { ibl_rebake_pending = true; };
+    ui_actions.request_scene_rebuild = [this]() { rebuild_requested = true; };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
     ui_actions.frame_scene = [this]() {

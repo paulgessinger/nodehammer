@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -33,6 +34,7 @@ struct SceneBuildJob::Impl {
     // Pre-prepared inputs handed in by `start`.
     std::unique_ptr<::nodehammer::NHConfig> preset_config;
     std::unique_ptr<::nodehammer::SemanticScene> preset_scene;
+    std::optional<::nodehammer::WedgeCutParams> wedge_cut;
 
     ::nodehammer::SceneBuildResult result;
 };
@@ -41,11 +43,13 @@ SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
 SceneBuildJob::~SceneBuildJob() = default;
 
 void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
-                          std::string config_label, std::string geometry_label) {
+                          std::string config_label, std::string geometry_label,
+                          std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
     impl_->config_label = std::move(config_label);
     impl_->geometry_label = std::move(geometry_label);
     impl_->preset_config = std::make_unique<::nodehammer::NHConfig>(std::move(config));
     impl_->preset_scene = std::make_unique<::nodehammer::SemanticScene>(std::move(scene));
+    impl_->wedge_cut = wedge_cut;
     impl_->result = {};
     impl_->prep = {};
     impl_->tess_job = ::nodehammer::TessellationJob{};
@@ -66,7 +70,7 @@ bool SceneBuildJob::poll(uint64_t budget_ns) {
     case Impl::State::PrepPending: {
         logPreBuild(impl_->config_label, impl_->geometry_label);
         impl_->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
-            std::move(*impl_->preset_config), std::move(*impl_->preset_scene));
+            std::move(*impl_->preset_config), std::move(*impl_->preset_scene), impl_->wedge_cut);
         impl_->preset_config.reset();
         impl_->preset_scene.reset();
         if (!impl_->prep.ok) {

@@ -23,6 +23,7 @@ struct ConfigStartupOverrides {
     std::optional<float> auto_orbit_speed_deg;
     std::optional<bool> angle_cut;
     std::optional<bool> shader_angle_cut;
+    std::optional<bool> boolean_cut;
     std::optional<float> angle_cut_start_deg;
     std::optional<float> angle_cut_end_deg;
     std::optional<bool> enable_pbr;
@@ -40,6 +41,10 @@ struct Config {
     float auto_orbit_speed_deg{15.f};
     bool angle_cut{false};
     bool shader_angle_cut{true};
+    /// Analytical Boolean wedge cut. Unlike the render-time shader/instance
+    /// cut, this rebuilds the scene with watertight cut faces; toggling it or
+    /// committing a new cut angle triggers an async re-tessellation.
+    bool boolean_cut{false};
     float angle_cut_start_deg{0.f};
     float angle_cut_end_deg{90.f};
     bool enable_pbr{true};

@@ -38,6 +38,10 @@ struct UiActions {
     std::function<void()> close_project;
     std::function<void()> rescan_project;
     std::function<void()> rebake_ibl;
+    /// Request an async scene re-tessellation (e.g. the Boolean angle cut was
+    /// toggled or its angle committed). Coalesced and serviced by the App's
+    /// build-drive loop from the cached pristine scene.
+    std::function<void()> request_scene_rebuild;
     std::function<void(std::string)> select_config_key;
     std::function<void(std::string)> select_geometry_key;
 };

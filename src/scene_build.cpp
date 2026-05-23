@@ -6,13 +6,16 @@
 #include <nodehammer/ir/semantic/importer.hpp>
 #include <nodehammer/selection/selector.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <nodehammer/tessellation/wedge_cut.hpp>
 
 #include <memory>
+#include <optional>
 #include <utility>
 
 namespace nodehammer {
 
-ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene) {
+ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene,
+                                                      std::optional<WedgeCutParams> wedgeCut) {
     ScenePrepResult prep;
     prep.config = std::move(config);
     prep.scene = std::move(scene);
@@ -36,6 +39,12 @@ ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticS
         prep.scene.deduplicateMaterials();
         prep.scene.deduplicateShapes();
         prep.scene.deduplicateLogVols();
+    }
+
+    // Azimuthal wedge cut runs after dedup so cut shapes that share an
+    // identical local-frame cut stay instanced (mirrors the convert CLI).
+    if (wedgeCut) {
+        (void)applyWedgeCut(prep.scene, *wedgeCut, prep.diags);
     }
 
     prep.ok = true;

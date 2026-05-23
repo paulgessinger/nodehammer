@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <utility>
@@ -37,6 +38,7 @@ struct SceneBuildJob::Impl {
     // Pre-prepared inputs handed in by `start`.
     std::unique_ptr<::nodehammer::NHConfig> preset_config;
     std::unique_ptr<::nodehammer::SemanticScene> preset_scene;
+    std::optional<::nodehammer::WedgeCutParams> wedge_cut;
 
     ::nodehammer::SceneBuildResult result;
 };
@@ -50,11 +52,13 @@ SceneBuildJob::~SceneBuildJob() {
 }
 
 void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
-                          std::string config_label, std::string geometry_label) {
+                          std::string config_label, std::string geometry_label,
+                          std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
     impl_->config_label = std::move(config_label);
     impl_->geometry_label = std::move(geometry_label);
     impl_->preset_config = std::make_unique<::nodehammer::NHConfig>(std::move(config));
     impl_->preset_scene = std::make_unique<::nodehammer::SemanticScene>(std::move(scene));
+    impl_->wedge_cut = wedge_cut;
     impl_->result = {};
 
     impl_->prep = {};
@@ -65,7 +69,7 @@ void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticS
     logPreBuild(impl_->config_label, impl_->geometry_label);
     impl_->worker = std::thread([impl = impl_.get()] {
         impl->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
-            std::move(*impl->preset_config), std::move(*impl->preset_scene));
+            std::move(*impl->preset_config), std::move(*impl->preset_scene), impl->wedge_cut);
         impl->preset_config.reset();
         impl->preset_scene.reset();
         if (!impl->prep.ok) {

@@ -4,9 +4,11 @@
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/tessellation/wedge_cut.hpp>
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 
 namespace nodehammer {
 
@@ -45,6 +47,12 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 /// pulled from a `ProjectFs`. No filesystem access. The result's
 /// `scene` is handed off to `TessellationJob` for cooperative
 /// iteration.
-ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene);
+///
+/// When `wedgeCut` is set, an azimuthal wedge cut is applied after dedup
+/// (matching the `convert --angle-cut` pipeline ordering), so the scene
+/// handed to tessellation already carries the Boolean-cut shapes.
+ScenePrepResult
+prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene,
+                                      std::optional<WedgeCutParams> wedgeCut = std::nullopt);
 
 } // namespace nodehammer

@@ -40,10 +40,10 @@ namespace {
 // sync with the readField calls below — the warnUnknownKeys check uses it
 // to flag silent typos in JSON keys (the boundary's main weakness vs. a
 // strongly-typed binding like embind).
-constexpr std::array<std::string_view, 17> kKnownOptionKeys = {
-    "title",     "width",      "height",   "vsync",          "cull",     "pauseWhenUnfocused",
-    "autoOrbit", "orbitSpeed", "angleCut", "shaderAngleCut", "cutStart", "cutEnd",
-    "pbr",       "input",      "config",   "assetBase",      "camera",
+constexpr std::array<std::string_view, 18> kKnownOptionKeys = {
+    "title",     "width",      "height",   "vsync",          "cull",       "pauseWhenUnfocused",
+    "autoOrbit", "orbitSpeed", "angleCut", "shaderAngleCut", "booleanCut", "cutStart",
+    "cutEnd",    "pbr",        "input",    "config",         "assetBase",  "camera",
 };
 
 constexpr std::array<std::string_view, 7> kKnownCameraKeys = {
@@ -167,6 +167,9 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
     }
     if (readField(j, "shaderAngleCut", cfg.shader_angle_cut)) {
         cfg.startup_overrides.shader_angle_cut = cfg.shader_angle_cut;
+    }
+    if (readField(j, "booleanCut", cfg.boolean_cut)) {
+        cfg.startup_overrides.boolean_cut = cfg.boolean_cut;
     }
     if (readField(j, "cutStart", cfg.angle_cut_start_deg)) {
         cfg.startup_overrides.angle_cut_start_deg = cfg.angle_cut_start_deg;

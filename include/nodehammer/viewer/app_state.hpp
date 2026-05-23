@@ -20,6 +20,7 @@ struct ViewerConfigState {
     float auto_orbit_speed_deg{15.f};
     bool angle_cut{false};
     bool shader_angle_cut{true};
+    bool boolean_cut{false};
     float angle_cut_start_deg{0.f};
     float angle_cut_end_deg{90.f};
     bool enable_pbr{true};

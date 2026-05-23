@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace nodehammer::viewer {
@@ -30,8 +31,13 @@ class SceneBuildJob {
     /// `take` is invalid; the App is expected to drive a single in-flight
     /// build at a time. The two `_label` strings are diagnostic-only —
     /// they show up in the pre-build log so failures stay attributable.
+    ///
+    /// When `wedge_cut` is set, the prep stage applies an azimuthal Boolean
+    /// wedge cut before tessellation; the caller passes a *pristine* scene so
+    /// re-cutting at a new angle re-derives from uncut geometry each build.
     void start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
-               std::string config_label, std::string geometry_label);
+               std::string config_label, std::string geometry_label,
+               std::optional<::nodehammer::WedgeCutParams> wedge_cut = std::nullopt);
 
     /// Drive progress. Returns true once the build has finished (either
     /// with a scene or with diagnostics describing a failure). Until then

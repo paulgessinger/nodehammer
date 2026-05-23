@@ -175,6 +175,7 @@ ViewerConfigState viewerConfigStateFrom(const Config &cfg, const Camera &camera)
     state.auto_orbit_speed_deg = cfg.auto_orbit_speed_deg;
     state.angle_cut = cfg.angle_cut;
     state.shader_angle_cut = cfg.shader_angle_cut;
+    state.boolean_cut = cfg.boolean_cut;
     state.angle_cut_start_deg = cfg.angle_cut_start_deg;
     state.angle_cut_end_deg = cfg.angle_cut_end_deg;
     state.enable_pbr = cfg.enable_pbr;
@@ -189,6 +190,7 @@ void applyViewerConfigState(const ViewerConfigState &state, Config &cfg, Camera 
     cfg.auto_orbit_speed_deg = state.auto_orbit_speed_deg;
     cfg.angle_cut = state.angle_cut;
     cfg.shader_angle_cut = state.shader_angle_cut;
+    cfg.boolean_cut = state.boolean_cut;
     cfg.angle_cut_start_deg = state.angle_cut_start_deg;
     cfg.angle_cut_end_deg = state.angle_cut_end_deg;
     cfg.enable_pbr = state.enable_pbr;
@@ -216,6 +218,9 @@ void applyViewerStartupOverrides(const ConfigStartupOverrides &overrides, Config
     }
     if (overrides.shader_angle_cut) {
         cfg.shader_angle_cut = *overrides.shader_angle_cut;
+    }
+    if (overrides.boolean_cut) {
+        cfg.boolean_cut = *overrides.boolean_cut;
     }
     if (overrides.angle_cut_start_deg) {
         cfg.angle_cut_start_deg = *overrides.angle_cut_start_deg;
@@ -248,6 +253,7 @@ std::string viewerConfigStateToToml(const ViewerConfigState &state) {
         {"auto_orbit_speed_deg", state.auto_orbit_speed_deg},
         {"angle_cut", state.angle_cut},
         {"shader_angle_cut", state.shader_angle_cut},
+        {"boolean_cut", state.boolean_cut},
         {"angle_cut_start_deg", state.angle_cut_start_deg},
         {"angle_cut_end_deg", state.angle_cut_end_deg},
         {"enable_pbr", state.enable_pbr},
@@ -283,6 +289,7 @@ std::optional<ViewerConfigState> viewerConfigStateFromToml(std::string_view byte
         readFloat(*view, "auto_orbit_speed_deg", state.auto_orbit_speed_deg);
         readBool(*view, "angle_cut", state.angle_cut);
         readBool(*view, "shader_angle_cut", state.shader_angle_cut);
+        readBool(*view, "boolean_cut", state.boolean_cut);
         readFloat(*view, "angle_cut_start_deg", state.angle_cut_start_deg);
         readFloat(*view, "angle_cut_end_deg", state.angle_cut_end_deg);
         readBool(*view, "enable_pbr", state.enable_pbr);
