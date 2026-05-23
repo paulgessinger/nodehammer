@@ -237,6 +237,13 @@ class SemanticScene {
     ankerl::unordered_dense::map<SemanticShapeId, SemanticShape> shapes;
     ankerl::unordered_dense::map<SemanticMaterialId, SourceMaterial> materials;
 
+    /// Reseed the ID allocation counters so that nextXxxId() returns values
+    /// greater than every ID currently present in the maps. Deserializing
+    /// importers (JSON/FlatBuffer) populate the maps directly with pre-existing
+    /// IDs without advancing the counters; call this before allocating new IDs
+    /// on a loaded scene to avoid colliding with — and overwriting — them.
+    void reseedIdCounters();
+
     /// BFS pass: compose parent × local to set worldTransform on every node.
     void computeWorldTransforms();
 

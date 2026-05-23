@@ -11,6 +11,7 @@
 #include <nodehammer/ir/semantic/importer.hpp>
 #include <nodehammer/selection/selector.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <nodehammer/tessellation/wedge_cut.hpp>
 #include <print>
 #include <string>
 
@@ -86,6 +87,16 @@ void registerCmdConvert(CLI::App &app) {
     auto *strictOpt = sub->add_flag("--strict", "Treat warnings as errors");
     auto *timingOpt = sub->add_flag("--timing", "Print per-step wall-clock timings");
 
+    auto *angleCutOpt =
+        sub->add_option("--angle-cut",
+                        "Apply a precise azimuthal wedge cut (Manifold boolean): removes the "
+                        "sector from START to END degrees (from +x, CCW)")
+            ->expected(2)
+            ->type_name("START END");
+    auto *acMarginOpt =
+        sub->add_option("--angle-cut-margin", "Cutting-solid oversize factor (default 2.0)")
+            ->needs(angleCutOpt);
+
     sub->callback([=] {
         std::string outputFmt;
         std::vector<std::string> outputPaths;
@@ -157,6 +168,28 @@ void registerCmdConvert(CLI::App &app) {
                              importResult.scene.shapes.size(), importResult.scene.logVols.size(),
                              importResult.scene.materials.size());
             }
+        }
+
+        // ── Wedge cut (optional) ────────────────────────────────────────────────
+        if (angleCutOpt->count() > 0) {
+            auto _t = timings.scope("wedgecut");
+            std::vector<double> angles;
+            angleCutOpt->results(angles); // exactly 2 (enforced by expected(2))
+            nodehammer::WedgeCutParams wcp;
+            wcp.startDeg = angles[0];
+            wcp.endDeg = angles[1];
+            if (*acMarginOpt) {
+                wcp.margin = acMarginOpt->as<double>();
+            }
+            nodehammer::DiagnosticList wcDiags;
+            const auto wcStats = nodehammer::applyWedgeCut(importResult.scene, wcp, wcDiags);
+            printDiags(wcDiags);
+            std::println(
+                stderr,
+                "Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} kept, "
+                "{} skipped, {} pruned",
+                wcp.startDeg, wcp.endDeg, wcStats.cut, wcStats.cutUnique, wcStats.emptied,
+                wcStats.kept, wcStats.skipped, wcStats.pruned);
         }
 
         // ── Tessellate ─────────────────────────────────────────────────────────

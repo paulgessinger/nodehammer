@@ -124,6 +124,7 @@ add_library(nodehammer_lib STATIC
     src/selection/selector.cpp
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
+    src/tessellation/wedge_cut.cpp
     src/ir/gltf/render/exporter.cpp
     src/ir/obj/render/exporter.cpp
     src/ir/render/exporter_registry.cpp

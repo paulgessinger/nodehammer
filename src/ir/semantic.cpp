@@ -224,6 +224,19 @@ bool ShapeEqual::operator()(const SemanticShapeVariant &a, const SemanticShapeVa
 
 } // namespace
 
+void SemanticScene::reseedIdCounters() {
+    auto maxKey = [](const auto &map, uint64_t seed) {
+        for (const auto &[id, _] : map) {
+            seed = std::max(seed, id.value);
+        }
+        return seed;
+    };
+    nextNodeId_ = maxKey(nodes, nextNodeId_ - 1) + 1;
+    nextLogVolId_ = maxKey(logVols, nextLogVolId_ - 1) + 1;
+    nextShapeId_ = maxKey(shapes, nextShapeId_ - 1) + 1;
+    nextMaterialId_ = maxKey(materials, nextMaterialId_ - 1) + 1;
+}
+
 void SemanticScene::computeWorldTransforms() {
     if (nodes.empty() || !nodes.contains(rootId)) {
         return;
