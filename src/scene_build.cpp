@@ -44,7 +44,7 @@ ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticS
     // Azimuthal wedge cut runs after dedup so cut shapes that share an
     // identical local-frame cut stay instanced (mirrors the convert CLI).
     if (wedgeCut) {
-        (void)applyWedgeCut(prep.scene, *wedgeCut, prep.diags);
+        (void)applyWedgeCut(prep.scene, *wedgeCut);
     }
 
     prep.ok = true;

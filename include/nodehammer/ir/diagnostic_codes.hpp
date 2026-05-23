@@ -50,7 +50,6 @@ inline constexpr std::string_view kWarnTessMergeMixedMaterials = "NH0504";
 inline constexpr std::string_view kWarnTessMergeEmpty = "NH0505";
 inline constexpr std::string_view kWarnTessBooleanManifoldFail = "NH0506";
 inline constexpr std::string_view kWarnTessDefaultMaterial = "NH0507";
-inline constexpr std::string_view kInfoWedgeCutApplied = "NH0508";
 
 // ── Export ────────────────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrExportWriteFailed = "NH0600";

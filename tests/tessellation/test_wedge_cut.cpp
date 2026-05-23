@@ -99,8 +99,7 @@ bool meshNonEmpty(const RenderScene &rs, MeshAssetId mid) {
 
 TEST_CASE("wedge cut: classifies placements by sector", "[tessellation][wedgecut]") {
     auto ts = makeScene();
-    DiagnosticList diags;
-    const auto stats = applyWedgeCut(ts.scene, {0.0, 90.0}, diags);
+    const auto stats = applyWedgeCut(ts.scene, {0.0, 90.0});
 
     // A, B kept; C emptied; D + world straddle.
     CHECK(stats.kept == 2);
@@ -117,8 +116,7 @@ TEST_CASE("wedge cut: classifies placements by sector", "[tessellation][wedgecut
 
 TEST_CASE("wedge cut: lowers to a valid render scene", "[tessellation][wedgecut]") {
     auto ts = makeScene();
-    DiagnosticList diags;
-    (void)applyWedgeCut(ts.scene, {0.0, 90.0}, diags);
+    (void)applyWedgeCut(ts.scene, {0.0, 90.0});
 
     NHConfig cfg;
     TessellationPass pass{cfg};
@@ -156,8 +154,7 @@ TEST_CASE("wedge cut: removes the geometry on the requested side", "[tessellatio
     // not intersect it and survive intact — so its mesh would still carry +y
     // vertices. The box is a pure translation, so its local mesh y matches world.
     auto ts = makeScene();
-    DiagnosticList diags;
-    (void)applyWedgeCut(ts.scene, {0.0, 90.0}, diags);
+    (void)applyWedgeCut(ts.scene, {0.0, 90.0});
 
     NHConfig cfg;
     TessellationPass pass{cfg};
@@ -209,37 +206,34 @@ TEST_CASE("wedge cut: a narrow sector inside a wide AABB still cuts", "[tessella
     scene.rootId = root;
     scene.computeWorldTransforms();
 
-    DiagnosticList diags;
-    const auto stats = applyWedgeCut(scene, {10.0, 20.0}, diags);
+    const auto stats = applyWedgeCut(scene, {10.0, 20.0});
     CHECK(stats.cut == 1); // straddles → boolean-cut
     CHECK(stats.kept == 0);
     CHECK(stats.emptied == 0);
 }
 
 TEST_CASE("wedge cut: degenerate sectors are a no-op", "[tessellation][wedgecut]") {
-    DiagnosticList diags;
 
     auto same = makeScene();
     const auto shapesBefore = same.scene.shapes.size();
-    const auto statsSame = applyWedgeCut(same.scene, {45.0, 45.0}, diags);
+    const auto statsSame = applyWedgeCut(same.scene, {45.0, 45.0});
     CHECK(statsSame.cut == 0);
     CHECK(statsSame.emptied == 0);
     CHECK(statsSame.kept == 0);
     CHECK(same.scene.shapes.size() == shapesBefore);
 
     auto full = makeScene();
-    const auto statsFull = applyWedgeCut(full.scene, {0.0, 360.0}, diags);
+    const auto statsFull = applyWedgeCut(full.scene, {0.0, 360.0});
     CHECK(statsFull.cut == 0);
     CHECK(full.scene.shapes.size() == shapesBefore);
 }
 
 TEST_CASE("wedge cut: wrap-around sector across 0°", "[tessellation][wedgecut]") {
     auto ts = makeScene();
-    DiagnosticList diags;
     // Removed 10° straddling the +x axis (355°→5°), narrower than D's ~14°
     // angular span so D crosses both boundaries → straddle; A and B (third
     // quadrant) are well clear → kept.
-    const auto stats = applyWedgeCut(ts.scene, {355.0, 5.0}, diags);
+    const auto stats = applyWedgeCut(ts.scene, {355.0, 5.0});
     CHECK(stats.kept >= 2);
     CHECK(stats.cut >= 1);
 
@@ -293,8 +287,7 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     scene.nodes[m1].localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{-1, 0, 0});
     scene.computeWorldTransforms();
 
-    DiagnosticList diags;
-    const auto stats = applyWedgeCut(scene, {0.0, 90.0}, diags);
+    const auto stats = applyWedgeCut(scene, {0.0, 90.0});
     CHECK(stats.cut == 1);     // the root straddles
     CHECK(stats.emptied == 3); // stave + 2 modules fully inside
     CHECK(stats.pruned == 3);  // and all three pruned
@@ -348,8 +341,7 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
     scene.nodes[root].children = {pxZ0, pxZ50, py};
     scene.computeWorldTransforms();
 
-    DiagnosticList diags;
-    const auto stats = applyWedgeCut(scene, {0.0, 90.0}, diags);
+    const auto stats = applyWedgeCut(scene, {0.0, 90.0});
     CHECK(stats.cut == 3);
     CHECK(stats.cutUnique == 2);
 
@@ -393,11 +385,87 @@ TEST_CASE("wedge cut: allocates fresh IDs without overwriting existing shapes",
     scene.rootId = node;
     scene.computeWorldTransforms();
 
-    DiagnosticList diags;
-    const auto stats = applyWedgeCut(scene, {0.0, 90.0}, diags);
+    const auto stats = applyWedgeCut(scene, {0.0, 90.0});
     CHECK(stats.cut == 1);
     // The original box shape must still be intact (not overwritten by a new
     // wedge/cut shape that collided with ID 1000…).
     REQUIRE(scene.shapes.contains(shape));
     CHECK(std::holds_alternative<BoxShape>(scene.shapes.at(shape).data));
+}
+
+TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
+          "[tessellation][wedgecut]") {
+    // Regression for the ODD `slice1_0` failure. A merge_descendants parent with
+    // fallback="fail" contains a descendant whose Boolean cut removes it entirely
+    // (the solid lay wholly inside the removed wedge, or its kept sliver collapsed
+    // below Manifold's tolerance). That yields an empty *but succeeded* mesh. The
+    // merge path used to treat empty-vertices as a tessellation failure and emit
+    // NH0503; it must instead skip the emptied descendant and still merge the rest.
+    SemanticScene scene;
+
+    const auto mat = scene.nextMaterialId();
+    scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
+
+    // A small box fully contained inside a larger subtractor at the same place →
+    // Box - Box is empty, and Manifold reports success (NoError).
+    const auto smallShape = scene.nextShapeId();
+    scene.shapes[smallShape] = {smallShape, BoxShape{1, 1, 1}};
+    const auto bigShape = scene.nextShapeId();
+    scene.shapes[bigShape] = {bigShape, BoxShape{5, 5, 5}};
+    const auto emptiedShape = scene.nextShapeId();
+    scene.shapes[emptiedShape] = {emptiedShape,
+                                  BooleanSubtraction{smallShape, bigShape, glm::dmat4{1.0}}};
+
+    // An ordinary box sibling so the merge group still produces geometry.
+    const auto keepShape = scene.nextShapeId();
+    scene.shapes[keepShape] = {keepShape, BoxShape{1, 1, 1}};
+    const auto worldShape = scene.nextShapeId();
+    scene.shapes[worldShape] = {worldShape, BoxShape{20, 20, 20}};
+
+    const auto emptiedLv = scene.nextLogVolId();
+    scene.logVols[emptiedLv] = {emptiedLv, "emptied_lv", emptiedShape, mat};
+    const auto keepLv = scene.nextLogVolId();
+    scene.logVols[keepLv] = {keepLv, "keep_lv", keepShape, mat};
+    const auto staveLv = scene.nextLogVolId();
+    scene.logVols[staveLv] = {staveLv, "stave_lv", worldShape, mat};
+
+    auto addNode = [&](const char *name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
+                       glm::dvec3 pos) {
+        const auto id = scene.nextNodeId();
+        SemanticNode n;
+        n.id = id;
+        n.name = name;
+        n.logVolId = lv;
+        n.localTransform = glm::translate(glm::dmat4{1.0}, pos);
+        n.parentId = parent;
+        scene.nodes[id] = n;
+        return id;
+    };
+
+    const auto stave = addNode("stave1", staveLv, std::nullopt, {0, 0, 0});
+    scene.rootId = stave;
+    const auto emptied = addNode("emptied_slice", emptiedLv, stave, {0, 0, 0});
+    const auto kept = addNode("kept_slice", keepLv, stave, {3, 0, 0});
+    scene.nodes[stave].children = {emptied, kept};
+    scene.computeWorldTransforms();
+
+    // Merge the stave's descendants with the strictest fallback.
+    NHConfig cfg;
+    Rule mergeRule;
+    mergeRule.match = PredicateExpr{NameGlobPredicate{"stave*"}};
+    mergeRule.tessellation = Rule::Tessellation{};
+    mergeRule.tessellation->mergeDescendants = true;
+    mergeRule.tessellation->fallback = BooleanFallback::Fail;
+    cfg.rules.push_back(mergeRule);
+
+    TessellationPass pass{cfg};
+    auto result = pass.lower(scene);
+
+    // The emptied Boolean must not be reported as a failure …
+    CHECK_FALSE(result.diags.hasErrors());
+    // … and the surviving sibling must still contribute a merged mesh.
+    const RenderNode *rn = findBySemId(result.scene, stave);
+    REQUIRE(rn);
+    REQUIRE(rn->meshBindings.size() == 1);
+    CHECK(meshNonEmpty(result.scene, rn->meshBindings[0].meshId));
 }

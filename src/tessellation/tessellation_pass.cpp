@@ -761,8 +761,12 @@ bool TessellationJob::Impl::stepOneNode() {
                     tessOut = tess.tessellate(descShape.data, descParams);
                 }
                 result.diags.append(tessOut.diags);
-                if (descIsBoolean && tessOut.vertices.empty()) {
-                    // Boolean tessellation failed — apply fallback.
+                if (descIsBoolean && !tessOut.succeeded) {
+                    // Boolean tessellation genuinely failed (operands unbuildable
+                    // or the boolean op errored) — apply fallback. An empty but
+                    // *succeeded* result (e.g. a wedge cut that removed the whole
+                    // descendant) is not a failure: it falls through to the
+                    // empty-vertices skip below and contributes nothing.
                     switch (rule.fallback) {
                     case BooleanFallback::Fail:
                         result.diags.error(

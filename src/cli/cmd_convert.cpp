@@ -181,9 +181,7 @@ void registerCmdConvert(CLI::App &app) {
             if (*acMarginOpt) {
                 wcp.margin = acMarginOpt->as<double>();
             }
-            nodehammer::DiagnosticList wcDiags;
-            const auto wcStats = nodehammer::applyWedgeCut(importResult.scene, wcp, wcDiags);
-            printDiags(wcDiags);
+            const auto wcStats = nodehammer::applyWedgeCut(importResult.scene, wcp);
             std::println(
                 stderr,
                 "Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} kept, "

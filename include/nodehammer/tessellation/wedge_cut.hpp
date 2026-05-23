@@ -1,6 +1,5 @@
 #pragma once
 
-#include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/semantic.hpp>
 
 #include <cstddef>
@@ -59,8 +58,8 @@ struct WedgeCutStats {
 ///
 /// World transforms are recomputed internally. If the removed sector is
 /// degenerate (≈0° or ≈360°) the scene is left unchanged and an all-zero stats
-/// value is returned.
-[[nodiscard]] WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params,
-                                          DiagnosticList &diags);
+/// value is returned. Outcome counts are reported via the returned stats; the
+/// CLI/viewer summarise them — the pass itself emits no diagnostics.
+[[nodiscard]] WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params);
 
 } // namespace nodehammer

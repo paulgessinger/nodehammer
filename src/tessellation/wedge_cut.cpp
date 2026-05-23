@@ -1,7 +1,6 @@
 #include <nodehammer/tessellation/wedge_cut.hpp>
 
 #include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
 
 #include <ankerl/unordered_dense.h>
 #include <glm/glm.hpp>
@@ -10,7 +9,6 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <format>
 #include <numbers>
 #include <variant>
 #include <vector>
@@ -285,8 +283,7 @@ struct CutKeyHash {
 
 } // namespace
 
-WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params,
-                            DiagnosticList &diags) {
+WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) {
     WedgeCutStats stats;
 
     const double startRad = params.startDeg * kPi / 180.0;
@@ -490,11 +487,6 @@ WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params,
         }
     }
 
-    diags.info(codes::kInfoWedgeCutApplied,
-               std::format("wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique), {} emptied, {} kept, "
-                           "{} skipped, {} pruned",
-                           params.startDeg, params.endDeg, stats.cut, stats.cutUnique,
-                           stats.emptied, stats.kept, stats.skipped, stats.pruned));
     return stats;
 }
 
