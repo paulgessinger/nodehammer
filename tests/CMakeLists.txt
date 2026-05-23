@@ -12,6 +12,7 @@ add_executable(nodehammer_tests
     selection/test_predicate.cpp
     selection/test_selector.cpp
     tessellation/test_primitive_tessellator.cpp
+    tessellation/test_boolean_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
     tessellation/test_wedge_cut.cpp
     export/test_gltf_exporter.cpp

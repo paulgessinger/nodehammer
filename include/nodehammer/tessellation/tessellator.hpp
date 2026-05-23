@@ -16,6 +16,12 @@ struct TessellationOutput {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     DiagnosticList diags;
+    /// Whether the producing operation completed. False marks a genuine failure
+    /// (e.g. a boolean whose operands could not be built). Note that `succeeded`
+    /// with empty `vertices` is a *valid* result: a boolean can legitimately
+    /// remove a solid entirely (e.g. a placement fully inside an angle-cut
+    /// wedge), which should render nothing rather than be treated as a failure.
+    bool succeeded{true};
 };
 
 /// Interface for shape tessellators.

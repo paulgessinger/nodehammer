@@ -44,20 +44,24 @@ std::optional<manifold::Manifold> meshToManifold(const TessellationOutput &mesh,
     // they should be considered topologically identical.
     // Use a map from quantized position to the first vertex index seen at that position.
     struct PosKey {
-        int32_t x, y, z;
+        int64_t x, y, z;
         bool operator<(const PosKey &o) const {
             return std::tie(x, y, z) < std::tie(o.x, o.y, o.z);
         }
     };
     // Quantize to ~1e-7 resolution (sufficient for geometry in mm/cm range).
-    constexpr float kScale = 1e7f;
+    // Use a double accumulator and 64-bit keys: float (24-bit mantissa) cannot
+    // represent the scaled value, and a 32-bit key overflows, for coordinates
+    // beyond ~200 mm — both silently corrupt the merge for large geometry such
+    // as the calorimeter envelopes.
+    constexpr double kScale = 1e7;
     std::map<PosKey, uint32_t> posMap;
 
     for (uint32_t i = 0; i < static_cast<uint32_t>(mesh.vertices.size()); ++i) {
         const auto &p = mesh.vertices[i].position;
-        PosKey key{static_cast<int32_t>(std::round(p.x * kScale)),
-                   static_cast<int32_t>(std::round(p.y * kScale)),
-                   static_cast<int32_t>(std::round(p.z * kScale))};
+        PosKey key{static_cast<int64_t>(std::llround(static_cast<double>(p.x) * kScale)),
+                   static_cast<int64_t>(std::llround(static_cast<double>(p.y) * kScale)),
+                   static_cast<int64_t>(std::llround(static_cast<double>(p.z) * kScale))};
         auto [it, inserted] = posMap.emplace(key, i);
         if (!inserted && it->second != i) {
             // This vertex duplicates an earlier one — record the merge pair.
@@ -183,25 +187,32 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const SemanticShapeVari
                 // Build a wedge by intersecting two half-space boxes.
                 auto bigBox = manifold::Manifold::Cube({r * 2, r * 2, h * 2}, true);
 
-                // Box1: centered, rotated so its -Y face is at angle phiStart
+                // The kept sector is the CCW span [phiStart, phiStart+phiDelta],
+                // matching the (cos φ, sin φ) sweep used everywhere else (e.g. the
+                // primitive tessellator). Each bounding box is the half-space on
+                // the sector's interior side of one boundary ray, through the z
+                // axis. Box1 keeps the CCW side of the start ray; box2 keeps the CW
+                // side of the end ray. The shift places the cube so the kept half
+                // is on the correct side *before* the rotation aligns the boundary
+                // plane with the ray (getting these signs wrong rotates the whole
+                // sector 180°).
                 manifold::Manifold box1;
                 {
                     const double c = std::cos(tube.phiStart), s = std::sin(tube.phiStart);
-                    auto shift =
-                        manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
-                                         manifold::vec3{0, 0, 1}, manifold::vec3{0, -r, 0});
+                    auto shift = manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
+                                                  manifold::vec3{0, 0, 1}, manifold::vec3{0, r, 0});
                     auto rot = manifold::mat3x4(manifold::vec3{c, s, 0}, manifold::vec3{-s, c, 0},
                                                 manifold::vec3{0, 0, 1}, manifold::vec3{0, 0, 0});
                     box1 = bigBox.Transform(shift).Transform(rot);
                 }
 
-                // Box2: rotated so its +Y face is at angle phiStart+phiDelta
                 manifold::Manifold box2;
                 {
                     const double endPhi = tube.phiStart + tube.phiDelta;
                     const double c = std::cos(endPhi), s = std::sin(endPhi);
-                    auto shift = manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
-                                                  manifold::vec3{0, 0, 1}, manifold::vec3{0, r, 0});
+                    auto shift =
+                        manifold::mat3x4(manifold::vec3{1, 0, 0}, manifold::vec3{0, 1, 0},
+                                         manifold::vec3{0, 0, 1}, manifold::vec3{0, -r, 0});
                     auto rot = manifold::mat3x4(manifold::vec3{c, s, 0}, manifold::vec3{-s, c, 0},
                                                 manifold::vec3{0, 0, 1}, manifold::vec3{0, 0, 0});
                     box2 = bigBox.Transform(shift).Transform(rot);
@@ -341,6 +352,7 @@ TessellationOutput tessellateBooleanShape(const SemanticShapeVariant &shape,
                                           const ITessellator &primitiveTessellator,
                                           const TessellationParams &params) {
     TessellationOutput result;
+    result.succeeded = false; // only overwritten when an actual boolean is processed
 
     // Extract the boolean shape and resolve recursively.
     auto processBoolean = [&](const auto &boolShape) -> TessellationOutput {
@@ -348,11 +360,13 @@ TessellationOutput tessellateBooleanShape(const SemanticShapeVariant &shape,
         auto left =
             resolveAndTessellate(boolShape.left, scene, primitiveTessellator, params, out.diags, 0);
         if (!left) {
+            out.succeeded = false;
             return out;
         }
         auto right = resolveAndTessellate(boolShape.right, scene, primitiveTessellator, params,
                                           out.diags, 0);
         if (!right) {
+            out.succeeded = false;
             return out;
         }
 
@@ -375,13 +389,18 @@ TessellationOutput tessellateBooleanShape(const SemanticShapeVariant &shape,
                 out.diags.warn(codes::kWarnTessBooleanManifoldFail,
                                std::format("boolean operation failed (status {})",
                                            static_cast<int>(combined.Status())));
+                out.succeeded = false;
                 return out;
             }
 
-            return manifoldToMesh(combined);
+            // Carry forward operand diagnostics; manifoldToMesh starts fresh.
+            auto meshOut = manifoldToMesh(combined);
+            meshOut.diags = std::move(out.diags);
+            return meshOut;
         } catch (const std::exception &e) {
             out.diags.warn(codes::kWarnTessBooleanManifoldFail,
                            std::format("boolean operation threw: {}", e.what()));
+            out.succeeded = false;
             return out;
         }
     };

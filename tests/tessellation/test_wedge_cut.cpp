@@ -8,6 +8,8 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
+
 using namespace nodehammer;
 
 namespace {
@@ -144,6 +146,40 @@ TEST_CASE("wedge cut: lowers to a valid render scene", "[tessellation][wedgecut]
     REQUIRE(d->meshBindings.size() == 1);
     CHECK(meshNonEmpty(result.scene, d->meshBindings[0].meshId));
     CHECK(d->meshBindings[0].meshId != a->meshBindings[0].meshId);
+}
+
+TEST_CASE("wedge cut: removes the geometry on the requested side", "[tessellation][wedgecut]") {
+    // Regression guard for the cut *orientation*. D is a wide box at world
+    // (10,0,0) spanning x∈[8,12], y∈[-1,1]. Removing the [0°,90°] sector takes
+    // the +y half (world φ∈(0,90°)) and keeps the -y half (φ∈(270°,360°)). If the
+    // cutting wedge were built on the opposite side (a 180° error), the box would
+    // not intersect it and survive intact — so its mesh would still carry +y
+    // vertices. The box is a pure translation, so its local mesh y matches world.
+    auto ts = makeScene();
+    DiagnosticList diags;
+    (void)applyWedgeCut(ts.scene, {0.0, 90.0}, diags);
+
+    NHConfig cfg;
+    TessellationPass pass{cfg};
+    auto result = pass.lower(ts.scene);
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    const RenderNode *d = findBySemId(result.scene, ts.d);
+    REQUIRE(d);
+    REQUIRE(d->meshBindings.size() == 1);
+    const auto meshIt = result.scene.meshAssets.find(d->meshBindings[0].meshId);
+    REQUIRE(meshIt != result.scene.meshAssets.end());
+    const auto &verts = meshIt->second.vertices;
+    REQUIRE_FALSE(verts.empty());
+
+    float maxY = -1e9f, minY = 1e9f;
+    for (const auto &v : verts) {
+        maxY = std::max(maxY, v.position.y);
+        minY = std::min(minY, v.position.y);
+    }
+    // The +y half is gone (cut plane at y≈0); the -y half is retained.
+    CHECK(maxY < 1e-3f);
+    CHECK(minY < -0.9f);
 }
 
 TEST_CASE("wedge cut: degenerate sectors are a no-op", "[tessellation][wedgecut]") {

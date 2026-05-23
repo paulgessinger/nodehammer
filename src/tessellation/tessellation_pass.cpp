@@ -879,11 +879,18 @@ bool TessellationJob::Impl::stepOneNode() {
     // ── Boolean handling ───────────────────────────────────────────────────
     if (isBoolean) {
         // Check the mesh cache first — same shapeId + segments → same mesh.
+        // The sentinel id 0 (never allocated; ids start at 1) marks a boolean
+        // that succeeded but removed the solid entirely (e.g. a placement fully
+        // inside an angle-cut wedge): a valid empty result, cached so instances
+        // sharing the shape are not re-evaluated.
+        constexpr MeshAssetId kFullyRemoved{0};
         auto &boolSegMap = meshCache[lv.shapeId];
         MeshAssetId boolMid;
         bool boolCacheHit = boolSegMap.contains(params.maxSegmentsCircle);
+        bool fullyRemoved = false;
         if (boolCacheHit) {
             boolMid = boolSegMap.at(params.maxSegmentsCircle);
+            fullyRemoved = (boolMid == kFullyRemoved);
         } else {
             auto boolOut = tessellateBooleanShape(shape.data, *scene, tess, params);
             result.diags.append(boolOut.diags);
@@ -899,7 +906,19 @@ bool TessellationJob::Impl::stepOneNode() {
                 result.scene.meshAssets[boolMid] = std::move(ma);
                 boolSegMap[params.maxSegmentsCircle] = boolMid;
                 boolCacheHit = true;
+            } else if (boolOut.succeeded) {
+                // Empty but valid: the solid was fully cut away. Render nothing.
+                boolSegMap[params.maxSegmentsCircle] = kFullyRemoved;
+                fullyRemoved = true;
             }
+        }
+        if (fullyRemoved) {
+            // No mesh binding — correct, not a failure, so no warning.
+            result.scene.nodes[rnId] = std::move(rn);
+            for (const auto childId : semNode.children) {
+                q.push(childId);
+            }
+            return true;
         }
         if (boolCacheHit) {
             RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);

@@ -15,6 +15,29 @@ namespace {
 
 constexpr float kPi = static_cast<float>(std::numbers::pi);
 
+// Azimuthal sweep angle for index i in [0, segs] over a span of `dphi` from
+// `phi0`. For a full 2π sweep the final index must land *exactly* on phi0 rather
+// than phi0+2π: sin/cos(2π) evaluated in float is off by ~2.6e-5 (the float
+// nearest 2π is not a multiple of it), which leaves the wrap-around vertices
+// ~26 nm away from the start vertices. That tiny gap opens the φ seam, so the
+// mesh has unmatched boundary edges and Manifold rejects it as non-manifold the
+// moment it is used as a boolean operand (e.g. an angle-cut subtraction). Snap
+// the wrap to phi0 so the seam closes exactly.
+inline float sweepAngle(float phi0, float dphi, int i, int segs) {
+    if (i >= segs && std::abs(dphi - 2.0f * kPi) < 1e-4f) {
+        return phi0;
+    }
+    return phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
+}
+
+// Poloidal angle for a full 2π loop (torus tube cross-section); same seam fix.
+inline float loopAngle(int j, int n) {
+    if (j >= n) {
+        return 0.0f;
+    }
+    return 2.0f * kPi * static_cast<float>(j) / static_cast<float>(n);
+}
+
 // Append a quad as two triangles (a,b,c) + (a,c,d), winding CCW when viewed
 // from the outside (i.e. along the direction opposite to the face normal).
 //
@@ -144,9 +167,7 @@ TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &
     // A tube is "full" when it sweeps a complete circle; partial tubes need
     // extra side-wall faces to close the open arc ends.
     const bool full = (dphi >= 2.0f * kPi - 1e-6f);
-    auto angle = [&](int i) {
-        return phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
-    };
+    auto angle = [&](int i) { return sweepAngle(phi0, dphi, i, segs); };
 
     // ── Outer wall ────────────────────────────────────────────────────────────
     // One quad per angular segment. The outward radial direction at angle a is
@@ -308,9 +329,7 @@ TessellationOutput tessellateCone(const ConeShape &s, const TessellationParams &
     const float hz = static_cast<float>(s.dz);
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
-    auto angle = [&](int i) {
-        return phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
-    };
+    auto angle = [&](int i) { return sweepAngle(phi0, dphi, i, segs); };
 
     // Precompute the Z and radial components of the outer slant normal.
     // snz: Z component; snr: radial (r) component (same for all azimuthal angles).
@@ -567,8 +586,8 @@ TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams
     // surface at tube radius r. normalSign: +1 for outward (outer surface),
     // -1 for inward (inner surface).
     auto vert = [&](int i, int j, float r, float normalSign) -> Vertex {
-        const float phi = phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
-        const float theta = 2.0f * kPi * static_cast<float>(j) / static_cast<float>(nTube);
+        const float phi = sweepAngle(phi0, dphi, i, segs);
+        const float theta = loopAngle(j, nTube);
         const float ct = std::cos(theta), st = std::sin(theta);
         const float cp = std::cos(phi), sp = std::sin(phi);
         const glm::vec3 pos{(rTor + r * ct) * cp, (rTor + r * ct) * sp, r * st};
@@ -629,9 +648,7 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
     const int segs = std::max(3, p.maxSegmentsCircle);
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
-    auto angle = [&](int i) {
-        return phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
-    };
+    auto angle = [&](int i) { return sweepAngle(phi0, dphi, i, segs); };
 
     // ── Walls (per section pair) ─────────────────────────────────────────────
     for (std::size_t k = 0; k + 1 < s.sections.size(); ++k) {
@@ -747,9 +764,7 @@ TessellationOutput tessellatePgon(const PgonShape &s, const TessellationParams &
     const int segs = s.nSides; // one segment per polygon face
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
-    auto angle = [&](int i) {
-        return phi0 + dphi * static_cast<float>(i) / static_cast<float>(segs);
-    };
+    auto angle = [&](int i) { return sweepAngle(phi0, dphi, i, segs); };
     // Convert apothem → circumradius. Each polygon face spans dphi/nSides
     // radians; the half-angle of that sector gives the apothem/circumradius ratio.
     const float cosPN = std::cos(dphi / (2.0f * static_cast<float>(segs)));
