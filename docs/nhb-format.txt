@@ -1,0 +1,270 @@
+================================================================================
+nhb FILE FORMAT
+nodehammer semantic geometry container
+================================================================================
+
+OVERVIEW
+--------------------------------------------------------------------------------
+An .nhb file is a binary serialization of a single SemanticScene: a geometry
+tree (nodes), the logical volumes / shapes / materials they reference, and a
+global pool of deduplicated transforms.
+
+The on-disk encoding is a FlatBuffers buffer. FlatBuffers gives the format its
+low-level framing (little-endian, vtable-based tables, length-prefixed strings
+and vectors, forward/backward compatibility via optional fields). This document
+describes the schema layered on top of that framing plus the encoding
+conventions the writer applies. It is NOT a from-scratch byte spec of
+FlatBuffers itself.
+
+Authoritative schema:   schemas/semantic.fbs
+Writer:                 src/ir/fb/semantic/flatbuffer.cpp (semanticSceneToFlatBuffer)
+                        src/ir/fb/semantic/exporter.cpp
+Reader:                 src/ir/fb/semantic/flatbuffer.cpp (semanticSceneFromFlatBuffer)
+                        src/ir/fb/semantic/importer.cpp
+
+To regenerate a human-readable JSON dump or re-verify the binary, use the
+FlatBuffers `flatc` compiler against schemas/semantic.fbs.
+
+
+FILE FRAMING
+--------------------------------------------------------------------------------
+Two variants exist, distinguished by extension:
+
+  .nhb        Raw FlatBuffers buffer.
+  .nhb.zst    The same FlatBuffers buffer, then zstd-compressed (level 3).
+
+Compression is decided purely by the ".zst" suffix (case-insensitive). For
+.nhb.zst the whole buffer is a single standard zstd frame; the frame stores its
+uncompressed content size, which the reader uses to size the output buffer.
+See include/nodehammer/detail/zstd_io.hpp.
+
+Within the (decompressed) FlatBuffers buffer:
+
+  bytes 0..3   uint32 little-endian: offset to the root table (SemanticScene)
+  bytes 4..7   file identifier, the 4 ASCII bytes "NHS8"
+  ...          table data, vtables, vectors, strings
+
+All scalars are little-endian. Floats are IEEE-754 (float = 4 bytes,
+double = 8 bytes). Strings are UTF-8, length-prefixed, NUL-terminated (the
+FlatBuffers string convention). The reader verifies the buffer and the "NHS8"
+identifier before decoding.
+
+Schema-declared identity:
+  root_type        SemanticScene
+  file_identifier  "NHS8"
+  file_extension   "nhb"
+
+
+ROOT TABLE: SemanticScene
+--------------------------------------------------------------------------------
+  root_id      uint32        ID of the root node, in the remapped node-ID space
+                             (see "Node ID remapping"). Node at column index i
+                             has ID i+1, so root_id is in [1..N].
+  source_file  string        Original source path the scene was imported from
+                             (e.g. the GDML file). May be empty/absent.
+  transforms   TransformPool  Global, deduplicated transform pool.
+  nodes        NodeColumns    The node tree, stored column-oriented.
+  log_vols     [LogicalVolume]
+  shapes       [Shape]
+  materials    [Material]
+
+Any field may be absent (FlatBuffers optional). Vectors may be empty.
+
+
+TRANSFORM POOL: TransformPool
+--------------------------------------------------------------------------------
+All node and daughter placements reference transforms by index into this pool
+instead of storing matrices inline. Rotations and translations are interned
+(deduplicated) separately, and a (rotation,translation) pair is itself interned
+into a transform row.
+
+  rotations              [double]   Flattened 3x3 rotation matrices, COLUMN-MAJOR,
+                                    9 doubles per matrix. Rotation row j occupies
+                                    rotations[j*9 .. j*9+9). Layout per matrix:
+                                       R00, R10, R20,   (column 0)
+                                       R01, R11, R21,   (column 1)
+                                       R02, R12, R22    (column 2)
+  translations           [double]   (x,y,z) per row, 3 doubles each. Translation
+                                    row j occupies translations[j*3 .. j*3+3).
+  transform_rot_indices  [uint32]   transform_rot_indices[k] = rotation row used
+                                    by transform k.
+  transform_trl_indices  [uint32]   transform_trl_indices[k] = translation row
+                                    used by transform k.
+
+Conventions:
+  - Row 0 is ALWAYS the identity transform: rotation row 0 = identity 3x3,
+    translation row 0 = (0,0,0), transform row 0 = (rot 0, trl 0). A
+    transform_index of 0 therefore means "identity".
+  - A transform index in NodeColumns / DaughterPlacement selects transform row
+    k; the matrix is reconstructed as translation(transform_trl_indices[k])
+    composed with rotation(transform_rot_indices[k]).
+
+
+NODES: NodeColumns
+--------------------------------------------------------------------------------
+The node tree is stored in struct-of-arrays (column) form. Every column below
+is indexed by the same row index i, where i in [0..N). The node at row i has
+ID i+1 (see "Node ID remapping").
+
+Several columns use an adaptive integer width to save space: a width enum
+selects whether the u16 or the u32 variant vector is populated (only one is).
+
+  log_vol_id_width   LogVolIdWidth   U16 (0) or U32 (1). Selects which of:
+  log_vol_ids_u16    [uint16]        Logical-volume ID per node (remapped LV id),
+  log_vol_ids_u32    [uint32]          one is present.
+
+  name_table         [string]        Deduplicated node names.
+  name_index_width   IndexWidth      U16 (0) or U32 (1). Selects which of:
+  name_indices_u16   [uint16]        Index into name_table per node,
+  name_indices_u32   [uint32]          one is present.
+
+  transform_index_width   IndexWidth U16 (0) or U32 (1). Selects which of:
+  transform_indices_u16   [uint16]   Index into TransformPool per node,
+  transform_indices_u32   [uint32]     one is present.
+
+  parent_ids         [uint32]        Parent node ID (remapped space). 0 = no
+                                     parent (i.e. the root node).
+
+  tag_counts         [uint8]         Number of tags on node i.
+  tag_key_table      [string]        Deduplicated tag keys.
+  tag_refs           [TagRef]        Flat array of (key_idx, value_idx) pairs.
+  tag_value_table    [string]        Deduplicated tag values.
+
+  source_system_table    [string]    Deduplicated source-system names.
+  source_system_indices  [uint8]     Index into source_system_table per node.
+
+  degradation        [uint8]         Per-node degradation bitmask. 0 = none.
+
+Tag decoding (important): tag_refs is a single flat list shared by all nodes.
+To read node i's tags, walk nodes in order 0,1,2,... keeping a running cursor
+into tag_refs, and consume tag_counts[i] entries for node i. Each entry is a
+TagRef { key:uint8, value:uint8 }, where key indexes tag_key_table and value
+indexes tag_value_table.
+
+Width-selection rule (writer side): the u16 variant is used when the maximum
+value in that column fits in uint16 (<= 65535); otherwise u32. Readers must
+honor the *_width enum rather than guessing.
+
+
+LOGICAL VOLUMES: LogicalVolume
+--------------------------------------------------------------------------------
+  id           uint32     Logical-volume ID (remapped to a dense [1..M] space).
+  name         string
+  shape_id     uint32     References a Shape.id.
+  material_id  uint32     References a Material.id.
+  daughters    [DaughterPlacement]
+
+DaughterPlacement:
+  name             string   Placement (physical-volume) name.
+  log_vol_id       uint32   Child logical volume (remapped LV id).
+  transform_index  uint32   Index into TransformPool for the placement transform.
+
+
+SHAPES: Shape
+--------------------------------------------------------------------------------
+  id    uint32
+  data  ShapeData (union)
+
+ShapeData is a FlatBuffers union; the buffer stores a type tag plus the offset
+to the selected table. Union member order (the numeric type tag) is:
+
+  1  BoxShape              dx, dy, dz                                    (double)
+  2  TubeShape             r_min, r_max, dz, phi_start, phi_delta        (double)
+  3  ConeShape             r_min1, r_max1, r_min2, r_max2, dz,
+                           phi_start, phi_delta                          (double)
+  4  TrdShape              dx1, dx2, dy1, dy2, dz                        (double)
+  5  ParaShape             dx, dy, dz, alpha, theta, phi                 (double)
+  6  PconShape             phi_start, phi_delta, sections:[Section]
+  7  PgonShape             phi_start, phi_delta, n_sides:int,
+                           sections:[Section]
+  8  TorusShape            r_min, r_max, r_tor, phi_start, phi_delta     (double)
+  9  TessellatedShape      triangles:[Triangle]
+ 10  BooleanUnion          left:uint32, right:uint32,
+                           right_transform_index:uint32
+ 11  BooleanIntersection   left:uint32, right:uint32,
+                           right_transform_index:uint32
+ 12  BooleanSubtraction    left:uint32, right:uint32,
+                           right_transform_index:uint32
+ 13  UnknownShape          original_type:string
+
+Boolean shapes reference other shapes by ID: left/right are Shape.id values, and
+right_transform_index indexes the TransformPool for the right operand's placement.
+
+
+MATERIALS: Material
+--------------------------------------------------------------------------------
+  id         uint32
+  name       string
+  has_color  bool      If false, color is meaningless/ignored.
+  color      Vec3f     RGB (see structs below).
+  density    double
+
+
+FIXED-SIZE STRUCTS
+--------------------------------------------------------------------------------
+These are FlatBuffers structs: fixed-size, inline, no vtable.
+
+  Vec3f      { x:float;  y:float;  z:float;  }              (12 bytes)
+  DVec3      { x:double; y:double; z:double; }              (24 bytes)
+  Triangle   { v0:DVec3; v1:DVec3; v2:DVec3; }             (72 bytes)
+  Section    { z:double; r_min:double; r_max:double; }      (24 bytes)
+  TagRef     { key:uint8; value:uint8; }                    (2 bytes)
+
+(Reported sizes are the data sizes; FlatBuffers may add alignment padding inside
+vectors of structs.)
+
+
+ENUMS
+--------------------------------------------------------------------------------
+  LogVolIdWidth : uint8   { U16 = 0, U32 = 1 }
+  IndexWidth    : uint8   { U16 = 0, U32 = 1 }
+
+
+ENCODING CONVENTIONS (writer behavior)
+--------------------------------------------------------------------------------
+These are not enforced by the schema but are applied by the writer and assumed
+by the reader.
+
+ID remapping
+  - Node IDs are remapped to a dense [1..N] space. The node serialized at column
+    index i gets ID i+1. parent_ids and root_id are expressed in this space; 0 in
+    parent_ids means "no parent" (root). Original node IDs are not stored; the
+    reader rebuilds parent/child links and recomputes world transforms and
+    original paths after loading.
+  - Logical-volume IDs are remapped to a dense [1..M] space. All log_vol_id and
+    shape/material references use IDs as serialized in this file.
+
+Deduplication / interning
+  - Rotations, translations, and (rotation,translation) transform pairs are each
+    interned, so identical matrices are stored once.
+  - Node names, tag keys, tag values, and source-system names are stored in
+    string tables and referenced by index.
+
+Node row ordering
+  - Node rows are sorted before serialization to improve column locality and
+    compression. The sort key, in order, is:
+        depth, then parent_id, then log_vol index, then transform index,
+        then name index, then original node id (tiebreak).
+    Readers must not rely on any particular row order beyond "row i has ID i+1".
+
+Range limits (the writer rejects scenes that exceed them)
+  - Node IDs, logical-volume IDs, shape/material IDs, transform indices, and
+    string-table indices: must fit in uint32 (and u16 columns require <= 65535).
+  - Per-node tag count, tag key/value indices, and source-system indices: must
+    fit in uint8 (<= 255). So at most 255 distinct tag keys, 255 distinct tag
+    values, 255 distinct source systems, and 255 tags per node.
+  - Per-node degradation bitmask: must fit in uint8.
+
+
+READING SUMMARY
+--------------------------------------------------------------------------------
+1. If the path ends in .zst, zstd-decompress to obtain the raw FlatBuffers buffer.
+2. Verify the buffer and confirm the "NHS8" file identifier.
+3. Get the root SemanticScene table.
+4. Decode shapes, materials, and logical volumes (resolving daughter transforms
+   through the TransformPool).
+5. Decode NodeColumns: for each row i, build node ID i+1, resolve its logical
+   volume / name / transform / parent / source system / degradation from the
+   parallel columns (honoring the width enums), and consume tag_counts[i] entries
+   from tag_refs via a running cursor.
+6. Recompute derived data (world transforms, original paths) from the tree.
