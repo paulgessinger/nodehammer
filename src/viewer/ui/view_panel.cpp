@@ -204,6 +204,16 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
                 }
                 ImGui::SetItemTooltip("GTAO sample count per pixel — slices × steps. More samples\n"
                                       "= less per-pixel jitter before the denoise pass eats it.");
+                // AO render resolution. The GTAO + denoise passes are fullscreen
+                // and were the single biggest GPU cost at full res; AO is
+                // low-frequency so half-res reclaims most of it. Bilinearly
+                // upsampled by the scene shader / composite.
+                ImGui::SliderFloat("resolution", &ctx.quality.ao_resolution_scale, 0.25f, 1.0f,
+                                   "%.2fx");
+                ImGui::SetItemTooltip(
+                    "Fraction of scene resolution for the GTAO + denoise passes.\n"
+                    "0.5 = quarter the pixels — big GPU win for little visible\n"
+                    "loss (AO is low-frequency). 1.0 = full res.");
                 // Denoise toggle. Strict quality win when on; exposed so
                 // the user can A/B the raw GTAO jitter vs the denoised
                 // result.
@@ -277,11 +287,22 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ctx.quality.saturation = 1.0f;
         }
 
-        // The remaining controls advertise the plumbing for MSAA/bloom/
-        // render-scale/IBL-quality that lands in later phases. Disabled
-        // today so they show what's coming without misleading the user.
-        ImGui::BeginDisabled(true);
+        // Render scale is implemented: it sizes the offscreen scene/AO/denoise
+        // targets and the composite upsamples to the window — the primary
+        // fragment-cost lever. <1 trades sharpness for speed; >1 supersamples.
         ImGui::SliderFloat("render scale", &ctx.quality.render_scale, 0.5f, 2.0f, "%.2fx");
+        ImGui::SetItemTooltip("Offscreen render resolution = window x scale. Lower = fewer "
+                              "fragments across every pass (scene, AO, denoise);\n"
+                              "the composite upsamples to the window.");
+
+        ImGui::Checkbox("cap FPS to 60", &ctx.quality.cap_fps);
+        ImGui::SetItemTooltip("Skip frames to hold the render rate at ~60 FPS.\n"
+                              "Useful on high-refresh (120Hz+) displays to save power.");
+
+        // The remaining controls advertise the plumbing for MSAA/bloom/
+        // IBL-quality that lands in later phases. Disabled today so they show
+        // what's coming without misleading the user.
+        ImGui::BeginDisabled(true);
         ImGui::Checkbox("bloom", &ctx.quality.enable_bloom);
         ImGui::SliderInt("MSAA", &ctx.quality.msaa_samples, 1, 8);
         ImGui::SliderInt("IBL quality", &ctx.quality.ibl_quality, 0, 3);

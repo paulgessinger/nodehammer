@@ -35,8 +35,16 @@ class SceneBuildJob {
     /// When `wedge_cut` is set, the prep stage applies an azimuthal Boolean
     /// wedge cut before tessellation; the caller passes a *pristine* scene so
     /// re-cutting at a new angle re-derives from uncut geometry each build.
-    void start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
-               std::string config_label, std::string geometry_label,
+    ///
+    /// Inputs come in as `shared_ptr<const>` so the caller (the UI thread) only
+    /// bumps a refcount here — the deep copy of the scene that prep consumes is
+    /// taken on the worker thread, off the main loop. That keeps re-aiming the
+    /// wedge cut from stalling the frame on a large scene (the copy of a fully
+    /// imported ODD is tens of ms; doing it here used to freeze the UI right as
+    /// the "Applying cut…" toast appeared).
+    void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
+               std::shared_ptr<const ::nodehammer::SemanticScene> scene, std::string config_label,
+               std::string geometry_label,
                std::optional<::nodehammer::WedgeCutParams> wedge_cut = std::nullopt);
 
     /// Drive progress. Returns true once the build has finished (either

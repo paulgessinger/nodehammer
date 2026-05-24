@@ -36,15 +36,27 @@ struct PerfHistory {
     float t{0.f};
 
     ScrollingBuffer frame_ms;
-    ScrollingBuffer cpu_submit_ms;
+    // The "CPU submit" total split into its two halves (see App::Impl): `encode`
+    // is the CPU time spent encoding the offscreen passes; `present` is the
+    // swapchain pass — drawable acquire + composite + commit — which absorbs GPU
+    // backpressure. present >> encode ⇒ GPU-bound, not submission-bound.
+    ScrollingBuffer encode_ms;
+    ScrollingBuffer present_ms;
+    // Subset of encode: the in-flight-frames semaphore wait at the first
+    // begin_pass. This is GPU backpressure, so the gap between encode and
+    // gpu_wait is the true CPU command-encoding cost.
+    ScrollingBuffer gpu_wait_ms;
     ScrollingBuffer scene_submit_ms;
     ScrollingBuffer fps;
 
-    void push(double dt_seconds, double frame_interval_ms, double render_submit_ms,
-              double scene_submit_ms_value, float fps_value) {
+    void push(double dt_seconds, double frame_interval_ms, double encode_ms_value,
+              double present_ms_value, double gpu_wait_ms_value, double scene_submit_ms_value,
+              float fps_value) {
         t += static_cast<float>(dt_seconds);
         frame_ms.add(t, static_cast<float>(frame_interval_ms));
-        cpu_submit_ms.add(t, static_cast<float>(render_submit_ms));
+        encode_ms.add(t, static_cast<float>(encode_ms_value));
+        present_ms.add(t, static_cast<float>(present_ms_value));
+        gpu_wait_ms.add(t, static_cast<float>(gpu_wait_ms_value));
         scene_submit_ms.add(t, static_cast<float>(scene_submit_ms_value));
         fps.add(t, fps_value);
     }

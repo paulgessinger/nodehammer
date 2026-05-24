@@ -477,8 +477,10 @@ void SceneRenderer::Impl::finalizeUpload() {
             auto [it, inserted] = group_idx.try_emplace(key, groups.size());
             if (inserted) {
                 auto mat_it = scene.materials.find(binding.materialId);
+                // Missing material → single-sided (cull), matching the
+                // RenderMaterial default for closed solids.
                 const bool double_sided =
-                    mat_it != scene.materials.end() ? mat_it->second.doubleSided : true;
+                    mat_it != scene.materials.end() ? mat_it->second.doubleSided : false;
                 groups.push_back(
                     {binding.meshId, binding.materialId, double_sided, 0, 0, {}, {}, {}});
             }
@@ -656,6 +658,13 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         // Switch only when the pipeline actually changes; VS uniforms must
         // be reapplied after each pipeline change.
         bool use_back_cull = !g.double_sided;
+        // The shader angle-cut discards the near wedge and exposes the interior
+        // back-faces of the far wall; culling them makes the cut-away look
+        // hollow. Render double-sided while it's active so cuts stay solid.
+        // (The baked boolean cut adds watertight caps, so it keeps culling.)
+        if (flags.shader_angle_cut) {
+            use_back_cull = false;
+        }
         if (flags.cull == CullOverride::ForceCull) {
             use_back_cull = true;
         } else if (flags.cull == CullOverride::ForceNoCull) {

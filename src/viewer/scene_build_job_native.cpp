@@ -41,9 +41,11 @@ struct SceneBuildJob::Impl {
     std::string config_label;
     std::string geometry_label;
 
-    // Pre-prepared inputs handed in by `start`.
-    std::unique_ptr<::nodehammer::NHConfig> preset_config;
-    std::unique_ptr<::nodehammer::SemanticScene> preset_scene;
+    // Pre-prepared inputs handed in by `start`. Held as shared_ptr<const> so
+    // `start` (main thread) just refcounts; the worker takes the deep copy that
+    // prep consumes (see the worker body below).
+    std::shared_ptr<const ::nodehammer::NHConfig> preset_config;
+    std::shared_ptr<const ::nodehammer::SemanticScene> preset_scene;
     std::optional<::nodehammer::WedgeCutParams> wedge_cut;
 
     ::nodehammer::SceneBuildResult result;
@@ -57,13 +59,14 @@ SceneBuildJob::~SceneBuildJob() {
     }
 }
 
-void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
+void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
+                          std::shared_ptr<const ::nodehammer::SemanticScene> scene,
                           std::string config_label, std::string geometry_label,
                           std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
     impl_->config_label = std::move(config_label);
     impl_->geometry_label = std::move(geometry_label);
-    impl_->preset_config = std::make_unique<::nodehammer::NHConfig>(std::move(config));
-    impl_->preset_scene = std::make_unique<::nodehammer::SemanticScene>(std::move(scene));
+    impl_->preset_config = std::move(config);
+    impl_->preset_scene = std::move(scene);
     impl_->wedge_cut = wedge_cut;
     impl_->result = {};
 
@@ -79,8 +82,13 @@ void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticS
         // Prep (validate / select / dedup) runs without the wedge cut — the cut
         // is driven cooperatively below so we can publish its progress, matching
         // the web path. Tests / CLI still get the synchronous cut via prep.
+        //
+        // The inputs are shared_ptr<const> (other refs may outlive us, e.g. the
+        // App's pristine cache), so prep gets a copy. That copy runs *here*, on
+        // the worker thread, rather than on the main thread at the call site —
+        // this is what keeps re-aiming the wedge cut from freezing the frame.
         impl->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
-            std::move(*impl->preset_config), std::move(*impl->preset_scene), std::nullopt);
+            *impl->preset_config, *impl->preset_scene, std::nullopt);
         impl->preset_config.reset();
         impl->preset_scene.reset();
         if (!impl->prep.ok) {

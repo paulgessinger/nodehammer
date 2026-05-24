@@ -34,9 +34,12 @@ struct SceneBuildJob::Impl {
     std::string config_label;
     std::string geometry_label;
 
-    // Pre-prepared inputs handed in by `start`.
-    std::unique_ptr<::nodehammer::NHConfig> preset_config;
-    std::unique_ptr<::nodehammer::SemanticScene> preset_scene;
+    // Pre-prepared inputs handed in by `start`. shared_ptr<const> to match the
+    // native signature; on web (single-threaded) the copy prep consumes is
+    // unavoidably on the main thread, but it lands on the PrepPending poll —
+    // after a frame has painted "Tessellating…" — rather than inside start().
+    std::shared_ptr<const ::nodehammer::NHConfig> preset_config;
+    std::shared_ptr<const ::nodehammer::SemanticScene> preset_scene;
     std::optional<::nodehammer::WedgeCutParams> wedge_cut;
 
     ::nodehammer::SceneBuildResult result;
@@ -45,13 +48,14 @@ struct SceneBuildJob::Impl {
 SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
 SceneBuildJob::~SceneBuildJob() = default;
 
-void SceneBuildJob::start(::nodehammer::NHConfig config, ::nodehammer::SemanticScene scene,
+void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
+                          std::shared_ptr<const ::nodehammer::SemanticScene> scene,
                           std::string config_label, std::string geometry_label,
                           std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
     impl_->config_label = std::move(config_label);
     impl_->geometry_label = std::move(geometry_label);
-    impl_->preset_config = std::make_unique<::nodehammer::NHConfig>(std::move(config));
-    impl_->preset_scene = std::make_unique<::nodehammer::SemanticScene>(std::move(scene));
+    impl_->preset_config = std::move(config);
+    impl_->preset_scene = std::move(scene);
     impl_->wedge_cut = wedge_cut;
     impl_->result = {};
     impl_->prep = {};
@@ -77,7 +81,7 @@ bool SceneBuildJob::poll(uint64_t budget_ns) {
         // is driven cooperatively below so it doesn't freeze the frame and can
         // report progress. Tests / CLI still get the synchronous cut via prep.
         impl_->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
-            std::move(*impl_->preset_config), std::move(*impl_->preset_scene), std::nullopt);
+            *impl_->preset_config, *impl_->preset_scene, std::nullopt);
         impl_->preset_config.reset();
         impl_->preset_scene.reset();
         if (!impl_->prep.ok) {

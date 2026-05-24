@@ -195,7 +195,7 @@ struct App::Impl {
     // the prep stage, which mutates the scene, so we must always re-derive from
     // this clean copy rather than from the already-cut result.
     std::shared_ptr<const ::nodehammer::SemanticScene> pristine_scene;
-    ::nodehammer::NHConfig pristine_config;
+    std::shared_ptr<const ::nodehammer::NHConfig> pristine_config;
     std::string pristine_config_label;
     std::string pristine_geometry_label;
 
@@ -268,7 +268,23 @@ struct App::Impl {
     float fps{0.f};
     double frame_interval_ms{0.0};
     double render_submit_ms{0.0};
+    // Breakdown of render_submit_ms (the "CPU submit" total): `encode_ms` is the
+    // CPU time spent encoding the offscreen passes (scene + AO + denoise);
+    // `present_ms` covers the swapchain pass — drawable acquisition + composite +
+    // ImGui + sg_commit. On Metal the drawable acquisition (sglue_swapchain)
+    // blocks on GPU backpressure when the GPU is behind, so present_ms >>
+    // encode_ms means the GPU, not CPU submission, is the bottleneck.
+    double encode_ms{0.0};
+    double present_ms{0.0};
+    // Subset of encode_ms: the frame's first sg_begin_pass, which blocks on the
+    // in-flight-frames semaphore when the GPU is behind. This is GPU backpressure
+    // masquerading as encode time; encode_ms - gpu_wait_ms is the true CPU encode.
+    double gpu_wait_ms{0.0};
     double scene_submit_ms{0.0};
+    // sokol per-frame draw-submission counters, snapshotted after sg_commit().
+    // Surfaced in the Debug panel to attribute the CPU encode cost (pipeline
+    // switches, bind/uniform/draw counts, redundant-bind skips).
+    sg_frame_stats render_stats{};
     // Rolling per-frame timing history feeding the Debug panel's live graphs.
     ui::PerfHistory perf_history;
 
@@ -411,6 +427,10 @@ void App::Impl::onInit() {
     gfx_desc.shader_pool_size = 256;
     gfx_desc.pipeline_pool_size = 256;
     sg_setup(&gfx_desc);
+    // Per-frame draw-submission counters (apply_pipeline/bindings/uniforms/draw
+    // + backend bind set-vs-skip), surfaced in the Debug panel to diagnose CPU
+    // submit cost. Cheap — just increments while encoding.
+    sg_enable_stats();
 
     // The renderer initialises with 1×1 placeholder IBL textures so the
     // first frame can draw before the GPU bake runs; onFrame swaps in the
@@ -720,24 +740,35 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     // churn the image pool — only a resize destroys them. A resize also
     // invalidates the history target's contents (different dimensions =
     // different per-pixel samples), so flip the validity bit.
+    // AO renders at quality.ao_resolution_scale of the scene resolution (the
+    // GTAO + denoise passes are fully UV-driven, so a smaller target Just Works
+    // and is bilinearly upsampled by consumers). Clamp to a sane range.
+    float ao_scale = quality.ao_resolution_scale;
+    ao_scale = ao_scale < 0.25f ? 0.25f : (ao_scale > 1.0f ? 1.0f : ao_scale);
+    const auto ao_dim = [ao_scale](uint32_t d) -> uint32_t {
+        const auto s = static_cast<uint32_t>(static_cast<float>(d) * ao_scale + 0.5f);
+        return s < 1u ? 1u : s;
+    };
+    const uint32_t ao_w = ao_dim(width);
+    const uint32_t ao_h = ao_dim(height);
+
     const sg_pixel_format ao_fmt = pickAoColorFormat();
     if (quality.enable_ao) {
-        if (!ao_rt_raw.matches(width, height, ao_fmt)) {
-            ao_rt_raw.create(width, height, ao_fmt);
+        if (!ao_rt_raw.matches(ao_w, ao_h, ao_fmt)) {
+            ao_rt_raw.create(ao_w, ao_h, ao_fmt);
             ao_history_valid = false; // raw + history were paired by dimension
         }
-        if (!ao_rt_history.matches(width, height, ao_fmt)) {
-            ao_rt_history.create(width, height, ao_fmt);
+        if (!ao_rt_history.matches(ao_w, ao_h, ao_fmt)) {
+            ao_rt_history.create(ao_w, ao_h, ao_fmt);
             ao_history_valid = false;
         }
         ao_pass.setTargetColorFormat(ao_fmt);
         ao_denoise_pass.setTargetColorFormat(ao_fmt);
     } else {
-        if (ao_rt_raw.color.id != SG_INVALID_ID && !ao_rt_raw.matches(width, height, ao_fmt)) {
+        if (ao_rt_raw.color.id != SG_INVALID_ID && !ao_rt_raw.matches(ao_w, ao_h, ao_fmt)) {
             ao_rt_raw.destroy();
         }
-        if (ao_rt_history.color.id != SG_INVALID_ID &&
-            !ao_rt_history.matches(width, height, ao_fmt)) {
+        if (ao_rt_history.color.id != SG_INVALID_ID && !ao_rt_history.matches(ao_w, ao_h, ao_fmt)) {
             ao_rt_history.destroy();
         }
         // AO is off — next enable will start fresh and rebuild history.
@@ -774,7 +805,19 @@ void App::Impl::render() {
     // MSAA toggle) the offscreen scene target. Doing this here, just
     // before the pass begins, avoids reallocating from inside an event
     // callback while a frame may still be in flight.
-    ensureSceneTarget(fb_width, fb_height);
+    // Render the offscreen scene/AO/denoise passes at quality.render_scale of the
+    // window resolution; the composite pass upsamples to the swapchain. This is a
+    // fragment-count lever across every offscreen pass — the dominant GPU cost.
+    // All passes already size off scene_rt's dimensions, so scaling here is
+    // self-consistent (incl. the scene shader's gl_FragCoord-based AO sampling,
+    // which uses scene_rt.width/height). Clamp to a sane range.
+    float render_scale = quality.render_scale;
+    render_scale = render_scale < 0.25f ? 0.25f : (render_scale > 2.0f ? 2.0f : render_scale);
+    const auto scale_dim = [render_scale](uint32_t d) -> uint32_t {
+        const auto s = static_cast<uint32_t>(static_cast<float>(d) * render_scale + 0.5f);
+        return s < 1u ? 1u : s;
+    };
+    ensureSceneTarget(scale_dim(fb_width), scale_dim(fb_height));
 
     // Pass 1 — scene into offscreen color + depth. Depth-clear convention
     // is backend-conditional (see useReversedZ): 0.0 paired with
@@ -790,7 +833,14 @@ void App::Impl::render() {
     scene_pass.action.depth.store_action = SG_STOREACTION_STORE;
     scene_pass.attachments = scene_rt.passAttachments();
     scene_pass.label = "scene_pass";
+    // This is the frame's first sg_begin_pass, where sokol's Metal backend waits
+    // on the in-flight-frames semaphore (SG_NUM_INFLIGHT_FRAMES=2) until the GPU
+    // drains an older frame. When the GPU is the bottleneck the CPU blocks here,
+    // so this is GPU backpressure — not command encoding — even though it lands
+    // inside encode_ms. Time it separately so the panel attributes it honestly.
+    const uint64_t gpu_wait_start = stm_now();
     sg_begin_pass(&scene_pass);
+    gpu_wait_ms = stm_sec(stm_diff(stm_now(), gpu_wait_start)) * 1000.0;
 
     if (scene && scene_uploaded) {
         if (!camera_framed) {
@@ -930,6 +980,13 @@ void App::Impl::render() {
         ao_history_was_raw = ao_history_target_is_raw;
     }
 
+    // Split the submit timer here: everything above is pure CPU encoding of the
+    // offscreen passes; everything below starts with the swapchain drawable
+    // acquisition (sglue_swapchain), which on Metal blocks on GPU backpressure
+    // when the GPU is behind. Splitting at this boundary separates real CPU
+    // submission cost (encode_ms) from the GPU-bound stall (present_ms).
+    const uint64_t present_start = stm_now();
+
     // Pass 3 — composite the offscreen target into the swapchain, then
     // ImGui on top. The composite covers the entire viewport so we
     // don't need to clear color or depth first.
@@ -987,7 +1044,13 @@ void App::Impl::render() {
 
     sg_end_pass();
     sg_commit();
-    render_submit_ms = stm_sec(stm_diff(stm_now(), render_submit_start)) * 1000.0;
+    // sg_commit() rotates cur_frame → prev_frame, so the frame we just
+    // submitted is in prev_frame (cur_frame is now cleared for the next one).
+    render_stats = sg_query_stats().prev_frame;
+    const uint64_t render_end = stm_now();
+    encode_ms = stm_sec(stm_diff(present_start, render_submit_start)) * 1000.0;
+    present_ms = stm_sec(stm_diff(render_end, present_start)) * 1000.0;
+    render_submit_ms = stm_sec(stm_diff(render_end, render_submit_start)) * 1000.0;
 }
 
 std::string App::Impl::browserUrlStateQuery() const {
@@ -1318,6 +1381,20 @@ void App::Impl::onFrame() {
         }
     }
 
+    // Opt-in 60 FPS cap. sokol drives this callback at the display's vsync
+    // rate, so on a high-refresh panel (120Hz+) skip the frames that would
+    // push us past 60. The slack keeps a true 60Hz vsync — which may report a
+    // hair under 16.67ms from timer jitter — from being mistaken as "too
+    // early" and dropped to 30. When idle this never bites: the idle gate
+    // above already throttles below 60.
+    if (quality.cap_fps) {
+        constexpr double kFpsCapInterval = 1.0 / 60.0;
+        constexpr double kFpsCapSlack = kFpsCapInterval * 0.1;
+        if (stm_sec(stm_diff(stm_now(), last_time)) < kFpsCapInterval - kFpsCapSlack) {
+            return;
+        }
+    }
+
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
 
@@ -1340,7 +1417,8 @@ void App::Impl::onFrame() {
     // Sample the rolling timing history once per rendered frame. The submit
     // timings still hold last frame's values here (they're measured during
     // render() further down), which is harmless for a scrolling graph.
-    perf_history.push(delta_seconds, frame_interval_ms, render_submit_ms, scene_submit_ms, fps);
+    perf_history.push(delta_seconds, frame_interval_ms, encode_ms, present_ms, gpu_wait_ms,
+                      scene_submit_ms, fps);
 
     // simgui_new_frame internally calls ImGui::NewFrame after configuring
     // io display size + delta time. Don't double-call NewFrame.
@@ -1365,11 +1443,12 @@ void App::Impl::onFrame() {
     // when the new build lands.
     // Kick off a build. `wedge` is nullopt for the uncut base scene and set for
     // a Boolean-cut bake; `building_cut` records which so completion routes the
-    // result to `scene` vs `cut_scene`. Takes inputs by value so the caller can
-    // hand over either fresh BuildSession inputs or copies of the pristine scene.
-    auto start_build = [this](::nodehammer::NHConfig config,
-                              ::nodehammer::SemanticScene semantic_scene, std::string config_label,
-                              std::string geometry_label,
+    // result to `scene` vs `cut_scene`. Inputs come in as shared_ptr<const> so
+    // both callers (a fresh BuildSession build and a re-aimed cut) just refcount
+    // here — the build job takes the deep copy on its worker thread.
+    auto start_build = [this](std::shared_ptr<const ::nodehammer::NHConfig> config,
+                              std::shared_ptr<const ::nodehammer::SemanticScene> semantic_scene,
+                              std::string config_label, std::string geometry_label,
                               std::optional<::nodehammer::WedgeCutParams> wedge) {
         build_start_time = std::chrono::steady_clock::now();
         building_cut = wedge.has_value();
@@ -1391,11 +1470,15 @@ void App::Impl::onFrame() {
         if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
             if (auto inputs = build_session.takeInputs()) {
                 // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
-                pristine_config = inputs->config.config;
-                pristine_scene =
-                    std::make_shared<const ::nodehammer::SemanticScene>(inputs->import.scene);
-                pristine_config_label = inputs->config_key;
-                pristine_geometry_label = inputs->geometry_key;
+                // Held as shared_ptr<const> and handed straight to the build job,
+                // so the move out of `inputs` is the only copy and the cut path
+                // later re-uses these without re-walking the project.
+                pristine_config = std::make_shared<const ::nodehammer::NHConfig>(
+                    std::move(inputs->config.config));
+                pristine_scene = std::make_shared<const ::nodehammer::SemanticScene>(
+                    std::move(inputs->import.scene));
+                pristine_config_label = std::move(inputs->config_key);
+                pristine_geometry_label = std::move(inputs->geometry_key);
                 // A new base build invalidates any resident cut bake.
                 cut_scene.reset();
                 cut_uploaded = false;
@@ -1403,9 +1486,8 @@ void App::Impl::onFrame() {
                 pending_cut_rebuild = false;
                 // The base scene is always uncut (wedge = nullopt); the cut bake
                 // follows once the base lands (see completion handler).
-                start_build(std::move(inputs->config.config), std::move(inputs->import.scene),
-                            std::move(inputs->config_key), std::move(inputs->geometry_key),
-                            std::nullopt);
+                start_build(pristine_config, pristine_scene, pristine_config_label,
+                            pristine_geometry_label, std::nullopt);
             }
         }
     }
@@ -1418,8 +1500,11 @@ void App::Impl::onFrame() {
     if (pending_cut_rebuild && !build_in_progress && pristine_scene) {
         pending_cut_rebuild = false;
         if (cfg.boolean_cut && !cut_fresh) {
+            // Hand the cached pristine inputs straight through (refcount bump);
+            // the worker thread takes the scene copy that prep consumes, so the
+            // frame that locks the angle no longer stalls on the deep copy.
             start_build(
-                pristine_config, *pristine_scene, pristine_config_label, pristine_geometry_label,
+                pristine_config, pristine_scene, pristine_config_label, pristine_geometry_label,
                 ::nodehammer::WedgeCutParams{cfg.angle_cut_start_deg, cfg.angle_cut_end_deg});
         }
     }
@@ -1441,10 +1526,29 @@ void App::Impl::onFrame() {
         .build_error = build_error,
         .fb_width = fb_width,
         .fb_height = fb_height,
+        .scene_width = scene_rt.width,
+        .scene_height = scene_rt.height,
+        .ao_width = ao_rt_raw.width,
+        .ao_height = ao_rt_raw.height,
         .fps = fps,
         .frame_interval_ms = frame_interval_ms,
         .render_submit_ms = render_submit_ms,
+        .encode_ms = encode_ms,
+        .present_ms = present_ms,
+        .gpu_wait_ms = gpu_wait_ms,
         .scene_submit_ms = scene_submit_ms,
+        .call_stats =
+            {
+                .num_apply_pipeline = render_stats.num_apply_pipeline,
+                .num_apply_bindings = render_stats.num_apply_bindings,
+                .num_apply_uniforms = render_stats.num_apply_uniforms,
+                .num_draw = render_stats.num_draw,
+                .mtl_set_render_pipeline_state =
+                    render_stats.metal.pipeline.num_set_render_pipeline_state,
+                .mtl_set_vertex_buffer = render_stats.metal.bindings.num_set_vertex_buffer,
+                .mtl_skip_vertex_buffer =
+                    render_stats.metal.bindings.num_skip_redundant_vertex_buffer,
+            },
         .perf_history = &perf_history,
         .has_scene = static_cast<bool>(scene),
         .scene_uploaded = scene_uploaded,

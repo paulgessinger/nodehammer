@@ -20,10 +20,13 @@ namespace {
 
 // Series colors shared between the numeric readouts and the plot lines so the
 // two read as one unit.
-constexpr ImVec4 kFrameColor{0.95f, 0.77f, 0.06f, 1.f}; // amber
-constexpr ImVec4 kCpuColor{0.16f, 0.63f, 0.93f, 1.f};   // blue
-constexpr ImVec4 kSceneColor{0.36f, 0.86f, 0.30f, 1.f}; // green
-constexpr ImVec4 kFpsColor{0.85f, 0.85f, 0.85f, 1.f};   // light grey
+constexpr ImVec4 kFrameColor{0.95f, 0.77f, 0.06f, 1.f};   // amber
+constexpr ImVec4 kCpuColor{0.16f, 0.63f, 0.93f, 1.f};     // blue  — CPU submit total
+constexpr ImVec4 kEncodeColor{0.30f, 0.80f, 0.85f, 1.f};  // cyan  — CPU encode (offscreen)
+constexpr ImVec4 kPresentColor{0.93f, 0.32f, 0.34f, 1.f}; // red   — present / GPU backpressure
+constexpr ImVec4 kWaitColor{0.85f, 0.40f, 0.90f, 1.f};    // magenta — GPU wait (in encode)
+constexpr ImVec4 kSceneColor{0.36f, 0.86f, 0.30f, 1.f};   // green
+constexpr ImVec4 kFpsColor{0.85f, 0.85f, 0.85f, 1.f};     // light grey
 
 const char *backendName() {
     switch (sg_query_backend()) {
@@ -85,6 +88,20 @@ float windowMax(const ScrollingBuffer &buf, float x_min) {
     return m;
 }
 
+// Mean of the samples at or after x_min. Used to steady the numeric readouts so
+// the digits average over a short window instead of flickering every frame.
+float windowMean(const ScrollingBuffer &buf, float x_min) {
+    double sum = 0.0;
+    int n = 0;
+    for (const ImVec2 &p : buf.data) {
+        if (p.x >= x_min) {
+            sum += static_cast<double>(p.y);
+            ++n;
+        }
+    }
+    return n > 0 ? static_cast<float>(sum / n) : 0.f;
+}
+
 // Round up to a "nice" number (1, 1.5, 2, 3, 4, 5, 6, 8, 10 × 10^n) so axis
 // bounds — and therefore the tick labels — land on readable values.
 float niceCeil(float v) {
@@ -124,15 +141,58 @@ float stableTop(AxisTracker &tr, float window_max, float min_top, float dt) {
 void renderPerfSection(const ViewerUiContext &ctx) {
     ImGui::SeparatorText("Performance");
 
+    // Numeric readouts are averaged over a short trailing window so the digits
+    // stay readable instead of flickering every frame. Without history (rare),
+    // fall back to the instantaneous values.
+    const PerfHistory *hist = ctx.perf_history;
+    constexpr float kReadoutAvgSecs = 0.5f;
+    const float ravg_min = hist != nullptr ? hist->t - kReadoutAvgSecs : 0.f;
+    const double v_fps = hist ? windowMean(hist->fps, ravg_min) : static_cast<double>(ctx.fps);
+    const double v_frame = hist ? windowMean(hist->frame_ms, ravg_min) : ctx.frame_interval_ms;
+    const double v_encode = hist ? windowMean(hist->encode_ms, ravg_min) : ctx.encode_ms;
+    const double v_wait = hist ? windowMean(hist->gpu_wait_ms, ravg_min) : ctx.gpu_wait_ms;
+    const double v_present = hist ? windowMean(hist->present_ms, ravg_min) : ctx.present_ms;
+    const double v_scene = hist ? windowMean(hist->scene_submit_ms, ravg_min) : ctx.scene_submit_ms;
+    const double v_cpu = v_encode + v_present; // total submit = encode + present
+
     char buf[32];
-    std::snprintf(buf, sizeof(buf), "%7.1f", static_cast<double>(ctx.fps));
+    std::snprintf(buf, sizeof(buf), "%7.1f", v_fps);
     readoutRow(kFpsColor, "FPS", buf);
-    std::snprintf(buf, sizeof(buf), "%7.2f ms", ctx.frame_interval_ms);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", v_frame);
     readoutRow(kFrameColor, "Frame", buf);
-    std::snprintf(buf, sizeof(buf), "%7.2f ms", ctx.render_submit_ms);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", v_cpu);
     readoutRow(kCpuColor, "CPU submit", buf);
-    std::snprintf(buf, sizeof(buf), "%7.2f ms", ctx.scene_submit_ms);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", v_encode);
+    readoutRow(kEncodeColor, "  encode", buf);
+    // GPU wait is the in-flight-frames semaphore block, counted inside encode.
+    // A large value here means GPU-bound; encode minus gpu wait is real CPU work.
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", v_wait);
+    readoutRow(kWaitColor, "    gpu wait", buf);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", v_present);
+    readoutRow(kPresentColor, "  present", buf);
+    std::snprintf(buf, sizeof(buf), "%7.2f ms", v_scene);
     readoutRow(kSceneColor, "Scene submit", buf);
+
+    // Per-frame sokol draw-submission counters. The encode cost is dominated by
+    // these calls, so they attribute where the CPU submit time goes.
+    const RenderCallStats &cs = ctx.call_stats;
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Draw submission / frame");
+    ImGui::Text("  draws %u   bindings %u   uniforms %u", cs.num_draw, cs.num_apply_bindings,
+                cs.num_apply_uniforms);
+    // Pipeline switches should be ~1-2. Approaching the draw count means the
+    // loop is thrashing pipeline state (groups not sorted by cull mode) — each
+    // switch is an extra sg_apply_pipeline + VS-uniform re-apply.
+    const bool pipeline_thrash = cs.num_draw > 4 && cs.num_apply_pipeline * 4 >= cs.num_draw;
+    ImGui::TextColored(pipeline_thrash ? kPresentColor : kSceneColor, "  pipeline switches %u",
+                       cs.num_apply_pipeline);
+    // Metal-only: how many vertex-buffer binds actually hit the driver vs. were
+    // skipped by sokol's state cache (confirms the IBL textures aren't rebound).
+    if (cs.mtl_set_vertex_buffer + cs.mtl_skip_vertex_buffer > 0) {
+        ImGui::Text("  vtx-buf binds %u set / %u skipped (Metal)", cs.mtl_set_vertex_buffer,
+                    cs.mtl_skip_vertex_buffer);
+        ImGui::Text("  pipeline-state sets %u (Metal)", cs.mtl_set_render_pipeline_state);
+    }
 
     if (ctx.perf_history == nullptr) {
         return;
@@ -149,8 +209,8 @@ void renderPerfSection(const ViewerUiContext &ctx) {
     // ratchet up on spikes and ease back down, rounded to nice tick values.
     static AxisTracker timing_axis;
     const float timing_max =
-        std::max({windowMax(h.frame_ms, x_min), windowMax(h.cpu_submit_ms, x_min),
-                  windowMax(h.scene_submit_ms, x_min)});
+        std::max({windowMax(h.frame_ms, x_min), windowMax(h.encode_ms, x_min),
+                  windowMax(h.present_ms, x_min), windowMax(h.scene_submit_ms, x_min)});
     const float timing_top = stableTop(timing_axis, timing_max, 2.f, dt);
 
     if (ImPlot::BeginPlot("Frame timing (ms)", ImVec2(-1.f, 140.f), kPlotFlags)) {
@@ -159,8 +219,10 @@ void renderPerfSection(const ViewerUiContext &ctx) {
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, timing_top, ImPlotCond_Always);
         ImPlot::SetupLegend(ImPlotLocation_NorthWest, ImPlotLegendFlags_Horizontal);
         plotSeries("Frame", h.frame_ms, kFrameColor);
-        plotSeries("CPU submit", h.cpu_submit_ms, kCpuColor);
-        plotSeries("Scene submit", h.scene_submit_ms, kSceneColor);
+        plotSeries("Encode", h.encode_ms, kEncodeColor);
+        plotSeries("GPU wait", h.gpu_wait_ms, kWaitColor);
+        plotSeries("Present", h.present_ms, kPresentColor);
+        plotSeries("Scene", h.scene_submit_ms, kSceneColor);
         ImPlot::EndPlot();
     }
 
@@ -185,6 +247,12 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
     }
 
     ImGui::Text("Backbuffer: %u x %u", ctx.fb_width, ctx.fb_height);
+    ImGui::Text("Render target: %u x %u (scale %.2fx)", ctx.scene_width, ctx.scene_height,
+                static_cast<double>(ctx.quality.render_scale));
+    if (ctx.quality.enable_ao && ctx.ao_width > 0) {
+        ImGui::Text("AO target: %u x %u (scale %.2fx)", ctx.ao_width, ctx.ao_height,
+                    static_cast<double>(ctx.quality.ao_resolution_scale));
+    }
     ImGui::Text("Renderer: %s", backendName());
     if (sg_query_backend() == SG_BACKEND_GLES3) {
         static constexpr const char *kWebGpuCanIUseUrl = "https://caniuse.com/webgpu";

@@ -47,6 +47,21 @@ struct UiActions {
     std::function<void(std::string)> select_geometry_key;
 };
 
+/// Per-frame sokol draw-submission counters for the Debug panel. Plain ints so
+/// this header (pulled into every UI TU) stays free of sokol_gfx.h; the App
+/// copies the fields out of sg_frame_stats. `mtl_*` are Metal-backend specific
+/// and 0 on other backends. set/skip vertex-buffer counts show how many binds
+/// actually hit the driver vs. were deduplicated by sokol's state cache.
+struct RenderCallStats {
+    std::uint32_t num_apply_pipeline{0};
+    std::uint32_t num_apply_bindings{0};
+    std::uint32_t num_apply_uniforms{0};
+    std::uint32_t num_draw{0};
+    std::uint32_t mtl_set_render_pipeline_state{0};
+    std::uint32_t mtl_set_vertex_buffer{0};
+    std::uint32_t mtl_skip_vertex_buffer{0};
+};
+
 struct ViewerUiContext {
     Config &cfg;
     RenderQualitySettings &quality;
@@ -64,10 +79,22 @@ struct ViewerUiContext {
 
     std::uint32_t fb_width{0};
     std::uint32_t fb_height{0};
+    /// Actual offscreen render-target resolution (window size × render_scale).
+    /// Differs from fb_width/height when render_scale != 1.
+    std::uint32_t scene_width{0};
+    std::uint32_t scene_height{0};
+    /// Actual AO-pass resolution (scene size × ao_resolution_scale). 0 when AO
+    /// is off.
+    std::uint32_t ao_width{0};
+    std::uint32_t ao_height{0};
     float fps{0.f};
     double frame_interval_ms{0.0};
     double render_submit_ms{0.0};
+    double encode_ms{0.0};
+    double present_ms{0.0};
+    double gpu_wait_ms{0.0};
     double scene_submit_ms{0.0};
+    RenderCallStats call_stats{};
     /// Rolling timing history for the Debug panel's live perf graphs. Owned by
     /// the App; null only in contexts that don't track frame timings.
     PerfHistory *perf_history{nullptr};

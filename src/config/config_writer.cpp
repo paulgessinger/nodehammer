@@ -158,8 +158,8 @@ toml::table buildMaterialsTable(const std::vector<MaterialDef> &materials) {
         if (mat.emissive.r != 0.0f || mat.emissive.g != 0.0f || mat.emissive.b != 0.0f) {
             tbl.insert("emissive", colorToArray(mat.emissive, false));
         }
-        if (!mat.doubleSided) {
-            tbl.insert("double_sided", false);
+        if (mat.doubleSided) {
+            tbl.insert("double_sided", true);
         }
         if (mat.alphaMode != Opaque) {
             tbl.insert("alpha_mode", std::string{alphaModeToString(mat.alphaMode)});

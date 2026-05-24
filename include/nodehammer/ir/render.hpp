@@ -55,7 +55,10 @@ struct RenderMaterial {
     // Alpha
     std::string alphaMode{"OPAQUE"};
     float alphaCutoff{0.5f};
-    bool doubleSided{true};
+    // Default single-sided: tessellated detector solids are closed volumes, so
+    // back-faces are hidden and culling them is correct + avoids ~2x overdraw.
+    // Genuinely two-sided materials (thin shells/foils) opt in explicitly.
+    bool doubleSided{false};
 
     // KHR extensions (nullopt = not set, omitted from glTF)
     std::optional<float> ior;

@@ -94,7 +94,10 @@ struct MaterialDef {
     float metallic{0.0f};
     float roughness{0.5f};
     Color emissive{0.0f, 0.0f, 0.0f, 1.0f};
-    bool doubleSided{true};
+    // Single-sided by default — closed solids cull their back-faces (see
+    // RenderMaterial::doubleSided). Set `double_sided = true` per material to
+    // opt into two-sided rendering.
+    bool doubleSided{false};
     AlphaMode alphaMode{AlphaMode::Opaque};
     float alphaCutoff{0.5f};
     std::optional<float> ior;          ///< KHR_materials_ior

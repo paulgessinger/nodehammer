@@ -34,7 +34,11 @@ enum class AoQualityPreset : int {
 /// rendering features land. Most fields are no-ops today and only exist so
 /// the UI plumbing path is established before HDR/FXAA/MSAA/etc. are wired.
 struct RenderQualitySettings {
-    float render_scale{1.0f};
+    float render_scale{0.85f};
+    /// Cap the render rate at 60 FPS. sokol drives the frame callback at the
+    /// display's vsync rate; on a high-refresh panel (120Hz+) this skips frames
+    /// to hold the visible rate at ~60. Off = render at the full refresh rate.
+    bool cap_fps{false};
     bool enable_hdr{true};
     bool enable_tonemap{true};
     bool enable_fxaa{true};
@@ -51,6 +55,12 @@ struct RenderQualitySettings {
     /// linear cost. Defaults to Medium = 4×4 = 16 taps per pixel, which is
     /// where the original implementation was hard-coded.
     AoQualityPreset ao_quality{AoQualityPreset::Medium};
+    /// Fraction of the scene resolution at which the GTAO + denoise passes
+    /// render. AO is low-frequency, so half-res (0.5 → ¼ the pixels) reclaims
+    /// most of the fullscreen AO cost for little visible loss; the result is
+    /// bilinearly upsampled when the scene shader / composite sample it.
+    /// 1.0 = full res. Independent of (and multiplied on top of) render_scale.
+    float ao_resolution_scale{0.9f};
     /// Run the bilateral denoise pass on the raw GTAO output. Strict
     /// quality win when on — exposed as a toggle so you can A/B raw GTAO
     /// jitter vs the denoised version without rebuilding. Off = scene
