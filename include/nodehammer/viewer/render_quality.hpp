@@ -48,13 +48,13 @@ enum class FxaaQualityPreset : int {
 /// for features that haven't landed.
 struct RenderQualitySettings {
     float render_scale{1.0f};
-    /// Dynamic render scale: when on, the offscreen scale drops to
-    /// `render_scale_min` while the camera is moving and ramps back up to
+    /// Dynamic render scale: when on (the default), the offscreen scale drops to
+    /// `render_scale_min` while the camera is moving and jumps up to
     /// `render_scale_max` once it settles — trading transient sharpness for a
-    /// steady framerate during interaction. The still image is unaffected (it
-    /// settles to max). When off (the default), the static `render_scale` above
-    /// is used — dynamic scaling is opt-in.
-    bool dynamic_render_scale{false};
+    /// steady framerate during interaction, then a high-fidelity still. Paired
+    /// with `pause_when_static`, the expensive settled frame renders once and is
+    /// cached. When off, the static `render_scale` above is used throughout.
+    bool dynamic_render_scale{true};
     /// When dynamic scaling is on, run a closed-loop controller while the camera
     /// moves: hold the highest scale in [render_scale_min, render_scale_max]
     /// that meets `render_scale_target_fps`. Off = always render at
@@ -66,13 +66,13 @@ struct RenderQualitySettings {
     /// Lowest scale used while the camera moves. With adaptive scaling on it's
     /// the floor the controller won't drop below; with it off it's the fixed
     /// in-motion resolution.
-    float render_scale_min{0.5f};
+    float render_scale_min{0.66f};
     /// Resolution the scale jumps to once the camera settles (quality target).
     /// 1.0 = native; >1 supersamples the still image (up to 4x). The transition
     /// is a single step, not a ramp through intermediate resolutions — stepping
     /// reallocates the offscreen targets and resets the AO history each time,
     /// which reads as flicker.
-    float render_scale_max{1.0f};
+    float render_scale_max{4.0f};
     /// Cap the render rate at 60 FPS. sokol drives the frame callback at the
     /// display's vsync rate; on a high-refresh panel (120Hz+) this skips frames
     /// to hold the visible rate at ~60. Off = render at the full refresh rate.
