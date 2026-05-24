@@ -30,24 +30,23 @@ struct SceneRenderTarget {
     sg_sampler depth_sampler{}; // nonfiltering — for depth (WebGPU constraint)
     uint32_t width{0};
     uint32_t height{0};
-    int sample_count{1};
     sg_pixel_format color_format{SG_PIXELFORMAT_RGBA8};
     sg_pixel_format depth_format{SG_PIXELFORMAT_DEPTH};
 
     /// Allocate (or reallocate, after destroy()) all resources for the given
-    /// size/formats/sample count. Must be called inside an active sokol_gfx
-    /// session (between sg_setup / sg_shutdown).
-    void create(uint32_t w, uint32_t h, sg_pixel_format color_fmt, sg_pixel_format depth_fmt,
-                int samples);
+    /// size/formats. The target is single-sampled — antialiasing is handled by
+    /// render scale (SSAA) and the composite-pass FXAA, not MSAA. Must be
+    /// called inside an active sokol_gfx session (between sg_setup/sg_shutdown).
+    void create(uint32_t w, uint32_t h, sg_pixel_format color_fmt, sg_pixel_format depth_fmt);
 
     /// Release every sokol handle held. Idempotent — safe to call when the
     /// target was never created or was already destroyed.
     void destroy();
 
-    /// True when the existing resources match the requested size/formats/
-    /// samples and no recreate is needed.
+    /// True when the existing resources match the requested size/formats and
+    /// no recreate is needed.
     [[nodiscard]] bool matches(uint32_t w, uint32_t h, sg_pixel_format color_fmt,
-                               sg_pixel_format depth_fmt, int samples) const;
+                               sg_pixel_format depth_fmt) const;
 
     /// Build the `sg_attachments` value the scene pass should use. `sg_attachments`
     /// is a struct (not a separately-created handle) — this is a convenience.

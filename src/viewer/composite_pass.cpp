@@ -17,6 +17,24 @@
 
 namespace nodehammer::viewer {
 
+namespace {
+// FXAA edge-search step budget per quality preset. The FS loops to the Ultra
+// count (compile-time bound in composite.glsl) and bails early at this value.
+int fxaaMaxSteps(FxaaQualityPreset preset) {
+    switch (preset) {
+    case FxaaQualityPreset::Low:
+        return 4;
+    case FxaaQualityPreset::Medium:
+        return 8;
+    case FxaaQualityPreset::High:
+        return 10;
+    case FxaaQualityPreset::Ultra:
+        return 12;
+    }
+    return 10;
+}
+} // namespace
+
 CompositePass::CompositePass() = default;
 
 CompositePass::~CompositePass() = default;
@@ -123,6 +141,13 @@ void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTa
     params.fxaa_params[1] = inv_w;
     params.fxaa_params[2] = inv_h;
     params.fxaa_params[3] = 0.0f;
+
+    // FXAA quality knobs (consumed only when enable_fxaa). subpix / thresholds
+    // are passed straight through; the preset becomes a max-step count.
+    params.fxaa_quality[0] = quality.fxaa_subpix;
+    params.fxaa_quality[1] = quality.fxaa_edge_threshold;
+    params.fxaa_quality[2] = quality.fxaa_edge_threshold_min;
+    params.fxaa_quality[3] = static_cast<float>(fxaaMaxSteps(quality.fxaa_quality));
 
     // Selects the linearization branch in the FS for the linear-depth view.
     // 0 = normal-Z, 1 = reversed-Z, 2 = log-Z (mutually exclusive). Must

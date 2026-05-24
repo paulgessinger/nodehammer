@@ -3,21 +3,20 @@
 namespace nodehammer::viewer {
 
 void SceneRenderTarget::create(uint32_t w, uint32_t h, sg_pixel_format color_fmt,
-                               sg_pixel_format depth_fmt, int samples) {
+                               sg_pixel_format depth_fmt) {
     destroy();
 
     width = w;
     height = h;
     color_format = color_fmt;
     depth_format = depth_fmt;
-    sample_count = samples;
 
     sg_image_desc cdesc{};
     cdesc.usage.color_attachment = true;
     cdesc.width = static_cast<int>(w);
     cdesc.height = static_cast<int>(h);
     cdesc.pixel_format = color_fmt;
-    cdesc.sample_count = samples;
+    cdesc.sample_count = 1;
     cdesc.label = "scene_color";
     color = sg_make_image(&cdesc);
 
@@ -26,7 +25,7 @@ void SceneRenderTarget::create(uint32_t w, uint32_t h, sg_pixel_format color_fmt
     ddesc.width = static_cast<int>(w);
     ddesc.height = static_cast<int>(h);
     ddesc.pixel_format = depth_fmt;
-    ddesc.sample_count = samples;
+    ddesc.sample_count = 1;
     ddesc.label = "scene_depth";
     depth = sg_make_image(&ddesc);
 
@@ -115,9 +114,9 @@ void SceneRenderTarget::destroy() {
 }
 
 bool SceneRenderTarget::matches(uint32_t w, uint32_t h, sg_pixel_format color_fmt,
-                                sg_pixel_format depth_fmt, int samples) const {
+                                sg_pixel_format depth_fmt) const {
     return color.id != SG_INVALID_ID && width == w && height == h && color_format == color_fmt &&
-           depth_format == depth_fmt && sample_count == samples;
+           depth_format == depth_fmt;
 }
 
 sg_attachments SceneRenderTarget::passAttachments() const {

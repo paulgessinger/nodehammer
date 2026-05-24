@@ -725,9 +725,8 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     const sg_pixel_format hdr_fmt = pickHdrColorFormat();
     const sg_pixel_format color_fmt =
         (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
-    const int samples = 1;
-    if (!scene_rt.matches(width, height, color_fmt, depth_fmt, samples)) {
-        scene_rt.create(width, height, color_fmt, depth_fmt, samples);
+    if (!scene_rt.matches(width, height, color_fmt, depth_fmt)) {
+        scene_rt.create(width, height, color_fmt, depth_fmt);
     }
     scene_renderer.setTargetColorFormat(color_fmt);
     cut_renderer.setTargetColorFormat(color_fmt);
@@ -801,10 +800,10 @@ void App::Impl::render() {
         }
     }
 
-    // Lazily allocate (or reallocate on resize / DPI change / future
-    // MSAA toggle) the offscreen scene target. Doing this here, just
-    // before the pass begins, avoids reallocating from inside an event
-    // callback while a frame may still be in flight.
+    // Lazily allocate (or reallocate on resize / DPI change) the offscreen
+    // scene target. Doing this here, just before the pass begins, avoids
+    // reallocating from inside an event callback while a frame may still be
+    // in flight.
     // Render the offscreen scene/AO/denoise passes at quality.render_scale of the
     // window resolution; the composite pass upsamples to the swapchain. This is a
     // fragment-count lever across every offscreen pass — the dominant GPU cost.

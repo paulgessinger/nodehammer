@@ -86,6 +86,11 @@ layout(binding=0) uniform composite_params {
     // y = saturation (1.0 = identity, 0.0 = grayscale)
     // zw reserved.
     vec4 look_params;
+    // FXAA (PC-quality variant) tunables. Appended last so existing std140
+    // offsets stay stable; sokol-shdc regenerates the C struct in lockstep.
+    // x = subpix amount (0..1), y = relative edge threshold,
+    // z = absolute edge threshold, w = max edge-search steps.
+    vec4 fxaa_quality;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -225,16 +230,20 @@ vec3 sampleScene(vec2 uv) {
     vec3 c;
     bool is_bg = false;
     if (background_params.x > 0.5) {
-        float d = texture(sampler2D(scene_depth, smp_depth), uv).r;
+        // textureLod (vs texture) everywhere in sampleScene: FXAA calls this
+        // from inside a dynamic search loop where implicit-LOD derivatives are
+        // undefined (and WGSL forbids implicit sampling in non-uniform control
+        // flow). All these targets are single-mip, so LOD 0 is identical.
+        float d = textureLod(sampler2D(scene_depth, smp_depth), uv, 0.0).r;
         is_bg = isBackground(d);
     }
     if (is_bg) {
         vec3 dir = reconstructViewDir(uv);
         c = textureLod(samplerCube(background_env, smp_env), dir, 0.0).rgb;
     } else {
-        c = texture(sampler2D(scene_color, smp_color), uv).rgb;
+        c = textureLod(sampler2D(scene_color, smp_color), uv, 0.0).rgb;
         if (ao_params.x > 0.5) {
-            float ao = texture(sampler2D(ao_map, smp_ao), uv).r;
+            float ao = textureLod(sampler2D(ao_map, smp_ao), uv, 0.0).r;
             c *= ao;
         }
     }
@@ -249,54 +258,154 @@ vec3 sampleScene(vec2 uv) {
 
 float luma709(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
-// FXAA 3.11 console-quality variant. Five luma taps (center + 4 corners) +
-// edge-direction blend + two final taps. Operates on the tonemapped LDR
-// output of sampleScene with rec.709 luma — correct for both LDR and HDR
-// scene targets.
-const float FXAA_EDGE_THRESHOLD     = 0.125;   // 1/8: skip flat regions
-const float FXAA_EDGE_THRESHOLD_MIN = 0.0625;  // 1/16: skip dark noise
-const float FXAA_SPAN_MAX           = 8.0;
+// Perceptual luma for FXAA. sampleScene returns *linear* color (the
+// tonemappers apply no OETF; the sRGB encode happens on the framebuffer
+// write), but FXAA's contrast thresholds were tuned for gamma-encoded luma.
+// sqrt() ≈ a gamma-2.0 encode — cheap, and enough to make the thresholds
+// catch the dark/midtone edges a linear luma silently skips.
+float fxaaLuma(vec2 uv) { return sqrt(luma709(sampleScene(uv))); }
+
+// FXAA 3.11 PC ("quality") variant. A 3×3 luma neighborhood drives edge
+// detection; a sub-pixel lowpass term softens shimmer; and a directional
+// edge-end search walks along the edge in both directions to place the blend
+// with sub-pixel accuracy (this is what the cheap "console" variant lacked,
+// so near-horizontal/vertical edges stayed staircased). Every tap routes
+// through sampleScene/fxaaLuma so FXAA sees the final tonemapped image.
+// Tunables arrive in fxaa_quality: x = subpix, y = relative edge threshold,
+// z = absolute edge threshold, w = max search steps. Step sizes are the
+// canonical FXAA quality preset; the loop bound is the Ultra count
+// (compile-time) with an early uniform bail for the lower presets.
+const int   FXAA_MAX_STEPS = 12;
+const float FXAA_STEPS[12] = float[12](
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);
+const float FXAA_LAST_STEP_GUESS = 8.0;
 
 vec3 fxaa(vec2 uv, vec2 inv_res) {
-    vec3 rgb_m  = sampleScene(uv);
-    vec3 rgb_nw = sampleScene(uv + inv_res * vec2(-1.0, -1.0));
-    vec3 rgb_ne = sampleScene(uv + inv_res * vec2( 1.0, -1.0));
-    vec3 rgb_sw = sampleScene(uv + inv_res * vec2(-1.0,  1.0));
-    vec3 rgb_se = sampleScene(uv + inv_res * vec2( 1.0,  1.0));
+    float subpix    = fxaa_quality.x;
+    float edge_rel  = fxaa_quality.y;
+    float edge_min  = fxaa_quality.z;
+    int   max_steps = int(clamp(fxaa_quality.w, 1.0, float(FXAA_MAX_STEPS)));
 
-    float luma_m  = luma709(rgb_m);
-    float luma_nw = luma709(rgb_nw);
-    float luma_ne = luma709(rgb_ne);
-    float luma_sw = luma709(rgb_sw);
-    float luma_se = luma709(rgb_se);
+    // 3×3 luma neighborhood (cardinals first — enough to early-out).
+    float lumaM = fxaaLuma(uv);
+    float lumaN = fxaaLuma(uv + vec2(0.0, -inv_res.y));
+    float lumaS = fxaaLuma(uv + vec2(0.0,  inv_res.y));
+    float lumaE = fxaaLuma(uv + vec2( inv_res.x, 0.0));
+    float lumaW = fxaaLuma(uv + vec2(-inv_res.x, 0.0));
 
-    float luma_min = min(luma_m, min(min(luma_nw, luma_ne), min(luma_sw, luma_se)));
-    float luma_max = max(luma_m, max(max(luma_nw, luma_ne), max(luma_sw, luma_se)));
-    float range    = luma_max - luma_min;
+    float lumaMin = min(lumaM, min(min(lumaN, lumaS), min(lumaE, lumaW)));
+    float lumaMax = max(lumaM, max(max(lumaN, lumaS), max(lumaE, lumaW)));
+    float range   = lumaMax - lumaMin;
 
-    if (range < max(FXAA_EDGE_THRESHOLD_MIN, luma_max * FXAA_EDGE_THRESHOLD)) {
-        return rgb_m;
+    // Flat region (or near-black noise) — leave the pixel untouched.
+    if (range < max(edge_min, lumaMax * edge_rel)) {
+        return sampleScene(uv);
     }
 
-    vec2 dir;
-    dir.x = -((luma_nw + luma_ne) - (luma_sw + luma_se));
-    dir.y =  ((luma_nw + luma_sw) - (luma_ne + luma_se));
+    float lumaNW = fxaaLuma(uv + vec2(-inv_res.x, -inv_res.y));
+    float lumaNE = fxaaLuma(uv + vec2( inv_res.x, -inv_res.y));
+    float lumaSW = fxaaLuma(uv + vec2(-inv_res.x,  inv_res.y));
+    float lumaSE = fxaaLuma(uv + vec2( inv_res.x,  inv_res.y));
 
-    float dir_reduce = max((luma_nw + luma_ne + luma_sw + luma_se) * 0.25 * 0.5, 1.0/128.0);
-    float rcp_dir_min = 1.0 / (min(abs(dir.x), abs(dir.y)) + dir_reduce);
-    dir = clamp(dir * rcp_dir_min, vec2(-FXAA_SPAN_MAX), vec2(FXAA_SPAN_MAX)) * inv_res;
+    // Sub-pixel term: how far the center deviates from the 3×3 lowpass,
+    // smoothed, squared, and scaled by the subpix knob.
+    float lumaAvg = (2.0 * (lumaN + lumaS + lumaE + lumaW) +
+                     lumaNW + lumaNE + lumaSW + lumaSE) * (1.0 / 12.0);
+    float subpixBlend = clamp(abs(lumaAvg - lumaM) / range, 0.0, 1.0);
+    subpixBlend = smoothstep(0.0, 1.0, subpixBlend);
+    subpixBlend = subpixBlend * subpixBlend * subpix;
 
-    vec3 rgb_a = 0.5 * (
-        sampleScene(uv + dir * (1.0/3.0 - 0.5)) +
-        sampleScene(uv + dir * (2.0/3.0 - 0.5)));
-    vec3 rgb_b = rgb_a * 0.5 + 0.25 * (
-        sampleScene(uv + dir * -0.5) +
-        sampleScene(uv + dir *  0.5));
+    // Edge orientation: weighted second derivatives along each axis.
+    float edgeHorz =
+        abs(lumaN  + lumaS  - 2.0 * lumaM) * 2.0 +
+        abs(lumaNE + lumaSE - 2.0 * lumaE) +
+        abs(lumaNW + lumaSW - 2.0 * lumaW);
+    float edgeVert =
+        abs(lumaE  + lumaW  - 2.0 * lumaM) * 2.0 +
+        abs(lumaNE + lumaNW - 2.0 * lumaN) +
+        abs(lumaSE + lumaSW - 2.0 * lumaS);
+    bool horizontal = edgeHorz >= edgeVert;
 
-    // If the second-pass luma escapes the corner range, the edge direction
-    // was too oblique — fall back to the first-pass blend.
-    float luma_b = luma709(rgb_b);
-    return (luma_b < luma_min || luma_b > luma_max) ? rgb_a : rgb_b;
+    // Gradient: the steeper of the two sides perpendicular to the edge picks
+    // the blend direction (one texel toward the higher-contrast neighbor).
+    float lumaP = horizontal ? lumaN : lumaE;
+    float lumaQ = horizontal ? lumaS : lumaW;
+    float gradP = abs(lumaP - lumaM);
+    float gradQ = abs(lumaQ - lumaM);
+
+    float pixelStep = horizontal ? inv_res.y : inv_res.x;
+    float oppositeLuma;
+    float gradient;
+    if (gradP < gradQ) {
+        pixelStep   = -pixelStep;
+        oppositeLuma = lumaQ;
+        gradient     = gradQ;
+    } else {
+        oppositeLuma = lumaP;
+        gradient     = gradP;
+    }
+
+    // Edge-end search: from the midline between the center and its steeper
+    // neighbor, walk along the edge until the average luma diverges past a
+    // quarter of the gradient (the edge end) or the step budget runs out.
+    vec2 edgeUV = uv;
+    vec2 stepUV = vec2(0.0);
+    if (horizontal) {
+        edgeUV.y += 0.5 * pixelStep;
+        stepUV.x  = inv_res.x;
+    } else {
+        edgeUV.x += 0.5 * pixelStep;
+        stepUV.y  = inv_res.y;
+    }
+    float edgeLuma   = 0.5 * (lumaM + oppositeLuma);
+    float gradThresh = 0.25 * gradient;
+
+    vec2  uvP   = edgeUV + stepUV * FXAA_STEPS[0];
+    float dP    = fxaaLuma(uvP) - edgeLuma;
+    bool  doneP = abs(dP) >= gradThresh;
+    for (int i = 1; i < FXAA_MAX_STEPS; ++i) {
+        if (i >= max_steps || doneP) break;
+        uvP  += stepUV * FXAA_STEPS[i];
+        dP    = fxaaLuma(uvP) - edgeLuma;
+        doneP = abs(dP) >= gradThresh;
+    }
+    if (!doneP) uvP += stepUV * FXAA_LAST_STEP_GUESS;
+
+    vec2  uvN   = edgeUV - stepUV * FXAA_STEPS[0];
+    float dN    = fxaaLuma(uvN) - edgeLuma;
+    bool  doneN = abs(dN) >= gradThresh;
+    for (int i = 1; i < FXAA_MAX_STEPS; ++i) {
+        if (i >= max_steps || doneN) break;
+        uvN  -= stepUV * FXAA_STEPS[i];
+        dN    = fxaaLuma(uvN) - edgeLuma;
+        doneN = abs(dN) >= gradThresh;
+    }
+    if (!doneN) uvN -= stepUV * FXAA_LAST_STEP_GUESS;
+
+    // Distance to each end along the edge axis; blend from the nearer end.
+    float distP, distN;
+    if (horizontal) { distP = uvP.x - uv.x; distN = uv.x - uvN.x; }
+    else            { distP = uvP.y - uv.y; distN = uv.y - uvN.y; }
+
+    bool  nearestIsP   = distP <= distN;
+    float nearestDist  = nearestIsP ? distP : distN;
+    float nearestDelta = nearestIsP ? dP : dN;
+    float edgeLength   = distP + distN;
+
+    // Only blend when the center is on the opposite side of the edge midline
+    // from the divergence at the nearest end — otherwise blending would push
+    // the edge the wrong way.
+    float edgeBlend = 0.0;
+    if (((lumaM - edgeLuma) >= 0.0) != (nearestDelta >= 0.0)) {
+        edgeBlend = 0.5 - nearestDist / edgeLength;
+    }
+
+    float blend = max(subpixBlend, edgeBlend);
+
+    vec2 finalUV = uv;
+    if (horizontal) finalUV.y += blend * pixelStep;
+    else            finalUV.x += blend * pixelStep;
+    return sampleScene(finalUV);
 }
 
 void main() {

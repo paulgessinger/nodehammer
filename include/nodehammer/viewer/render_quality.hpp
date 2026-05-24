@@ -28,13 +28,26 @@ enum class AoQualityPreset : int {
     Ultra = 3,
 };
 
+/// FXAA edge-search quality. Caps how many steps the PC-quality edge walk
+/// takes before giving up; longer walks resolve longer near-axis edges at
+/// linear cost. The FS loops to the Ultra step count (a compile-time bound)
+/// and bails early via a uniform, mirroring the GTAO loop approach.
+///   Low = 4, Medium = 8, High = 10, Ultra = 12 search steps.
+enum class FxaaQualityPreset : int {
+    Low = 0,
+    Medium = 1,
+    High = 2,
+    Ultra = 3,
+};
+
 /// Runtime visual-quality controls for the viewer's render stack. Kept
 /// separate from `Config` because Config is the user/CLI-facing persisted
-/// surface; quality settings are runtime tunables that will grow as more
-/// rendering features land. Most fields are no-ops today and only exist so
-/// the UI plumbing path is established before HDR/FXAA/MSAA/etc. are wired.
+/// surface; quality settings are runtime tunables that grow as more
+/// rendering features land. HDR, tonemap, AO, FXAA, render scale and the
+/// "look" knobs are live; `enable_bloom` / `ibl_quality` are still plumbing
+/// for features that haven't landed.
 struct RenderQualitySettings {
-    float render_scale{0.85f};
+    float render_scale{1.0f};
     /// Cap the render rate at 60 FPS. sokol drives the frame callback at the
     /// display's vsync rate; on a high-refresh panel (120Hz+) this skips frames
     /// to hold the visible rate at ~60. Off = render at the full refresh rate.
@@ -42,6 +55,21 @@ struct RenderQualitySettings {
     bool enable_hdr{true};
     bool enable_tonemap{true};
     bool enable_fxaa{true};
+    /// FXAA (PC-quality variant) tunables. Only consulted when enable_fxaa.
+    /// Sub-pixel aliasing removal: blends the pixel toward the local 3×3
+    /// lowpass. 0 = edge-only AA (sharpest, but thin features can still
+    /// shimmer); 1 = maximum softening. 0.75 is the classic FXAA default.
+    float fxaa_subpix{0.75f};
+    /// Minimum local luma contrast (relative to the brighter neighbor) for a
+    /// pixel to count as an edge. Lower = catch fainter edges (smoother, can
+    /// soften texture); higher = only strong edges. FXAA "quality" default is
+    /// ~0.166 (1/6); 0.125 is a touch more aggressive.
+    float fxaa_edge_threshold{0.166f};
+    /// Absolute luma floor below which edges are ignored as noise — keeps FXAA
+    /// off near-black regions where relative contrast is meaningless.
+    float fxaa_edge_threshold_min{0.0833f};
+    /// Edge-search step budget — see FxaaQualityPreset.
+    FxaaQualityPreset fxaa_quality{FxaaQualityPreset::High};
     bool enable_ao{true};
     float ao_intensity{1.0f};
     float ao_radius{0.3f};
@@ -60,7 +88,7 @@ struct RenderQualitySettings {
     /// most of the fullscreen AO cost for little visible loss; the result is
     /// bilinearly upsampled when the scene shader / composite sample it.
     /// 1.0 = full res. Independent of (and multiplied on top of) render_scale.
-    float ao_resolution_scale{0.9f};
+    float ao_resolution_scale{1.0f};
     /// Run the bilateral denoise pass on the raw GTAO output. Strict
     /// quality win when on — exposed as a toggle so you can A/B raw GTAO
     /// jitter vs the denoised version without rebuilding. Off = scene
@@ -82,7 +110,6 @@ struct RenderQualitySettings {
     /// win without the noisier extremes. Only consulted when
     /// `enable_advanced_ao` is on.
     float ao_bent_strength{0.5f};
-    int msaa_samples{1};
     int ibl_quality{1};
     bool enable_bloom{false};
     DebugView debug_view{DebugView::Off};

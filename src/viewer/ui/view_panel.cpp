@@ -158,7 +158,31 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
             ImGui::BeginDisabled(depth_debug);
             ImGui::Checkbox("FXAA", &ctx.quality.enable_fxaa);
-            ImGui::SetItemTooltip("Fast Approximate Anti-Aliasing (post-process)");
+            ImGui::SetItemTooltip("Fast Approximate Anti-Aliasing "
+                                  "(post-process, PC-quality variant)");
+
+            // Quality knobs only bite when FXAA is on.
+            ImGui::BeginDisabled(!ctx.quality.enable_fxaa);
+            const char *kFxaaQualityLabels[] = {"low", "medium", "high", "ultra"};
+            int fxaa_q = static_cast<int>(ctx.quality.fxaa_quality);
+            if (ImGui::Combo("FXAA quality", &fxaa_q, kFxaaQualityLabels,
+                             IM_ARRAYSIZE(kFxaaQualityLabels))) {
+                ctx.quality.fxaa_quality = static_cast<FxaaQualityPreset>(fxaa_q);
+            }
+            ImGui::SetItemTooltip("Edge-search step budget. Higher resolves longer "
+                                  "near-horizontal/vertical edges at linear cost.");
+            ImGui::SliderFloat("FXAA subpix", &ctx.quality.fxaa_subpix, 0.0f, 1.0f, "%.2f");
+            ImGui::SetItemTooltip("Sub-pixel softening. 0 = edge-only (sharpest, thin "
+                                  "features can shimmer); 1 = max smoothing. 0.75 = default.");
+            ImGui::SliderFloat("FXAA edge", &ctx.quality.fxaa_edge_threshold, 0.063f, 0.333f,
+                               "%.3f");
+            ImGui::SetItemTooltip("Relative contrast needed to treat a pixel as an edge. "
+                                  "Lower catches fainter edges (can soften texture).");
+            ImGui::SliderFloat("FXAA edge min", &ctx.quality.fxaa_edge_threshold_min, 0.0312f,
+                               0.0833f, "%.4f");
+            ImGui::SetItemTooltip("Absolute luma floor — ignore edges in near-black regions.");
+            ImGui::EndDisabled();
+
             ImGui::EndDisabled();
         }
 
@@ -299,12 +323,11 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
         ImGui::SetItemTooltip("Skip frames to hold the render rate at ~60 FPS.\n"
                               "Useful on high-refresh (120Hz+) displays to save power.");
 
-        // The remaining controls advertise the plumbing for MSAA/bloom/
-        // IBL-quality that lands in later phases. Disabled today so they show
-        // what's coming without misleading the user.
+        // The remaining controls advertise plumbing for bloom / IBL-quality
+        // that lands in later phases. Disabled today so they show what's
+        // coming without misleading the user.
         ImGui::BeginDisabled(true);
         ImGui::Checkbox("bloom", &ctx.quality.enable_bloom);
-        ImGui::SliderInt("MSAA", &ctx.quality.msaa_samples, 1, 8);
         ImGui::SliderInt("IBL quality", &ctx.quality.ibl_quality, 0, 3);
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
