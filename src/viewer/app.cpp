@@ -285,6 +285,18 @@ struct App::Impl {
     // "no input observed yet" — treated as idle.
     uint64_t last_activity_time{0};
 
+    // Decoupled on-demand scene rendering: the cheap composite + ImGui run on
+    // every awake frame (so the UI stays fully live — hover, panels, graphs),
+    // but the expensive scene + AO passes only re-run when the scene actually
+    // changes. last_scene_change timestamps the last scene-affecting change
+    // (camera, a held widget, a job, IBL); we keep re-rendering the scene for a
+    // settle window afterward so the AO temporal denoise and the dynamic-scale
+    // settle jump converge. last_scene_consumed_ao caches the scene pass's AO
+    // decision so compositing a *cached* scene still gates the AO multiply
+    // correctly. Both only matter while pause_when_static is on.
+    uint64_t last_scene_change{0};
+    bool last_scene_consumed_ao{false};
+
     uint64_t frame_count{0};
     uint64_t fps_window_start{0};
     float fps{0.f};
@@ -700,7 +712,7 @@ void App::Impl::updateCameraInput() {
                 const float scale = camera.distance * (platform::kIsWeb ? 0.1f : 0.02f);
                 camera.pan(-pending_scroll_x * scale, pending_scroll_y * scale);
             } else {
-                constexpr float kTrackpadOrbitSensitivity = platform::kIsWeb ? 0.1f : 0.03f;
+                constexpr float kTrackpadOrbitSensitivity = platform::kIsWeb ? 0.2f : 0.03f;
                 camera.orbit(pending_scroll_x * kTrackpadOrbitSensitivity,
                              pending_scroll_y * kTrackpadOrbitSensitivity);
             }
@@ -951,167 +963,209 @@ void App::Impl::render() {
         const auto s = static_cast<uint32_t>(static_cast<float>(d) * render_scale + 0.5f);
         return s < 1u ? 1u : s;
     };
-    ensureSceneTarget(scale_dim(fb_width), scale_dim(fb_height));
+    const uint32_t want_w = scale_dim(fb_width);
+    const uint32_t want_h = scale_dim(fb_height);
+    // A resize / scale change reallocates scene_rt; if it does we MUST render
+    // into it this frame (an empty target can't be composited).
+    const bool scene_target_resized = scene_rt.width != want_w || scene_rt.height != want_h;
+    ensureSceneTarget(want_w, want_h);
 
-    // Pass 1 — scene into offscreen color + depth. Depth-clear convention
-    // is backend-conditional (see useReversedZ): 0.0 paired with
-    // GREATER_EQUAL on `[0,1]` clip-depth backends, 1.0 paired with
-    // LESS_EQUAL on GLES3.
-    sg_pass scene_pass{};
-    scene_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    scene_pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
-    scene_pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-    scene_pass.action.depth.clear_value = useReversedZ() ? 0.0f : 1.0f;
-    // STORE so the composite pass's depth-debug view can sample the
-    // depth attachment after the scene pass ends.
-    scene_pass.action.depth.store_action = SG_STOREACTION_STORE;
-    scene_pass.attachments = scene_rt.passAttachments();
-    scene_pass.label = "scene_pass";
-    // This is the frame's first sg_begin_pass, where sokol's Metal backend waits
-    // on the in-flight-frames semaphore (SG_NUM_INFLIGHT_FRAMES=2) until the GPU
-    // drains an older frame. When the GPU is the bottleneck the CPU blocks here,
-    // so this is GPU backpressure — not command encoding — even though it lands
-    // inside encode_ms. Time it separately so the panel attributes it honestly.
-    const uint64_t gpu_wait_start = stm_now();
-    sg_begin_pass(&scene_pass);
-    gpu_wait_ms = stm_sec(stm_diff(stm_now(), gpu_wait_start)) * 1000.0;
-
-    if (scene && scene_uploaded) {
-        if (!camera_framed) {
-            glm::vec3 bmin{0.f}, bmax{0.f};
-            if (scene_renderer.worldBounds(bmin, bmax)) {
-                scene_radius = camera.frameBounds(bmin, bmax);
-                applyInitialCamera();
-                camera_framed = true;
-            }
+    // Decide whether to re-run the expensive scene + AO passes this frame. With
+    // pause_when_static on, an unchanged view reuses the cached scene_rt and
+    // only the cheap composite + ImGui run below — the UI stays fully live while
+    // the geometry renders on demand. We keep rendering through a settle window
+    // after the last change so the AO temporal denoise and the dynamic-scale
+    // settle jump converge before we hold the frame.
+    bool render_scene = true;
+    if (quality.pause_when_static) {
+        const auto session_phase = build_session.phase();
+        const bool jobs_running = !ibl_installed || build_in_progress ||
+                                  (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
+                                  pending_cut_rebuild || session_phase == BuildPhase::Walking ||
+                                  session_phase == BuildPhase::ResolvedReady;
+        const bool ibl_dirty = ibl_rebake_pending || ibl_settings != ibl_last_baked_settings;
+        const bool scene_changing = interacting || jobs_running || ibl_dirty;
+        if (scene_changing) {
+            last_scene_change = stm_now();
         }
-        // Choose between the base scene (interactive shader-cut preview) and the
-        // baked Boolean-cut scene. The cut scene is shown only when the Boolean
-        // cut is enabled and a resident bake matches the committed angle —
-        // otherwise (cut disabled, mid-drag, or a rebuild in flight) we show the
-        // base scene with the live shader cut. The two cut methods are never
-        // active together, which is what avoids the discard-vs-cut-face z-fight.
-        const bool cut_ready = cfg.boolean_cut && cut_uploaded &&
-                               cut_built_start_deg == cfg.angle_cut_start_deg &&
-                               cut_built_end_deg == cfg.angle_cut_end_deg;
-        SceneRenderer &renderer = cut_ready ? cut_renderer : scene_renderer;
-        active_renderer = &renderer;
-        // Flipping which scene is drawn changes the geometry under the temporal
-        // AO history, so invalidate it for one frame to avoid ghosting.
-        if (cut_ready != last_shown_cut) {
-            ao_history_valid = false;
-            last_shown_cut = cut_ready;
-        }
-
-        SceneRenderer::RenderFlags flags;
-        flags.cull = cfg.cull;
-        if (cut_ready) {
-            // Geometry already carries watertight cut faces — no shader discard.
-            flags.angle_cut = false;
-            flags.shader_angle_cut = false;
-        } else if (cfg.boolean_cut) {
-            // Boolean cut enabled but its bake isn't current (dragging / baking):
-            // preview the cut interactively with the shader discard.
-            flags.angle_cut = true;
-            flags.shader_angle_cut = true;
-        } else {
-            // No Boolean cut — honour the standalone shader/instance cut toggles.
-            flags.angle_cut = cfg.angle_cut;
-            flags.shader_angle_cut = cfg.shader_angle_cut;
-        }
-        flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
-        flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
-        flags.enable_pbr = cfg.enable_pbr;
-        // Single source of truth for sun direction: ibl_settings.sun_dir
-        // drives both the IBL bake and the analytical light, so the baked
-        // reflected sun lines up with the analytical highlight (docs §9.1).
-        flags.sun_dir = ibl_settings.sun_dir;
-        flags.sun_intensity = ibl_settings.sun_intensity;
-        // Feed previous frame's denoised AO+bent-normal map into the scene
-        // shader's PBR IBL path. Gated on:
-        //   * PBR (Lambert ignores AO inside the scene shader)
-        //   * `enable_advanced_ao` — the user-facing A/B toggle. When off,
-        //     the scene shader falls back to no-AO defaults and the
-        //     composite does the legacy single-multiply on the AO scalar.
-        //   * History validity (first frame after enable / resize)
-        //   * Non-debug view
-        // When any gate fails the binding still points at a valid texture
-        // (BRDF LUT as placeholder, see scene_renderer.cpp) but the FS
-        // uniform disables the sample — keeps the binding contract trivial.
-        const bool ao_history_pbr = cfg.enable_pbr && quality.enable_ao &&
-                                    quality.enable_advanced_ao &&
-                                    quality.debug_view == DebugView::Off && ao_history_valid;
-        // Pick the right "history" target based on what last frame produced:
-        // either the denoised target (normal case) or the raw target (last
-        // frame had denoise toggled off). Falls back to a null view when
-        // history isn't usable; scene shader's enable bit gates the sample.
-        const AoRenderTarget &history_src = ao_history_was_raw ? ao_rt_raw : ao_rt_history;
-        const bool history_src_valid = history_src.color.id != SG_INVALID_ID;
-        const bool ao_history_active = ao_history_pbr && history_src_valid;
-        flags.ao_history_view = ao_history_active ? history_src.color_texture_view : sg_view{};
-        flags.ao_history_sampler = ao_history_active ? history_src.sampler : sg_sampler{};
-        flags.ao_history_enable = ao_history_active;
-        flags.ao_bent_strength = quality.ao_bent_strength;
-        // Remember the actual decision the scene path made so the composite
-        // gate matches. Naively re-deriving from `ao_history_valid` later
-        // would mis-fire on the first frame after enable (history flips
-        // valid *between* the scene render and the composite, so a re-
-        // computed gate would tell the composite "scene applied AO" when
-        // it actually did not).
-        scene_consumed_ao_this_frame = ao_history_pbr;
-        const uint64_t scene_submit_start = stm_now();
-        renderer.render(camera, scene_rt.width, scene_rt.height, flags);
-        scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
+        constexpr double kSceneStableSeconds = 1.0;
+        const bool converging =
+            last_scene_change != 0 &&
+            stm_sec(stm_diff(stm_now(), last_scene_change)) < kSceneStableSeconds;
+        render_scene = scene_changing || converging || scene_target_resized;
     }
 
-    sg_end_pass();
+    if (render_scene) {
+        // Pass 1 — scene into offscreen color + depth. Depth-clear convention
+        // is backend-conditional (see useReversedZ): 0.0 paired with
+        // GREATER_EQUAL on `[0,1]` clip-depth backends, 1.0 paired with
+        // LESS_EQUAL on GLES3.
+        sg_pass scene_pass{};
+        scene_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+        scene_pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
+        scene_pass.action.depth.load_action = SG_LOADACTION_CLEAR;
+        scene_pass.action.depth.clear_value = useReversedZ() ? 0.0f : 1.0f;
+        // STORE so the composite pass's depth-debug view can sample the
+        // depth attachment after the scene pass ends.
+        scene_pass.action.depth.store_action = SG_STOREACTION_STORE;
+        scene_pass.attachments = scene_rt.passAttachments();
+        scene_pass.label = "scene_pass";
+        // This is the frame's first sg_begin_pass, where sokol's Metal backend waits
+        // on the in-flight-frames semaphore (SG_NUM_INFLIGHT_FRAMES=2) until the GPU
+        // drains an older frame. When the GPU is the bottleneck the CPU blocks here,
+        // so this is GPU backpressure — not command encoding — even though it lands
+        // inside encode_ms. Time it separately so the panel attributes it honestly.
+        const uint64_t gpu_wait_start = stm_now();
+        sg_begin_pass(&scene_pass);
+        gpu_wait_ms = stm_sec(stm_diff(stm_now(), gpu_wait_start)) * 1000.0;
 
-    // Pass 2 (optional) — GTAO into the raw AO target, then a bilateral
-    // denoise from raw into the history target. Skipped entirely when
-    // disabled or while a depth-debug view is active (the composite short-
-    // circuits AO in those modes anyway, but skipping the passes saves the
-    // work). The denoise output (history) is read by *next* frame's scene
-    // shader (PBR IBL) and by this frame's composite Lambert-AO path.
-    //
-    // When `enable_ao_denoise` is off, the denoise pass is skipped and the
-    // raw target stands in as "history" — scene/composite both rebind to
-    // `ao_rt_raw` via the gating below so they see the un-denoised data
-    // (useful as a diagnostic A/B against the denoised path).
-    const bool ao_active = quality.enable_ao && quality.debug_view == DebugView::Off &&
-                           ao_rt_raw.color.id != SG_INVALID_ID &&
-                           ao_rt_history.color.id != SG_INVALID_ID && scene_uploaded;
-    bool ao_history_target_is_raw = false;
-    if (ao_active) {
-        sg_pass ao_pass_desc{};
-        ao_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
-        ao_pass_desc.attachments = ao_rt_raw.passAttachments();
-        ao_pass_desc.label = "ao_pass";
-        sg_begin_pass(&ao_pass_desc);
-        ao_pass.draw(scene_rt, camera, ao_rt_raw.width, ao_rt_raw.height, quality);
-        sg_end_pass();
+        if (scene && scene_uploaded) {
+            if (!camera_framed) {
+                glm::vec3 bmin{0.f}, bmax{0.f};
+                if (scene_renderer.worldBounds(bmin, bmax)) {
+                    scene_radius = camera.frameBounds(bmin, bmax);
+                    applyInitialCamera();
+                    camera_framed = true;
+                }
+            }
+            // Choose between the base scene (interactive shader-cut preview) and the
+            // baked Boolean-cut scene. The cut scene is shown only when the Boolean
+            // cut is enabled and a resident bake matches the committed angle —
+            // otherwise (cut disabled, mid-drag, or a rebuild in flight) we show the
+            // base scene with the live shader cut. The two cut methods are never
+            // active together, which is what avoids the discard-vs-cut-face z-fight.
+            const bool cut_ready = cfg.boolean_cut && cut_uploaded &&
+                                   cut_built_start_deg == cfg.angle_cut_start_deg &&
+                                   cut_built_end_deg == cfg.angle_cut_end_deg;
+            SceneRenderer &renderer = cut_ready ? cut_renderer : scene_renderer;
+            active_renderer = &renderer;
+            // Flipping which scene is drawn changes the geometry under the temporal
+            // AO history, so invalidate it for one frame to avoid ghosting.
+            if (cut_ready != last_shown_cut) {
+                ao_history_valid = false;
+                last_shown_cut = cut_ready;
+            }
 
-        if (quality.enable_ao_denoise) {
-            sg_pass denoise_pass_desc{};
-            denoise_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
-            denoise_pass_desc.attachments = ao_rt_history.passAttachments();
-            denoise_pass_desc.label = "ao_denoise_pass";
-            sg_begin_pass(&denoise_pass_desc);
-            ao_denoise_pass.draw(ao_rt_raw, scene_rt, camera, ao_rt_history.width,
-                                 ao_rt_history.height);
-            sg_end_pass();
-        } else {
-            // Denoise toggle is off — leave ao_rt_history un-updated and
-            // let downstream consumers rebind to the raw target. The
-            // history-validity bit is still flipped on because the raw
-            // target's contents are valid (just noisier than denoised).
-            ao_history_target_is_raw = true;
+            SceneRenderer::RenderFlags flags;
+            flags.cull = cfg.cull;
+            if (cut_ready) {
+                // Geometry already carries watertight cut faces — no shader discard.
+                flags.angle_cut = false;
+                flags.shader_angle_cut = false;
+            } else if (cfg.boolean_cut) {
+                // Boolean cut enabled but its bake isn't current (dragging / baking):
+                // preview the cut interactively with the shader discard.
+                flags.angle_cut = true;
+                flags.shader_angle_cut = true;
+            } else {
+                // No Boolean cut — honour the standalone shader/instance cut toggles.
+                flags.angle_cut = cfg.angle_cut;
+                flags.shader_angle_cut = cfg.shader_angle_cut;
+            }
+            flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
+            flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
+            flags.enable_pbr = cfg.enable_pbr;
+            // Single source of truth for sun direction: ibl_settings.sun_dir
+            // drives both the IBL bake and the analytical light, so the baked
+            // reflected sun lines up with the analytical highlight (docs §9.1).
+            flags.sun_dir = ibl_settings.sun_dir;
+            flags.sun_intensity = ibl_settings.sun_intensity;
+            // Feed previous frame's denoised AO+bent-normal map into the scene
+            // shader's PBR IBL path. Gated on:
+            //   * PBR (Lambert ignores AO inside the scene shader)
+            //   * `enable_advanced_ao` — the user-facing A/B toggle. When off,
+            //     the scene shader falls back to no-AO defaults and the
+            //     composite does the legacy single-multiply on the AO scalar.
+            //   * History validity (first frame after enable / resize)
+            //   * Non-debug view
+            // When any gate fails the binding still points at a valid texture
+            // (BRDF LUT as placeholder, see scene_renderer.cpp) but the FS
+            // uniform disables the sample — keeps the binding contract trivial.
+            const bool ao_history_pbr = cfg.enable_pbr && quality.enable_ao &&
+                                        quality.enable_advanced_ao &&
+                                        quality.debug_view == DebugView::Off && ao_history_valid;
+            // Pick the right "history" target based on what last frame produced:
+            // either the denoised target (normal case) or the raw target (last
+            // frame had denoise toggled off). Falls back to a null view when
+            // history isn't usable; scene shader's enable bit gates the sample.
+            const AoRenderTarget &history_src = ao_history_was_raw ? ao_rt_raw : ao_rt_history;
+            const bool history_src_valid = history_src.color.id != SG_INVALID_ID;
+            const bool ao_history_active = ao_history_pbr && history_src_valid;
+            flags.ao_history_view = ao_history_active ? history_src.color_texture_view : sg_view{};
+            flags.ao_history_sampler = ao_history_active ? history_src.sampler : sg_sampler{};
+            flags.ao_history_enable = ao_history_active;
+            flags.ao_bent_strength = quality.ao_bent_strength;
+            // Remember the actual decision the scene path made so the composite
+            // gate matches. Naively re-deriving from `ao_history_valid` later
+            // would mis-fire on the first frame after enable (history flips
+            // valid *between* the scene render and the composite, so a re-
+            // computed gate would tell the composite "scene applied AO" when
+            // it actually did not).
+            scene_consumed_ao_this_frame = ao_history_pbr;
+            const uint64_t scene_submit_start = stm_now();
+            renderer.render(camera, scene_rt.width, scene_rt.height, flags);
+            scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
         }
 
-        // AO output is populated and safe for next frame's scene sample
-        // (either the just-denoised history target or, when denoise is
-        // off, the raw target — see the rebind below).
-        ao_history_valid = true;
-        ao_history_was_raw = ao_history_target_is_raw;
+        sg_end_pass();
+
+        // Pass 2 (optional) — GTAO into the raw AO target, then a bilateral
+        // denoise from raw into the history target. Skipped entirely when
+        // disabled or while a depth-debug view is active (the composite short-
+        // circuits AO in those modes anyway, but skipping the passes saves the
+        // work). The denoise output (history) is read by *next* frame's scene
+        // shader (PBR IBL) and by this frame's composite Lambert-AO path.
+        //
+        // When `enable_ao_denoise` is off, the denoise pass is skipped and the
+        // raw target stands in as "history" — scene/composite both rebind to
+        // `ao_rt_raw` via the gating below so they see the un-denoised data
+        // (useful as a diagnostic A/B against the denoised path).
+        const bool ao_active = quality.enable_ao && quality.debug_view == DebugView::Off &&
+                               ao_rt_raw.color.id != SG_INVALID_ID &&
+                               ao_rt_history.color.id != SG_INVALID_ID && scene_uploaded;
+        bool ao_history_target_is_raw = false;
+        if (ao_active) {
+            sg_pass ao_pass_desc{};
+            ao_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+            ao_pass_desc.attachments = ao_rt_raw.passAttachments();
+            ao_pass_desc.label = "ao_pass";
+            sg_begin_pass(&ao_pass_desc);
+            ao_pass.draw(scene_rt, camera, ao_rt_raw.width, ao_rt_raw.height, quality);
+            sg_end_pass();
+
+            if (quality.enable_ao_denoise) {
+                sg_pass denoise_pass_desc{};
+                denoise_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+                denoise_pass_desc.attachments = ao_rt_history.passAttachments();
+                denoise_pass_desc.label = "ao_denoise_pass";
+                sg_begin_pass(&denoise_pass_desc);
+                ao_denoise_pass.draw(ao_rt_raw, scene_rt, camera, ao_rt_history.width,
+                                     ao_rt_history.height);
+                sg_end_pass();
+            } else {
+                // Denoise toggle is off — leave ao_rt_history un-updated and
+                // let downstream consumers rebind to the raw target. The
+                // history-validity bit is still flipped on because the raw
+                // target's contents are valid (just noisier than denoised).
+                ao_history_target_is_raw = true;
+            }
+
+            // AO output is populated and safe for next frame's scene sample
+            // (either the just-denoised history target or, when denoise is
+            // off, the raw target — see the rebind below).
+            ao_history_valid = true;
+            ao_history_was_raw = ao_history_target_is_raw;
+        }
+
+        // Cache the scene pass's AO-consumed decision so a later cached-scene
+        // composite (when we skip the scene pass) gates the AO multiply the same
+        // way the cached scene_rt was actually rendered.
+        last_scene_consumed_ao = scene_consumed_ao_this_frame;
+    } else {
+        // Reusing the cached scene_rt + AO targets — no offscreen GPU work this
+        // frame; only the composite + ImGui below run.
+        gpu_wait_ms = 0.0;
+        scene_submit_ms = 0.0;
     }
 
     // Split the submit timer here: everything above is pure CPU encoding of the
@@ -1162,17 +1216,19 @@ void App::Impl::render() {
         // gates on a valid color id and falls back to its 1×1 white dummy
         // so we never sample undefined data. When denoise is off this
         // frame, the raw target is what the composite should sample.
+        // Source the AO target and the scene's AO-consumed flag from persistent
+        // members (not this-frame locals) so this works whether we re-rendered
+        // the scene above or are compositing a cached one.
         const AoRenderTarget *composite_ao_src = nullptr;
         if (ao_history_valid) {
-            composite_ao_src = ao_history_target_is_raw ? &ao_rt_raw : &ao_rt_history;
+            composite_ao_src = ao_history_was_raw ? &ao_rt_raw : &ao_rt_history;
         }
         const AoRenderTarget composite_ao_empty{};
         const AoRenderTarget &composite_ao_target =
             composite_ao_src ? *composite_ao_src : composite_ao_empty;
-        composite.draw(scene_rt, composite_ao_target, ao_pass, quality,
-                       scene_consumed_ao_this_frame, camera.near_plane, camera.far_plane,
-                       scene_renderer.iblPrefilterView(), scene_renderer.iblCubeSampler(),
-                       inv_view_proj, camera.eye());
+        composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
+                       camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
+                       scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
     }
     ImGui_ImplSokol_Render();
 
@@ -1511,6 +1567,37 @@ void App::Impl::onFrame() {
         }
         constexpr double kIdleFrameInterval = 1.0 / 30.0; // 30 Hz
         if (stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
+            return;
+        }
+    }
+
+    // Focused idle frame-rate cap. Once nothing is actively changing, the only
+    // per-frame work is the cheap composite + ImGui — the scene is cached and
+    // rendered on demand (see render_scene below) — so vsync is overkill. Cap to
+    // a low rate to trim idle power while keeping the UI live (and self-updating,
+    // so there's no stale-frame risk). Recent input, running jobs, a pending
+    // rebake, auto-orbit, a file-drag, and live toasts all bypass the cap so
+    // interaction and animations stay at the full refresh rate; input bypasses
+    // it on the very next vsync, so first-interaction latency is unaffected.
+    // (This is the focused counterpart to the unfocused idle gate above; that
+    // one skips entirely / 30 Hz when backgrounded.)
+    if (quality.pause_when_static) {
+        constexpr double kIdleInputSeconds = 0.2;         // recent input keeps full rate
+        constexpr double kIdleFrameInterval = 1.0 / 12.0; // ~12 Hz when parked
+        const auto session_phase = build_session.phase();
+        const bool jobs_running = !ibl_installed || build_in_progress ||
+                                  (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
+                                  pending_cut_rebuild || session_phase == BuildPhase::Walking ||
+                                  session_phase == BuildPhase::ResolvedReady;
+        const bool ibl_dirty = ibl_rebake_pending || ibl_settings != ibl_last_baked_settings;
+        const bool drag_hover = platform_ && platform_->windowState().drag_hover.active;
+        const bool input_recent =
+            last_activity_time != 0 &&
+            stm_sec(stm_diff(stm_now(), last_activity_time)) < kIdleInputSeconds;
+        const bool full_rate = input_recent || jobs_running || ibl_dirty || cfg.auto_orbit ||
+                               drag_hover || notifications.hasActiveToasts();
+        if (!full_rate && last_time != 0 &&
+            stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
             return;
         }
     }

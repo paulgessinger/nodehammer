@@ -356,6 +356,14 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
         ImGui::SetItemTooltip("Skip frames to hold the render rate at ~60 FPS.\n"
                               "Useful on high-refresh (120Hz+) displays to save power.");
 
+        ImGui::Checkbox("pause when static", &ctx.quality.pause_when_static);
+        ImGui::SetItemTooltip(
+            "Render the scene on demand. The UI stays live, but the geometry\n"
+            "only re-renders when the view changes — moving the cursor or working\n"
+            "the panels reuses the cached scene. When nothing is changing the loop\n"
+            "caps to a low idle rate to save power; interaction snaps back to full\n"
+            "rate instantly.");
+
         // The remaining controls advertise plumbing for bloom / IBL-quality
         // that lands in later phases. Disabled today so they show what's
         // coming without misleading the user.

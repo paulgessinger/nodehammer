@@ -77,6 +77,17 @@ struct RenderQualitySettings {
     /// display's vsync rate; on a high-refresh panel (120Hz+) this skips frames
     /// to hold the visible rate at ~60. Off = render at the full refresh rate.
     bool cap_fps{false};
+    /// Render the scene on demand. The cheap composite + ImGui run on every
+    /// frame the loop ticks, so the UI stays live (hover, panels, graphs), but
+    /// the expensive scene + AO passes only re-run when the view actually
+    /// changes (camera, a held widget such as the wedge cut, a build/bake job)
+    /// plus a short settle window so AO and the dynamic-scale jump converge.
+    /// Moving the cursor or working the panels reuses the cached scene instead
+    /// of re-rendering geometry. On top of that, when nothing is changing the
+    /// loop caps to a low idle rate (~12 Hz) to trim power — full refresh
+    /// resumes the instant anything happens, so interaction is unaffected. Most
+    /// valuable with an expensive supersampled settled frame.
+    bool pause_when_static{true};
     bool enable_hdr{true};
     bool enable_tonemap{true};
     bool enable_fxaa{true};

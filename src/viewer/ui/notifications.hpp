@@ -76,6 +76,11 @@ class Notifications : public LogSink {
 
     void render();
 
+    /// True while any toast is still live (fading in/out, counting down, or a
+    /// sticky progress/error). Lets the frame loop know the overlay is still
+    /// animating and shouldn't be frozen by on-demand rendering.
+    [[nodiscard]] bool hasActiveToasts() const { return !toasts_.empty(); }
+
     enum class Kind { Info, Success, Warning, Error, Progress };
 
   private:
