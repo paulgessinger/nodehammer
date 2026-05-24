@@ -31,6 +31,13 @@ function getModule() {
     return modulePromise;
 }
 
+// Kick off module instantiation immediately so the wasm loads in parallel with
+// the app's scene fetch rather than lazily on the first build. A load failure is
+// surfaced (fatal) so the main thread can fall back to the cooperative path.
+getModule().catch(function (err) {
+    self.postMessage({ nh: 'error', message: 'compute: module load failed: ' + err, fatal: true });
+});
+
 // Epoch whose scene bytes are already resident in the wasm cache. Lets re-aim
 // requests skip re-sending (and re-deserializing) the scene.
 let loadedEpoch = -1;
@@ -45,7 +52,7 @@ self.onmessage = async function (e) {
     try {
         mod = await getModule();
     } catch (err) {
-        self.postMessage({ nh: 'error', message: 'compute: module load failed: ' + err });
+        self.postMessage({ nh: 'error', message: 'compute: module load failed: ' + err, fatal: true });
         return;
     }
 

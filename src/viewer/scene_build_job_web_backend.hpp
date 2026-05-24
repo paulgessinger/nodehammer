@@ -39,6 +39,11 @@ class IWebBackend {
     [[nodiscard]] virtual std::size_t wedgeCutTotal() const = 0;
     [[nodiscard]] virtual std::size_t wedgeCutProcessed() const = 0;
     [[nodiscard]] virtual SceneBuildJob::Phase phase() const = 0;
+
+    /// True once the backend is known to be unusable and the just-finished
+    /// build should be retried on a different backend (the worker backend
+    /// raises this on a fatal worker/module failure). Default: never.
+    [[nodiscard]] virtual bool wantsFallback() const { return false; }
 };
 
 /// Always succeeds — the cooperative path has no external dependency.

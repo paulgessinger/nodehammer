@@ -9,8 +9,10 @@
 #include <nodehammer/tessellation/wedge_cut.hpp>
 
 #include <cstdint>
+#include <iostream>
 #include <memory>
 #include <optional>
+#include <print>
 #include <string>
 #include <utility>
 
@@ -188,9 +190,20 @@ std::unique_ptr<IWebBackend> makeCooperativeBackend() {
 // identical SceneBuildJob surface.
 struct SceneBuildJob::Impl {
     std::unique_ptr<IWebBackend> backend;
+    bool using_worker{false};
+
+    // Saved start() args, kept only while the worker backend is active, so a
+    // fatal worker failure mid-build can be replayed on the cooperative backend
+    // without the App ever knowing.
+    std::shared_ptr<const ::nodehammer::NHConfig> saved_config;
+    std::shared_ptr<const ::nodehammer::SemanticScene> saved_scene;
+    std::string saved_config_label;
+    std::string saved_geometry_label;
+    std::optional<::nodehammer::WedgeCutParams> saved_wedge;
 
     Impl() {
         backend = makeWorkerBackend();
+        using_worker = backend != nullptr;
         if (!backend) {
             backend = makeCooperativeBackend();
         }
@@ -204,11 +217,37 @@ void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
                           std::shared_ptr<const ::nodehammer::SemanticScene> scene,
                           std::string config_label, std::string geometry_label,
                           std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
+    if (impl_->using_worker) {
+        // Cheap (shared_ptr refcount + small string copies) — retained for a
+        // possible cooperative replay if the worker turns out to be broken.
+        impl_->saved_config = config;
+        impl_->saved_scene = scene;
+        impl_->saved_config_label = config_label;
+        impl_->saved_geometry_label = geometry_label;
+        impl_->saved_wedge = wedge_cut;
+    }
     impl_->backend->start(std::move(config), std::move(scene), std::move(config_label),
                           std::move(geometry_label), wedge_cut);
 }
 
-bool SceneBuildJob::poll(uint64_t budget_ns) { return impl_->backend->poll(budget_ns); }
+bool SceneBuildJob::poll(uint64_t budget_ns) {
+    const bool done = impl_->backend->poll(budget_ns);
+    if (done && impl_->using_worker && impl_->backend->wantsFallback()) {
+        // The worker is unusable (fatal load/run failure). Discard its empty
+        // result and transparently rerun this build on the cooperative backend.
+        (void)impl_->backend->take();
+        std::println(std::cerr, "scene_build_job: compute worker unavailable — falling back to "
+                                "cooperative main-thread build");
+        impl_->backend = makeCooperativeBackend();
+        impl_->using_worker = false;
+        impl_->backend->start(impl_->saved_config, impl_->saved_scene, impl_->saved_config_label,
+                              impl_->saved_geometry_label, impl_->saved_wedge);
+        impl_->saved_config.reset();
+        impl_->saved_scene.reset();
+        return false; // keep building, now cooperatively
+    }
+    return done;
+}
 
 ::nodehammer::SceneBuildResult SceneBuildJob::take() { return impl_->backend->take(); }
 

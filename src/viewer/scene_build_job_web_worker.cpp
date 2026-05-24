@@ -55,6 +55,7 @@ EM_JS(int, nh_worker_create, (), {
             resultPtr: 0,
             resultLen: 0,
             error: "",
+            fatal: 0,       // 1 = worker/module is broken; main thread should fall back
             phase: 0,       // 1 prep, 2 cut, 3 tess, 4 finalize
             processed: 0,
             total: 0,
@@ -66,6 +67,7 @@ EM_JS(int, nh_worker_create, (), {
                 st.phase = m.phase; st.processed = m.processed; st.total = m.total;
             } else if (m.nh === "error") {
                 st.error = m.message || "compute worker error";
+                if (m.fatal) st.fatal = 1;
                 st.status = 3;
             } else if (m.nh === "result") {
                 var bytes = new Uint8Array(m.buffer);
@@ -77,7 +79,10 @@ EM_JS(int, nh_worker_create, (), {
             }
         };
         w.onerror = function (e) {
+            // An error on the worker itself (bad script, importScripts failure)
+            // means the worker can't be used — fatal, fall back.
             st.error = "compute worker error: " + (e && e.message ? e.message : e);
+            st.fatal = 1;
             st.status = 3;
         };
         st.worker = w;
@@ -116,6 +121,7 @@ EM_JS(double, nh_worker_processed, (), { var st = Module.__nhWorker; return st ?
 EM_JS(double, nh_worker_total, (), { var st = Module.__nhWorker; return st ? st.total : 0; });
 EM_JS(unsigned, nh_worker_result_ptr, (), { var st = Module.__nhWorker; return st ? st.resultPtr : 0; });
 EM_JS(unsigned, nh_worker_result_len, (), { var st = Module.__nhWorker; return st ? st.resultLen : 0; });
+EM_JS(int, nh_worker_fatal, (), { var st = Module.__nhWorker; return (st && st.fatal) ? 1 : 0; });
 
 // Copy out the pending error message (malloc'd; caller frees). Empty if none.
 EM_JS(char *, nh_worker_take_error, (), {
@@ -179,12 +185,30 @@ class WorkerBackend final : public IWebBackend {
         if (state_ == State::Done) {
             return true;
         }
+        // A *fatal* failure (bad worker script, module load/instantiate failure)
+        // can surface at any time — including a worker that died before our build
+        // message, where a dead worker would otherwise leave status stuck at
+        // "building". So check it first. The result is left empty and
+        // wantsFallback() is raised so SceneBuildJob reruns this build on the
+        // cooperative backend.
+        if (nh_worker_fatal() != 0) {
+            fatal_ = true;
+            char *err = nh_worker_take_error();
+            std::free(err);
+            result_.scene = nullptr;
+            nh_worker_reset();
+            state_ = State::Done;
+            return true;
+        }
+
         // Building: check what the worker has reported.
         const int status = nh_worker_status();
         if (status == 1) {
             return false; // still working
         }
         if (status == 3) {
+            // Non-fatal error: a content failure (bad config/geometry) that the
+            // cooperative path would hit too, so report it rather than fall back.
             char *err = nh_worker_take_error();
             result_.scene = nullptr;
             result_.diags.error(::nodehammer::codes::kErrComputeWorker,
@@ -221,6 +245,10 @@ class WorkerBackend final : public IWebBackend {
         state_ = State::Idle;
         return out;
     }
+
+    // Raised once the worker is known to be unusable (fatal load/run failure);
+    // SceneBuildJob then reruns the build on the cooperative backend.
+    bool wantsFallback() const override { return fatal_; }
 
     // Progress getters are phase-gated to match the cooperative/native jobs:
     // only the active phase reports counts.
@@ -266,6 +294,7 @@ class WorkerBackend final : public IWebBackend {
 
     State state_{State::Idle};
     ::nodehammer::SceneBuildResult result_;
+    bool fatal_{false};
 
     // Pristine-scene cache (main-thread side): identity + serialized bytes so a
     // re-aim reuses them instead of re-serializing.
