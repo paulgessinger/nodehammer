@@ -54,4 +54,7 @@ inline constexpr std::string_view kWarnTessDefaultMaterial = "NH0507";
 // ── Export ────────────────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrExportWriteFailed = "NH0600";
 
+// ── Compute worker (web) ────────────────────────────────────────────────────────
+inline constexpr std::string_view kErrComputeWorker = "NH0700";
+
 } // namespace nodehammer::codes

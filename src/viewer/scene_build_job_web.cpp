@@ -1,6 +1,7 @@
 #include "scene_build_job.hpp"
 
 #include "scene_build_job_internal.hpp"
+#include "scene_build_job_web_backend.hpp"
 
 #include <nodehammer/scene_build.hpp>
 #include <nodehammer/tessellation/tessellation_job.hpp>
@@ -15,34 +16,185 @@
 
 namespace nodehammer::viewer {
 
-struct SceneBuildJob::Impl {
-    enum class State : uint8_t {
+// ── CooperativeBackend ────────────────────────────────────────────────────────
+//
+// The original single-threaded web path: runs the (synchronous) prep on the
+// first poll, then drives the WedgeCutJob / TessellationJob iterators across
+// subsequent polls within `budget_ns` so the UI keeps rendering. This is the
+// fallback whenever a Web Worker isn't usable (file://, no `Worker`, CSP,
+// `?compute=main`).
+namespace {
+
+class CooperativeBackend final : public IWebBackend {
+  public:
+    void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
+               std::shared_ptr<const ::nodehammer::SemanticScene> scene, std::string config_label,
+               std::string geometry_label,
+               std::optional<::nodehammer::WedgeCutParams> wedge_cut) override {
+        config_label_ = std::move(config_label);
+        geometry_label_ = std::move(geometry_label);
+        preset_config_ = std::move(config);
+        preset_scene_ = std::move(scene);
+        wedge_cut_ = wedge_cut;
+        result_ = {};
+        prep_ = {};
+        wedge_job_ = ::nodehammer::WedgeCutJob{};
+        tess_job_ = ::nodehammer::TessellationJob{};
+        state_ = State::Queued;
+    }
+
+    bool poll(std::uint64_t budget_ns) override {
+        switch (state_) {
+        case State::Idle:
+            return false;
+        case State::Done:
+            return true;
+        case State::Queued:
+            // Burn one poll so the caller's last frame paints before we run the
+            // synchronous prep + first tessellation slice.
+            state_ = State::PrepPending;
+            return false;
+        case State::PrepPending: {
+            logPreBuild(config_label_, geometry_label_);
+            prep_ = ::nodehammer::prepareSceneForTessellationFromInputs(
+                *preset_config_, *preset_scene_, std::nullopt);
+            preset_config_.reset();
+            preset_scene_.reset();
+            if (!prep_.ok) {
+                result_.scene = nullptr;
+                result_.diags = std::move(prep_.diags);
+                state_ = State::Done;
+                return true;
+            }
+            if (wedge_cut_) {
+                wedge_job_.start(prep_.scene, *wedge_cut_);
+                state_ = State::Cutting;
+                if (wedge_job_.advance(budget_ns)) {
+                    (void)wedge_job_.take();
+                    tess_job_.start(prep_.config, prep_.scene);
+                    state_ = State::Tessellating;
+                }
+                return false;
+            }
+            tess_job_.start(prep_.config, prep_.scene);
+            state_ = State::Tessellating;
+            if (tess_job_.advance(budget_ns)) {
+                state_ = State::Finalizing;
+            }
+            return false;
+        }
+        case State::Cutting:
+            if (wedge_job_.advance(budget_ns)) {
+                (void)wedge_job_.take();
+                tess_job_.start(prep_.config, prep_.scene);
+                state_ = State::Tessellating;
+            }
+            return false;
+        case State::Tessellating:
+            if (tess_job_.advance(budget_ns)) {
+                state_ = State::Finalizing;
+            }
+            return false;
+        case State::Finalizing: {
+            ::nodehammer::TessellationPassResult tess = tess_job_.take();
+            prep_.diags.append(tess.diags);
+            if (tess.diags.hasErrors()) {
+                result_.scene = nullptr;
+            } else {
+                result_.scene = std::make_shared<::nodehammer::RenderScene>(std::move(tess.scene));
+            }
+            result_.diags = std::move(prep_.diags);
+            prep_ = {};
+            state_ = State::Done;
+            return true;
+        }
+        }
+        return false;
+    }
+
+    ::nodehammer::SceneBuildResult take() override {
+        ::nodehammer::SceneBuildResult out = std::move(result_);
+        result_ = {};
+        state_ = State::Idle;
+        config_label_.clear();
+        geometry_label_.clear();
+        prep_ = {};
+        wedge_job_ = ::nodehammer::WedgeCutJob{};
+        tess_job_ = ::nodehammer::TessellationJob{};
+        return out;
+    }
+
+    std::size_t tessellationTotal() const override { return tess_job_.totalNodes(); }
+    std::size_t tessellationProcessed() const override { return tess_job_.processedNodes(); }
+    std::size_t wedgeCutTotal() const override { return wedge_job_.totalPlacements(); }
+    std::size_t wedgeCutProcessed() const override { return wedge_job_.processedPlacements(); }
+
+    SceneBuildJob::Phase phase() const override {
+        switch (state_) {
+        case State::Idle:
+            return SceneBuildJob::Phase::Idle;
+        case State::Queued:
+        case State::PrepPending:
+            return SceneBuildJob::Phase::Preparing;
+        case State::Cutting:
+            return SceneBuildJob::Phase::Cutting;
+        case State::Tessellating:
+            return SceneBuildJob::Phase::Tessellating;
+        case State::Finalizing:
+            return SceneBuildJob::Phase::Finalizing;
+        case State::Done:
+            return SceneBuildJob::Phase::Done;
+        }
+        return SceneBuildJob::Phase::Idle;
+    }
+
+  private:
+    enum class State : std::uint8_t {
         Idle,
-        Queued,       // start() called, first poll will paint a "Tessellating…" frame
-        PrepPending,  // run upstream stages (config, import, select, dedup) on next poll
-        Cutting,      // drive the cooperative WedgeCutJob (only when one is requested)
+        Queued,       // start() called; first poll paints a "Tessellating…" frame
+        PrepPending,  // run upstream stages on next poll
+        Cutting,      // drive the cooperative WedgeCutJob (only when requested)
         Tessellating, // drive TessellationJob iterator
         Finalizing,   // package result on next poll
         Done,
     };
-    State state{State::Idle};
+    State state_{State::Idle};
 
-    ::nodehammer::ScenePrepResult prep;
-    ::nodehammer::WedgeCutJob wedge_job;
-    ::nodehammer::TessellationJob tess_job;
+    ::nodehammer::ScenePrepResult prep_;
+    ::nodehammer::WedgeCutJob wedge_job_;
+    ::nodehammer::TessellationJob tess_job_;
 
-    std::string config_label;
-    std::string geometry_label;
+    std::string config_label_;
+    std::string geometry_label_;
 
-    // Pre-prepared inputs handed in by `start`. shared_ptr<const> to match the
-    // native signature; on web (single-threaded) the copy prep consumes is
-    // unavoidably on the main thread, but it lands on the PrepPending poll —
-    // after a frame has painted "Tessellating…" — rather than inside start().
-    std::shared_ptr<const ::nodehammer::NHConfig> preset_config;
-    std::shared_ptr<const ::nodehammer::SemanticScene> preset_scene;
-    std::optional<::nodehammer::WedgeCutParams> wedge_cut;
+    std::shared_ptr<const ::nodehammer::NHConfig> preset_config_;
+    std::shared_ptr<const ::nodehammer::SemanticScene> preset_scene_;
+    std::optional<::nodehammer::WedgeCutParams> wedge_cut_;
 
-    ::nodehammer::SceneBuildResult result;
+    ::nodehammer::SceneBuildResult result_;
+};
+
+} // namespace
+
+std::unique_ptr<IWebBackend> makeCooperativeBackend() {
+    return std::make_unique<CooperativeBackend>();
+}
+
+// ── SceneBuildJob: backend selection + delegation ─────────────────────────────
+//
+// Prefer the Web Worker (true off-main-thread parallelism); fall back to the
+// cooperative state machine when one isn't available. The choice is made once,
+// at construction, and is invisible to the App — both backends present the
+// identical SceneBuildJob surface.
+struct SceneBuildJob::Impl {
+    std::unique_ptr<IWebBackend> backend;
+
+    Impl() {
+        backend = makeWorkerBackend();
+        if (!backend) {
+            backend = makeCooperativeBackend();
+        }
+    }
 };
 
 SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
@@ -52,129 +204,21 @@ void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
                           std::shared_ptr<const ::nodehammer::SemanticScene> scene,
                           std::string config_label, std::string geometry_label,
                           std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
-    impl_->config_label = std::move(config_label);
-    impl_->geometry_label = std::move(geometry_label);
-    impl_->preset_config = std::move(config);
-    impl_->preset_scene = std::move(scene);
-    impl_->wedge_cut = wedge_cut;
-    impl_->result = {};
-    impl_->prep = {};
-    impl_->wedge_job = ::nodehammer::WedgeCutJob{};
-    impl_->tess_job = ::nodehammer::TessellationJob{};
-    impl_->state = Impl::State::Queued;
+    impl_->backend->start(std::move(config), std::move(scene), std::move(config_label),
+                          std::move(geometry_label), wedge_cut);
 }
 
-bool SceneBuildJob::poll(uint64_t budget_ns) {
-    switch (impl_->state) {
-    case Impl::State::Idle:
-        return false;
-    case Impl::State::Done:
-        return true;
-    case Impl::State::Queued:
-        // Burn one poll so the caller's last frame paints before we run
-        // the synchronous prep + first tessellation slice.
-        impl_->state = Impl::State::PrepPending;
-        return false;
-    case Impl::State::PrepPending: {
-        logPreBuild(impl_->config_label, impl_->geometry_label);
-        // Prep (validate / select / dedup) runs without the wedge cut — the cut
-        // is driven cooperatively below so it doesn't freeze the frame and can
-        // report progress. Tests / CLI still get the synchronous cut via prep.
-        impl_->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
-            *impl_->preset_config, *impl_->preset_scene, std::nullopt);
-        impl_->preset_config.reset();
-        impl_->preset_scene.reset();
-        if (!impl_->prep.ok) {
-            // Upstream stage failed — package the diags and finish.
-            impl_->result.scene = nullptr;
-            impl_->result.diags = std::move(impl_->prep.diags);
-            impl_->state = Impl::State::Done;
-            return true;
-        }
-        if (impl_->wedge_cut) {
-            impl_->wedge_job.start(impl_->prep.scene, *impl_->wedge_cut);
-            impl_->state = Impl::State::Cutting;
-            // Run a first slice immediately so we make visible progress on
-            // this poll — but stop within the budget so we yield to render.
-            if (impl_->wedge_job.advance(budget_ns)) {
-                (void)impl_->wedge_job.take();
-                impl_->tess_job.start(impl_->prep.config, impl_->prep.scene);
-                impl_->state = Impl::State::Tessellating;
-            }
-            return false;
-        }
-        impl_->tess_job.start(impl_->prep.config, impl_->prep.scene);
-        impl_->state = Impl::State::Tessellating;
-        if (impl_->tess_job.advance(budget_ns)) {
-            impl_->state = Impl::State::Finalizing;
-        }
-        return false;
-    }
-    case Impl::State::Cutting:
-        if (impl_->wedge_job.advance(budget_ns)) {
-            (void)impl_->wedge_job.take();
-            impl_->tess_job.start(impl_->prep.config, impl_->prep.scene);
-            impl_->state = Impl::State::Tessellating;
-        }
-        return false;
-    case Impl::State::Tessellating:
-        if (impl_->tess_job.advance(budget_ns)) {
-            impl_->state = Impl::State::Finalizing;
-        }
-        return false;
-    case Impl::State::Finalizing: {
-        ::nodehammer::TessellationPassResult tess = impl_->tess_job.take();
-        impl_->prep.diags.append(tess.diags);
-        if (tess.diags.hasErrors()) {
-            impl_->result.scene = nullptr;
-        } else {
-            impl_->result.scene =
-                std::make_shared<::nodehammer::RenderScene>(std::move(tess.scene));
-        }
-        impl_->result.diags = std::move(impl_->prep.diags);
-        impl_->prep = {};
-        impl_->state = Impl::State::Done;
-        return true;
-    }
-    }
-    return false;
+bool SceneBuildJob::poll(uint64_t budget_ns) { return impl_->backend->poll(budget_ns); }
+
+::nodehammer::SceneBuildResult SceneBuildJob::take() { return impl_->backend->take(); }
+
+size_t SceneBuildJob::tessellationTotal() const { return impl_->backend->tessellationTotal(); }
+size_t SceneBuildJob::tessellationProcessed() const {
+    return impl_->backend->tessellationProcessed();
 }
+size_t SceneBuildJob::wedgeCutTotal() const { return impl_->backend->wedgeCutTotal(); }
+size_t SceneBuildJob::wedgeCutProcessed() const { return impl_->backend->wedgeCutProcessed(); }
 
-::nodehammer::SceneBuildResult SceneBuildJob::take() {
-    ::nodehammer::SceneBuildResult out = std::move(impl_->result);
-    impl_->result = {};
-    impl_->state = Impl::State::Idle;
-    impl_->config_label.clear();
-    impl_->geometry_label.clear();
-    impl_->prep = {};
-    impl_->wedge_job = ::nodehammer::WedgeCutJob{};
-    impl_->tess_job = ::nodehammer::TessellationJob{};
-    return out;
-}
-
-size_t SceneBuildJob::tessellationTotal() const { return impl_->tess_job.totalNodes(); }
-size_t SceneBuildJob::tessellationProcessed() const { return impl_->tess_job.processedNodes(); }
-
-size_t SceneBuildJob::wedgeCutTotal() const { return impl_->wedge_job.totalPlacements(); }
-size_t SceneBuildJob::wedgeCutProcessed() const { return impl_->wedge_job.processedPlacements(); }
-
-SceneBuildJob::Phase SceneBuildJob::phase() const {
-    switch (impl_->state) {
-    case Impl::State::Idle:
-        return Phase::Idle;
-    case Impl::State::Queued:
-    case Impl::State::PrepPending:
-        return Phase::Preparing;
-    case Impl::State::Cutting:
-        return Phase::Cutting;
-    case Impl::State::Tessellating:
-        return Phase::Tessellating;
-    case Impl::State::Finalizing:
-        return Phase::Finalizing;
-    case Impl::State::Done:
-        return Phase::Done;
-    }
-    return Phase::Idle;
-}
+SceneBuildJob::Phase SceneBuildJob::phase() const { return impl_->backend->phase(); }
 
 } // namespace nodehammer::viewer

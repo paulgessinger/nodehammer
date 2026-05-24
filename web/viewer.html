@@ -118,6 +118,11 @@
                 }
             }
 
+            // Scene building runs in a Web Worker (off the main thread) when
+            // one is available; otherwise it falls back to a cooperative
+            // main-thread build. Force the main-thread path with ?compute=main
+            // (read directly by the C++ worker probe — no JS plumbing needed).
+            //
             // Backend selection: WebGPU when available, WebGL2 otherwise.
             // Force a specific backend with ?backend=wgpu/webgpu or
             // ?backend=gles3/webgl2.

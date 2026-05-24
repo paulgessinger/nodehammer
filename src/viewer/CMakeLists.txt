@@ -49,6 +49,7 @@ function(nh_add_viewer_lib name sokol_lib)
         ${_dir}/ibl.cpp
         ${_dir}/scene_build_job_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
+        $<$<BOOL:${EMSCRIPTEN}>:${_dir}/scene_build_job_web_worker.cpp>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_project_fs_web.cpp,>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,$<IF:$<BOOL:${APPLE}>,${_dir}/platform_macos.mm,${_dir}/platform_native_default.cpp>>
         $<$<NOT:$<BOOL:${EMSCRIPTEN}>>:${_dir}/platform_native_common.cpp>
