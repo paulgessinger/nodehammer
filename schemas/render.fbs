@@ -1,0 +1,107 @@
+// Render IR FlatBuffer schema (RenderScene — the tessellation output).
+//
+// Sibling to semantic.fbs (the imported geometry, "NHS8"/.nhb). This encodes
+// the *post-tessellation* render scene so it can cross a byte boundary —
+// primarily a Web Worker postMessage, but it also doubles as a "baked
+// tessellation" artifact. The bulk is mesh vertex/index data; node/material
+// tables are small by comparison, so v1 favours simplicity over the
+// column-oriented / transform-pooled compaction that semantic.fbs uses.
+//
+// Types live in `nodehammer.fbs.render` (not `nodehammer.fbs`) so the generated
+// header can be co-included with semantic_generated.h without colliding on the
+// shared primitive names (Vec3f, etc.).
+
+namespace nodehammer.fbs.render;
+
+// ── Inline math primitives ───────────────────────────────────────────────────
+
+struct Vec3f { x:float; y:float; z:float; }
+struct Vec4f { x:float; y:float; z:float; w:float; }
+
+// glm::mat4 is column-major; columns map 1:1 to c0..c3 (m[0]..m[3]).
+struct Mat4f { c0:Vec4f; c1:Vec4f; c2:Vec4f; c3:Vec4f; }
+
+// Interleaved vertex: matches nodehammer::Vertex (pos+normal, 6 contiguous
+// floats) so the codec can memcpy whole arrays on the hot path.
+struct Vertex { position:Vec3f; normal:Vec3f; }
+
+// Per-instance material binding. IDs are full uint64 (StrongId values), so no
+// remapping is needed — the round-trip preserves original IDs.
+struct MeshBinding { mesh_id:ulong; material_id:ulong; }
+
+// ── Provenance (shared geometry metadata) ────────────────────────────────────
+
+table Provenance {
+    source_system:string;
+    source_name:string;
+    source_file:string;
+    // DegradationFlags bitset (4 bits today) packed into one byte.
+    degradation:ubyte;
+}
+
+// ── Mesh asset (shared geometry, immutable) ──────────────────────────────────
+
+table MeshAsset {
+    id:ulong;
+    name:string;
+    vertices:[Vertex];
+    indices:[uint];        // triangles: every 3 indices = one triangle
+    provenance:Provenance;
+}
+
+// ── Material (per-instance binding) ──────────────────────────────────────────
+
+table RenderMaterial {
+    id:ulong;
+    name:string;
+
+    // PBR metallic-roughness
+    base_color:Vec4f;      // RGBA, linear
+    metallic:float;
+    roughness:float;
+
+    emissive:Vec3f;
+
+    alpha_mode:string;
+    alpha_cutoff:float;
+    double_sided:bool;
+
+    // KHR extensions — optional scalars (null = std::nullopt). specular_color
+    // is an optional struct (absent → nullptr → std::nullopt).
+    ior:float = null;
+    transmission:float = null;
+    clearcoat:float = null;
+    clearcoat_roughness:float = null;
+    anisotropy_strength:float = null;
+    anisotropy_rotation:float = null;
+    specular:float = null;
+    specular_color:Vec3f;
+}
+
+// ── Render node (instance in the scene graph) ────────────────────────────────
+
+table RenderNode {
+    id:ulong;
+    name:string;
+    local_transform:Mat4f;
+    world_transform:Mat4f;
+    parent_id:ulong;       // 0 = no parent (RenderNodeId values start at 1)
+    children:[ulong];
+    mesh_bindings:[MeshBinding];
+    semantic_node_id:ulong;
+    // RenderNode::extras (free-form nlohmann::json) is export-only metadata the
+    // GPU path never reads, so it is intentionally omitted from this schema.
+}
+
+// ── Scene (root) ─────────────────────────────────────────────────────────────
+
+table RenderScene {
+    root_id:ulong;
+    nodes:[RenderNode];
+    mesh_assets:[MeshAsset];
+    materials:[RenderMaterial];
+}
+
+root_type RenderScene;
+file_identifier "NHR8";
+file_extension "nhr";

@@ -58,6 +58,7 @@ include(cmake/CompilerOptions.cmake)
 # ── FlatBuffers code generation ──────────────────────────────────────────────
 set(NH_FBS_SCHEMAS
     ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs
+    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/render.fbs
 )
 set(NH_FBS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/flatbuffers)
 
@@ -120,6 +121,7 @@ add_library(nodehammer_lib STATIC
     src/ir/json/semantic/importer.cpp
     src/ir/fb/semantic/importer.cpp
     src/ir/fb/semantic/flatbuffer.cpp
+    src/ir/fb/render/flatbuffer.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
     src/tessellation/primitive_tessellator.cpp
