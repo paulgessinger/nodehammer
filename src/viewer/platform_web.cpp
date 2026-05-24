@@ -67,6 +67,24 @@ EM_JS(void, nh_viewer_open_url, (const char *url), {
     }
     window.open(u, "_blank", "noopener,noreferrer");
 });
+
+// Trigger a browser download of `size` bytes at `data` under `filename`. Copies
+// the bytes out of the wasm heap (it can move/detach) into a Blob, then clicks a
+// transient <a download>. Used by the PNG screenshot export.
+EM_JS(void, nh_viewer_download_bytes, (const char *filename, const uint8_t *data, int size), {
+    var name = UTF8ToString(filename);
+    var copy = new Uint8Array(HEAPU8.subarray(data, data + size));
+    var blob = new Blob([copy], { type: "image/png" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+});
 // clang-format on
 
 // clang-format off
@@ -391,6 +409,13 @@ void Platform::commitUrlState(const std::string &state_query, const std::string 
 }
 
 void Platform::openUrl(const std::string &url) { nh_viewer_open_url(url.c_str()); }
+
+std::optional<std::string> Platform::saveExportedImage(const std::string &filename,
+                                                       std::span<const std::byte> bytes) {
+    nh_viewer_download_bytes(filename.c_str(), reinterpret_cast<const std::uint8_t *>(bytes.data()),
+                             static_cast<int>(bytes.size()));
+    return filename;
+}
 
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
 void Platform::openFolderPicker() {} // no folder picker on web today

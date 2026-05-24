@@ -2,6 +2,7 @@
 
 #include <nodehammer/viewer/config.hpp>
 #include <nodehammer/viewer/platform.hpp>
+#include <nodehammer/viewer/png_export.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
 
 #include <cstdint>
@@ -43,6 +44,10 @@ struct UiActions {
     /// toggled or its angle committed). Coalesced and serviced by the App's
     /// build-drive loop from the cached pristine scene.
     std::function<void()> request_scene_rebuild;
+    /// Kick off a high-resolution PNG export using the current
+    /// `ViewerUiContext::export_settings`. Coalesced — ignored while another
+    /// export is already in flight.
+    std::function<void()> export_png;
     std::function<void(std::string)> select_config_key;
     std::function<void(std::string)> select_geometry_key;
 };
@@ -65,6 +70,7 @@ struct RenderCallStats {
 struct ViewerUiContext {
     Config &cfg;
     RenderQualitySettings &quality;
+    PngExportSettings &export_settings;
     ProjectFs *project;
     BuildSession &build_session;
     SceneBuildJob &build_job;
@@ -102,6 +108,8 @@ struct ViewerUiContext {
     bool has_scene{false};
     bool scene_uploaded{false};
     bool build_in_progress{false};
+    /// A high-resolution PNG export is currently rendering / reading back.
+    bool export_in_progress{false};
     bool ibl_installed{false};
     bool hdr_supported{false};
     IblSettings *ibl_settings{nullptr};

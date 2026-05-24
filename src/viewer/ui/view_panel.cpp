@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 
 namespace nodehammer::viewer::ui {
 namespace {
@@ -383,6 +384,42 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
         ImGui::EndDisabled();
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("wired, not implemented");
+        }
+    }
+
+    if (ImGui::CollapsingHeader("Screenshot")) {
+        // High-res PNG export: render the frame at output × supersample with all
+        // quality settings maxed, then box-downscale to the output size. The
+        // output dimensions also set the exported frame's aspect ratio.
+        PngExportSettings &ex = ctx.export_settings;
+        int w = static_cast<int>(ex.out_width);
+        int h = static_cast<int>(ex.out_height);
+        if (ImGui::InputInt("width", &w, 16, 256)) {
+            ex.out_width = static_cast<std::uint32_t>(std::clamp(w, 16, 16384));
+        }
+        if (ImGui::InputInt("height", &h, 16, 256)) {
+            ex.out_height = static_cast<std::uint32_t>(std::clamp(h, 16, 16384));
+        }
+        int ss = static_cast<int>(ex.supersample);
+        if (ImGui::SliderInt("supersample", &ss, 1,
+                             static_cast<int>(PngExportSettings::kMaxSupersample), "%dx")) {
+            ex.supersample = static_cast<std::uint32_t>(
+                std::clamp(ss, 1, static_cast<int>(PngExportSettings::kMaxSupersample)));
+        }
+        ImGui::SetItemTooltip("Antialiasing: render at output size × this, then average down.\n"
+                              "Internal resolution is capped to the GPU's max texture size.");
+        ImGui::TextDisabled("renders at %u × %u", ex.out_width * ex.supersample,
+                            ex.out_height * ex.supersample);
+
+        const bool can_export = ctx.has_scene && ctx.scene_uploaded && !ctx.export_in_progress;
+        ImGui::BeginDisabled(!can_export);
+        if (ImGui::Button("Export PNG") && actions.export_png) {
+            actions.export_png();
+        }
+        ImGui::EndDisabled();
+        if (ctx.export_in_progress) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("exporting...");
         }
     }
 

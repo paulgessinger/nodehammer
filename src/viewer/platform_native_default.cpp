@@ -67,6 +67,11 @@ void Platform::openUrl(const std::string & /*url*/) {
     // TODO: native URL opener intentionally deferred.
 }
 
+std::optional<std::string> Platform::saveExportedImage(const std::string &filename,
+                                                       std::span<const std::byte> bytes) {
+    return saveNativeExportedImage(filename, bytes);
+}
+
 void Platform::openFilePicker() { impl_->pickers.openFilePicker(); }
 void Platform::openFolderPicker() { impl_->pickers.openFolderPicker(); }
 void Platform::drainPickers() { impl_->pickers.drainPickers(impl_->app); }

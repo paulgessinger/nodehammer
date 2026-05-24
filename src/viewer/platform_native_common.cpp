@@ -133,4 +133,26 @@ void saveNativePersistentText(const std::string &key, const std::string &bytes) 
     out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 }
 
+std::optional<std::string> saveNativeExportedImage(const std::string &filename,
+                                                   std::span<const std::byte> bytes) {
+    std::error_code ec;
+    const auto path = std::filesystem::current_path(ec) / filename;
+    if (ec) {
+        std::println(stderr, "viewer: export image cwd lookup failed: {}", ec.message());
+        return std::nullopt;
+    }
+    std::ofstream out{path, std::ios::binary | std::ios::trunc};
+    if (!out) {
+        std::println(stderr, "viewer: export image open-for-write failed: {}", path.string());
+        return std::nullopt;
+    }
+    out.write(reinterpret_cast<const char *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+    if (!out) {
+        std::println(stderr, "viewer: export image write failed: {}", path.string());
+        return std::nullopt;
+    }
+    return path.string();
+}
+
 } // namespace nodehammer::viewer::platform

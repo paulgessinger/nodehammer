@@ -6,6 +6,7 @@
 #include "composite_pass.hpp"
 #include "ibl.hpp"
 #include "imgui_backend.hpp"
+#include "png_export_readback.hpp"
 #include "scene_build_job.hpp"
 #include "scene_render_target.hpp"
 #include "scene_renderer.hpp"
@@ -16,6 +17,7 @@
 
 #include <nodehammer/viewer/backend_caps.hpp>
 #include <nodehammer/viewer/platform.hpp>
+#include <nodehammer/viewer/png_export.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
 
 #include <nodehammer/ir/render.hpp>
@@ -36,8 +38,10 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <memory>
@@ -107,6 +111,23 @@ void appendUrlFloat(std::string &query, std::string_view name, float value, floa
     }
 }
 
+// Timestamped default name for an exported screenshot, e.g.
+// "nodehammer-screenshot-20260524-153012.png".
+std::string makeScreenshotFilename() {
+    const std::time_t t = std::time(nullptr);
+    std::tm tm{};
+#if defined(_WIN32)
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char buf[64];
+    if (std::strftime(buf, sizeof(buf), "nodehammer-screenshot-%Y%m%d-%H%M%S.png", &tm) == 0) {
+        return "nodehammer-screenshot.png";
+    }
+    return std::string{buf};
+}
+
 } // namespace
 
 constexpr const char *kViewerConfigStateKey = "viewer-state.toml";
@@ -166,6 +187,47 @@ struct App::Impl {
     CompositePass composite;
     RenderQualitySettings quality;
     Camera camera;
+
+    // ── PNG screenshot export ────────────────────────────────────────────────
+    // High-res export: render the scene at the export resolution with every
+    // quality knob maxed, composite into a dedicated LDR target, read it back,
+    // box-downscale to the requested output size, then write (native) or
+    // download (web) a PNG. Driven as a small state machine across frames from
+    // onFrame because the readback is async on some backends — and even on Metal
+    // we wait for the capture frame's GPU work to drain. The live scene/AO
+    // targets are reused (resized to the export resolution); only the composite
+    // output target `export_out_rt` is export-specific.
+    enum class ExportPhase {
+        Idle,
+        Rendering, // rendering export-res frames so the AO temporal denoise converges
+        WaitGpu,   // capture composite issued; waiting for its GPU work to finish
+        Readback   // reading back, then downscale + encode + deliver
+    };
+    ExportPhase export_phase{ExportPhase::Idle};
+    PngExportSettings export_settings;    // edited by the UI; snapshot taken at request time
+    RenderQualitySettings export_quality; // maxed snapshot used while exporting
+    SceneRenderTarget export_out_rt;      // composite output (LDR, swapchain format)
+    ImageReadback export_readback;
+    uint32_t export_internal_w{0};
+    uint32_t export_internal_h{0};
+    int export_converge_count{0};
+    int export_wait_count{0};
+    bool export_render_active{false}; // render() targets the export resolution this frame
+    bool export_capture{false};       // render() also composites into export_out_rt this frame
+    bool export_readback_started{false};
+    ui::Notifications::ProgressHandle export_progress{0};
+    std::string export_filename;
+    // When set, the encoded PNG is written straight to this path instead of
+    // going through the platform delivery (cwd file / browser download). Used by
+    // the headless --screenshot CLI mode. `export_quit_when_done` makes the app
+    // quit once the export resolves (success or failure).
+    std::string export_explicit_path;
+    bool export_quit_when_done{false};
+    // Pending one-shot startup screenshot (set by App::requestScreenshot before
+    // run()). Triggered from onFrame once the scene is loaded and settled.
+    bool startup_screenshot_pending{false};
+    std::string startup_screenshot_path;
+    PngExportSettings startup_screenshot_settings;
 
     // Procedural IBL bake. Runs on the GPU in a single frame the first
     // time `onFrame` ticks; until then `scene_renderer` samples from 1×1
@@ -360,6 +422,12 @@ struct App::Impl {
     void applyInitialCamera();
     void render();
     void ensureSceneTarget(uint32_t width, uint32_t height);
+    void requestPngExport(const PngExportSettings &settings, std::string explicit_path = {},
+                          bool quit_when_done = false);
+    void exportPreRender();
+    void exportPostRender();
+    [[nodiscard]] std::optional<std::string> deliverExport(const std::vector<std::uint8_t> &png);
+    void finishExport(bool ok, const std::string &message);
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
@@ -831,6 +899,19 @@ void App::Impl::render() {
     scene_submit_ms = 0.0;
     bool scene_consumed_ao_this_frame = false;
 
+    // While a screenshot export is rendering, run the whole pipeline at the
+    // export resolution with the maxed quality snapshot. We temporarily swap the
+    // live `quality` for the duration of render() (the UI was already built this
+    // frame, so it still shows the user's live settings) and restore it before
+    // returning. The dims override happens below, and the captured frame gets an
+    // extra composite into `export_out_rt` after the swapchain pass.
+    const bool exporting_frame = export_render_active;
+    RenderQualitySettings saved_quality;
+    if (exporting_frame) {
+        saved_quality = quality;
+        quality = export_quality;
+    }
+
     // Drive the chunked GPU uploads BEFORE sg_begin_pass so any new sokol
     // buffer creation isn't tangled up with the active scene pass. The base and
     // cut scenes live in separate renderers, so their uploads run independently.
@@ -1051,8 +1132,13 @@ void App::Impl::render() {
         const auto s = static_cast<uint32_t>(static_cast<float>(d) * render_scale + 0.5f);
         return s < 1u ? 1u : s;
     };
-    const uint32_t want_w = scale_dim(fb_width);
-    const uint32_t want_h = scale_dim(fb_height);
+    // During an export the offscreen targets are driven straight from the export
+    // resolution (the dynamic-scale math above is moot — export_quality disables
+    // it — and its result is overridden here). The scene/composite aspect ratio
+    // follows scene_rt's dimensions, so this also gives the exported frame the
+    // requested output aspect, independent of the window.
+    const uint32_t want_w = exporting_frame ? export_internal_w : scale_dim(fb_width);
+    const uint32_t want_h = exporting_frame ? export_internal_h : scale_dim(fb_height);
     // A resize / scale change reallocates scene_rt; if it does we MUST render
     // into it this frame (an empty target can't be composited).
     const bool scene_target_resized = scene_rt.width != want_w || scene_rt.height != want_h;
@@ -1271,64 +1357,68 @@ void App::Impl::render() {
     // Pass 3 — composite the offscreen target into the swapchain, then
     // ImGui on top. The composite covers the entire viewport so we
     // don't need to clear color or depth first.
+    //
+    // The composite inputs (inv_view_proj + the AO target) are computed once,
+    // outside the pass, so the export path can reuse them for a second composite
+    // into export_out_rt after the swapchain pass.
+    //
+    // Match the conventions the scene shader uses (see scene_renderer.cpp):
+    // GL/GLES needs [-1,1] z; everything else [0,1]. Reversed-Z is gated by
+    // useReversedZ(). inv(view_proj) lets the composite FS turn a screen-space
+    // pixel into a world-space view ray for the background dome.
+    const sg_backend backend = sg_query_backend();
+    const bool homogeneous_depth = (backend == SG_BACKEND_GLCORE) || (backend == SG_BACKEND_GLES3);
+    const float aspect = (scene_rt.height > 0) ? static_cast<float>(scene_rt.width) /
+                                                     static_cast<float>(scene_rt.height)
+                                               : 1.0f;
+    const glm::mat4 view_proj =
+        camera.proj(aspect, homogeneous_depth, useReversedZ()) * camera.view();
+    const glm::mat4 inv_view_proj = glm::inverse(view_proj);
+    // Composite samples the latest final-AO buffer for its Lambert AO multiply —
+    // the same data the next frame's scene-shader PBR path will sample, kept
+    // consistent so toggling PBR on/off doesn't introduce a frame of mismatched
+    // AO. `last_scene_consumed_ao` mirrors the scene decision (captured before
+    // the AO+denoise passes ran) so the first frame after enable still gets a
+    // composite AO multiply. When no history has been written, an empty target
+    // makes composite's `ao_on` check fall back to its 1×1 white dummy. Sourced
+    // from persistent members so this works for a cached scene too.
+    const AoRenderTarget *composite_ao_src =
+        ao_history_valid ? &ao_hist[ao_hist_last_written] : nullptr;
+    const AoRenderTarget composite_ao_empty{};
+    const AoRenderTarget &composite_ao_target =
+        composite_ao_src ? *composite_ao_src : composite_ao_empty;
+
     sg_pass swap_pass{};
     swap_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
     swap_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
     swap_pass.swapchain = sglue_swapchain();
     swap_pass.label = "swapchain_pass";
     sg_begin_pass(&swap_pass);
+    composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
+                   camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
+                   scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
+    ImGui_ImplSokol_Render();
+    sg_end_pass();
 
-    {
-        // Match the conventions the scene shader uses (see scene_renderer.cpp):
-        // GL/GLES needs [-1,1] z; everything else [0,1]. Reversed-Z is gated
-        // by useReversedZ(). Compute inv(view_proj) so the composite FS can
-        // turn a screen-space pixel into a world-space view ray for the
-        // background dome.
-        const sg_backend backend = sg_query_backend();
-        const bool homogeneous_depth =
-            (backend == SG_BACKEND_GLCORE) || (backend == SG_BACKEND_GLES3);
-        const float aspect = (scene_rt.height > 0) ? static_cast<float>(scene_rt.width) /
-                                                         static_cast<float>(scene_rt.height)
-                                                   : 1.0f;
-        const glm::mat4 view_proj =
-            camera.proj(aspect, homogeneous_depth, useReversedZ()) * camera.view();
-        const glm::mat4 inv_view_proj = glm::inverse(view_proj);
-        // Composite samples the latest final-AO buffer for its
-        // Lambert AO multiply — that's the same data the next frame's
-        // scene-shader PBR path will sample, kept consistent so toggling
-        // PBR on/off doesn't introduce a frame of mismatched AO. The
-        // `ao_already_applied_in_scene` flag mirrors the actual scene
-        // decision (captured above before the AO+denoise passes ran) so
-        // the first frame after enable — where history flips valid mid-
-        // frame — still gets a composite AO multiply rather than no AO at
-        // all.
-        //
-        // When the history target hasn't been written yet (very first frame
-        // after enable, or before the scene has finished uploading), pass
-        // an empty render target — composite's internal `ao_on` check
-        // gates on a valid color id and falls back to its 1×1 white dummy
-        // so we never sample undefined data. When denoise is off this
-        // frame, the raw target is what the composite should sample.
-        // Source the AO target and the scene's AO-consumed flag from persistent
-        // members (not this-frame locals) so this works whether we re-rendered
-        // the scene above or are compositing a cached one.
-        const AoRenderTarget *composite_ao_src = nullptr;
-        if (ao_history_valid) {
-            // The latest final-AO buffer: this frame's write when AO ran above,
-            // or the most recent one when compositing a cached scene.
-            composite_ao_src = &ao_hist[ao_hist_last_written];
-        }
-        const AoRenderTarget composite_ao_empty{};
-        const AoRenderTarget &composite_ao_target =
-            composite_ao_src ? *composite_ao_src : composite_ao_empty;
+    // Export capture: composite the same converged frame into the full-res
+    // offscreen LDR target (no ImGui). exportPostRender reads it back next.
+    if (exporting_frame && export_capture && export_out_rt.color.id != SG_INVALID_ID) {
+        sg_pass export_pass{};
+        export_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+        export_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
+        export_pass.attachments = export_out_rt.passAttachments();
+        export_pass.label = "export_pass";
+        sg_begin_pass(&export_pass);
         composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
                        camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
                        scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
+        sg_end_pass();
     }
-    ImGui_ImplSokol_Render();
 
-    sg_end_pass();
     sg_commit();
+    if (exporting_frame) {
+        quality = saved_quality;
+    }
     // sg_commit() rotates cur_frame → prev_frame, so the frame we just
     // submitted is in prev_frame (cur_frame is now cleared for the next one).
     render_stats = sg_query_stats().prev_frame;
@@ -1336,6 +1426,213 @@ void App::Impl::render() {
     encode_ms = stm_sec(stm_diff(present_start, render_submit_start)) * 1000.0;
     present_ms = stm_sec(stm_diff(render_end, present_start)) * 1000.0;
     render_submit_ms = stm_sec(stm_diff(render_end, render_submit_start)) * 1000.0;
+}
+
+void App::Impl::requestPngExport(const PngExportSettings &settings, std::string explicit_path,
+                                 bool quit_when_done) {
+    if (export_phase != ExportPhase::Idle) {
+        notifications.warning("A screenshot export is already in progress");
+        return;
+    }
+    if (!scene || !scene_uploaded) {
+        notifications.error("Load a scene before exporting a screenshot");
+        return;
+    }
+
+    export_explicit_path = std::move(explicit_path);
+    export_quit_when_done = quit_when_done;
+    export_settings = settings;
+    // Clamp the output and derive the internal (supersampled) resolution. Reduce
+    // the supersample factor as needed so the internal target fits the backend's
+    // max texture size — keeping the downscale an exact integer ratio.
+    uint32_t out_w = std::clamp<uint32_t>(export_settings.out_width, 16u, 16384u);
+    uint32_t out_h = std::clamp<uint32_t>(export_settings.out_height, 16u, 16384u);
+    uint32_t ss =
+        std::clamp<uint32_t>(export_settings.supersample, 1u, PngExportSettings::kMaxSupersample);
+    const uint32_t max_tex = static_cast<uint32_t>(sg_query_limits().max_image_size_2d);
+    if (max_tex > 0) {
+        out_w = std::min(out_w, max_tex);
+        out_h = std::min(out_h, max_tex);
+        while (ss > 1 && (out_w * ss > max_tex || out_h * ss > max_tex)) {
+            --ss;
+        }
+    }
+    export_settings.out_width = out_w;
+    export_settings.out_height = out_h;
+    export_settings.supersample = ss;
+    export_internal_w = out_w * ss;
+    export_internal_h = out_h * ss;
+
+    // Maxed quality snapshot for the export frames. Start from the live settings
+    // to keep the user's "look" (tonemap curve, exposure, contrast, saturation,
+    // sun) and force every cost/quality lever to its best.
+    export_quality = quality;
+    export_quality.dynamic_render_scale = false;
+    export_quality.render_scale = 1.0f;
+    export_quality.render_scale_memory_budget_mb = 0.0f; // no memory cap for a one-shot export
+    export_quality.cap_fps = false;
+    export_quality.pause_when_static = false;
+    export_quality.enable_fxaa = true;
+    export_quality.fxaa_quality = FxaaQualityPreset::Ultra;
+    export_quality.enable_ao = true;
+    export_quality.ao_quality = AoQualityPreset::Ultra;
+    export_quality.ao_resolution_scale = 1.0f;
+    export_quality.enable_ao_denoise = true;
+    export_quality.enable_advanced_ao = true;
+    export_quality.enable_tonemap = true;
+    export_quality.debug_view = DebugView::Off;
+    if (hdrSupported()) {
+        export_quality.enable_hdr = true;
+    }
+
+    export_converge_count = 0;
+    export_readback_started = false;
+    export_readback.reset();
+    export_filename = makeScreenshotFilename();
+    export_phase = ExportPhase::Rendering;
+    export_progress = notifications.startProgress("Rendering screenshot...");
+    std::println("viewer: PNG export started ({}×{} ×{} SSAA → {}×{})", out_w, out_h, ss, out_w,
+                 out_h);
+}
+
+void App::Impl::exportPreRender() {
+    export_render_active = false;
+    export_capture = false;
+    if (export_phase != ExportPhase::Rendering) {
+        return;
+    }
+    // Allocate the composite output target at the export resolution, using the
+    // swapchain's color/depth formats so the composite pipeline (which bakes the
+    // swapchain formats) validates against it. Created here, before render()
+    // begins any pass.
+    sg_environment env = sglue_environment();
+    sg_pixel_format color_fmt = env.defaults.color_format;
+    if (color_fmt == SG_PIXELFORMAT_NONE) {
+        color_fmt = SG_PIXELFORMAT_RGBA8;
+    }
+    sg_pixel_format depth_fmt = env.defaults.depth_format;
+    if (depth_fmt == SG_PIXELFORMAT_NONE) {
+        depth_fmt = SG_PIXELFORMAT_DEPTH;
+    }
+    if (!export_out_rt.matches(export_internal_w, export_internal_h, color_fmt, depth_fmt)) {
+        export_out_rt.create(export_internal_w, export_internal_h, color_fmt, depth_fmt);
+    }
+    export_render_active = true;
+    // Render a handful of export-res frames so the GTAO temporal denoise (and the
+    // frame-late AO history the PBR path samples) converge before we capture.
+    constexpr int kConvergeFrames = 8;
+    export_capture = (export_converge_count >= kConvergeFrames);
+}
+
+void App::Impl::exportPostRender() {
+    switch (export_phase) {
+    case ExportPhase::Idle:
+        return;
+    case ExportPhase::Rendering:
+        if (export_capture) {
+            // The capture composite was issued this frame; wait for its GPU work
+            // to drain before reading back. A few normal frames in between let
+            // sokol's in-flight semaphore guarantee the capture frame completed.
+            export_phase = ExportPhase::WaitGpu;
+            export_wait_count = 3;
+        } else {
+            ++export_converge_count;
+        }
+        return;
+    case ExportPhase::WaitGpu:
+        if (--export_wait_count <= 0) {
+            export_phase = ExportPhase::Readback;
+            export_readback_started = false;
+        }
+        return;
+    case ExportPhase::Readback: {
+        if (!export_readback_started) {
+            export_readback_started = true;
+            if (!export_readback.begin(export_out_rt.color, export_internal_w, export_internal_h,
+                                       export_out_rt.color_format)) {
+                finishExport(false, "Screenshot readback is not supported on this build");
+                return;
+            }
+        }
+        std::vector<std::uint8_t> pixels;
+        const ReadbackStatus st = export_readback.poll(pixels);
+        if (st == ReadbackStatus::Pending) {
+            return; // try again next frame
+        }
+        if (st != ReadbackStatus::Ready) {
+            finishExport(false, "Screenshot GPU readback failed");
+            return;
+        }
+        // SSAA resolve (box-downscale by the supersample factor) → PNG → deliver.
+        const uint32_t ss = export_settings.supersample;
+        auto small = downscaleBoxRgba8(pixels, export_internal_w, export_internal_h, ss);
+        const uint32_t out_w = export_internal_w / ss;
+        const uint32_t out_h = export_internal_h / ss;
+        auto png = encodePngRgba8(small, out_w, out_h);
+        if (png.empty()) {
+            finishExport(false, "Screenshot PNG encoding failed");
+            return;
+        }
+        auto dest = deliverExport(png);
+        if (!dest) {
+            finishExport(false, "Failed to save screenshot");
+            return;
+        }
+        const bool downloaded = platform::kIsWeb && export_explicit_path.empty();
+        finishExport(true, (downloaded ? "Downloaded " : "Saved ") + *dest);
+        return;
+    }
+    }
+}
+
+std::optional<std::string> App::Impl::deliverExport(const std::vector<std::uint8_t> &png) {
+    // Headless CLI path: write straight to the requested file.
+    if (!export_explicit_path.empty()) {
+        std::ofstream out{export_explicit_path, std::ios::binary | std::ios::trunc};
+        if (!out) {
+            return std::nullopt;
+        }
+        out.write(reinterpret_cast<const char *>(png.data()),
+                  static_cast<std::streamsize>(png.size()));
+        if (!out) {
+            return std::nullopt;
+        }
+        return export_explicit_path;
+    }
+    // Interactive path: native writes to cwd, web triggers a download.
+    return platform_->saveExportedImage(
+        export_filename, std::as_bytes(std::span<const std::uint8_t>{png.data(), png.size()}));
+}
+
+void App::Impl::finishExport(bool ok, const std::string &message) {
+    if (export_progress != 0) {
+        if (ok) {
+            notifications.finishProgress(export_progress, message);
+        } else {
+            notifications.cancelProgress(export_progress);
+        }
+        export_progress = 0;
+    }
+    if (ok) {
+        std::println("viewer: PNG export complete — {}", message);
+    } else {
+        std::println(stderr, "viewer: PNG export failed — {}", message);
+        notifications.error(message);
+    }
+    export_readback.reset();
+    export_render_active = false;
+    export_capture = false;
+    export_phase = ExportPhase::Idle;
+    // The export target can be large; free it until the next export.
+    export_out_rt.destroy();
+
+    const bool quit_now = export_quit_when_done;
+    export_explicit_path.clear();
+    export_quit_when_done = false;
+    if (quit_now) {
+        // Headless screenshot mode: shut the window down once the file is out.
+        sapp_quit();
+    }
 }
 
 std::string App::Impl::browserUrlStateQuery() const {
@@ -1503,6 +1800,14 @@ void App::Impl::onFrame() {
     // heartbeat (jobs running) or skip it entirely (truly idle).
     const bool idle = shouldThrottleIdle();
 
+    // A screenshot export must keep the frame loop running at full rate (it spans
+    // several render frames plus an async readback), so it bypasses every idle /
+    // pause / fps-cap gate below. A *pending* startup screenshot counts too —
+    // otherwise an unfocused/backgrounded window would park at the idle gate
+    // before the loop ever reaches the trigger.
+    const bool exporting = export_phase != ExportPhase::Idle;
+    const bool keep_loop_awake = exporting || startup_screenshot_pending;
+
     // Auto-rebake on settings change, debounced. Each frame we check whether
     // the user has touched any IBL slider since last frame; if so, reset the
     // settle timer. Once settings have been stable for `kIblRebakeDebounce`
@@ -1651,7 +1956,7 @@ void App::Impl::onFrame() {
     // URL/CLI keep the `pauseWhenUnfocused` name for backwards
     // compatibility even though the rule no longer keys on focus
     // alone and the cadence is now dynamic.
-    if (idle) {
+    if (idle && !keep_loop_awake) {
         const auto session_phase = build_session.phase();
         const bool jobs_running = !ibl_installed || build_in_progress ||
                                   (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
@@ -1676,7 +1981,7 @@ void App::Impl::onFrame() {
     // it on the very next vsync, so first-interaction latency is unaffected.
     // (This is the focused counterpart to the unfocused idle gate above; that
     // one skips entirely / 30 Hz when backgrounded.)
-    if (quality.pause_when_static) {
+    if (quality.pause_when_static && !keep_loop_awake) {
         constexpr double kIdleInputSeconds = 0.2;         // recent input keeps full rate
         constexpr double kIdleFrameInterval = 1.0 / 12.0; // ~12 Hz when parked
         const auto session_phase = build_session.phase();
@@ -1709,7 +2014,7 @@ void App::Impl::onFrame() {
     // hair under 16.67ms from timer jitter — from being mistaken as "too
     // early" and dropped to 30. When idle this never bites: the idle gate
     // above already throttles below 60.
-    if (quality.cap_fps) {
+    if (quality.cap_fps && !keep_loop_awake) {
         constexpr double kFpsCapInterval = 1.0 / 60.0;
         constexpr double kFpsCapSlack = kFpsCapInterval * 0.1;
         if (stm_sec(stm_diff(stm_now(), last_time)) < kFpsCapInterval - kFpsCapSlack) {
@@ -1840,6 +2145,7 @@ void App::Impl::onFrame() {
     ui::ViewerUiContext ui_ctx{
         .cfg = cfg,
         .quality = quality,
+        .export_settings = export_settings,
         .project = project_.get(),
         .build_session = build_session,
         .build_job = build_job,
@@ -1881,6 +2187,7 @@ void App::Impl::onFrame() {
         .has_scene = static_cast<bool>(scene),
         .scene_uploaded = scene_uploaded,
         .build_in_progress = build_in_progress,
+        .export_in_progress = exporting,
         .ibl_installed = ibl_installed,
         .hdr_supported = hdrSupported(),
         .ibl_settings = &ibl_settings,
@@ -1891,6 +2198,7 @@ void App::Impl::onFrame() {
     ui_actions.open_url = [this](const std::string &url) { platform_->openUrl(url); };
     ui_actions.rebake_ibl = [this]() { ibl_rebake_pending = true; };
     ui_actions.request_scene_rebuild = [this]() { pending_cut_rebuild = true; };
+    ui_actions.export_png = [this]() { requestPngExport(export_settings); };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
     ui_actions.frame_scene = [this]() {
@@ -1944,9 +2252,24 @@ void App::Impl::onFrame() {
     renderActiveModal();
     notifications.render();
 
+    // Headless screenshot: once the scene is loaded, uploaded, lit and framed,
+    // fire the one-shot export (which quits when the file is written).
+    if (startup_screenshot_pending && export_phase == ExportPhase::Idle && scene &&
+        scene_uploaded && ibl_installed && camera_framed && !build_in_progress) {
+        startup_screenshot_pending = false;
+        requestPngExport(startup_screenshot_settings, startup_screenshot_path,
+                         /*quit_when_done=*/true);
+    }
+
+    // Set up any export-frame state (target allocation, dims/quality override
+    // flags) before render() reads it; advance the export state machine after.
+    exportPreRender();
+
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
     render();
+
+    exportPostRender();
 
     // Drain any pending native picker modal. ImGui frame is ended,
     // sokol pass is committed; if NFD spawns a nested run loop and
@@ -1967,6 +2290,8 @@ void App::Impl::onCleanup() {
     ao_hist[0].destroy();
     ao_hist[1].destroy();
     ao_rt_raw.destroy();
+    export_out_rt.destroy();
+    export_readback.reset();
     scene_rt.destroy();
     scene_renderer.release();
     cut_renderer.release();
@@ -1980,6 +2305,12 @@ void App::setScene(std::shared_ptr<const RenderScene> scene) {
     impl_->scene = std::move(scene);
     impl_->scene_uploaded = false;
     impl_->camera_framed = false;
+}
+
+void App::requestScreenshot(std::string path, PngExportSettings settings) {
+    impl_->startup_screenshot_pending = true;
+    impl_->startup_screenshot_path = std::move(path);
+    impl_->startup_screenshot_settings = settings;
 }
 
 void App::setProject(std::unique_ptr<ProjectFs> project) {

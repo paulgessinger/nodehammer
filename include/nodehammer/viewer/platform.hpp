@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -146,6 +148,14 @@ class Platform {
     /// Open an external URL. Web opens a new tab/window; native is
     /// currently a no-op.
     void openUrl(const std::string &url);
+
+    /// Deliver an exported image (e.g. a screenshot PNG) to the user. Native
+    /// writes it into the process's current working directory and returns the
+    /// path written; web triggers a browser download and returns the suggested
+    /// filename. Returns nullopt on failure. `bytes` is consumed during the
+    /// call — safe to free afterwards.
+    std::optional<std::string> saveExportedImage(const std::string &filename,
+                                                 std::span<const std::byte> bytes);
 
     /// Request a "pick files" gesture. Web dispatches the browser's
     /// transient `<input type=file multiple>` inline (the browser

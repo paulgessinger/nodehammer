@@ -89,9 +89,22 @@ void registerCmdViewer(CLI::App &app) {
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
+    // Headless screenshot mode: render one high-res PNG (all quality maxed) once
+    // the scene settles, then quit. Useful for CI thumbnails / automated renders.
+    auto screenshot = std::make_shared<nodehammer::viewer::PngExportSettings>();
+    auto *screenshotOpt =
+        sub->add_option("--screenshot", "Render a PNG to this path on startup, then quit");
+    sub->add_option("--screenshot-width", screenshot->out_width, "Screenshot output width")
+        ->capture_default_str();
+    sub->add_option("--screenshot-height", screenshot->out_height, "Screenshot output height")
+        ->capture_default_str();
+    sub->add_option("--screenshot-supersample", screenshot->supersample,
+                    "Screenshot supersampling factor (1-4)")
+        ->capture_default_str();
+
     sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt, cullModeStr,
-                   pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt, angleCutOpt,
-                   shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
+                   screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt,
+                   angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
                    cameraPitchOpt, inputOpt, configOpt]() {
         if (*cullModeOpt) {
@@ -162,7 +175,19 @@ void registerCmdViewer(CLI::App &app) {
             configOpt->results(configPath);
         }
 
+        std::string screenshotPath;
+        if (*screenshotOpt) {
+            screenshotOpt->results(screenshotPath);
+            if (inputPath.empty()) {
+                std::println(stderr, "viewer: --screenshot requires --input (no scene to render)");
+                std::exit(1);
+            }
+        }
+
         nodehammer::viewer::App::Handle application(*cfg);
+        if (!screenshotPath.empty()) {
+            application->requestScreenshot(screenshotPath, *screenshot);
+        }
 
         // Native CLI flow: if both roots live under the launch CWD, mount that
         // directory as a real filesystem project so the tree can expose

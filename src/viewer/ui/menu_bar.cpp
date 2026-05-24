@@ -23,6 +23,11 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
         if (ctx.has_scene && ImGui::MenuItem("Close project") && actions.close_project) {
             actions.close_project();
         }
+        ImGui::Separator();
+        const bool can_export = ctx.has_scene && ctx.scene_uploaded && !ctx.export_in_progress;
+        if (ImGui::MenuItem("Export PNG...", nullptr, false, can_export) && actions.export_png) {
+            actions.export_png();
+        }
         ImGui::EndMenu();
     }
 

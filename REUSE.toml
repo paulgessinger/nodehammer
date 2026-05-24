@@ -20,3 +20,11 @@ path = "third_party/fontawesome7/fa-solid-900.h"
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Fonticons, Inc. (https://fontawesome.com)"
 SPDX-License-Identifier = "OFL-1.1"
+
+[[annotations]]
+path = "third_party/stb/stb_image_write.h"
+precedence = "override"
+SPDX-FileCopyrightText = "2010-2019 Sean Barrett"
+# stb is offered under MIT OR Unlicense; we take it under MIT (already in
+# LICENSES/) so no extra license text file is needed.
+SPDX-License-Identifier = "MIT"

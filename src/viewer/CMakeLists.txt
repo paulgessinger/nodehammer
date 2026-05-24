@@ -37,6 +37,13 @@ function(nh_add_viewer_lib name sokol_lib)
         ${_dir}/ao_pass.cpp
         ${_dir}/ao_denoise_pass.cpp
         ${_dir}/composite_pass.cpp
+        ${_dir}/png_export.cpp
+        ${_dir}/stb_image_write_impl.cpp
+        # PNG-export GPU readback: one TU per graphics backend (the sokol header
+        # surface, and the readback API, are backend-specific). Web compiles a
+        # single TU into both wgpu+gles3 libs (it branches on the backend define);
+        # Apple uses Metal; other native backends #error until implemented.
+        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/png_export_readback_web.cpp,$<IF:$<BOOL:${APPLE}>,${_dir}/png_export_readback_metal.mm,${_dir}/png_export_readback_native_other.cpp>>
         ${_dir}/imgui_backend.cpp
         ${_dir}/ui/debug_panel.cpp
         ${_dir}/ui/icon_font.cpp
@@ -56,7 +63,7 @@ function(nh_add_viewer_lib name sokol_lib)
         # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
         # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )
-    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7 implot)
+    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7 nh_stb implot)
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
     add_dependencies(${name} nodehammer_shaders)
     nodehammer_set_compiler_options(${name})

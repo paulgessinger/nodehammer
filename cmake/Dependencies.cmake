@@ -274,6 +274,17 @@ if(NODEHAMMER_WITH_VIEWER)
         )
     endif()
 
+    # Vendored stb_image_write (single public-domain header). Conan's tinygltf
+    # package ships only tiny_gltf.h, so the screenshot/PNG export carries its
+    # own copy. INTERFACE-only target — consumers include <stb_image_write.h>;
+    # exactly one viewer TU (stb_image_write_impl.cpp) defines the implementation.
+    if(NOT TARGET nh_stb)
+        add_library(nh_stb INTERFACE)
+        target_include_directories(nh_stb SYSTEM INTERFACE
+            ${CMAKE_SOURCE_DIR}/third_party/stb
+        )
+    endif()
+
     # sokol headers + sokol-shdc resolver + nh_add_sokol_lib + nh_compile_shader.
     include(${CMAKE_SOURCE_DIR}/cmake/Sokol.cmake)
 

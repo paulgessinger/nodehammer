@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace nodehammer::viewer {
@@ -26,5 +28,10 @@ class NativePickerState {
 void dispatchNativeDroppedFiles(App &app);
 [[nodiscard]] std::optional<std::string> loadNativePersistentText(const std::string &key);
 void saveNativePersistentText(const std::string &key, const std::string &bytes);
+
+/// Write an exported image to the current working directory. Returns the
+/// absolute path on success, or nullopt on failure.
+[[nodiscard]] std::optional<std::string> saveNativeExportedImage(const std::string &filename,
+                                                                 std::span<const std::byte> bytes);
 
 } // namespace nodehammer::viewer::platform

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nodehammer/viewer/config.hpp>
+#include <nodehammer/viewer/png_export.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -103,6 +104,12 @@ class App {
     /// based recognition over the project's progress entries. Either
     /// argument may be empty to clear the corresponding root.
     void setRootKeys(std::string config_key, std::string geometry_key);
+
+    /// Request a one-shot headless screenshot: once the scene has loaded and
+    /// settled, render a PNG to `path` (with all quality maxed, per
+    /// `settings`) and then quit. Intended for CLI / automated rendering; call
+    /// before run(). Reuses the interactive export pipeline.
+    void requestScreenshot(std::string path, PngExportSettings settings);
 
     /// Native: blocks until the window closes; returns the exit code.
     /// Emscripten: registers the main loop with the runtime and returns 0
