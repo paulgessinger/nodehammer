@@ -24,6 +24,7 @@ add_executable(nodehammer_tests
     viewer/test_byte_buffer.cpp
     viewer/test_app_state.cpp
     test_scene_build.cpp
+    test_compute_pipeline.cpp
     test_markup.cpp
     test_timing.cpp
 )

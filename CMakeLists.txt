@@ -290,6 +290,15 @@ if(NODEHAMMER_WITH_VIEWER)
         nh_add_viewer_exe(nodehammer-gles3 nodehammer_viewer_gles3)
         nh_add_viewer_exe(nodehammer-wgpu  nodehammer_viewer_wgpu)
         target_link_options(nodehammer-wgpu PRIVATE "--use-port=emdawnwebgpu")
+
+        # Headless compute module for the viewer's Web Worker: tessellation +
+        # wedge cut off the main thread, no sokol/GL. Links the pipeline core
+        # only (nodehammer_lib), so it stays small. Driven by
+        # src/web/compute_worker.js — see nh_compute_build.
+        add_executable(nodehammer-compute src/web/compute_worker_main.cpp)
+        target_link_libraries(nodehammer-compute PRIVATE nodehammer_lib)
+        nodehammer_apply_emscripten_compute_options(nodehammer-compute)
+        nodehammer_set_compiler_options(nodehammer-compute)
     else()
         if(APPLE)
             set(_nh_backend SOKOL_METAL)
@@ -323,7 +332,7 @@ include(GNUInstallDirs)
 # wasm bundles named nodehammer-{gles3,wgpu}.{js,wasm}. Emscripten + no
 # viewer: headless nodehammer (just the .js + .wasm).
 if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
-    set(NH_INSTALL_TARGETS nodehammer-gles3 nodehammer-wgpu)
+    set(NH_INSTALL_TARGETS nodehammer-gles3 nodehammer-wgpu nodehammer-compute)
 else()
     set(NH_INSTALL_TARGETS nodehammer)
 endif()

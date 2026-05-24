@@ -53,8 +53,14 @@ stage_file() {
 
 mkdir -p "$out"
 stage_file "$root/web/viewer.html" "$out/viewer.html"
+# Worker script that hosts the headless compute module (off-main-thread
+# tessellation/wedge cut). Served alongside the viewer; loaded as a classic
+# Worker by the viewer when one is available.
+stage_file "$root/src/web/compute_worker.js" "$out/compute_worker.js"
 
-bundles=("$src"/nodehammer-gles3.* "$src"/nodehammer-wgpu.*)
+# Compute module bundle (nodehammer-compute.{js,wasm}) is staged alongside the
+# per-backend viewer bundles.
+bundles=("$src"/nodehammer-gles3.* "$src"/nodehammer-wgpu.* "$src"/nodehammer-compute.*)
 if [ "${#bundles[@]}" -eq 0 ]; then
     echo "no nodehammer-{gles3,wgpu} artifacts in $src - run 'just wasm-build' first." >&2
     exit 1

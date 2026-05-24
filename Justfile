@@ -176,3 +176,19 @@ wasm-copy scene='odd' target='build/wasm-viewer':
     mode="${staged[1]}"
 
     echo "copied wasm viewer payload to $out in $mode"
+
+# Headless smoke for the compute-worker module: generates a small synthetic
+# semantic scene with the native build, then drives nh_compute_build in node via
+# the wasm compute module, asserting NHR8 render bytes come back. Build both
+# first: `cmake --build build/RelWithDebInfo --target nodehammer` and
+# `just wasm-build`.
+wasm-compute-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    native="$root/build/RelWithDebInfo/nodehammer"
+    module="$root/build/emscripten/RelWithDebInfo/nodehammer-compute.js"
+    fixture="$(mktemp -t nh_compute_smoke.XXXXXX.nhb)"
+    trap 'rm -f "$fixture"' EXIT
+    "$native" dump-semantic --input dummy --input-format synthetic --output-format nhb -o "$fixture"
+    node "$root/scripts/wasm_compute_smoke.js" "$module" "$fixture"

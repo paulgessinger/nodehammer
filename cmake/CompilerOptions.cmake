@@ -128,3 +128,45 @@ function(nodehammer_apply_emscripten_viewer_options target)
     endif()
     set_target_properties(${target} PROPERTIES SUFFIX ".js")
 endfunction()
+
+# Apply link options for the headless compute module loaded inside the viewer's
+# Web Worker (Emscripten only). Unlike the viewer module this links no GL/Fetch
+# and runs in a worker (and node, for the smoke test) — never the main DOM
+# thread. MODULARIZE + EXPORT_NAME let the worker JS instantiate it explicitly;
+# EXIT_RUNTIME=0 keeps it alive so the pristine-scene cache survives across
+# builds. Output is .js + .wasm; see src/web/compute_worker.js.
+function(nodehammer_apply_emscripten_compute_options target)
+    if(NOT EMSCRIPTEN)
+        return()
+    endif()
+    target_link_options(${target} PRIVATE
+        "-sMODULARIZE=1"
+        "-sEXPORT_NAME=NodehammerCompute"
+        # Worker for production; node so the headless smoke test can load it.
+        # Deliberately no 'web' — it never runs on the main DOM thread.
+        "-sENVIRONMENT=worker,node"
+        "-sEXIT_RUNTIME=0"
+        "-sALLOW_MEMORY_GROWTH=1"
+        # A full ODD tessellation is large; pre-size the heap to keep growth
+        # churn down during the build (growth still on as a safety net).
+        "-sINITIAL_MEMORY=64MB"
+        # nh_compute_build is the single entry; _malloc/_free let the worker
+        # stage input bytes and free the returned buffer.
+        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_nh_compute_build"
+        # ccall invokes nh_compute_build; HEAPU8 copies input bytes in / output
+        # bytes out; HEAPU32 reads the out_len pointer.
+        "-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAPU32,ccall"
+        # Same wasm-exceptions stack helpers the viewer module needs.
+        "-sDEFAULT_LIBRARY_FUNCS_TO_INCLUDE=$stackSave,$stackRestore"
+    )
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_options(${target} PRIVATE -Oz -flto)
+        target_link_options(${target} PRIVATE
+            "-Oz"
+            "-flto"
+            "-sASSERTIONS=0"
+            "--closure=1"
+        )
+    endif()
+    set_target_properties(${target} PROPERTIES SUFFIX ".js")
+endfunction()
