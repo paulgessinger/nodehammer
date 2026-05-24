@@ -314,10 +314,43 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
         // Render scale is implemented: it sizes the offscreen scene/AO/denoise
         // targets and the composite upsamples to the window — the primary
         // fragment-cost lever. <1 trades sharpness for speed; >1 supersamples.
-        ImGui::SliderFloat("render scale", &ctx.quality.render_scale, 0.5f, 2.0f, "%.2fx");
-        ImGui::SetItemTooltip("Offscreen render resolution = window x scale. Lower = fewer "
-                              "fragments across every pass (scene, AO, denoise);\n"
-                              "the composite upsamples to the window.");
+        ImGui::Checkbox("dynamic resolution", &ctx.quality.dynamic_render_scale);
+        ImGui::SetItemTooltip("Drop render resolution while the camera moves, then ramp it\n"
+                              "back up once the view settles. Keeps interaction smooth on\n"
+                              "heavy scenes; the still image is unaffected.");
+        if (ctx.quality.dynamic_render_scale) {
+            ImGui::Checkbox("adaptive (GPU-driven)", &ctx.quality.adaptive_render_scale);
+            ImGui::SetItemTooltip("While moving, hold the highest scale in the min..max\n"
+                                  "range that meets the target framerate. Off = always use\n"
+                                  "the min scale while moving.");
+            if (ctx.quality.adaptive_render_scale) {
+                ImGui::SliderFloat("target FPS", &ctx.quality.render_scale_target_fps, 30.f, 120.f,
+                                   "%.0f");
+                ImGui::SetItemTooltip("Frame-time budget the adaptive scaler aims for while the\n"
+                                      "camera moves. It coarsens to hold this, and refines when\n"
+                                      "there's headroom.");
+            }
+            ImGui::SliderFloat(ctx.quality.adaptive_render_scale ? "scale min (floor)"
+                                                                 : "scale min (moving)",
+                               &ctx.quality.render_scale_min, 0.25f, 1.0f, "%.2fx");
+            ImGui::SetItemTooltip(ctx.quality.adaptive_render_scale
+                                      ? "Lowest scale the adaptive scaler will drop to."
+                                      : "Resolution while the camera is in motion.");
+            ImGui::SliderFloat("scale max (settled)", &ctx.quality.render_scale_max, 0.5f, 4.0f,
+                               "%.2fx");
+            ImGui::SetItemTooltip("Resolution the scale jumps to once the camera settles (and\n"
+                                  "the adaptive ceiling while moving). >1 supersamples the\n"
+                                  "still image (4x = 16x the pixels — sharp, but heavy).");
+            // Keep min <= max so the pair can't invert.
+            if (ctx.quality.render_scale_min > ctx.quality.render_scale_max) {
+                ctx.quality.render_scale_min = ctx.quality.render_scale_max;
+            }
+        } else {
+            ImGui::SliderFloat("render scale", &ctx.quality.render_scale, 0.5f, 4.0f, "%.2fx");
+            ImGui::SetItemTooltip("Offscreen render resolution = window x scale. Lower = fewer "
+                                  "fragments across every pass (scene, AO, denoise);\n"
+                                  "the composite upsamples to the window.");
+        }
 
         ImGui::Checkbox("cap FPS to 60", &ctx.quality.cap_fps);
         ImGui::SetItemTooltip("Skip frames to hold the render rate at ~60 FPS.\n"

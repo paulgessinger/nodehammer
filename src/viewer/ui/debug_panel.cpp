@@ -247,8 +247,13 @@ void renderDebugPanel(bool *open, const ViewerUiContext &ctx, const UiActions &a
     }
 
     ImGui::Text("Backbuffer: %u x %u", ctx.fb_width, ctx.fb_height);
+    // Derive the scale from the actual target size so it tracks the live
+    // dynamic value, not just the static slider.
+    const double render_scale =
+        ctx.fb_width > 0 ? static_cast<double>(ctx.scene_width) / static_cast<double>(ctx.fb_width)
+                         : 0.0;
     ImGui::Text("Render target: %u x %u (scale %.2fx)", ctx.scene_width, ctx.scene_height,
-                static_cast<double>(ctx.quality.render_scale));
+                render_scale);
     if (ctx.quality.enable_ao && ctx.ao_width > 0) {
         ImGui::Text("AO target: %u x %u (scale %.2fx)", ctx.ao_width, ctx.ao_height,
                     static_cast<double>(ctx.quality.ao_resolution_scale));

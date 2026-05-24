@@ -256,6 +256,28 @@ struct App::Impl {
     uint64_t last_time{0};
     double delta_seconds{0.0};
 
+    // Dynamic render-scale state. When quality.dynamic_render_scale is on, the
+    // offscreen scale drops while the camera moves (to protect framerate) and
+    // jumps back up to render_scale_max once it settles. dyn_scale is the value
+    // applied this frame. With adaptive scaling on, dyn_motion_scale is the
+    // closed-loop in-motion scale driven by frame timing (dyn_frame_ms_ema is
+    // its smoothed input; dyn_climb_lock / dyn_last_climb rate-limit upward
+    // probing). The dyn_prev_* fields snapshot last frame's camera to detect
+    // motion.
+    float dyn_scale{1.0f};
+    float dyn_motion_scale{0.5f};
+    double dyn_frame_ms_ema{0.0};
+    bool dyn_was_moving{false};
+    uint64_t dyn_settle_anchor{0};
+    uint64_t dyn_climb_lock{0};
+    uint64_t dyn_last_climb{0};
+    glm::vec3 dyn_prev_target{0.f};
+    float dyn_prev_yaw{0.f};
+    float dyn_prev_pitch{0.f};
+    float dyn_prev_distance{0.f};
+    float dyn_prev_fov{0.f};
+    ProjectionMode dyn_prev_proj{ProjectionMode::Perspective};
+
     // Sokol-time stamp of the last user-input-class event. Drives the
     // idle-throttle decision: a recent input keeps us at full vsync
     // rate even when the OS reports the window as backgrounded, so
@@ -810,8 +832,121 @@ void App::Impl::render() {
     // All passes already size off scene_rt's dimensions, so scaling here is
     // self-consistent (incl. the scene shader's gl_FragCoord-based AO sampling,
     // which uses scene_rt.width/height). Clamp to a sane range.
-    float render_scale = quality.render_scale;
-    render_scale = render_scale < 0.25f ? 0.25f : (render_scale > 2.0f ? 2.0f : render_scale);
+    // Detect interaction this frame. Two sources, both of which re-render the
+    // scene and should drop resolution:
+    //   - a camera change (orbit/pan/zoom/fov/projection), and
+    //   - any active ImGui widget. IsAnyItemActive() is true for the whole time
+    //     a slider is held, so dragging the wedge/angle cut, exposure, AO, etc.
+    //     keeps us in the low-res interactive state until release. (The cut
+    //     sliders feed the shader live, so they're exactly as interactive as
+    //     the camera.)
+    // The camera snapshot is refreshed every frame — even when dynamic scaling
+    // is off — so toggling it back on doesn't see a false change.
+    const bool cam_changed = camera.yaw != dyn_prev_yaw || camera.pitch != dyn_prev_pitch ||
+                             camera.distance != dyn_prev_distance ||
+                             camera.fov_deg != dyn_prev_fov || camera.target != dyn_prev_target ||
+                             camera.projection != dyn_prev_proj;
+    dyn_prev_yaw = camera.yaw;
+    dyn_prev_pitch = camera.pitch;
+    dyn_prev_distance = camera.distance;
+    dyn_prev_fov = camera.fov_deg;
+    dyn_prev_target = camera.target;
+    dyn_prev_proj = camera.projection;
+    const bool interacting = cam_changed || ImGui::IsAnyItemActive();
+
+    const auto clamp_scale = [](float s) { return s < 0.25f ? 0.25f : (s > 4.0f ? 4.0f : s); };
+    float render_scale;
+    if (quality.dynamic_render_scale) {
+        float lo = clamp_scale(quality.render_scale_min);
+        float hi = clamp_scale(quality.render_scale_max);
+        if (lo > hi) {
+            const float t = lo;
+            lo = hi;
+            hi = t;
+        }
+        // While the camera moves the scale stays low; once it settles it jumps
+        // straight to `hi`. The settle transition is a single step (not a ramp
+        // through intermediate resolutions) because each step reallocates the
+        // offscreen targets *and* resets the AO temporal history — a staircase
+        // of AO re-converges on a still image reads as flicker. One jump = one
+        // realloc + one AO reset per settle, and it avoids reallocating through
+        // huge intermediate targets now that `hi` can reach 4x.
+        constexpr double kSettleDelaySeconds = 0.2;
+        if (interacting) {
+            if (quality.adaptive_render_scale) {
+                // Closed-loop: hold the highest scale in [lo, hi] that meets the
+                // target frame time. frame_interval_ms is last frame's wall time
+                // (its render cost); smooth it so a single hitch doesn't yank the
+                // scale. React asymmetrically — drop fast when over budget, probe
+                // up slowly — and rate-limit changes so we don't reallocate every
+                // frame near the budget boundary (during motion the resolution
+                // step and AO reset are both masked, but churn still costs time).
+                const double target_ms = 1000.0 / std::max(15.0f, quality.render_scale_target_fps);
+                if (!dyn_was_moving) {
+                    // Interaction just started: drop straight to the floor for an
+                    // instantly-cheap first frame — responsiveness beats fidelity
+                    // the moment the user grabs the camera or a slider. Then let
+                    // the loop climb back if there's headroom. Seed the average at
+                    // target and clear the climb locks so recovery can begin right
+                    // away, and so the slow full-res settled frame we just showed
+                    // doesn't drag the controller down.
+                    dyn_motion_scale = lo;
+                    dyn_frame_ms_ema = target_ms;
+                    dyn_climb_lock = 0;
+                    dyn_last_climb = 0;
+                } else {
+                    constexpr double kAlpha = 0.25;           // EMA smoothing
+                    constexpr double kClimbLockSeconds = 1.5; // pause up-probing after overshoot
+                    constexpr double kClimbIntervalSeconds = 0.12; // min time between up-steps
+                    dyn_frame_ms_ema =
+                        dyn_frame_ms_ema * (1.0 - kAlpha) + frame_interval_ms * kAlpha;
+                    if (dyn_frame_ms_ema > target_ms * 1.15) {
+                        // Over budget — coarsen (faster the worse it is) and stop
+                        // probing upward: we just found the ceiling.
+                        dyn_motion_scale -= dyn_frame_ms_ema > target_ms * 1.6 ? 0.5f : 0.125f;
+                        dyn_climb_lock = stm_now();
+                    } else if (stm_sec(stm_diff(stm_now(), dyn_climb_lock)) > kClimbLockSeconds &&
+                               stm_sec(stm_diff(stm_now(), dyn_last_climb)) >
+                                   kClimbIntervalSeconds) {
+                        // Under budget, or vsync-capped at it — probe finer. If
+                        // this step overshoots, the branch above pulls it back and
+                        // locks probing, so it settles at the sustainable scale.
+                        dyn_motion_scale += 0.125f;
+                        dyn_last_climb = stm_now();
+                    }
+                }
+                dyn_motion_scale =
+                    dyn_motion_scale < lo ? lo : (dyn_motion_scale > hi ? hi : dyn_motion_scale);
+                dyn_scale = dyn_motion_scale;
+            } else {
+                // Non-adaptive: fixed floor while moving (blurry-but-smooth).
+                dyn_scale = lo;
+            }
+            dyn_settle_anchor = stm_now();
+        } else if (stm_sec(stm_diff(stm_now(), dyn_settle_anchor)) >= kSettleDelaySeconds) {
+            // Settled and not interacting (auto-orbit counts as interaction, so
+            // it never lands here): jump to `hi` unconditionally — the still
+            // image is allowed to exceed the frame-time budget to maximize
+            // fidelity, since slowness no longer costs interactivity.
+            dyn_scale = hi;
+        }
+        dyn_was_moving = interacting;
+        render_scale = dyn_scale;
+    } else {
+        render_scale = clamp_scale(quality.render_scale);
+        dyn_scale = render_scale;
+    }
+    // Don't let a high settled scale (up to 4x) push the offscreen target past
+    // the backend's max texture size on a large window. Cap uniformly so the
+    // aspect ratio is preserved.
+    const float max_tex = static_cast<float>(sg_query_limits().max_image_size_2d);
+    if (max_tex > 0.f && fb_width > 0 && fb_height > 0) {
+        const float cap = std::min(max_tex / static_cast<float>(fb_width),
+                                   max_tex / static_cast<float>(fb_height));
+        if (render_scale > cap) {
+            render_scale = cap;
+        }
+    }
     const auto scale_dim = [render_scale](uint32_t d) -> uint32_t {
         const auto s = static_cast<uint32_t>(static_cast<float>(d) * render_scale + 0.5f);
         return s < 1u ? 1u : s;
