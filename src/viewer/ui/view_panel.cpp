@@ -352,6 +352,16 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
                                   "the composite upsamples to the window.");
         }
 
+        // Memory ceiling on the resolution-scaling targets. The effective max
+        // scale is lowered so scene+depth (and the AO targets) fit this budget,
+        // which prevents a large window x high scale from OOMing constrained
+        // GPUs. Logarithmic so the low end (where it bites) has resolution.
+        ImGui::SliderFloat("scale memory budget", &ctx.quality.render_scale_memory_budget_mb, 64.f,
+                           4096.f, "%.0f MB", ImGuiSliderFlags_Logarithmic);
+        ImGui::SetItemTooltip("Caps the render scale so the offscreen scene/depth/AO targets\n"
+                              "stay within this much GPU memory — guards against OOM on a\n"
+                              "large window with a high scale. Scales with the window size.");
+
         ImGui::Checkbox("cap FPS to 60", &ctx.quality.cap_fps);
         ImGui::SetItemTooltip("Skip frames to hold the render rate at ~60 FPS.\n"
                               "Useful on high-refresh (120Hz+) displays to save power.");

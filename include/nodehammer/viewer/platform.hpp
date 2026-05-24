@@ -113,6 +113,13 @@ class Platform {
     [[nodiscard]] const PlatformWindowState &windowState() const noexcept;
     [[nodiscard]] std::vector<PlatformGestureEvent> takeGestureEvents();
 
+    /// Whether any platform gesture events are queued but not yet drained
+    /// by `takeGestureEvents`. Read-only peek used by the idle frame-rate
+    /// gate: trackpad pinch-zoom arrives through this queue rather than as
+    /// sokol input events, so without this it wouldn't keep the viewer at
+    /// full refresh while the user is gesturing.
+    [[nodiscard]] bool hasPendingGestures() const noexcept;
+
     /// Push the current sokol_app FILES_DROPPED batch into the App's
     /// long-lived project. Multi-gesture accumulation is the norm: the
     /// previous drop's files stay in the bag, and this gesture's files

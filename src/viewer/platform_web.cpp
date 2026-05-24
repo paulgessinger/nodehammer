@@ -346,6 +346,8 @@ std::vector<PlatformGestureEvent> Platform::takeGestureEvents() {
     return std::exchange(impl_->gesture_events, {});
 }
 
+bool Platform::hasPendingGestures() const noexcept { return !impl_->gesture_events.empty(); }
+
 void Platform::dispatchDroppedFiles() {
     const int n = sapp_get_num_dropped_files();
     std::println(stderr, "[viewer] dispatchDroppedFiles: n={}", n);

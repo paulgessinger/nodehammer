@@ -46,6 +46,8 @@ std::vector<PlatformGestureEvent> Platform::takeGestureEvents() {
     return std::exchange(impl_->gesture_events, {});
 }
 
+bool Platform::hasPendingGestures() const noexcept { return !impl_->gesture_events.empty(); }
+
 void Platform::dispatchDroppedFiles() { dispatchNativeDroppedFiles(impl_->app); }
 
 std::optional<std::string> Platform::loadPersistentText(const std::string &key) const {

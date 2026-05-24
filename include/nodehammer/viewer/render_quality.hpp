@@ -73,6 +73,21 @@ struct RenderQualitySettings {
     /// reallocates the offscreen targets and resets the AO history each time,
     /// which reads as flicker.
     float render_scale_max{4.0f};
+    /// Memory budget (in MB) for the resolution-scaling offscreen targets: the
+    /// scene color + depth, plus the two AO targets (at ao_resolution_scale² of
+    /// the scene area) when AO is on. The effective maximum render scale is
+    /// lowered so these targets fit the budget — this keeps a large window times
+    /// a high `render_scale_max` (up to 4x = 16x the pixels) from OOMing
+    /// memory-constrained backends (WebGL/WebGPU, mobile, integrated GPUs). The
+    /// derived cap never drops below 0.25x; 0 disables the budget cap entirely.
+    /// Fixed-size resources (IBL cubemaps, swapchain) are not counted.
+    /// Defaults are platform-keyed: 2 GB on native (discrete-GPU headroom),
+    /// 1 GB on web where the browser/WebGL context is tighter.
+#ifdef __EMSCRIPTEN__
+    float render_scale_memory_budget_mb{1024.0f};
+#else
+    float render_scale_memory_budget_mb{2048.0f};
+#endif
     /// Cap the render rate at 60 FPS. sokol drives the frame callback at the
     /// display's vsync rate; on a high-refresh panel (120Hz+) this skips frames
     /// to hold the visible rate at ~60. Off = render at the full refresh rate.

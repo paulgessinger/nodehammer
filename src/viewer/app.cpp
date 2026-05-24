@@ -261,16 +261,18 @@ struct App::Impl {
     // jumps back up to render_scale_max once it settles. dyn_scale is the value
     // applied this frame. With adaptive scaling on, dyn_motion_scale is the
     // closed-loop in-motion scale driven by frame timing (dyn_frame_ms_ema is
-    // its smoothed input; dyn_climb_lock / dyn_last_climb rate-limit upward
-    // probing). The dyn_prev_* fields snapshot last frame's camera to detect
-    // motion.
+    // its smoothed input; dyn_climb_lock pauses upward probing after an
+    // overshoot, and dyn_last_scale_change rate-limits how often the applied
+    // scale changes at all — both directions — so orbiting doesn't reallocate
+    // the offscreen targets every few frames). The dyn_prev_* fields snapshot
+    // last frame's camera to detect motion.
     float dyn_scale{1.0f};
     float dyn_motion_scale{0.5f};
     double dyn_frame_ms_ema{0.0};
     bool dyn_was_moving{false};
     uint64_t dyn_settle_anchor{0};
     uint64_t dyn_climb_lock{0};
-    uint64_t dyn_last_climb{0};
+    uint64_t dyn_last_scale_change{0};
     glm::vec3 dyn_prev_target{0.f};
     float dyn_prev_yaw{0.f};
     float dyn_prev_pitch{0.f};
@@ -895,36 +897,55 @@ void App::Impl::render() {
                 // step and AO reset are both masked, but churn still costs time).
                 const double target_ms = 1000.0 / std::max(15.0f, quality.render_scale_target_fps);
                 if (!dyn_was_moving) {
-                    // Interaction just started: drop straight to the floor for an
-                    // instantly-cheap first frame — responsiveness beats fidelity
-                    // the moment the user grabs the camera or a slider. Then let
-                    // the loop climb back if there's headroom. Seed the average at
-                    // target and clear the climb locks so recovery can begin right
-                    // away, and so the slow full-res settled frame we just showed
-                    // doesn't drag the controller down.
-                    dyn_motion_scale = lo;
+                    // Interaction just started: resume from the last sustainable
+                    // in-motion scale rather than dropping to the floor and
+                    // re-climbing the staircase — repeated orbits shouldn't keep
+                    // re-running the ramp. Re-seed the average at target and clear
+                    // the climb/hold locks so the controller can react right away,
+                    // and so the slow full-res settled frame we just showed
+                    // doesn't drag the controller down. (dyn_motion_scale is left
+                    // as-is and clamped to [lo, hi] below; on the very first
+                    // interaction it starts from its default.)
                     dyn_frame_ms_ema = target_ms;
                     dyn_climb_lock = 0;
-                    dyn_last_climb = 0;
+                    dyn_last_scale_change = 0;
                 } else {
                     constexpr double kAlpha = 0.25;           // EMA smoothing
                     constexpr double kClimbLockSeconds = 1.5; // pause up-probing after overshoot
-                    constexpr double kClimbIntervalSeconds = 0.12; // min time between up-steps
+                    // Minimum wall time between applied scale changes, in either
+                    // direction. The controller still samples every frame, but it
+                    // only reallocates the offscreen targets this often — so a
+                    // steady orbit holds a resolution instead of churning through
+                    // fine steps. A severe overshoot bypasses this to recover from
+                    // a real hitch immediately.
+                    constexpr double kScaleHoldSeconds = 0.4;
                     dyn_frame_ms_ema =
                         dyn_frame_ms_ema * (1.0 - kAlpha) + frame_interval_ms * kAlpha;
-                    if (dyn_frame_ms_ema > target_ms * 1.15) {
-                        // Over budget — coarsen (faster the worse it is) and stop
+                    const bool hold_elapsed =
+                        stm_sec(stm_diff(stm_now(), dyn_last_scale_change)) > kScaleHoldSeconds;
+                    if (dyn_frame_ms_ema > target_ms * 1.6) {
+                        // Severely over budget — drop hard immediately, bypassing
+                        // the hold so a real hitch recovers at once, and stop
                         // probing upward: we just found the ceiling.
-                        dyn_motion_scale -= dyn_frame_ms_ema > target_ms * 1.6 ? 0.5f : 0.125f;
+                        dyn_motion_scale -= 0.5f;
                         dyn_climb_lock = stm_now();
-                    } else if (stm_sec(stm_diff(stm_now(), dyn_climb_lock)) > kClimbLockSeconds &&
-                               stm_sec(stm_diff(stm_now(), dyn_last_climb)) >
-                                   kClimbIntervalSeconds) {
+                        dyn_last_scale_change = stm_now();
+                    } else if (dyn_frame_ms_ema > target_ms * 1.15) {
+                        // Mildly over budget — coarsen, but no more often than the
+                        // hold so we don't reallocate every frame near the
+                        // boundary. Lock upward probing regardless.
+                        if (hold_elapsed) {
+                            dyn_motion_scale -= 0.125f;
+                            dyn_last_scale_change = stm_now();
+                        }
+                        dyn_climb_lock = stm_now();
+                    } else if (hold_elapsed &&
+                               stm_sec(stm_diff(stm_now(), dyn_climb_lock)) > kClimbLockSeconds) {
                         // Under budget, or vsync-capped at it — probe finer. If
                         // this step overshoots, the branch above pulls it back and
                         // locks probing, so it settles at the sustainable scale.
                         dyn_motion_scale += 0.125f;
-                        dyn_last_climb = stm_now();
+                        dyn_last_scale_change = stm_now();
                     }
                 }
                 dyn_motion_scale =
@@ -957,6 +978,53 @@ void App::Impl::render() {
                                    max_tex / static_cast<float>(fb_height));
         if (render_scale > cap) {
             render_scale = cap;
+        }
+    }
+    // Cap the scale so the resolution-scaling offscreen targets stay within a
+    // memory budget — protects memory-constrained backends from OOMing on a
+    // large window times a high settled scale. The targets that grow with
+    // resolution are scene color + scene depth (full res) and, when AO is on,
+    // the two AO targets at ao_resolution_scale² of the scene area. Everything
+    // else (IBL cubemaps, the 1x1 AO dummy, the swapchain) is fixed-size and
+    // excluded. The per-pixel cost mirrors the format choices ensureSceneTarget
+    // makes below, so the estimate tracks HDR / AO toggles automatically.
+    if (quality.render_scale_memory_budget_mb > 0.f && fb_width > 0 && fb_height > 0) {
+        const auto bytes_per_pixel = [](sg_pixel_format f) -> float {
+            switch (f) {
+            case SG_PIXELFORMAT_RGBA16F:
+                return 8.f;
+            case SG_PIXELFORMAT_RGBA8:
+                return 4.f;
+            default:
+                return 4.f; // depth32f / depth-stencil
+            }
+        };
+        const sg_environment env = sglue_environment();
+        const sg_pixel_format swap_fmt = env.defaults.color_format == SG_PIXELFORMAT_NONE
+                                             ? SG_PIXELFORMAT_RGBA8
+                                             : env.defaults.color_format;
+        const sg_pixel_format depth_fmt = env.defaults.depth_format == SG_PIXELFORMAT_NONE
+                                              ? SG_PIXELFORMAT_DEPTH
+                                              : env.defaults.depth_format;
+        const sg_pixel_format hdr_fmt = pickHdrColorFormat();
+        const sg_pixel_format color_fmt =
+            (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
+        float bytes_per_scene_px = bytes_per_pixel(color_fmt) + bytes_per_pixel(depth_fmt);
+        if (quality.enable_ao) {
+            const float ao_scale = std::clamp(quality.ao_resolution_scale, 0.25f, 1.0f);
+            bytes_per_scene_px += 2.f * bytes_per_pixel(pickAoColorFormat()) * ao_scale * ao_scale;
+        }
+        const double budget_bytes =
+            static_cast<double>(quality.render_scale_memory_budget_mb) * 1024.0 * 1024.0;
+        const double base_px = static_cast<double>(fb_width) * static_cast<double>(fb_height);
+        // total_bytes(scale) = base_px * scale² * bytes_per_scene_px ≤ budget.
+        const double max_scale_sq = budget_bytes / (base_px * bytes_per_scene_px);
+        float budget_cap = static_cast<float>(std::sqrt(std::max(0.0, max_scale_sq)));
+        if (budget_cap < 0.25f) {
+            budget_cap = 0.25f; // never strangle below the hard floor, even on a tiny budget
+        }
+        if (render_scale > budget_cap) {
+            render_scale = budget_cap;
         }
     }
     const auto scale_dim = [render_scale](uint32_t d) -> uint32_t {
@@ -1591,11 +1659,17 @@ void App::Impl::onFrame() {
                                   session_phase == BuildPhase::ResolvedReady;
         const bool ibl_dirty = ibl_rebake_pending || ibl_settings != ibl_last_baked_settings;
         const bool drag_hover = platform_ && platform_->windowState().drag_hover.active;
+        // Trackpad pinch-zoom arrives via the platform gesture queue, not as a
+        // sokol input event, so it never bumps last_activity_time. Peek the
+        // queue here so an in-flight gesture keeps full rate from its very first
+        // frame; consuming the events below also bumps the activity clock, which
+        // carries the full rate through the brief settle tail after it ends.
+        const bool pending_gesture = platform_ && platform_->hasPendingGestures();
         const bool input_recent =
             last_activity_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_activity_time)) < kIdleInputSeconds;
         const bool full_rate = input_recent || jobs_running || ibl_dirty || cfg.auto_orbit ||
-                               drag_hover || notifications.hasActiveToasts();
+                               drag_hover || pending_gesture || notifications.hasActiveToasts();
         if (!full_rate && last_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
             return;
@@ -1649,6 +1723,12 @@ void App::Impl::onFrame() {
     platform_->beginFrameWindowSync();
     platform_window_state = platform_->windowState();
     platform_gesture_events = platform_->takeGestureEvents();
+    if (!platform_gesture_events.empty()) {
+        // A platform gesture (trackpad pinch-zoom) is a user-input-class event
+        // just like a scroll, but it bypasses onEvent — bump the activity clock
+        // here so the idle gate keeps full rate through the settle tail.
+        last_activity_time = stm_now();
+    }
 
     updateCameraInput();
     if (scene && cfg.auto_orbit) {
