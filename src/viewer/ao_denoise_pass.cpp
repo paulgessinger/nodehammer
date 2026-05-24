@@ -129,7 +129,10 @@ void AoDenoisePass::draw(const AoRenderTarget &raw_ao, const SceneRenderTarget &
     params.frame_params[0] = inv_w;
     params.frame_params[1] = inv_h;
     params.frame_params[2] = sg_query_features().origin_top_left ? 1.0f : 0.0f;
-    params.frame_params[3] = 0.0f;
+    // Denoise the bent normal only when the target is high-precision. At RGBA8
+    // the decode→average→re-encode round trip speckles the octahedral coords
+    // (see ao_denoise.glsl header); at RGBA16F it's a clear win.
+    params.frame_params[3] = (current_color_format_ == SG_PIXELFORMAT_RGBA16F) ? 1.0f : 0.0f;
 
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_ao_denoise_ao_denoise_params_block, &u);

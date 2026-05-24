@@ -80,12 +80,25 @@ sg_attachments AoRenderTarget::passAttachments() const {
 }
 
 sg_pixel_format pickAoColorFormat() {
-    // RGBA8 is the universally-supported, renderable + filterable choice.
-    // We previously preferred R16F for AO-gradient precision, but bent
-    // normals (octahedral, 2 bytes) now share the target — the precision
-    // gain from R16F doesn't extend to the GB channels we'd have to add
-    // anyway, and RGBA16F doubles the bandwidth for marginal AO benefit.
-    // Bayer dither in the AO FS hides the R8 quantization artifacts.
+    // The target carries an octahedral bent normal in GB, which the scene
+    // shader decodes and feeds straight into the irradiance-cubemap lookup. At
+    // RGBA8 the 8-bit-per-axis octahedral encode resolves to directions ~1°
+    // apart, and on a saturated-diffuse material that quantization shows up as
+    // a fine color speckle on otherwise-smooth surfaces (the bent normal can't
+    // be denoised away — see ao_denoise.glsl's header). RGBA16F gives ~11 bits
+    // of mantissa per axis, dropping the speckle below perceptible, and also
+    // smooths the AO scalar gradient (making the FS Bayer dither moot there).
+    //
+    // Prefer it whenever the backend can both render to and linearly filter
+    // RGBA16F: WebGPU mandates it; WebGL2 exposes it via the half-float
+    // color-buffer + (core) half-float linear-filter support, which sokol
+    // probes at init. The renderer already uses RGBA16F for its HDR scene
+    // target and IBL bakes, so this is available in practice. Fall back to
+    // RGBA8 (with the AO FS's Bayer dither) on a constrained context.
+    sg_pixelformat_info info = sg_query_pixelformat(SG_PIXELFORMAT_RGBA16F);
+    if (info.render && info.filter) {
+        return SG_PIXELFORMAT_RGBA16F;
+    }
     return SG_PIXELFORMAT_RGBA8;
 }
 

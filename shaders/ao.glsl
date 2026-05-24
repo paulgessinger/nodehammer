@@ -189,7 +189,17 @@ void main() {
     // for each axis keeps the normal stable across silhouettes too: a tap
     // that lands on the background gets discarded in favor of the in-surface
     // side.
-    vec2 texel = ao_params.zw;
+    // Normal-reconstruction tap offset. Use a *fixed screen-space* size (a small
+    // fraction of the frame), not ±1 AO texel. The reconstructed normal — and
+    // therefore the bent normal and the AO it drives — must not depend on the
+    // resolution AO happens to be computed at, or it visibly shifts ("pops") when
+    // the dynamic render scale jumps on settle: a ±1-texel baseline shrinks/grows
+    // with the scale, tilting the normal differently and re-tinting the bent-
+    // normal irradiance. A fixed UV baseline makes the estimate scale-invariant.
+    // Floored at the AO texel so the two taps never collapse into one texel under
+    // nearest depth sampling (which would give a degenerate gradient).
+    const float NORMAL_RECON_UV = 0.0015;
+    vec2 texel = max(vec2(NORMAL_RECON_UV), ao_params.zw);
     float d_l = texture(sampler2D(scene_depth, smp_depth), uv - vec2(texel.x, 0.0)).r;
     float d_r = texture(sampler2D(scene_depth, smp_depth), uv + vec2(texel.x, 0.0)).r;
     float d_d = texture(sampler2D(scene_depth, smp_depth), uv - vec2(0.0, texel.y)).r;
@@ -216,22 +226,29 @@ void main() {
     vec3 dx = (abs(z_l - center_z) < abs(z_r - center_z)) ? (P - P_l) : (P_r - P);
     vec3 dy = (abs(z_dn - center_z) < abs(z_up - center_z)) ? (P - P_dn) : (P_up - P);
     vec3 N = normalize(cross(dy, dx));
-    // No `if (N.z < 0.0) N = -N` here. That flip was a source of the
-    // "whole flat quad changes AO color abruptly during orbit" artifact:
-    // for a flat quad every pixel shares the same N, so N.z crosses 0
-    // for the entire quad at the same camera angle. Before the flip the
-    // slice weights `max(dot(N, slice_normal), 0)` picked one set of
-    // hemisphere-aligned slices; after, they picked the *opposite* set,
-    // and the bent-normal direction (a weighted sum) jumped. The fix is
-    // below (we use abs() on the slice weight so the integration is
-    // sign-invariant under N → -N) and removing the flip is the matching
-    // half of that pair — we never need N to point at the camera, only
-    // to define the slice plane's projection axis up to sign.
 
     // View vector. In ortho V is constant +Z (camera looks down -Z, viewer
     // direction toward eye is +Z); in perspective V varies per pixel.
     bool is_perspective = frame_params.y > 0.5;
     vec3 V = is_perspective ? normalize(-P) : vec3(0.0, 0.0, 1.0);
+
+    // Orient the reconstructed normal toward the viewer. AO is computed for
+    // the surface we can actually see (the depth buffer only holds visible
+    // fragments), so the relevant hemisphere is the one around that surface's
+    // camera-facing normal. The GTAO integrand below integrates *around N* and
+    // so depends on N's sign — a stable, correct orientation is required.
+    //
+    // The test is `dot(N, V) < 0`, NOT the old `N.z < 0`. `N.z` is the normal's
+    // view-space Z, which only equals "faces away from the camera" when the eye
+    // looks straight down view-Z. In perspective, a clearly front-facing quad
+    // off to the side of the screen can have N.z < 0 while dot(N, V) > 0 — so
+    // `N.z < 0` flipped visible surfaces, and because a flat quad shares one N
+    // the whole quad flipped at once mid-orbit, snapping its AO and bent normal.
+    // `dot(N, V)` flips only at the true silhouette (edge-on), where the quad is
+    // a sliver on screen and the transition is imperceptible.
+    if (dot(N, V) < 0.0) {
+        N = -N;
+    }
 
     // Step length in UV space.
     //   Perspective: world radius shrinks on screen as the fragment recedes;
@@ -274,7 +291,6 @@ void main() {
     float thickness = max(frame_params.z, 1e-4) * radius_world;
 
     float occlusion = 0.0;
-    float weight_sum = 0.0;
     // Accumulate the view-space bent normal alongside the AO integral.
     // For each slice we compute the midpoint angle of the unoccluded arc
     // (between the two horizon angles, both measured from V) and turn that
@@ -288,13 +304,15 @@ void main() {
         float phi = (float(s) + 0.5) * (PI / float(num_slices)) + jitter_phi;
         vec2 dir = vec2(cos(phi), sin(phi));
 
-        // Slice plane axis (the projection of the sampling direction onto
-        // the tangent plane at P). Used to weight each slice's contribution
-        // by how aligned it is with the surface normal.
+        // Slice basis. The slice plane contains V and `slice_dir` (the
+        // screen-space sampling direction in view space). `slice_axis` is that
+        // plane's normal; `omega` is the in-plane direction perpendicular to V
+        // pointing toward +slice_dir — the axis the horizon angle is measured
+        // along. The projected-normal angle and the bent-normal midpoint below
+        // both live in the orthonormal (V, omega) basis of this plane.
         vec3 slice_dir = vec3(dir.x, dir.y, 0.0);
         vec3 slice_axis = normalize(cross(slice_dir, V));
-        vec3 slice_normal = normalize(cross(V, slice_axis));
-        float n_proj = dot(N, slice_normal);
+        vec3 omega = normalize(cross(V, slice_axis));
 
         // Walk +dir and -dir; track the maximum cosine of the angle between V
         // and the ray to each sample (= horizon angle's cos) on each side.
@@ -333,52 +351,66 @@ void main() {
             }
         }
 
-        // Convert max cosines to horizon angles. A horizon flush against V
-        // (cos = 1) means the slice is fully open in that direction;
-        // cos < 0 means rays bend back behind the camera, treat as no
-        // occlusion. Closed-form GTAO integrand per slice is roughly
-        // (1 - cos²(theta_horizon)) integrated symmetrically; we
-        // approximate it as the mean of the two-side horizon cosines.
-        float t_pos = max(max_cos_pos, 0.0);
-        float t_neg = max(max_cos_neg, 0.0);
-        float slice_visibility = 1.0 - 0.5 * (t_pos * t_pos + t_neg * t_neg);
-
-        // Bent normal contribution from this slice. Horizon angles are
-        // h_pos = acos(t_pos) on +dir side and h_neg = acos(t_neg) on
-        // -dir side, measured from V toward +dir and -dir respectively.
-        // The unoccluded arc spans [-h_neg, +h_pos] around V (positive
-        // angles toward +dir). Its midpoint is `(h_pos - h_neg) * 0.5`,
-        // and the direction at that midpoint within the slice plane is:
-        //   V * cos(theta_mid) + slice_dir * sin(theta_mid)
-        // We use float trig (acos+sin/cos) here once per slice — it's
-        // cheap relative to the tap loop and avoids a half-angle identity
-        // that would need branchless sign handling for the slice_dir term.
-        float h_pos = acos(t_pos);
-        float h_neg = acos(t_neg);
-        float theta_mid = (h_pos - h_neg) * 0.5;
-        vec3 slice_bent = V * cos(theta_mid) + slice_dir * sin(theta_mid);
-
-        // Sign-invariant slice weight. Was `max(n_proj, 0)`, which weighted
-        // the slice by how aligned its in-plane normal direction was with N
-        // (one hemisphere only). That made the integration dependent on N's
-        // sign — and since N from depth-derivative reconstruction can flip
-        // its sign as the camera orbits past `N.z = 0`, the whole flat-quad
-        // surface would abruptly switch which slices it counted, jumping
-        // the bent-normal direction and the irradiance lookup color.
+        // GTAO arc integral (Jiménez 2016 §3.2, after XeGTAO), integrating
+        // visibility over the hemisphere around the *surface normal* — not
+        // just the view vector.
         //
-        // `abs(n_proj)` makes the integration symmetric under N → -N: both
-        // hemispheres' slices contribute. The bent direction itself depends
-        // only on V and slice_dir (not on N), so it's now genuinely
-        // invariant to the N flip. Two-sided viewer geometry (detector
-        // plates rendered from either side) gets the same AO result either
-        // way, which is what we actually want.
-        float w = abs(n_proj);
-        occlusion += slice_visibility * w;
-        bent_view += slice_bent * w;
-        weight_sum += w;
+        // This is the fix for the "AO glow" on large flat faces. The previous
+        // integrand `1 - 0.5*(t_pos² + t_neg²)` only ever referenced V. On a
+        // flat surface seen off-axis, coplanar up-slope samples have H·V > 0
+        // and so registered as false horizons, dropping visibility as the
+        // grazing angle grew. Across a flat face in perspective the grazing
+        // angle is smallest where the surface crosses screen-center and largest
+        // at the edges, painting a soft radial brightening onto the face.
+        // Integrating around N removes it: a fully unoccluded surface
+        // integrates to 1 at any view angle.
+        //
+        // gamma is the signed angle of N projected into the slice plane,
+        // measured from V toward omega. projN_len is that projection's length
+        // and is the per-slice weight (it down-weights slices the normal barely
+        // lies in). Because N was oriented toward V above, NoV ≥ 0 and
+        // gamma ∈ (-π/2, π/2).
+        float NoV = dot(N, V);
+        float NoW = dot(N, omega);
+        float projN_len = sqrt(max(NoV * NoV + NoW * NoW, 1e-8));
+        float gamma = atan(NoW, NoV);
+        float cos_gamma = NoV / projN_len;   // = cos(gamma)
+        float sin_gamma = NoW / projN_len;   // = sin(gamma)
+
+        // Raw horizon angles from V. When no occluder was found on a side,
+        // max_cos_* is still its -1 init → acos = π (fully open). Do NOT clamp
+        // the cosine to [0,1]: that would cap the horizon at π/2 from V and
+        // truncate the open arc on the up-tilt side. Instead bend each horizon
+        // into [gamma - π/2, gamma + π/2] so the integrated arc stays within
+        // the surface's own hemisphere — that clamp is what makes a flat face
+        // integrate to 1 at any view angle.
+        float h_pos = acos(clamp(max_cos_pos, -1.0, 1.0));   // +omega side
+        float h_neg = acos(clamp(max_cos_neg, -1.0, 1.0));   // -omega side
+        float H2 = gamma + min( h_pos - gamma,  0.5 * PI);
+        float H1 = gamma + max(-h_neg - gamma, -0.5 * PI);
+
+        // Closed-form cosine-weighted visibility of each clamped arc.
+        float arc2 = cos_gamma + 2.0 * H2 * sin_gamma - cos(2.0 * H2 - gamma);
+        float arc1 = cos_gamma + 2.0 * H1 * sin_gamma - cos(2.0 * H1 - gamma);
+        float slice_vis = 0.25 * (arc1 + arc2);
+
+        // Bent normal: midpoint of the *clamped* unoccluded arc, lifted into 3D
+        // in the (V, omega) basis. Using the clamped horizons (not the raw
+        // V-relative ones) removes the bias toward V the old midpoint carried,
+        // so the estimate tilts toward where the surface is genuinely open. The
+        // +V component stays positive (theta_mid ∈ (-π/2, π/2)), so the bent
+        // normal remains camera-facing — the scene shader relies on that.
+        float theta_mid = 0.5 * (H1 + H2);
+        vec3 slice_bent = V * cos(theta_mid) + omega * sin(theta_mid);
+
+        occlusion += projN_len * slice_vis;
+        bent_view += projN_len * slice_bent;
     }
 
-    float ao = (weight_sum > 1e-5) ? (occlusion / weight_sum) : 1.0;
+    // Normalize by slice count (XeGTAO convention): the projN_len weighting is
+    // the per-slice spatial weight, and averaging projN_len·slice_vis over a
+    // uniform set of slice azimuths converges to the cosine-weighted AO.
+    float ao = occlusion / float(num_slices);
     ao = clamp(ao, 0.0, 1.0);
     ao = pow(ao, max(ao_params.x, 1e-3));
 

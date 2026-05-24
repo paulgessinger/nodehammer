@@ -16,34 +16,27 @@
 // inside the depth-fetch latency. Promote to separable if profiling
 // ever flags this as a bottleneck.
 //
-// Bent normal handling: pass through the center tap's bent normal
-// *unchanged* (octahedral coords copied byte-for-byte), do NOT average
-// across the kernel.
+// Bent normal handling: averaged across the same bilateral kernel as the AO
+// scalar (a weighted spherical mean — decode each tap's octahedral GB to a unit
+// vector, accumulate with the tap's spatial×depth weight, renormalize, re-
+// encode), BUT only when the target is high-precision (RGBA16F). On an RGBA8
+// fallback the average is skipped and the center tap's bent normal is passed
+// through unchanged.
 //
-// Why not average:
-//   * The raw bent-normal signal out of GTAO is already smooth on uniform
-//     surfaces (the IGN slice-phase jitter mostly cancels in the per-pixel
-//     integration because every slice's contribution sums into a single
-//     direction estimate, with the magnitude dominated by N's projection
-//     into each slice plane).
-//   * Vector-mean-then-renormalize on already-smooth input amplifies LSB
-//     precision wobble: 25 nearly-aligned vectors sum to a long vector,
-//     then normalize divides out the shared length and exposes whatever
-//     FP noise survived. Re-encoding to 8-bit octahedral binds adjacent
-//     output pixels to *different* quantization bins, which decode to
-//     directions ~1° apart, which the irradiance cubemap maps to a
-//     visible color speckle on saturated diffuse materials. Confirmed
-//     visually: with averaging on, a smooth purple curved surface picks
-//     up a fine high-frequency dotted pattern that disappears with the
-//     denoise off entirely.
-//   * The AO *scalar* (R channel) has no such degeneracy — it's bounded
-//     in [0,1] and averaging only smooths. The 5×5 bilateral on R is
-//     still a clear win, just not on GB.
+// The precision gate matters. Averaging unit vectors then renormalizing exposes
+// the storage quantization: at 8 bits per octahedral axis, adjacent output
+// pixels round to *different* bins ~1° apart, which the irradiance cubemap turns
+// into a fine color speckle on saturated diffuse surfaces — so at 8-bit,
+// passthrough actually read cleaner than averaging. At 16F (~11 mantissa bits,
+// bins ~0.05° apart) that speckle is gone, and averaging is a clear win: it
+// removes the per-pixel slice-phase (IGN) jitter that otherwise shows up as
+// low-frequency color mottling on flat surfaces — and which "crawls" under
+// camera motion because the jitter is locked to screen space while the geometry
+// moves under it. The enable flag is frame_params.w, set by the CPU from the AO
+// target's pixel format.
 //
-// Trade-off: if the GTAO bent normal *is* genuinely noisy on some scene
-// (e.g., very low sample-count preset), this passthrough won't help. The
-// user-facing dial for that case is to bump AO quality to High/Ultra or
-// to pull `bent strength` toward 0 in the UI.
+// The AO *scalar* (R channel) is always averaged — it's bounded in [0,1] with
+// no encode/decode round-trip, so the bilateral only ever smooths it.
 
 @module ao_denoise
 
@@ -73,7 +66,10 @@ layout(binding=0) uniform ao_denoise_params_block {
     // z = flip_v (1.0 on top-left-origin backends; applied to v_uv before
     //     sampling both the raw AO target and scene depth so the read is
     //     aligned to the same pixel that produced it).
-    // w = reserved.
+    // w = denoise_bent (1.0 = average the bent normal across the kernel; 0.0 =
+    //     pass the center tap's bent normal through unchanged). Set to 1.0 only
+    //     when the AO target is RGBA16F — see the file header on why averaging
+    //     an 8-bit octahedral bent normal speckles.
     vec4 frame_params;
 };
 
@@ -89,12 +85,29 @@ layout(binding=1) uniform sampler   smp_depth;
 in vec2 v_uv;
 out vec4 frag_color;
 
-// (Octahedral encode/decode helpers used to live here for the bent-normal
-// spherical-mean. They were removed when bent-normal averaging proved to
-// amplify LSB precision noise — see the file header comment. If we ever
-// add bent-normal denoising back, recreate the helpers from ao.glsl /
-// scene.glsl rather than reviving the deleted ones here, to keep the
-// encoding contract single-sourced at the producer + consumer ends.)
+// Octahedral encode/decode for the bent-normal spherical mean. Must match the
+// producer (ao.glsl octEncode) and consumer (scene.glsl octDecodeBent) exactly
+// so the GB channels survive the decode→average→re-encode round trip with the
+// same convention they're read back under.
+vec3 octDecode(vec2 e) {
+    e = e * 2.0 - 1.0;
+    vec3 v = vec3(e.x, e.y, 1.0 - abs(e.x) - abs(e.y));
+    if (v.z < 0.0) {
+        vec2 sn = vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
+        v.xy = (1.0 - abs(v.yx)) * sn;
+    }
+    return normalize(v);
+}
+
+vec2 octEncode(vec3 n) {
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+    vec2 e = n.xy;
+    if (n.z < 0.0) {
+        vec2 sn = vec2(e.x >= 0.0 ? 1.0 : -1.0, e.y >= 0.0 ? 1.0 : -1.0);
+        e = (1.0 - abs(e.yx)) * sn;
+    }
+    return e * 0.5 + 0.5;
+}
 
 float linearZ(float d) {
     return linearize_depth(d, depth_params.z, depth_params.y,
@@ -123,13 +136,16 @@ void main() {
     const float SPATIAL_SIGMA = 1.4;
     const float spatial_falloff = 1.0 / (2.0 * SPATIAL_SIGMA * SPATIAL_SIGMA);
 
-    // Sample the center tap once up-front; we use it for the bent-normal
-    // passthrough (see the long comment at the top of this file) and as a
-    // safe fallback for the AO scalar if every other tap gets rejected.
+    // Sample the center tap once up-front; we use it as the bent-normal
+    // fallback (RGBA8 passthrough, or a degenerate bent sum) and as a safe
+    // fallback for the AO scalar if every other tap gets rejected.
     vec4 center_sample = texture(sampler2D(ao_raw, smp_ao), uv);
+
+    bool denoise_bent = frame_params.w > 0.5;
 
     float ao_sum = 0.0;
     float w_sum = 0.0;
+    vec3 bent_sum = vec3(0.0);
 
     // Loop bounds are compile-time constants so the inner loop unrolls on
     // every shader compiler we ship to. 25 taps total — bilateral 5×5 on
@@ -150,19 +166,27 @@ void main() {
             float depth_w = exp(-(dz * dz) * inv_2_sigma_sq);
 
             float w = spatial * depth_w;
-            float tap_ao = texture(sampler2D(ao_raw, smp_ao), tap_uv).r;
+            vec4 tap = texture(sampler2D(ao_raw, smp_ao), tap_uv);
 
-            ao_sum += tap_ao * w;
+            ao_sum += tap.r * w;
             w_sum += w;
+            // Bent normal: weighted spherical mean over the same bilateral
+            // kernel (depth weight keeps it from averaging across silhouettes).
+            // Skipped on the RGBA8 fallback — see the file header.
+            if (denoise_bent) {
+                bent_sum += octDecode(tap.gb) * w;
+            }
         }
     }
 
     float ao = (w_sum > 1e-6) ? (ao_sum / w_sum) : center_sample.r;
 
-    // Bent normal: passthrough from the center tap. See the file header
-    // for why averaging here makes things visibly worse rather than
-    // better on smooth, mostly-unoccluded surfaces.
-    frag_color = vec4(ao, center_sample.gb, 1.0);
+    // Bent normal: re-encode the averaged direction when denoising and the sum
+    // is non-degenerate; otherwise pass the center tap through unchanged.
+    vec2 bent_oct = (denoise_bent && dot(bent_sum, bent_sum) > 1e-12)
+                        ? octEncode(normalize(bent_sum))
+                        : center_sample.gb;
+    frag_color = vec4(ao, bent_oct, 1.0);
 }
 @end
 

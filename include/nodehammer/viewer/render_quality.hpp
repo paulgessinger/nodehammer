@@ -54,7 +54,7 @@ struct RenderQualitySettings {
     /// steady framerate during interaction, then a high-fidelity still. Paired
     /// with `pause_when_static`, the expensive settled frame renders once and is
     /// cached. When off, the static `render_scale` above is used throughout.
-    bool dynamic_render_scale{true};
+    bool dynamic_render_scale{false};
     /// When dynamic scaling is on, run a closed-loop controller while the camera
     /// moves: hold the highest scale in [render_scale_min, render_scale_max]
     /// that meets `render_scale_target_fps`. Off = always render at
@@ -122,7 +122,7 @@ struct RenderQualitySettings {
     /// Edge-search step budget — see FxaaQualityPreset.
     FxaaQualityPreset fxaa_quality{FxaaQualityPreset::High};
     bool enable_ao{true};
-    float ao_intensity{1.0f};
+    float ao_intensity{1.8f};
     float ao_radius{0.3f};
     /// Multiplier on `ao_radius` defining the maximum length of a
     /// horizon-sample offset from the center pixel before the sample is
@@ -133,7 +133,7 @@ struct RenderQualitySettings {
     /// (and less load on the bilateral denoise downstream) at the obvious
     /// linear cost. Defaults to Medium = 4×4 = 16 taps per pixel, which is
     /// where the original implementation was hard-coded.
-    AoQualityPreset ao_quality{AoQualityPreset::Medium};
+    AoQualityPreset ao_quality{AoQualityPreset::Ultra};
     /// Fraction of the scene resolution at which the GTAO + denoise passes
     /// render. AO is low-frequency, so half-res (0.5 → ¼ the pixels) reclaims
     /// most of the fullscreen AO cost for little visible loss; the result is
@@ -164,7 +164,7 @@ struct RenderQualitySettings {
     int ibl_quality{1};
     bool enable_bloom{false};
     DebugView debug_view{DebugView::Off};
-    float exposure_stops{1.3f};
+    float exposure_stops{1.6f};
     /// AgX has more contrast than the Narkowicz ACES fit at neutral
     /// exposure, so diffuse-lit interior scenes (typical detector views)
     /// look less flat out of the box. Users can switch back via the UI.
