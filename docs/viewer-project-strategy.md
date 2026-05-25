@@ -16,7 +16,7 @@ The viewer already has the right shape for this work; what's missing is mostly
 a write path, a unified hierarchical listing model, an editor surface, and a
 few mode-transition rules.
 
-**Status:** Steps 1 and 2 of §12 have landed.
+**Status:** Steps 1, 2, and 3 of §12 have landed.
 - Step 1: `DirNode::children` is gone; backends maintain per-directory
   caches keyed by `generation()`; the App's tree panel recurses via
   `project_->list(node.key)`.
@@ -26,6 +26,11 @@ few mode-transition rules.
   and URL backends share their cached vectors by refcount-bump.
   `BuildSession` holds `ByteBuffer`s, dropping the immediate-copy
   protection it used to need.
+- Step 3: `NativeBagProjectFs` wraps an inner `FilesystemProjectFs`
+  pointed at a process-owned `temp_directory_path()` subdir; writes flow
+  through `add`, bump `generation()`, and warn on basename collision.
+  Cross-launch persistence (`state.json` session slot + `getDataHome()`)
+  and atomic temp+rename writes are still deferred — see §12 step 3.
 
 ### Existing `ProjectFs` surface (relevant parts)
 
@@ -70,6 +75,17 @@ consumed via the same interface — no API churn at the App boundary.
 - The newly hoisted polling loop in `App::Impl::onFrame` runs the
   pipeline regardless of whether a scene is loaded, so file additions and
   edits drive a rebuild even after the first scene renders.
+- A platform persistent-text primitive is in place:
+  [`Platform::loadPersistentText` / `savePersistentText`](../include/nodehammer/viewer/platform.hpp)
+  store small TOML/ini blobs under the config dir on native
+  (`sago::getConfigHome()/nodehammer/<key>`) and in browser
+  `localStorage` on web. [`app_state.{hpp,cpp}`](../src/viewer/app_state.cpp)
+  uses it to round-trip `ViewerConfigState` (panel visibility,
+  cull/cut/PBR toggles, **camera**) to TOML — loaded on startup, flushed
+  on quit; on web the same state is also mirrored into the URL query
+  string via `Platform::commitUrlState`. This is *view* state, separate
+  from project/bag **content**, but it's the same primitive the deferred
+  bag `state.json` slot (§3.2, §12 step 3) will build on.
 
 ---
 
@@ -690,7 +706,12 @@ without an editor sitting on top of churning APIs.
    restore, and atomic temp+rename writes. Drops survive within a
    process (which is what step 4's watcher and step 11's editor commit
    need); cross-launch persistence and crash-safe writes follow when
-   we wire up `state.json`.
+   we wire up `state.json`. The persistence primitive to build this on
+   already exists — `Platform::loadPersistentText`/`savePersistentText`
+   plus the `app_state` viewer-state TOML round-trip (see §1) are the
+   template; the bag slot just needs `getDataHome()` in place of
+   `getConfigHome()` and a session-id record pointing at the active
+   storage dir.
 4. **`WatchedFilesystemProjectFs` decorator** + rebuild-on-change.
    Closes the loop for the canonical dev flow (edit on disk → viewer
    re-walks). Invalidates the per-dir lazy cache for the affected
