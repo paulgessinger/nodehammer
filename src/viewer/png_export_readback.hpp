@@ -51,4 +51,14 @@ class ImageReadback {
     std::unique_ptr<Impl> impl_;
 };
 
+/// Create the color image for a render target the PNG-export readback will copy
+/// from. Most backends can read back any color attachment as-is, so the default
+/// (Metal / GL) returns `SG_INVALID_ID`, telling the caller to allocate the
+/// image the normal way. WebGPU is the exception: its render-target textures
+/// need an explicit `CopySrc` usage flag that sokol never sets, so the WGPU
+/// readback TU injects a self-created `WGPUTexture` with that usage here. Like
+/// the readback impl, this is one definition per graphics backend.
+[[nodiscard]] sg_image makeReadbackColorImage(std::uint32_t width, std::uint32_t height,
+                                              sg_pixel_format format);
+
 } // namespace nodehammer::viewer

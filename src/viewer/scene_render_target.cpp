@@ -1,9 +1,11 @@
 #include "scene_render_target.hpp"
 
+#include "png_export_readback.hpp"
+
 namespace nodehammer::viewer {
 
 void SceneRenderTarget::create(uint32_t w, uint32_t h, sg_pixel_format color_fmt,
-                               sg_pixel_format depth_fmt) {
+                               sg_pixel_format depth_fmt, bool for_readback) {
     destroy();
 
     width = w;
@@ -11,14 +13,22 @@ void SceneRenderTarget::create(uint32_t w, uint32_t h, sg_pixel_format color_fmt
     color_format = color_fmt;
     depth_format = depth_fmt;
 
-    sg_image_desc cdesc{};
-    cdesc.usage.color_attachment = true;
-    cdesc.width = static_cast<int>(w);
-    cdesc.height = static_cast<int>(h);
-    cdesc.pixel_format = color_fmt;
-    cdesc.sample_count = 1;
-    cdesc.label = "scene_color";
-    color = sg_make_image(&cdesc);
+    // For an export target, let the active graphics backend supply a
+    // readback-capable color image first (WebGPU needs a CopySrc texture sokol
+    // won't create on its own); SG_INVALID_ID means "use the normal path".
+    if (for_readback) {
+        color = makeReadbackColorImage(w, h, color_fmt);
+    }
+    if (color.id == SG_INVALID_ID) {
+        sg_image_desc cdesc{};
+        cdesc.usage.color_attachment = true;
+        cdesc.width = static_cast<int>(w);
+        cdesc.height = static_cast<int>(h);
+        cdesc.pixel_format = color_fmt;
+        cdesc.sample_count = 1;
+        cdesc.label = "scene_color";
+        color = sg_make_image(&cdesc);
+    }
 
     sg_image_desc ddesc{};
     ddesc.usage.depth_stencil_attachment = true;

@@ -137,4 +137,10 @@ void ImageReadback::reset() {
     impl_->pixels.clear();
 }
 
+sg_image makeReadbackColorImage(std::uint32_t, std::uint32_t, sg_pixel_format) {
+    // Metal can blit from any render-target texture, so the normal color image
+    // is readable as-is — let the caller allocate it the standard way.
+    return sg_image{SG_INVALID_ID};
+}
+
 } // namespace nodehammer::viewer

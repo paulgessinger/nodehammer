@@ -1515,7 +1515,8 @@ void App::Impl::exportPreRender() {
         depth_fmt = SG_PIXELFORMAT_DEPTH;
     }
     if (!export_out_rt.matches(export_internal_w, export_internal_h, color_fmt, depth_fmt)) {
-        export_out_rt.create(export_internal_w, export_internal_h, color_fmt, depth_fmt);
+        export_out_rt.create(export_internal_w, export_internal_h, color_fmt, depth_fmt,
+                             /*for_readback=*/true);
     }
     export_render_active = true;
     // Render a handful of export-res frames so the GTAO temporal denoise (and the

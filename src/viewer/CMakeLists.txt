@@ -27,8 +27,26 @@
 # variables in the caller's scope at call time — and this helper is
 # invoked from the root CMakeLists, where CMAKE_CURRENT_SOURCE_DIR no
 # longer points here.
-function(nh_add_viewer_lib name sokol_lib)
+function(nh_add_viewer_lib name sokol_lib backend)
     set(_dir "${CMAKE_SOURCE_DIR}/src/viewer")
+
+    # PNG-export GPU readback: one TU per *graphics backend* (the readback API
+    # and sokol's exposed native-handle surface are backend-specific, and a
+    # backend like WebGPU or GL can be compiled on native as well as web — so
+    # the choice follows the SOKOL_<backend> being built, not the platform).
+    # GL covers both GLES3 and desktop GLCORE. D3D11 is a #error stub for now.
+    if(backend STREQUAL "SOKOL_METAL")
+        set(_readback ${_dir}/png_export_readback_metal.mm)
+    elseif(backend STREQUAL "SOKOL_WGPU")
+        set(_readback ${_dir}/png_export_readback_wgpu.cpp)
+    elseif(backend STREQUAL "SOKOL_GLES3" OR backend STREQUAL "SOKOL_GLCORE")
+        set(_readback ${_dir}/png_export_readback_gl.cpp)
+    elseif(backend STREQUAL "SOKOL_D3D11")
+        set(_readback ${_dir}/png_export_readback_d3d11.cpp)
+    else()
+        message(FATAL_ERROR "nh_add_viewer_lib: unknown sokol backend '${backend}'")
+    endif()
+
     add_library(${name} STATIC
         ${_dir}/app.cpp
         ${_dir}/scene_renderer.cpp
@@ -39,11 +57,7 @@ function(nh_add_viewer_lib name sokol_lib)
         ${_dir}/composite_pass.cpp
         ${_dir}/png_export.cpp
         ${_dir}/stb_image_write_impl.cpp
-        # PNG-export GPU readback: one TU per graphics backend (the sokol header
-        # surface, and the readback API, are backend-specific). Web compiles a
-        # single TU into both wgpu+gles3 libs (it branches on the backend define);
-        # Apple uses Metal; other native backends #error until implemented.
-        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/png_export_readback_web.cpp,$<IF:$<BOOL:${APPLE}>,${_dir}/png_export_readback_metal.mm,${_dir}/png_export_readback_native_other.cpp>>
+        ${_readback}
         ${_dir}/imgui_backend.cpp
         ${_dir}/ui/debug_panel.cpp
         ${_dir}/ui/icon_font.cpp

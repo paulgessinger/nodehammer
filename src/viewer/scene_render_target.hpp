@@ -37,7 +37,12 @@ struct SceneRenderTarget {
     /// size/formats. The target is single-sampled — antialiasing is handled by
     /// render scale (SSAA) and the composite-pass FXAA, not MSAA. Must be
     /// called inside an active sokol_gfx session (between sg_setup/sg_shutdown).
-    void create(uint32_t w, uint32_t h, sg_pixel_format color_fmt, sg_pixel_format depth_fmt);
+    ///
+    /// When `for_readback` is set, the color image is created so the PNG-export
+    /// GPU→CPU readback can copy from it (via `makeReadbackColorImage` — only
+    /// WebGPU needs the special CopySrc texture; other backends are unaffected).
+    void create(uint32_t w, uint32_t h, sg_pixel_format color_fmt, sg_pixel_format depth_fmt,
+                bool for_readback = false);
 
     /// Release every sokol handle held. Idempotent — safe to call when the
     /// target was never created or was already destroyed.
