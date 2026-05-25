@@ -4,6 +4,7 @@
 #include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/config.hpp>
 #include <nodehammer/viewer/filesystem_project_fs.hpp>
+#include <nodehammer/viewer/watched_filesystem_project_fs.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -269,7 +270,8 @@ void registerCmdViewer(CLI::App &app) {
                 auto geometry_key = relativeKeyUnder(cwd, geometry_abs);
                 if (config_key && geometry_key) {
                     application->setProject(
-                        std::make_unique<nodehammer::viewer::FilesystemProjectFs>(cwd));
+                        std::make_unique<nodehammer::viewer::WatchedFilesystemProjectFs>(
+                            std::make_unique<nodehammer::viewer::FilesystemProjectFs>(cwd)));
                     application->setRootKeys(std::move(*config_key), std::move(*geometry_key));
                     const int rc = application->run();
                     if (rc != 0) {

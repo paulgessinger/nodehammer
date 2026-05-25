@@ -48,6 +48,11 @@ class Nodehammer(ConanFile):
         # build for that target anyway.
         if self.options.viewer and self.settings.os != "Emscripten":
             self.requires("platformfolders/4.3.0")
+            # Cross-platform directory watcher (FSEvents/inotify/RDCW) backing
+            # WatchedFilesystemProjectFs (strategy doc step 4). Header-only;
+            # native + viewer-only like platformfolders — the web bag has no
+            # on-disk tree to watch.
+            self.requires("watcher/0.14.1")
         if self.options.viewer:
             self.requires("sokol/2026.07.02")
             self.requires("imgui/1.92.8")

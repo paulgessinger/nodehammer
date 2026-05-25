@@ -47,6 +47,14 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(nodehammer_tests PRIVATE nodehammer_lua)
 endif()
 
+# WatchedFilesystemProjectFs (and its wtr.watcher dep) is compiled into
+# nodehammer_lib only when the viewer is on; gate its test the same way.
+if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
+    target_sources(nodehammer_tests PRIVATE
+        viewer/test_watched_filesystem_project_fs.cpp
+    )
+endif()
+
 target_compile_definitions(nodehammer_tests PRIVATE
     NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
     $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>
