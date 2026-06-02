@@ -113,7 +113,7 @@ EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
         return items ? items.length : 0;
     }
     function setDrag(active, ev) {
-        Module._nh_viewer_platform_set_drag_hover(
+        Module['_nh_viewer_platform_set_drag_hover'](
             handle,
             active ? 1 : 0,
             ev ? ev.clientX : 0,
@@ -150,12 +150,12 @@ EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
         setDrag(false, ev);
     });
     window.addEventListener('beforeunload', function() {
-        Module._nh_viewer_save_persistent_state();
+        Module['_nh_viewer_save_persistent_state']();
     });
 
     var gestureScale = 1.0;
     function pushPinch(type, scaleDelta, ev) {
-        Module._nh_viewer_platform_push_pinch(
+        Module['_nh_viewer_platform_push_pinch'](
             handle,
             type, scaleDelta,
             ev ? ev.clientX : 0,
@@ -256,25 +256,25 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
                 return;
             }
             var buffers = await Promise.all(files.map(function(f) { return f.arrayBuffer(); }));
-            var handle = Module._nh_viewer_begin_upload_batch();
+            var handle = Module['_nh_viewer_begin_upload_batch']();
             var enc = new TextEncoder();
             for (var i = 0; i < files.length; ++i) {
                 var bytes = new Uint8Array(buffers[i]);
                 var size = bytes.length;
-                var data_ptr = Module._malloc(size);
+                var data_ptr = Module['_malloc'](size);
                 Module.HEAPU8.set(bytes, data_ptr);
 
                 var name_utf8 = enc.encode(files[i].name);
-                var name_ptr = Module._malloc(name_utf8.length + 1);
+                var name_ptr = Module['_malloc'](name_utf8.length + 1);
                 Module.HEAPU8.set(name_utf8, name_ptr);
                 Module.HEAPU8[name_ptr + name_utf8.length] = 0;
 
-                Module._nh_viewer_add_upload(handle, name_ptr, data_ptr, size);
+                Module['_nh_viewer_add_upload'](handle, name_ptr, data_ptr, size);
 
-                Module._free(name_ptr);
-                Module._free(data_ptr);
+                Module['_free'](name_ptr);
+                Module['_free'](data_ptr);
             }
-            Module._nh_viewer_end_upload_batch(handle);
+            Module['_nh_viewer_end_upload_batch'](handle);
         });
     document.body.appendChild(input);
     input.click();
