@@ -586,7 +586,12 @@ bool WedgeCutJob::advance(std::uint64_t budget_ns) {
     if (im.done) {
         return true;
     }
+    // See TessellationJob::advance: batch the wall-clock sampling so a coarsened
+    // Web Worker clock can't collapse the slice to one step per advance() call
+    // and flood a per-slice progress emitter.
+    constexpr std::uint64_t kClockCheckStride = 128;
     const auto start_time = std::chrono::steady_clock::now();
+    std::uint64_t since_check = 0;
     while (!im.done) {
         switch (im.phase) {
         case Impl::Phase::Bounds:
@@ -617,6 +622,10 @@ bool WedgeCutJob::advance(std::uint64_t budget_ns) {
         if (im.done) {
             break;
         }
+        if (++since_check < kClockCheckStride) {
+            continue;
+        }
+        since_check = 0;
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                  std::chrono::steady_clock::now() - start_time)
                                  .count();
