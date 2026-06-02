@@ -172,20 +172,24 @@ wasm-serve scene='odd' port='8000':
     cd "$dir" && exec python3 -m http.server {{port}}
 
 # Copy the same static viewer payload that `wasm-serve` exposes into a
-# self-contained directory, sourced from the Release wasm build. The target
-# may be relative to the repo root or absolute. Build the Release wasm first
-# with `just wasm-release`.
+# self-contained directory. Sources from the Release wasm build by default;
+# pass `build=RelWithDebInfo` to deploy the unminified (no-closure, -O2) build
+# instead — useful for A/B-ing a Release-only browser bug against a known-good
+# build. The target may be relative to the repo root or absolute. Build the
+# chosen config first (`just wasm-release` for Release, `just wasm` for
+# RelWithDebInfo).
 #
 # Usage:
-#   just wasm-copy                              # copy ODD autoload bundle to build/wasm-viewer
-#   just wasm-copy odd public/viewer            # copy ODD autoload bundle to a custom directory
-#   just wasm-copy odd_simple public/viewer     # copy simplified ODD autoload bundle
-#   just wasm-copy none public/viewer           # copy upload-only bundle
-wasm-copy scene='odd' target='build/wasm-viewer':
+#   just wasm-copy                                          # ODD autoload bundle (Release) to build/wasm-viewer
+#   just wasm-copy odd public/viewer                        # ODD autoload bundle (Release) to a custom directory
+#   just wasm-copy odd_simple public/viewer                 # simplified ODD autoload bundle (Release)
+#   just wasm-copy none public/viewer                       # upload-only bundle (Release)
+#   just wasm-copy odd public/viewer RelWithDebInfo         # deploy the RelWithDebInfo build instead
+wasm-copy scene='odd' target='build/wasm-viewer' build='Release':
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{justfile_directory()}}"
-    src="$root/build/emscripten/Release"
+    src="$root/build/emscripten/{{build}}"
     mapfile -t staged < <("$root/scripts/stage_wasm_viewer.sh" copy "{{scene}}" "{{target}}" "$src")
     out="${staged[0]}"
     mode="${staged[1]}"
