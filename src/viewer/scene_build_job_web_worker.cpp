@@ -63,14 +63,18 @@ EM_JS(int, nh_worker_create, (), {
         var w = new Worker("compute_worker.js");
         w.onmessage = function (e) {
             var m = e.data || {};
-            if (m.nh === "progress") {
-                st.phase = m.phase; st.processed = m.processed; st.total = m.total;
-            } else if (m.nh === "error") {
-                st.error = m.message || "compute worker error";
-                if (m.fatal) st.fatal = 1;
+            // Quoted keys: messages cross the worker boundary between separate
+            // Closure compilations (viewer / compute module) and the
+            // non-Closure'd compute_worker.js. Unquoted keys get renamed
+            // inconsistently and the protocol breaks in the Release build.
+            if (m['nh'] === "progress") {
+                st.phase = m['phase']; st.processed = m['processed']; st.total = m['total'];
+            } else if (m['nh'] === "error") {
+                st.error = m['message'] || "compute worker error";
+                if (m['fatal']) st.fatal = 1;
                 st.status = 3;
-            } else if (m.nh === "result") {
-                var bytes = new Uint8Array(m.buffer);
+            } else if (m['nh'] === "result") {
+                var bytes = new Uint8Array(m['buffer']);
                 var ptr = _malloc(bytes.length);
                 HEAPU8.set(bytes, ptr);
                 st.resultPtr = ptr;
@@ -99,17 +103,19 @@ EM_JS(void, nh_worker_post, (unsigned epoch, const uint8_t *scene_ptr, unsigned 
     var st = Module.__nhWorker;
     st.status = 1; st.error = ""; st.resultPtr = 0; st.resultLen = 0;
     st.phase = 1; st.processed = 0; st.total = 0;
+    // Quoted keys: this object is read by the non-Closure'd compute_worker.js,
+    // so Closure must not rename the wire names in the Release build.
     var msg = {
-        nh: "build",
-        epoch: epoch >>> 0,
-        wedge: has_wedge ? { startDeg: start_deg, endDeg: end_deg, margin: margin } : null,
+        'nh': "build",
+        'epoch': epoch >>> 0,
+        'wedge': has_wedge ? { 'startDeg': start_deg, 'endDeg': end_deg, 'margin': margin } : null,
     };
     var transfer = [];
     if (scene_ptr) {
         // Copy out of the wasm heap into a standalone, transferable buffer.
         var buf = HEAPU8.slice(scene_ptr, scene_ptr + scene_len).buffer;
-        msg.sceneBytes = buf;
-        msg.configToml = config_toml ? UTF8ToString(config_toml) : "";
+        msg['sceneBytes'] = buf;
+        msg['configToml'] = config_toml ? UTF8ToString(config_toml) : "";
         transfer.push(buf);
     }
     st.worker.postMessage(msg, transfer);

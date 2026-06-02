@@ -71,15 +71,22 @@ constexpr std::uint64_t kSliceNs = 50'000'000;
 constexpr std::size_t kProgressUpdates = 100;
 
 // clang-format off
+// NOTE: the postMessage object keys are quoted on purpose. This module is
+// compiled with Closure (--closure=1) in the Release build, which renames
+// unquoted object-literal keys; the receiving viewer bundle is a *separate*
+// Closure compilation (and compute_worker.js isn't Closure'd at all), so an
+// unquoted contract renames inconsistently across the worker boundary and the
+// messages stop matching. Quoting pins the wire names. Keep these in sync with
+// compute_worker.js and scene_build_job_web_worker.cpp.
 EM_JS(void, nh_compute_emit_progress, (int phase, double processed, double total), {
     if (typeof postMessage === 'function') {
-        postMessage({ nh: 'progress', phase: phase, processed: processed, total: total });
+        postMessage({ 'nh': 'progress', 'phase': phase, 'processed': processed, 'total': total });
     }
 });
 
 EM_JS(void, nh_compute_emit_error, (const char *msg), {
     if (typeof postMessage === 'function') {
-        postMessage({ nh: 'error', message: UTF8ToString(msg) });
+        postMessage({ 'nh': 'error', 'message': UTF8ToString(msg) });
     }
 });
 // clang-format on
