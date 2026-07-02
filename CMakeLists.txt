@@ -41,11 +41,10 @@ endif()
 
 # ── Options ───────────────────────────────────────────────────────────────────
 # Declared before Dependencies.cmake so dep fetching can gate on them
-# (the viewer pulls bgfx/SDL3/ImGui only when NODEHAMMER_WITH_VIEWER is ON).
+# (the viewer pulls sokol/Dear ImGui only when NODEHAMMER_WITH_VIEWER is ON).
 option(NODEHAMMER_WITH_TGEO     "Enable TGeo/ROOT importer"                            OFF)
 option(NODEHAMMER_WITH_DD4HEP   "Enable DD4hep importer"                               OFF)
 option(NODEHAMMER_WITH_GEANT4   "Enable GDML/Geant4 importer"                          OFF)
-option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"                             OFF)
 option(NODEHAMMER_WITH_VIEWER   "Build the sokol/Dear ImGui interactive viewer"        OFF)
 option(NODEHAMMER_ENABLE_ASAN   "Enable AddressSanitizer"                              OFF)
 option(NODEHAMMER_WERROR        "Treat project warnings as errors"                     OFF)
