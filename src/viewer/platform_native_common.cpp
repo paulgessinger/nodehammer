@@ -6,7 +6,9 @@
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
 
+#ifdef NH_VIEWER_NATIVE_DIALOG
 #include <nfd.hpp>
+#endif
 #include <sago/platform_folders.h>
 #include <sokol_app.h>
 
@@ -42,6 +44,8 @@ void NativePickerState::drainPickers(App &app) {
     }
 }
 
+#ifdef NH_VIEWER_NATIVE_DIALOG
+
 void NativePickerState::runFilePickerModal(App &app) {
     NFD::Guard nfd;
     NFD::UniquePathSet picked;
@@ -72,6 +76,23 @@ void NativePickerState::runFolderPickerModal(App &app) {
     }
     app.setProject(std::make_unique<FilesystemProjectFs>(std::filesystem::path{picked.get()}));
 }
+
+#else // NH_VIEWER_NATIVE_DIALOG
+
+// Built without NFD (NODEHAMMER_VIEWER_NATIVE_DIALOG=OFF): no GTK/DBus
+// dependency, so the picker is a no-op. Drag-and-drop and the CLI --input
+// flag remain the ways to load geometry.
+void NativePickerState::runFilePickerModal(App &) {
+    std::println(stderr, "viewer: built without a native file dialog; "
+                         "drag files onto the window or pass --input on the CLI.");
+}
+
+void NativePickerState::runFolderPickerModal(App &) {
+    std::println(stderr, "viewer: built without a native folder dialog; "
+                         "drag a folder onto the window instead.");
+}
+
+#endif // NH_VIEWER_NATIVE_DIALOG
 
 void dispatchNativeDroppedFiles(App &app) {
     const int n = sapp_get_num_dropped_files();

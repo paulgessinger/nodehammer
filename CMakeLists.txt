@@ -46,6 +46,7 @@ option(NODEHAMMER_WITH_TGEO     "Enable TGeo/ROOT importer"                     
 option(NODEHAMMER_WITH_DD4HEP   "Enable DD4hep importer"                               OFF)
 option(NODEHAMMER_WITH_GEANT4   "Enable GDML/Geant4 importer"                          OFF)
 option(NODEHAMMER_WITH_VIEWER   "Build the sokol/Dear ImGui interactive viewer"        OFF)
+option(NODEHAMMER_VIEWER_NATIVE_DIALOG "Use the native file dialog (NFD); OFF compiles a no-op picker and drops the GTK/DBus dependency" ON)
 option(NODEHAMMER_ENABLE_ASAN   "Enable AddressSanitizer"                              OFF)
 option(NODEHAMMER_WERROR        "Treat project warnings as errors"                     OFF)
 option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                           OFF)
