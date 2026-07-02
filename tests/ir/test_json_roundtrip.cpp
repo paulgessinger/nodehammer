@@ -2,7 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/render.hpp>
-#include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/ir/semantic_json.hpp>
 
 TEST_CASE("to_json: BoxShape serialization", "[ir][json]") {
     nodehammer::BoxShape box{1.0, 2.0, 3.0};
