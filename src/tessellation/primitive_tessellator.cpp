@@ -877,9 +877,7 @@ TessellationOutput tessellateTessellated(const TessellatedShape &s) {
 // ── PrimitiveTessellator ──────────────────────────────────────────────────────
 
 bool PrimitiveTessellator::canTessellate(const SemanticShapeVariant &shape) const noexcept {
-    return !std::holds_alternative<BooleanUnion>(shape) &&
-           !std::holds_alternative<BooleanIntersection>(shape) &&
-           !std::holds_alternative<BooleanSubtraction>(shape);
+    return !isBooleanShape(shape);
 }
 
 TessellationOutput PrimitiveTessellator::tessellate(const SemanticShapeVariant &shape,

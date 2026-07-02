@@ -371,8 +371,7 @@ TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData, const Se
 
     auto enqueue = [&](const auto &s) {
         using T = std::decay_t<decltype(s)>;
-        if constexpr (std::is_same_v<T, BooleanUnion> || std::is_same_v<T, BooleanIntersection> ||
-                      std::is_same_v<T, BooleanSubtraction>) {
+        if constexpr (is_boolean_shape_v<T>) {
             q.push({s.left, glm::dmat4{1.0}});
             q.push({s.right, s.rightTransform});
         }
@@ -389,9 +388,7 @@ TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData, const Se
         bool isBool = std::visit(
             [&](const auto &s) {
                 using T = std::decay_t<decltype(s)>;
-                if constexpr (std::is_same_v<T, BooleanUnion> ||
-                              std::is_same_v<T, BooleanIntersection> ||
-                              std::is_same_v<T, BooleanSubtraction>) {
+                if constexpr (is_boolean_shape_v<T>) {
                     q.push({s.left, xform});
                     q.push({s.right, xform * s.rightTransform});
                     return true;
@@ -746,10 +743,7 @@ bool TessellationJob::Impl::stepOneNode() {
             descParams.maxSegmentsCircle = mergeDesc.maxSegmentsCircle;
 
             const SemanticShape &descShape = scene->shapes.at(descLv.shapeId);
-            const bool descIsBoolean =
-                std::holds_alternative<BooleanUnion>(descShape.data) ||
-                std::holds_alternative<BooleanIntersection>(descShape.data) ||
-                std::holds_alternative<BooleanSubtraction>(descShape.data);
+            const bool descIsBoolean = isBooleanShape(descShape.data);
             auto &descSegMap = meshCache[descLv.shapeId];
             MeshAssetId descMid;
             bool isBBoxProxy = false;
@@ -886,9 +880,7 @@ bool TessellationJob::Impl::stepOneNode() {
         return true;
     }
     const SemanticShape &shape = scene->shapes.at(lv.shapeId);
-    const bool isBoolean = std::holds_alternative<BooleanUnion>(shape.data) ||
-                           std::holds_alternative<BooleanIntersection>(shape.data) ||
-                           std::holds_alternative<BooleanSubtraction>(shape.data);
+    const bool isBoolean = isBooleanShape(shape.data);
 
     // ── Boolean handling ───────────────────────────────────────────────────
     if (isBoolean) {

@@ -143,6 +143,31 @@ TEST_CASE("SemanticShapeVariant: std::visit dispatches to_json for each type", "
     checkType(nodehammer::BooleanSubtraction{}, "subtraction");
 }
 
+// ── isBooleanShape ────────────────────────────────────────────────────────────
+
+TEST_CASE("isBooleanShape: true only for the three CSG variants", "[ir][variant]") {
+    using namespace nodehammer;
+    // Boolean variants.
+    REQUIRE(isBooleanShape(SemanticShapeVariant{BooleanUnion{}}));
+    REQUIRE(isBooleanShape(SemanticShapeVariant{BooleanIntersection{}}));
+    REQUIRE(isBooleanShape(SemanticShapeVariant{BooleanSubtraction{}}));
+    // A representative selection of primitive / non-boolean variants.
+    REQUIRE_FALSE(isBooleanShape(SemanticShapeVariant{BoxShape{1, 2, 3}}));
+    REQUIRE_FALSE(isBooleanShape(SemanticShapeVariant{TubeShape{}}));
+    REQUIRE_FALSE(isBooleanShape(SemanticShapeVariant{TessellatedShape{}}));
+    REQUIRE_FALSE(isBooleanShape(SemanticShapeVariant{UnknownShape{"Foo"}}));
+}
+
+TEST_CASE("is_boolean_shape_v: compile-time trait matches the runtime check", "[ir][variant]") {
+    using namespace nodehammer;
+    STATIC_REQUIRE(is_boolean_shape_v<BooleanUnion>);
+    STATIC_REQUIRE(is_boolean_shape_v<BooleanIntersection>);
+    STATIC_REQUIRE(is_boolean_shape_v<BooleanSubtraction>);
+    STATIC_REQUIRE_FALSE(is_boolean_shape_v<BoxShape>);
+    STATIC_REQUIRE_FALSE(is_boolean_shape_v<TorusShape>);
+    STATIC_REQUIRE_FALSE(is_boolean_shape_v<UnknownShape>);
+}
+
 // ── Default phiDelta uses std::numbers::pi ────────────────────────────────────
 
 TEST_CASE("TubeShape: default phiDelta is 2*pi", "[ir][variant]") {
