@@ -374,17 +374,6 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             "the panels reuses the cached scene. When nothing is changing the loop\n"
             "caps to a low idle rate to save power; interaction snaps back to full\n"
             "rate instantly.");
-
-        // The remaining controls advertise plumbing for bloom / IBL-quality
-        // that lands in later phases. Disabled today so they show what's
-        // coming without misleading the user.
-        ImGui::BeginDisabled(true);
-        ImGui::Checkbox("bloom", &ctx.quality.enable_bloom);
-        ImGui::SliderInt("IBL quality", &ctx.quality.ibl_quality, 0, 3);
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            ImGui::SetTooltip("wired, not implemented");
-        }
     }
 
     if (ImGui::CollapsingHeader("Screenshot")) {

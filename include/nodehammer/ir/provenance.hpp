@@ -7,7 +7,6 @@
 namespace nodehammer {
 
 /// Bit positions for degradation flags. Pass to DegradationFlags::set()/has().
-/// @TODO: Revisit if we even need this
 enum class DegradationBit : std::size_t {
     UnknownShape = 0,    ///< Shape type not recognized; placeholder emitted
     MaterialMissing = 1, ///< No material info available
