@@ -112,6 +112,7 @@ endif()
 # header-only template forest) into their closure.
 add_library(nodehammer_lib STATIC
     src/ir/semantic.cpp
+    src/ir/semantic_json.cpp
     src/config/config_loader.cpp
     src/config/config_writer.cpp
     src/config/config_validator.cpp

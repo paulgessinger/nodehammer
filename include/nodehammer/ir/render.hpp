@@ -4,7 +4,10 @@
 #include <glm/glm.hpp>
 #include <nlohmann/json.hpp>
 #include <nodehammer/ir/provenance.hpp>
-#include <nodehammer/ir/semantic.hpp>
+// render.hpp defines its own inline JSON codec and serializes SemanticNodeId
+// (a StrongId), so it needs the Semantic IR's json overloads, not just the
+// data model in semantic.hpp.
+#include <nodehammer/ir/semantic_json.hpp>
 
 #include <cstdint>
 #include <string>

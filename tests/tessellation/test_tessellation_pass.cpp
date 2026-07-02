@@ -10,6 +10,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <nlohmann/json.hpp>
+#include <nodehammer/ir/semantic_json.hpp>
 #include <nodehammer/tessellation/boolean_tessellator.hpp>
 
 using namespace nodehammer;

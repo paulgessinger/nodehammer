@@ -2,6 +2,7 @@
 
 #include <nodehammer/detail/zstd_io.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
+#include <nodehammer/ir/semantic_json.hpp>
 
 #include <nlohmann/json.hpp>
 
