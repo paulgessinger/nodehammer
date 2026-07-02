@@ -86,8 +86,12 @@ function(nh_add_viewer_lib name sokol_lib backend)
         # Native file picker (NFD-extended). The web build uses an HTML
         # <input type=file> + FileSystemAccess API, so it never needs this
         # dep. nfd::nfd is only declared when NOT EMSCRIPTEN — see
-        # cmake/Dependencies.cmake.
-        target_link_libraries(${name} PUBLIC nfd::nfd)
+        # cmake/Dependencies.cmake. NODEHAMMER_VIEWER_NATIVE_DIALOG=OFF drops
+        # it: platform_native_common.cpp compiles a no-op picker instead.
+        if(NODEHAMMER_VIEWER_NATIVE_DIALOG)
+            target_compile_definitions(${name} PRIVATE NH_VIEWER_NATIVE_DIALOG=1)
+            target_link_libraries(${name} PUBLIC nfd::nfd)
+        endif()
         # PlatformFolders resolves the OS cache/config directory on native.
         # Web doesn't need it (no on-disk paths). Conan recipe is
         # `platformfolders`, but it sets cmake_file_name to `platform_folders`
