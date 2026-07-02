@@ -117,7 +117,7 @@ sokol exposes the native handles needed for each:
   - Platform delivery: native cwd write; web `nh_viewer_download_bytes` download.
   - Headless `viewer --screenshot <path> [--screenshot-width/-height/-supersample]`
     CLI mode (renders one PNG on startup, then quits).
-  - Verified: `nodehammer viewer --input odd.nhb.zst --config odd_flat.toml
+  - Verified: `nodehammer viewer --input odd.nhb.zst --config fixtures/configs/odd.toml
     --screenshot out.png` produces a correct ODD render at the requested size and
     aspect (tested 1280×720 @2× and 800×600 @3×). All 335 unit tests pass.
 
