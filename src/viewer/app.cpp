@@ -418,9 +418,33 @@ struct App::Impl {
     void classifyScroll(float scroll_x, float scroll_y);
     void handleScrollEvent(const sapp_event *ev, bool imgui_handled);
     [[nodiscard]] bool shouldThrottleIdle() const;
+
+    // True while any async work that mutates the rendered scene is in flight:
+    // the IBL bake, a geometry build, an un-uploaded scene/cut, or a pending
+    // cut rebuild. The frame loop consults it to decide whether it may idle,
+    // throttle to a low rate, or hold a cached still. Computed identically at
+    // three sites in render()/onFrame(); centralized here.
+    [[nodiscard]] bool jobsRunning() const {
+        const auto session_phase = build_session.phase();
+        return !ibl_installed || build_in_progress || (scene && !scene_uploaded) ||
+               (cut_scene && !cut_uploaded) || pending_cut_rebuild ||
+               session_phase == BuildPhase::Walking || session_phase == BuildPhase::ResolvedReady;
+    }
+
+    // True when the IBL environment differs from what was last baked and so
+    // needs a rebake before the frame can settle.
+    [[nodiscard]] bool iblDirty() const {
+        return ibl_rebake_pending || ibl_settings != ibl_last_baked_settings;
+    }
+
     void updateCameraInput();
     void applyInitialCamera();
     void render();
+    // Clamp render_scale (a render() local, passed by reference) so the
+    // resolution-scaling offscreen targets (scene color + depth, plus the AO
+    // targets) fit render_scale_memory_budget_mb. Split out of render() as a
+    // self-contained piece of the render-scale logic; reads the fb_* members.
+    void clampRenderScaleToMemoryBudget(float &render_scale);
     void ensureSceneTarget(uint32_t width, uint32_t height);
     void requestPngExport(const PngExportSettings &settings, std::string explicit_path = {},
                           bool quit_when_done = false);
@@ -894,6 +918,61 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     }
 }
 
+void App::Impl::clampRenderScaleToMemoryBudget(float &render_scale) {
+    // Cap the scale so the resolution-scaling offscreen targets stay within a
+    // memory budget — protects memory-constrained backends from OOMing on a
+    // large window times a high settled scale. The targets that grow with
+    // resolution are scene color + scene depth (full res) and, when AO is on,
+    // the two AO targets at ao_resolution_scale² of the scene area. Everything
+    // else (IBL cubemaps, the 1x1 AO dummy, the swapchain) is fixed-size and
+    // excluded. The per-pixel cost mirrors the format choices ensureSceneTarget
+    // makes below, so the estimate tracks HDR / AO toggles automatically.
+    if (quality.render_scale_memory_budget_mb > 0.f && fb_width > 0 && fb_height > 0) {
+        const auto bytes_per_pixel = [](sg_pixel_format f) -> float {
+            switch (f) {
+            case SG_PIXELFORMAT_RGBA16F:
+                return 8.f;
+            case SG_PIXELFORMAT_RGBA8:
+                return 4.f;
+            default:
+                return 4.f; // depth32f / depth-stencil
+            }
+        };
+        const sg_environment env = sglue_environment();
+        const sg_pixel_format swap_fmt = env.defaults.color_format == SG_PIXELFORMAT_NONE
+                                             ? SG_PIXELFORMAT_RGBA8
+                                             : env.defaults.color_format;
+        const sg_pixel_format depth_fmt = env.defaults.depth_format == SG_PIXELFORMAT_NONE
+                                              ? SG_PIXELFORMAT_DEPTH
+                                              : env.defaults.depth_format;
+        const sg_pixel_format hdr_fmt = pickHdrColorFormat();
+        const sg_pixel_format color_fmt =
+            (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
+        float bytes_per_scene_px = bytes_per_pixel(color_fmt) + bytes_per_pixel(depth_fmt);
+        if (quality.enable_ao) {
+            const float ao_scale = std::clamp(quality.ao_resolution_scale, 0.25f, 1.0f);
+            // AO is coupled to the scaled scene resolution: two ping-pong history
+            // buffers, plus the raw target when denoise is on (three total),
+            // each at ao_scale² of the scene area.
+            const float ao_buffers = quality.enable_ao_denoise ? 3.f : 2.f;
+            bytes_per_scene_px +=
+                ao_buffers * bytes_per_pixel(pickAoColorFormat()) * ao_scale * ao_scale;
+        }
+        const double budget_bytes =
+            static_cast<double>(quality.render_scale_memory_budget_mb) * 1024.0 * 1024.0;
+        const double base_px = static_cast<double>(fb_width) * static_cast<double>(fb_height);
+        // total_bytes(scale) = base_px * scale² * bytes_per_scene_px ≤ budget.
+        const double max_scale_sq = budget_bytes / (base_px * bytes_per_scene_px);
+        float budget_cap = static_cast<float>(std::sqrt(std::max(0.0, max_scale_sq)));
+        if (budget_cap < 0.25f) {
+            budget_cap = 0.25f; // never strangle below the hard floor, even on a tiny budget
+        }
+        if (render_scale > budget_cap) {
+            render_scale = budget_cap;
+        }
+    }
+}
+
 void App::Impl::render() {
     const uint64_t render_submit_start = stm_now();
     scene_submit_ms = 0.0;
@@ -1076,58 +1155,8 @@ void App::Impl::render() {
             render_scale = cap;
         }
     }
-    // Cap the scale so the resolution-scaling offscreen targets stay within a
-    // memory budget — protects memory-constrained backends from OOMing on a
-    // large window times a high settled scale. The targets that grow with
-    // resolution are scene color + scene depth (full res) and, when AO is on,
-    // the two AO targets at ao_resolution_scale² of the scene area. Everything
-    // else (IBL cubemaps, the 1x1 AO dummy, the swapchain) is fixed-size and
-    // excluded. The per-pixel cost mirrors the format choices ensureSceneTarget
-    // makes below, so the estimate tracks HDR / AO toggles automatically.
-    if (quality.render_scale_memory_budget_mb > 0.f && fb_width > 0 && fb_height > 0) {
-        const auto bytes_per_pixel = [](sg_pixel_format f) -> float {
-            switch (f) {
-            case SG_PIXELFORMAT_RGBA16F:
-                return 8.f;
-            case SG_PIXELFORMAT_RGBA8:
-                return 4.f;
-            default:
-                return 4.f; // depth32f / depth-stencil
-            }
-        };
-        const sg_environment env = sglue_environment();
-        const sg_pixel_format swap_fmt = env.defaults.color_format == SG_PIXELFORMAT_NONE
-                                             ? SG_PIXELFORMAT_RGBA8
-                                             : env.defaults.color_format;
-        const sg_pixel_format depth_fmt = env.defaults.depth_format == SG_PIXELFORMAT_NONE
-                                              ? SG_PIXELFORMAT_DEPTH
-                                              : env.defaults.depth_format;
-        const sg_pixel_format hdr_fmt = pickHdrColorFormat();
-        const sg_pixel_format color_fmt =
-            (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
-        float bytes_per_scene_px = bytes_per_pixel(color_fmt) + bytes_per_pixel(depth_fmt);
-        if (quality.enable_ao) {
-            const float ao_scale = std::clamp(quality.ao_resolution_scale, 0.25f, 1.0f);
-            // AO is coupled to the scaled scene resolution: two ping-pong history
-            // buffers, plus the raw target when denoise is on (three total),
-            // each at ao_scale² of the scene area.
-            const float ao_buffers = quality.enable_ao_denoise ? 3.f : 2.f;
-            bytes_per_scene_px +=
-                ao_buffers * bytes_per_pixel(pickAoColorFormat()) * ao_scale * ao_scale;
-        }
-        const double budget_bytes =
-            static_cast<double>(quality.render_scale_memory_budget_mb) * 1024.0 * 1024.0;
-        const double base_px = static_cast<double>(fb_width) * static_cast<double>(fb_height);
-        // total_bytes(scale) = base_px * scale² * bytes_per_scene_px ≤ budget.
-        const double max_scale_sq = budget_bytes / (base_px * bytes_per_scene_px);
-        float budget_cap = static_cast<float>(std::sqrt(std::max(0.0, max_scale_sq)));
-        if (budget_cap < 0.25f) {
-            budget_cap = 0.25f; // never strangle below the hard floor, even on a tiny budget
-        }
-        if (render_scale > budget_cap) {
-            render_scale = budget_cap;
-        }
-    }
+    // Clamp the render scale to the offscreen-target memory budget.
+    clampRenderScaleToMemoryBudget(render_scale);
     const auto scale_dim = [render_scale](uint32_t d) -> uint32_t {
         const auto s = static_cast<uint32_t>(static_cast<float>(d) * render_scale + 0.5f);
         return s < 1u ? 1u : s;
@@ -1152,13 +1181,7 @@ void App::Impl::render() {
     // settle jump converge before we hold the frame.
     bool render_scene = true;
     if (quality.pause_when_static) {
-        const auto session_phase = build_session.phase();
-        const bool jobs_running = !ibl_installed || build_in_progress ||
-                                  (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
-                                  pending_cut_rebuild || session_phase == BuildPhase::Walking ||
-                                  session_phase == BuildPhase::ResolvedReady;
-        const bool ibl_dirty = ibl_rebake_pending || ibl_settings != ibl_last_baked_settings;
-        const bool scene_changing = interacting || jobs_running || ibl_dirty;
+        const bool scene_changing = interacting || jobsRunning() || iblDirty();
         if (scene_changing) {
             last_scene_change = stm_now();
         }
@@ -1958,12 +1981,7 @@ void App::Impl::onFrame() {
     // compatibility even though the rule no longer keys on focus
     // alone and the cadence is now dynamic.
     if (idle && !keep_loop_awake) {
-        const auto session_phase = build_session.phase();
-        const bool jobs_running = !ibl_installed || build_in_progress ||
-                                  (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
-                                  pending_cut_rebuild || session_phase == BuildPhase::Walking ||
-                                  session_phase == BuildPhase::ResolvedReady;
-        if (!jobs_running) {
+        if (!jobsRunning()) {
             return;
         }
         constexpr double kIdleFrameInterval = 1.0 / 30.0; // 30 Hz
@@ -1985,12 +2003,6 @@ void App::Impl::onFrame() {
     if (quality.pause_when_static && !keep_loop_awake) {
         constexpr double kIdleInputSeconds = 0.2;         // recent input keeps full rate
         constexpr double kIdleFrameInterval = 1.0 / 12.0; // ~12 Hz when parked
-        const auto session_phase = build_session.phase();
-        const bool jobs_running = !ibl_installed || build_in_progress ||
-                                  (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
-                                  pending_cut_rebuild || session_phase == BuildPhase::Walking ||
-                                  session_phase == BuildPhase::ResolvedReady;
-        const bool ibl_dirty = ibl_rebake_pending || ibl_settings != ibl_last_baked_settings;
         const bool drag_hover = platform_ && platform_->windowState().drag_hover.active;
         // Trackpad pinch-zoom arrives via the platform gesture queue, not as a
         // sokol input event, so it never bumps last_activity_time. Peek the
@@ -2001,7 +2013,7 @@ void App::Impl::onFrame() {
         const bool input_recent =
             last_activity_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_activity_time)) < kIdleInputSeconds;
-        const bool full_rate = input_recent || jobs_running || ibl_dirty || cfg.auto_orbit ||
+        const bool full_rate = input_recent || jobsRunning() || iblDirty() || cfg.auto_orbit ||
                                drag_hover || pending_gesture || notifications.hasActiveToasts();
         if (!full_rate && last_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
