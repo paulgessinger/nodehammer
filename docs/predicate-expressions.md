@@ -37,6 +37,8 @@ Both forms produce the same predicate AST. The table form remains valid and can 
 | `tag.KEY` | Matches if the tag `KEY` exists (any value) |
 | `tag.KEY == "value"` | Matches if tag `KEY` equals `"value"` |
 
+In the table form, the constants `true`/`false` are written `{ type = "bool", value = true }` / `{ type = "bool", value = false }`.
+
 ### Glob patterns
 
 The `~=` operator performs glob matching with the following rules:
