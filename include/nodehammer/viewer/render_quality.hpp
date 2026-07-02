@@ -44,8 +44,7 @@ enum class FxaaQualityPreset : int {
 /// separate from `Config` because Config is the user/CLI-facing persisted
 /// surface; quality settings are runtime tunables that grow as more
 /// rendering features land. HDR, tonemap, AO, FXAA, render scale and the
-/// "look" knobs are live; `enable_bloom` / `ibl_quality` are still plumbing
-/// for features that haven't landed.
+/// "look" knobs are live.
 struct RenderQualitySettings {
     float render_scale{1.0f};
     /// Dynamic render scale: when on (the default), the offscreen scale drops to
@@ -161,8 +160,6 @@ struct RenderQualitySettings {
     /// win without the noisier extremes. Only consulted when
     /// `enable_advanced_ao` is on.
     float ao_bent_strength{0.5f};
-    int ibl_quality{1};
-    bool enable_bloom{false};
     DebugView debug_view{DebugView::Off};
     float exposure_stops{1.6f};
     /// AgX has more contrast than the Narkowicz ACES fit at neutral
