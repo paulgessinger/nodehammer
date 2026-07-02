@@ -14,6 +14,7 @@
 #include <optional>
 #include <queue>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -159,6 +160,21 @@ using SemanticShapeVariant =
     std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape, PgonShape,
                  TorusShape, TessellatedShape, BooleanUnion, BooleanIntersection,
                  BooleanSubtraction, UnknownShape>;
+
+/// The boolean/CSG shape variants. These reference other shapes and must be
+/// routed to the boolean tessellator; the primitive tessellator rejects them.
+/// Exposed as a compile-time trait (for `if constexpr` inside std::visit) and a
+/// runtime predicate over the variant, so the three-way test lives in one place.
+template <typename T>
+inline constexpr bool is_boolean_shape_v =
+    std::is_same_v<T, BooleanUnion> || std::is_same_v<T, BooleanIntersection> ||
+    std::is_same_v<T, BooleanSubtraction>;
+
+[[nodiscard]] inline bool isBooleanShape(const SemanticShapeVariant &shape) noexcept {
+    return std::holds_alternative<BooleanUnion>(shape) ||
+           std::holds_alternative<BooleanIntersection>(shape) ||
+           std::holds_alternative<BooleanSubtraction>(shape);
+}
 
 struct SemanticShape {
     SemanticShapeId id;
