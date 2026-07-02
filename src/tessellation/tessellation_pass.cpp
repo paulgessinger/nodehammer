@@ -492,7 +492,20 @@ struct TessellationJob::Impl {
     // Process one outer-BFS iteration. Returns false if the queue became
     // empty (no more nodes to process) OR if the pass has already aborted
     // due to an error. After the queue drains, `done` is set.
+    //
+    // stepOneNode() builds the RenderNode and resolves the tessellation rule,
+    // then dispatches the geometry work to one of these branch helpers. Each
+    // finalizes `rn` into the render scene and returns the same bool contract
+    // as stepOneNode (false only on a fallback=fail abort).
     bool stepOneNode();
+    bool tessellateMergeDescendants(const SemanticNode &semNode, RenderNode &rn, RenderNodeId rnId,
+                                    const ResolvedTessellation &rule);
+    bool tessellateBooleanNode(const SemanticNode &semNode, const SemanticLogicalVolume &lv,
+                               const SemanticShape &shape, RenderNode &rn, RenderNodeId rnId,
+                               const ResolvedTessellation &rule, const TessellationParams &params);
+    bool tessellatePrimitiveNode(const SemanticNode &semNode, const SemanticLogicalVolume &lv,
+                                 const SemanticShape &shape, RenderNode &rn, RenderNodeId rnId,
+                                 const TessellationParams &params);
 
     // Count the number of nodes that the outer BFS in `stepOneNode`
     // will actually process. Mirrors that loop's children-skip rules so
@@ -655,212 +668,7 @@ bool TessellationJob::Impl::stepOneNode() {
     // combine into per-material meshes on this node. Children are not added
     // to the render tree.
     if (rule.mergeDescendants) {
-        MergeCacheKey mergeKey;
-        mergeKey.fallback = rule.fallback;
-
-        std::vector<MergeDescendant> mergeDescendants;
-
-        // BFS descendants. Accumulate transforms down the selected local hierarchy instead
-        // of recomputing inverse(parentWorld) * childWorld; the latter introduces tiny
-        // roundoff differences that defeat exact cache reuse for repeated source volumes.
-        std::queue<MergeDescendant> collectQ;
-        for (const auto childId : semNode.children) {
-            if (scene->nodes.contains(childId)) {
-                collectQ.push({childId, scene->nodes.at(childId).localTransform});
-            }
-        }
-        while (!collectQ.empty()) {
-            const auto mergeDesc = collectQ.front();
-            collectQ.pop();
-            const auto descId = mergeDesc.nodeId;
-            if (!scene->nodes.contains(descId)) {
-                continue;
-            }
-            const SemanticNode &descNode = scene->nodes.at(descId);
-
-            for (const auto gcId : descNode.children) {
-                if (scene->nodes.contains(gcId)) {
-                    collectQ.push(
-                        {gcId, mergeDesc.toMergeLocal * scene->nodes.at(gcId).localTransform});
-                }
-            }
-
-            if (!scene->logVols.contains(descNode.logVolId)) {
-                continue;
-            }
-            const SemanticLogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
-            if (!scene->shapes.contains(descLv.shapeId)) {
-                continue;
-            }
-
-            NodeView descView = makeNodeView(descNode);
-            const std::string *matName = resolveMaterial(compiledRules, descView);
-            const std::string materialKey = matName != nullptr
-                                                ? "config:" + *matName
-                                                : std::format("source:{}", descLv.materialId.value);
-
-            const auto descTess =
-                resolveTessellation(compiledRules, config->tessellationDefaults, descView);
-            const int descSegs = descTess.maxSegmentsCircle;
-
-            mergeKey.descendants.push_back(
-                {descLv.shapeId, descLv.materialId, materialKey, mergeDesc.toMergeLocal, descSegs});
-            mergeDescendants.push_back({mergeDesc.nodeId, mergeDesc.toMergeLocal, descSegs});
-        }
-
-        if (!tryUsePrototypeMergeKey(*scene, semNode.logVolId, mergeKey)) {
-            sortMergeDescendants(mergeKey.descendants);
-        }
-
-        // Check the merge cache only after the placement-aware key is known.
-        auto mcIt = mergeCache.find(mergeKey);
-        if (mcIt != mergeCache.end()) {
-            rn.meshBindings = mcIt->second;
-            result.scene.nodes[rnId] = std::move(rn);
-            return true;
-        }
-
-        // Per-material accumulation buffers.
-        struct MatGroup {
-            std::vector<Vertex> verts;
-            std::vector<uint32_t> indices;
-        };
-        std::map<RenderMaterialId, MatGroup> groups;
-
-        for (const auto &mergeDesc : mergeDescendants) {
-            const auto descId = mergeDesc.nodeId;
-            const SemanticNode &descNode = scene->nodes.at(descId);
-            if (!scene->logVols.contains(descNode.logVolId)) {
-                continue;
-            }
-            const SemanticLogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
-            if (!scene->shapes.contains(descLv.shapeId)) {
-                continue;
-            }
-
-            // Tessellate (using cache) — use per-descendant segment count.
-            TessellationParams descParams;
-            descParams.maxSegmentsCircle = mergeDesc.maxSegmentsCircle;
-
-            const SemanticShape &descShape = scene->shapes.at(descLv.shapeId);
-            const bool descIsBoolean = isBooleanShape(descShape.data);
-            auto &descSegMap = meshCache[descLv.shapeId];
-            MeshAssetId descMid;
-            bool isBBoxProxy = false;
-            if (!descSegMap.contains(descParams.maxSegmentsCircle)) {
-                TessellationOutput tessOut;
-                if (descIsBoolean) {
-                    tessOut = tessellateBooleanShape(descShape.data, *scene, tess, descParams);
-                } else {
-                    tessOut = tess.tessellate(descShape.data, descParams);
-                }
-                result.diags.append(tessOut.diags);
-                if (descIsBoolean && !tessOut.succeeded) {
-                    // Boolean tessellation genuinely failed (operands unbuildable
-                    // or the boolean op errored) — apply fallback. An empty but
-                    // *succeeded* result (e.g. a wedge cut that removed the whole
-                    // descendant) is not a failure: it falls through to the
-                    // empty-vertices skip below and contributes nothing.
-                    switch (rule.fallback) {
-                    case BooleanFallback::Fail:
-                        result.diags.error(
-                            codes::kErrTessBooleanFail,
-                            std::format("boolean shape on node '{}' cannot be tessellated "
-                                        "(fallback=fail)",
-                                        descNode.name),
-                            descNode.name);
-                        done = true;
-                        return false;
-                    case BooleanFallback::BBox:
-                        tessOut = makeBBoxProxy(descShape.data, *scene, tess, descParams);
-                        result.diags.append(tessOut.diags);
-                        isBBoxProxy = true;
-                        break;
-                    case BooleanFallback::Skip:
-                    default:
-                        continue;
-                    }
-                }
-                if (tessOut.vertices.empty()) {
-                    continue;
-                }
-                MeshAsset ma;
-                ma.id = result.scene.nextMeshId();
-                ma.name = descLv.name;
-                ma.vertices = std::move(tessOut.vertices);
-                ma.indices = std::move(tessOut.indices);
-                ma.provenance.sourceSystem = "tessellation_pass";
-                ma.provenance.sourceName = descLv.name;
-                descMid = ma.id;
-                result.scene.meshAssets[descMid] = std::move(ma);
-                descSegMap[descParams.maxSegmentsCircle] = descMid;
-            } else {
-                descMid = descSegMap.at(descParams.maxSegmentsCircle);
-            }
-
-            if (!result.scene.meshAssets.contains(descMid)) {
-                continue;
-            }
-            const MeshAsset &srcMesh = result.scene.meshAssets.at(descMid);
-            if (srcMesh.vertices.empty()) {
-                continue;
-            }
-
-            // Resolve material — use red proxy for bbox fallbacks.
-            RenderMaterialId rmId = isBBoxProxy
-                                        ? getBBoxProxyMaterial()
-                                        : resolveRenderMaterial(descLv.materialId, descNode);
-
-            // Transform vertices into merge node's local frame
-            const glm::mat4 toLocal = glm::mat4(mergeDesc.toMergeLocal);
-            const glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(glm::mat3(toLocal))));
-
-            auto &grp = groups[rmId];
-            const auto idxBase = static_cast<uint32_t>(grp.verts.size());
-            for (const auto &v : srcMesh.vertices) {
-                Vertex tv;
-                tv.position = glm::vec3(toLocal * glm::vec4(v.position, 1.0f));
-                tv.normal = glm::normalize(normalMat * v.normal);
-                grp.verts.push_back(tv);
-            }
-            for (const auto idx : srcMesh.indices) {
-                grp.indices.push_back(idx + idxBase);
-            }
-        }
-
-        if (groups.empty() && !wedgeCutApplied) {
-            // With a wedge cut applied, an empty merge is expected: the cut can
-            // empty (and the prune can remove) every descendant of a stave whose
-            // envelope straddled the cut. Rendering nothing is correct, so only
-            // warn when no cut is in play — i.e. the genuine "selection removed
-            // them" config case this diagnostic was meant to catch.
-            result.diags.warn(
-                codes::kWarnTessMergeEmpty,
-                std::format("merge_descendants on '{}' produced no geometry — node has no "
-                            "tessellatable descendants (did selection remove them?)",
-                            semNode.name),
-                semNode.name);
-        }
-
-        // Create one MeshAsset per material group → one MeshBinding each.
-        for (auto &[rmId, grp] : groups) {
-            MeshAssetId mid = result.scene.nextMeshId();
-            MeshAsset ma;
-            ma.id = mid;
-            ma.name = semNode.name + "_merged";
-            ma.vertices = std::move(grp.verts);
-            ma.indices = std::move(grp.indices);
-            ma.provenance.sourceSystem = "tessellation_pass";
-            ma.provenance.sourceName = semNode.name;
-            result.scene.meshAssets[mid] = std::move(ma);
-            rn.meshBindings.push_back({mid, rmId});
-        }
-
-        mergeCache[std::move(mergeKey)] = rn.meshBindings;
-
-        // Don't enqueue children — they've been consumed by the merge.
-        result.scene.nodes[rnId] = std::move(rn);
-        return true;
+        return tessellateMergeDescendants(semNode, rn, rnId, rule);
     }
 
     // ── Resolve shape ──────────────────────────────────────────────────────
@@ -880,107 +688,328 @@ bool TessellationJob::Impl::stepOneNode() {
         return true;
     }
     const SemanticShape &shape = scene->shapes.at(lv.shapeId);
-    const bool isBoolean = isBooleanShape(shape.data);
 
-    // ── Boolean handling ───────────────────────────────────────────────────
-    if (isBoolean) {
-        // Check the mesh cache first — same shapeId + segments → same mesh.
-        // The sentinel id 0 (never allocated; ids start at 1) marks a boolean
-        // that succeeded but removed the solid entirely (e.g. a placement fully
-        // inside an angle-cut wedge): a valid empty result, cached so instances
-        // sharing the shape are not re-evaluated.
-        constexpr MeshAssetId kFullyRemoved{0};
-        auto &boolSegMap = meshCache[lv.shapeId];
-        MeshAssetId boolMid;
-        bool boolCacheHit = boolSegMap.contains(params.maxSegmentsCircle);
-        bool fullyRemoved = false;
-        if (boolCacheHit) {
-            boolMid = boolSegMap.at(params.maxSegmentsCircle);
-            fullyRemoved = (boolMid == kFullyRemoved);
-        } else {
-            auto boolOut = tessellateBooleanShape(shape.data, *scene, tess, params);
-            result.diags.append(boolOut.diags);
-            if (!boolOut.vertices.empty()) {
-                boolMid = result.scene.nextMeshId();
-                MeshAsset ma;
-                ma.id = boolMid;
-                ma.name = lv.name + "_boolean";
-                ma.vertices = std::move(boolOut.vertices);
-                ma.indices = std::move(boolOut.indices);
-                ma.provenance.sourceSystem = "tessellation_pass/manifold";
-                ma.provenance.sourceName = lv.name;
-                result.scene.meshAssets[boolMid] = std::move(ma);
-                boolSegMap[params.maxSegmentsCircle] = boolMid;
-                boolCacheHit = true;
-            } else if (boolOut.succeeded) {
-                // Empty but valid: the solid was fully cut away. Render nothing.
-                boolSegMap[params.maxSegmentsCircle] = kFullyRemoved;
-                fullyRemoved = true;
+    if (isBooleanShape(shape.data)) {
+        return tessellateBooleanNode(semNode, lv, shape, rn, rnId, rule, params);
+    }
+    return tessellatePrimitiveNode(semNode, lv, shape, rn, rnId, params);
+}
+
+bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNode,
+                                                       RenderNode &rn, RenderNodeId rnId,
+                                                       const ResolvedTessellation &rule) {
+    MergeCacheKey mergeKey;
+    mergeKey.fallback = rule.fallback;
+
+    std::vector<MergeDescendant> mergeDescendants;
+
+    // BFS descendants. Accumulate transforms down the selected local hierarchy instead
+    // of recomputing inverse(parentWorld) * childWorld; the latter introduces tiny
+    // roundoff differences that defeat exact cache reuse for repeated source volumes.
+    std::queue<MergeDescendant> collectQ;
+    for (const auto childId : semNode.children) {
+        if (scene->nodes.contains(childId)) {
+            collectQ.push({childId, scene->nodes.at(childId).localTransform});
+        }
+    }
+    while (!collectQ.empty()) {
+        const auto mergeDesc = collectQ.front();
+        collectQ.pop();
+        const auto descId = mergeDesc.nodeId;
+        if (!scene->nodes.contains(descId)) {
+            continue;
+        }
+        const SemanticNode &descNode = scene->nodes.at(descId);
+
+        for (const auto gcId : descNode.children) {
+            if (scene->nodes.contains(gcId)) {
+                collectQ.push(
+                    {gcId, mergeDesc.toMergeLocal * scene->nodes.at(gcId).localTransform});
             }
         }
-        if (fullyRemoved) {
-            // No mesh binding — correct, not a failure, so no warning.
-            result.scene.nodes[rnId] = std::move(rn);
-            for (const auto childId : semNode.children) {
-                q.push(childId);
-            }
-            return true;
+
+        if (!scene->logVols.contains(descNode.logVolId)) {
+            continue;
         }
-        if (boolCacheHit) {
-            RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
-            rn.meshBindings.push_back({boolMid, rmId});
-            result.scene.nodes[rnId] = std::move(rn);
-            for (const auto childId : semNode.children) {
-                q.push(childId);
-            }
-            return true;
+        const SemanticLogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
+        if (!scene->shapes.contains(descLv.shapeId)) {
+            continue;
         }
-        // Manifold failed or produced empty output — fall through to fallback.
-        switch (rule.fallback) {
-        case BooleanFallback::Fail:
-            result.diags.error(
-                codes::kErrTessBooleanFail,
-                std::format("boolean shape on node '{}' cannot be tessellated (fallback=fail)",
-                            semNode.name),
-                semNode.name);
-            done = true;
-            return false;
-        case BooleanFallback::BBox: {
-            result.diags.warn(
-                codes::kWarnTessBooleanBbox,
-                std::format("boolean shape on node '{}' replaced with bounding-box proxy",
-                            semNode.name),
-                semNode.name);
-            auto bboxOut = makeBBoxProxy(shape.data, *scene, tess, params);
-            result.diags.append(bboxOut.diags);
-            MeshAssetId mid = result.scene.nextMeshId();
+
+        NodeView descView = makeNodeView(descNode);
+        const std::string *matName = resolveMaterial(compiledRules, descView);
+        const std::string materialKey = matName != nullptr
+                                            ? "config:" + *matName
+                                            : std::format("source:{}", descLv.materialId.value);
+
+        const auto descTess =
+            resolveTessellation(compiledRules, config->tessellationDefaults, descView);
+        const int descSegs = descTess.maxSegmentsCircle;
+
+        mergeKey.descendants.push_back(
+            {descLv.shapeId, descLv.materialId, materialKey, mergeDesc.toMergeLocal, descSegs});
+        mergeDescendants.push_back({mergeDesc.nodeId, mergeDesc.toMergeLocal, descSegs});
+    }
+
+    if (!tryUsePrototypeMergeKey(*scene, semNode.logVolId, mergeKey)) {
+        sortMergeDescendants(mergeKey.descendants);
+    }
+
+    // Check the merge cache only after the placement-aware key is known.
+    auto mcIt = mergeCache.find(mergeKey);
+    if (mcIt != mergeCache.end()) {
+        rn.meshBindings = mcIt->second;
+        result.scene.nodes[rnId] = std::move(rn);
+        return true;
+    }
+
+    // Per-material accumulation buffers.
+    struct MatGroup {
+        std::vector<Vertex> verts;
+        std::vector<uint32_t> indices;
+    };
+    std::map<RenderMaterialId, MatGroup> groups;
+
+    for (const auto &mergeDesc : mergeDescendants) {
+        const auto descId = mergeDesc.nodeId;
+        const SemanticNode &descNode = scene->nodes.at(descId);
+        if (!scene->logVols.contains(descNode.logVolId)) {
+            continue;
+        }
+        const SemanticLogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
+        if (!scene->shapes.contains(descLv.shapeId)) {
+            continue;
+        }
+
+        // Tessellate (using cache) — use per-descendant segment count.
+        TessellationParams descParams;
+        descParams.maxSegmentsCircle = mergeDesc.maxSegmentsCircle;
+
+        const SemanticShape &descShape = scene->shapes.at(descLv.shapeId);
+        const bool descIsBoolean = isBooleanShape(descShape.data);
+        auto &descSegMap = meshCache[descLv.shapeId];
+        MeshAssetId descMid;
+        bool isBBoxProxy = false;
+        if (!descSegMap.contains(descParams.maxSegmentsCircle)) {
+            TessellationOutput tessOut;
+            if (descIsBoolean) {
+                tessOut = tessellateBooleanShape(descShape.data, *scene, tess, descParams);
+            } else {
+                tessOut = tess.tessellate(descShape.data, descParams);
+            }
+            result.diags.append(tessOut.diags);
+            if (descIsBoolean && !tessOut.succeeded) {
+                // Boolean tessellation genuinely failed (operands unbuildable
+                // or the boolean op errored) — apply fallback. An empty but
+                // *succeeded* result (e.g. a wedge cut that removed the whole
+                // descendant) is not a failure: it falls through to the
+                // empty-vertices skip below and contributes nothing.
+                switch (rule.fallback) {
+                case BooleanFallback::Fail:
+                    result.diags.error(
+                        codes::kErrTessBooleanFail,
+                        std::format("boolean shape on node '{}' cannot be tessellated "
+                                    "(fallback=fail)",
+                                    descNode.name),
+                        descNode.name);
+                    done = true;
+                    return false;
+                case BooleanFallback::BBox:
+                    tessOut = makeBBoxProxy(descShape.data, *scene, tess, descParams);
+                    result.diags.append(tessOut.diags);
+                    isBBoxProxy = true;
+                    break;
+                case BooleanFallback::Skip:
+                default:
+                    continue;
+                }
+            }
+            if (tessOut.vertices.empty()) {
+                continue;
+            }
             MeshAsset ma;
-            ma.id = mid;
-            ma.name = semNode.name + "_bbox";
-            ma.vertices = std::move(bboxOut.vertices);
-            ma.indices = std::move(bboxOut.indices);
+            ma.id = result.scene.nextMeshId();
+            ma.name = descLv.name;
+            ma.vertices = std::move(tessOut.vertices);
+            ma.indices = std::move(tessOut.indices);
             ma.provenance.sourceSystem = "tessellation_pass";
-            ma.provenance.sourceName = semNode.name;
-            result.scene.meshAssets[mid] = std::move(ma);
+            ma.provenance.sourceName = descLv.name;
+            descMid = ma.id;
+            result.scene.meshAssets[descMid] = std::move(ma);
+            descSegMap[descParams.maxSegmentsCircle] = descMid;
+        } else {
+            descMid = descSegMap.at(descParams.maxSegmentsCircle);
+        }
 
-            rn.meshBindings.push_back({mid, getBBoxProxyMaterial()});
-            break;
+        if (!result.scene.meshAssets.contains(descMid)) {
+            continue;
         }
-        case BooleanFallback::Skip:
-        default:
-            result.diags.warn(
-                codes::kWarnTessBooleanSkipped,
-                std::format("boolean shape on node '{}' skipped (fallback=skip)", semNode.name),
-                semNode.name);
-            break;
+        const MeshAsset &srcMesh = result.scene.meshAssets.at(descMid);
+        if (srcMesh.vertices.empty()) {
+            continue;
         }
+
+        // Resolve material — use red proxy for bbox fallbacks.
+        RenderMaterialId rmId = isBBoxProxy
+                                    ? getBBoxProxyMaterial()
+                                    : resolveRenderMaterial(descLv.materialId, descNode);
+
+        // Transform vertices into merge node's local frame
+        const glm::mat4 toLocal = glm::mat4(mergeDesc.toMergeLocal);
+        const glm::mat3 normalMat = glm::mat3(glm::transpose(glm::inverse(glm::mat3(toLocal))));
+
+        auto &grp = groups[rmId];
+        const auto idxBase = static_cast<uint32_t>(grp.verts.size());
+        for (const auto &v : srcMesh.vertices) {
+            Vertex tv;
+            tv.position = glm::vec3(toLocal * glm::vec4(v.position, 1.0f));
+            tv.normal = glm::normalize(normalMat * v.normal);
+            grp.verts.push_back(tv);
+        }
+        for (const auto idx : srcMesh.indices) {
+            grp.indices.push_back(idx + idxBase);
+        }
+    }
+
+    if (groups.empty() && !wedgeCutApplied) {
+        // With a wedge cut applied, an empty merge is expected: the cut can
+        // empty (and the prune can remove) every descendant of a stave whose
+        // envelope straddled the cut. Rendering nothing is correct, so only
+        // warn when no cut is in play — i.e. the genuine "selection removed
+        // them" config case this diagnostic was meant to catch.
+        result.diags.warn(
+            codes::kWarnTessMergeEmpty,
+            std::format("merge_descendants on '{}' produced no geometry — node has no "
+                        "tessellatable descendants (did selection remove them?)",
+                        semNode.name),
+            semNode.name);
+    }
+
+    // Create one MeshAsset per material group → one MeshBinding each.
+    for (auto &[rmId, grp] : groups) {
+        MeshAssetId mid = result.scene.nextMeshId();
+        MeshAsset ma;
+        ma.id = mid;
+        ma.name = semNode.name + "_merged";
+        ma.vertices = std::move(grp.verts);
+        ma.indices = std::move(grp.indices);
+        ma.provenance.sourceSystem = "tessellation_pass";
+        ma.provenance.sourceName = semNode.name;
+        result.scene.meshAssets[mid] = std::move(ma);
+        rn.meshBindings.push_back({mid, rmId});
+    }
+
+    mergeCache[std::move(mergeKey)] = rn.meshBindings;
+
+    // Don't enqueue children — they've been consumed by the merge.
+    result.scene.nodes[rnId] = std::move(rn);
+    return true;
+}
+
+bool TessellationJob::Impl::tessellateBooleanNode(
+    const SemanticNode &semNode, const SemanticLogicalVolume &lv, const SemanticShape &shape,
+    RenderNode &rn, RenderNodeId rnId, const ResolvedTessellation &rule,
+    const TessellationParams &params) {
+    // Check the mesh cache first — same shapeId + segments → same mesh.
+    // The sentinel id 0 (never allocated; ids start at 1) marks a boolean
+    // that succeeded but removed the solid entirely (e.g. a placement fully
+    // inside an angle-cut wedge): a valid empty result, cached so instances
+    // sharing the shape are not re-evaluated.
+    constexpr MeshAssetId kFullyRemoved{0};
+    auto &boolSegMap = meshCache[lv.shapeId];
+    MeshAssetId boolMid;
+    bool boolCacheHit = boolSegMap.contains(params.maxSegmentsCircle);
+    bool fullyRemoved = false;
+    if (boolCacheHit) {
+        boolMid = boolSegMap.at(params.maxSegmentsCircle);
+        fullyRemoved = (boolMid == kFullyRemoved);
+    } else {
+        auto boolOut = tessellateBooleanShape(shape.data, *scene, tess, params);
+        result.diags.append(boolOut.diags);
+        if (!boolOut.vertices.empty()) {
+            boolMid = result.scene.nextMeshId();
+            MeshAsset ma;
+            ma.id = boolMid;
+            ma.name = lv.name + "_boolean";
+            ma.vertices = std::move(boolOut.vertices);
+            ma.indices = std::move(boolOut.indices);
+            ma.provenance.sourceSystem = "tessellation_pass/manifold";
+            ma.provenance.sourceName = lv.name;
+            result.scene.meshAssets[boolMid] = std::move(ma);
+            boolSegMap[params.maxSegmentsCircle] = boolMid;
+            boolCacheHit = true;
+        } else if (boolOut.succeeded) {
+            // Empty but valid: the solid was fully cut away. Render nothing.
+            boolSegMap[params.maxSegmentsCircle] = kFullyRemoved;
+            fullyRemoved = true;
+        }
+    }
+    if (fullyRemoved) {
+        // No mesh binding — correct, not a failure, so no warning.
         result.scene.nodes[rnId] = std::move(rn);
         for (const auto childId : semNode.children) {
             q.push(childId);
         }
         return true;
     }
+    if (boolCacheHit) {
+        RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
+        rn.meshBindings.push_back({boolMid, rmId});
+        result.scene.nodes[rnId] = std::move(rn);
+        for (const auto childId : semNode.children) {
+            q.push(childId);
+        }
+        return true;
+    }
+    // Manifold failed or produced empty output — fall through to fallback.
+    switch (rule.fallback) {
+    case BooleanFallback::Fail:
+        result.diags.error(
+            codes::kErrTessBooleanFail,
+            std::format("boolean shape on node '{}' cannot be tessellated (fallback=fail)",
+                        semNode.name),
+            semNode.name);
+        done = true;
+        return false;
+    case BooleanFallback::BBox: {
+        result.diags.warn(
+            codes::kWarnTessBooleanBbox,
+            std::format("boolean shape on node '{}' replaced with bounding-box proxy",
+                        semNode.name),
+            semNode.name);
+        auto bboxOut = makeBBoxProxy(shape.data, *scene, tess, params);
+        result.diags.append(bboxOut.diags);
+        MeshAssetId mid = result.scene.nextMeshId();
+        MeshAsset ma;
+        ma.id = mid;
+        ma.name = semNode.name + "_bbox";
+        ma.vertices = std::move(bboxOut.vertices);
+        ma.indices = std::move(bboxOut.indices);
+        ma.provenance.sourceSystem = "tessellation_pass";
+        ma.provenance.sourceName = semNode.name;
+        result.scene.meshAssets[mid] = std::move(ma);
 
+        rn.meshBindings.push_back({mid, getBBoxProxyMaterial()});
+        break;
+    }
+    case BooleanFallback::Skip:
+    default:
+        result.diags.warn(
+            codes::kWarnTessBooleanSkipped,
+            std::format("boolean shape on node '{}' skipped (fallback=skip)", semNode.name),
+            semNode.name);
+        break;
+    }
+    result.scene.nodes[rnId] = std::move(rn);
+    for (const auto childId : semNode.children) {
+        q.push(childId);
+    }
+    return true;
+}
+
+bool TessellationJob::Impl::tessellatePrimitiveNode(
+    const SemanticNode &semNode, const SemanticLogicalVolume &lv, const SemanticShape &shape,
+    RenderNode &rn, RenderNodeId rnId, const TessellationParams &params) {
     // ── Tessellate primitive shape ─────────────────────────────────────────
     MeshAssetId mid;
     auto &segMap = meshCache[lv.shapeId];
