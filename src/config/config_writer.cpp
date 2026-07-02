@@ -46,10 +46,12 @@ toml::table predicateToTable(const PredicateExpr &expr) {
             },
             [](const IsLeafPredicate &) -> toml::table { return toml::table{{"type", "is_leaf"}}; },
             [](const BoolPredicate &p) -> toml::table {
-                if (p.value) {
-                    return toml::table{{"type", "name_glob"}, {"pattern", "*"}};
-                }
-                return toml::table{{"type", "and"}, {"operands", toml::array{}}};
+                // A constant predicate round-trips through the dedicated `bool`
+                // type. The older encodings — name_glob "*" for true, empty
+                // `and` for false — were lossy: an empty `and` reloads as
+                // vacuously true (makeAndPredicate({}) == true), silently
+                // inverting an always-false rule into "matches everything".
+                return toml::table{{"type", "bool"}, {"value", p.value}};
             },
             [](const std::shared_ptr<AndPredicate> &p) -> toml::table {
                 toml::array operands;

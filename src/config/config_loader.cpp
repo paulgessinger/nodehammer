@@ -214,6 +214,15 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
         return PredicateExpr{IsLeafPredicate{}};
     }
 
+    if (type == "bool") {
+        auto val = tbl["value"].value<bool>();
+        if (!val) {
+            diags.error(codes::kErrConfigParse, "bool predicate missing 'value'", context);
+            return std::nullopt;
+        }
+        return PredicateExpr{BoolPredicate{*val}};
+    }
+
     if (type == "and" || type == "or") {
         const auto *operandsArr = tbl["operands"].as_array();
         if (operandsArr == nullptr) {

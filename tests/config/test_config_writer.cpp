@@ -247,6 +247,40 @@ TEST_CASE("ConfigWriter: not predicate round-trip", "[config][writer]") {
         std::get<std::shared_ptr<NotPredicate>>(p.data)->operand.data));
 }
 
+// ── Constant (bool) predicates ──────────────────────────────────────────────
+
+TEST_CASE("ConfigWriter: always-false predicate round-trip", "[config][writer]") {
+    // Regression: configToToml used to encode BoolPredicate{false} as an empty
+    // `and` table, which the loader reloads as vacuously true. A flatten
+    // round-trip therefore inverted `keep_if = "false"` into "matches
+    // everything". Pin the constant on both sides.
+    NHConfig cfg;
+    SelectionRule rule;
+    rule.action = SelectionAction::KeepIf;
+    rule.predicate = PredicateExpr{BoolPredicate{false}};
+    cfg.selection.push_back(rule);
+
+    auto rt = roundTrip(cfg);
+    REQUIRE(rt.selection.size() == 1);
+    const auto &p = rt.selection[0].predicate;
+    REQUIRE(std::holds_alternative<BoolPredicate>(p.data));
+    REQUIRE(std::get<BoolPredicate>(p.data).value == false);
+}
+
+TEST_CASE("ConfigWriter: always-true predicate round-trip", "[config][writer]") {
+    NHConfig cfg;
+    SelectionRule rule;
+    rule.action = SelectionAction::KeepIf;
+    rule.predicate = PredicateExpr{BoolPredicate{true}};
+    cfg.selection.push_back(rule);
+
+    auto rt = roundTrip(cfg);
+    REQUIRE(rt.selection.size() == 1);
+    const auto &p = rt.selection[0].predicate;
+    REQUIRE(std::holds_alternative<BoolPredicate>(p.data));
+    REQUIRE(std::get<BoolPredicate>(p.data).value == true);
+}
+
 // ── Export format config ────────────────────────────────────────────────────
 
 TEST_CASE("ConfigWriter: gltf export config round-trip", "[config][writer]") {
