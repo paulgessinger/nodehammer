@@ -196,7 +196,9 @@ TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pip
     // returns !ok and the pipeline lands on the failure branch.
     SemanticScene scene = SyntheticSceneBuilder::buildSingleBox();
     NHConfig cfg;
-    cfg.rules.push_back(Rule{.material = "does_not_exist"});
+    Rule rule;
+    rule.material = "does_not_exist";
+    cfg.rules.push_back(std::move(rule));
 
     BuildPipeline pipe;
     pipe.start(std::make_shared<const NHConfig>(std::move(cfg)),

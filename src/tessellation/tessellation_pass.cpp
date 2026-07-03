@@ -695,8 +695,8 @@ bool TessellationJob::Impl::stepOneNode() {
     return tessellatePrimitiveNode(semNode, lv, shape, rn, rnId, params);
 }
 
-bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNode,
-                                                       RenderNode &rn, RenderNodeId rnId,
+bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNode, RenderNode &rn,
+                                                       RenderNodeId rnId,
                                                        const ResolvedTessellation &rule) {
     MergeCacheKey mergeKey;
     mergeKey.fallback = rule.fallback;
@@ -850,9 +850,8 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         }
 
         // Resolve material — use red proxy for bbox fallbacks.
-        RenderMaterialId rmId = isBBoxProxy
-                                    ? getBBoxProxyMaterial()
-                                    : resolveRenderMaterial(descLv.materialId, descNode);
+        RenderMaterialId rmId = isBBoxProxy ? getBBoxProxyMaterial()
+                                            : resolveRenderMaterial(descLv.materialId, descNode);
 
         // Transform vertices into merge node's local frame
         const glm::mat4 toLocal = glm::mat4(mergeDesc.toMergeLocal);
@@ -906,10 +905,12 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     return true;
 }
 
-bool TessellationJob::Impl::tessellateBooleanNode(
-    const SemanticNode &semNode, const SemanticLogicalVolume &lv, const SemanticShape &shape,
-    RenderNode &rn, RenderNodeId rnId, const ResolvedTessellation &rule,
-    const TessellationParams &params) {
+bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
+                                                  const SemanticLogicalVolume &lv,
+                                                  const SemanticShape &shape, RenderNode &rn,
+                                                  RenderNodeId rnId,
+                                                  const ResolvedTessellation &rule,
+                                                  const TessellationParams &params) {
     // Check the mesh cache first — same shapeId + segments → same mesh.
     // The sentinel id 0 (never allocated; ids start at 1) marks a boolean
     // that succeeded but removed the solid entirely (e.g. a placement fully
@@ -972,11 +973,10 @@ bool TessellationJob::Impl::tessellateBooleanNode(
         done = true;
         return false;
     case BooleanFallback::BBox: {
-        result.diags.warn(
-            codes::kWarnTessBooleanBbox,
-            std::format("boolean shape on node '{}' replaced with bounding-box proxy",
-                        semNode.name),
-            semNode.name);
+        result.diags.warn(codes::kWarnTessBooleanBbox,
+                          std::format("boolean shape on node '{}' replaced with bounding-box proxy",
+                                      semNode.name),
+                          semNode.name);
         auto bboxOut = makeBBoxProxy(shape.data, *scene, tess, params);
         result.diags.append(bboxOut.diags);
         MeshAssetId mid = result.scene.nextMeshId();
@@ -1007,9 +1007,11 @@ bool TessellationJob::Impl::tessellateBooleanNode(
     return true;
 }
 
-bool TessellationJob::Impl::tessellatePrimitiveNode(
-    const SemanticNode &semNode, const SemanticLogicalVolume &lv, const SemanticShape &shape,
-    RenderNode &rn, RenderNodeId rnId, const TessellationParams &params) {
+bool TessellationJob::Impl::tessellatePrimitiveNode(const SemanticNode &semNode,
+                                                    const SemanticLogicalVolume &lv,
+                                                    const SemanticShape &shape, RenderNode &rn,
+                                                    RenderNodeId rnId,
+                                                    const TessellationParams &params) {
     // ── Tessellate primitive shape ─────────────────────────────────────────
     MeshAssetId mid;
     auto &segMap = meshCache[lv.shapeId];

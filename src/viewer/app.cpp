@@ -509,7 +509,7 @@ void App::Impl::onInit() {
     exporter_.configure(PngExporter::Deps{
         .notifications = &notifications,
         .make_filename = [] { return makeScreenshotFilename(); },
-        .hdr_supported = [this] { return hdrSupported(); },
+        .hdr_supported = [] { return hdrSupported(); },
         .save_image =
             [this](const std::string &filename, std::span<const std::byte> bytes) {
                 return platform_->saveExportedImage(filename, bytes);
