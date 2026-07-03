@@ -1,17 +1,28 @@
-# nodehammer
+<p align="center">
+  <img src="docs/assets/logo.png" width="520" alt="nodehammer">
+</p>
 
-**A HEP geometry conversion pipeline — and a real-time, physically-based viewer to see what you built.**
+<p align="center">
+  <a href="https://github.com/paulgessinger/nodehammer/actions/workflows/ci.yml"><img src="https://github.com/paulgessinger/nodehammer/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/C%2B%2B-23-00599C.svg" alt="C++23">
+  <img src="https://img.shields.io/badge/wasm-WebGPU%20%2F%20WebGL2-654FF0.svg" alt="WebAssembly">
+</p>
 
-`nodehammer` takes detector geometry from High Energy Physics toolchains (ROOT/TGeo, DD4hep, GDML/Geant4, GeoModel) and turns it into clean, semantically-tagged, renderable scenes — then lets you fly through them at 60fps with GPU ambient occlusion, HDR tonemapping, and a procedural sky, on desktop *and* in the browser.
+<p align="center">
+  <strong>Turn High-Energy Physics detector geometry into a scene you can actually fly through.</strong>
+</p>
 
 ---
 
-## Why
-
-Detector geometries are huge, deeply nested, and encoded in formats built for simulation — not for looking at. nodehammer bridges that gap:
+Detector geometries (ROOT/TGeo, DD4hep, GDML, GeoModel, …) are huge, deeply
+nested, and built for simulation — not for looking at. nodehammer converts
+them into a clean, semantically-tagged scene graph and renders it in
+real time with a physically-based pipeline, natively or straight in the
+browser.
 
 ```
-TGeo / DD4hep / GDML / GeoModel
+   TGeo / DD4hep ── (GDML/Geant4, GeoModel: planned)
               │
               ▼
     Semantic scene graph (.nhb / .nhb.zst)
@@ -23,31 +34,78 @@ TGeo / DD4hep / GDML / GeoModel
                        │
                        ▼
               Interactive viewer
-   native (Metal / D3D11 / GLCORE) · web (WebGPU / GLES3, wasm)
+        native (Metal / GLCORE / D3D11) · web (WebGPU / GLES3, wasm)
 ```
 
-Every stage is driven by declarative TOML config — `keep_if` / `drop_if` selection rules with a small predicate-expression language (`tag.sensitive == "true" && any(path ~= "**/Pixels/**")`), material remapping, and boolean cuts — so you can go from "the whole detector" to "just the Pixel barrel" without touching code.
+Every stage is driven by declarative TOML config — `keep_if`/`drop_if`
+selection rules with a small predicate-expression language
+(`tag.sensitive == "true" && any(path ~= "**/Pixels/**")`), material
+remapping, and analytical boolean cuts — so you can go from "the whole
+detector" to "just the Pixel barrel" without touching code.
 
-## Highlights
+## Status
 
-- **Multiple importers** — TGeo/ROOT, DD4hep, GDML/Geant4, GeoModel, each independently switchable at build time.
-- **A real intermediate format** — `.nhb`/`.nhb.zst`: a compact, zstd-compressible FlatBuffers container for the full semantic scene graph, with a documented [on-disk spec](docs/nhb-format.txt).
-- **Analytical geometry surgery** — semantic-level azimuthal wedge cuts and boolean operations (via [manifold](https://github.com/elalish/manifold)) that stay correct on non-manifold swept primitives.
-- **A viewer that actually looks good**:
-  - Full offscreen HDR pipeline — ACES / Reinhard / AgX tonemapping, exposure control
-  - GTAO screen-space ambient occlusion
-  - Nishita single-scattering atmospheric sky (real Rayleigh + Mie, a real sun disc) baked straight into the IBL pipeline
+nodehammer is under active, pre-1.0 development. Here's what's real today
+versus what's on the roadmap.
+
+### ✅ Implemented
+
+- **Importers**: ROOT/TGeo and DD4hep, each independently switchable at
+  build time (`NODEHAMMER_WITH_TGEO`, `NODEHAMMER_WITH_DD4HEP`).
+- **Exporters**: glTF/GLB and OBJ (render IR), plus the native `.nhb`/`.nhb.zst`
+  FlatBuffers semantic-scene container — a documented, zstd-compressible
+  [on-disk format](docs/nhb-format.txt).
+- **Analytical geometry surgery**: semantic-level azimuthal wedge cuts and
+  boolean operations via [manifold](https://github.com/elalish/manifold),
+  correct on non-manifold swept primitives, cooperative with UI progress.
+- **CLI**: `convert`, `inspect`, `validate-config`, `config-flatten`,
+  `dump-semantic`, `dump-render`, `viewer`.
+- **Viewer rendering pipeline**, live today:
+  - Full offscreen HDR pipeline with ACES / Reinhard / AgX tonemapping and
+    exposure control
+  - GTAO screen-space ambient occlusion, with selectable quality presets
+  - Nishita single-scattering atmospheric sky (real Rayleigh + Mie, a real
+    sun disc) baked into the IBL pipeline, plus a visible background dome
   - FXAA 3.11 console-quality antialiasing
-  - Dynamic, GPU-load-driven render scale with a power-saving idle profile — renders on demand, caps idle frame rate
-  - High-resolution, supersampled PNG screenshot export with backend-specific GPU readback (Metal, GL/GLES3, WebGPU) — `nodehammer viewer --screenshot out.png --screenshot-width ... --screenshot-supersample ...`
+  - Dynamic, GPU-load-adaptive render scale with a power-saving idle
+    profile — renders on demand and caps the idle frame rate
   - Live ImPlot performance graphs in the debug panel
-- **Runs everywhere** — native builds on Metal (Apple), D3D11 (Windows), or GLCORE (Linux); a wasm build targets both GLES3 and WebGPU from one configure, with the browser shell auto-picking the right bundle via `navigator.gpu`. A headless compute-worker wasm module (`nodehammer-compute`) runs tessellation and boolean cuts off the main thread.
-- **Modern C++** — C++23 throughout (`<print>`, the works); requires GCC ≥ 14, Clang ≥ 18/libc++, or MSVC ≥ 19.37.
+  - High-resolution, supersampled PNG screenshot export
+    (`nodehammer viewer --screenshot out.png ...`) — **verified on Metal**;
+    the WebGL2/GLES3 and WebGPU readback paths compile and link but are not
+    yet verified in-browser
+- **Builds on macOS, Linux, and Windows** natively (Metal, GLCORE, and D3D11
+  respectively), plus a wasm build targeting both GLES3 and WebGPU from one
+  configure, with the browser shell auto-picking the right bundle via
+  `navigator.gpu`. All five configurations build and pass the (headless)
+  test suite in CI. A headless compute-worker wasm module
+  (`nodehammer-compute`) runs tessellation and boolean cuts off the main
+  thread. macOS is the primary hand-verified target for the interactive
+  viewer itself — see below for what's untested elsewhere.
+- **Modern C++**: C++23 throughout (`<print>`, the works); requires
+  GCC ≥ 14, Clang ≥ 18/libc++, or MSVC ≥ 19.37.
+
+### 🚧 Planned / in progress
+
+- **GDML/Geant4 importer** — CMake option and library wiring exist
+  (`NODEHAMMER_WITH_GEANT4`); the actual importer isn't written yet.
+- **GeoModel importer** — CMake option declared only; no implementation.
+- **Windows viewer verification** — the D3D11 backend builds and passes CI's
+  headless tests, but the maintainer has no Windows machine to manually
+  verify interactive rendering; the PNG-export readback for D3D11 is a
+  build-time `#error` stub for now.
+- **Bloom** and **IBL-quality levels** — UI controls exist and are wired
+  through `RenderQualitySettings`, but both are no-ops for now.
+- **Project save/export system** (bag / filesystem / archive / URL modes,
+  in-viewer editor windows) — partially landed; see
+  [docs/viewer-project-strategy.md](docs/viewer-project-strategy.md).
+- **Single-instance enforcement + a real macOS `.app` bundle** — designed,
+  not implemented; see [docs/viewer-single-instance.md](docs/viewer-single-instance.md).
 
 ## CLI
 
 ```
-nodehammer convert         # geometry → glTF / render IR
+nodehammer convert         # geometry → glTF / OBJ / render IR
 nodehammer inspect         # explore a semantic scene
 nodehammer validate-config # lint a TOML config before running it
 nodehammer config-flatten  # resolve config includes/overrides
@@ -68,18 +126,22 @@ just build
 just test
 ```
 
-Or drive `conan`/`cmake` directly — see the [Justfile](Justfile) for the exact flags, including the Emscripten/wasm targets (`just wasm-deps`, requires [emsdk](https://github.com/emscripten-core/emsdk)) and the full spack-based dev configuration (`configure-full`) that enables every importer at once.
+Or drive `conan`/`cmake` directly — see the [Justfile](Justfile) for the
+exact flags, including the Emscripten/wasm targets (`just wasm-deps`,
+requires [emsdk](https://github.com/emscripten-core/emsdk)) and the
+spack-based dev configuration (`configure-full`) that turns on the TGeo and
+DD4hep importers together.
 
 Key CMake options:
 
-| Option | Purpose |
-|---|---|
-| `NODEHAMMER_WITH_VIEWER` | Build the sokol/Dear ImGui interactive viewer |
-| `NODEHAMMER_WITH_TGEO` | ROOT/TGeo importer |
-| `NODEHAMMER_WITH_DD4HEP` | DD4hep importer |
-| `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer |
-| `NODEHAMMER_WITH_GEOMODEL` | GeoModel importer |
-| `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary |
+| Option | Purpose | Status |
+|---|---|---|
+| `NODEHAMMER_WITH_VIEWER` | Build the sokol/Dear ImGui interactive viewer | ✅ |
+| `NODEHAMMER_WITH_TGEO` | ROOT/TGeo importer | ✅ |
+| `NODEHAMMER_WITH_DD4HEP` | DD4hep importer | ✅ |
+| `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | 🚧 links Geant4 only, no importer yet |
+| `NODEHAMMER_WITH_GEOMODEL` | GeoModel importer | 🚧 declared only |
+| `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary | ✅ |
 
 ## Try it
 
@@ -107,4 +169,5 @@ web/           browser viewer entry point
 
 ## License
 
-MIT © Paul Gessinger — see [LICENSE](LICENSE). Third-party license texts for vendored/bundled assets live under [LICENSES/](LICENSES).
+MIT © Paul Gessinger — see [LICENSE](LICENSE). Third-party license texts
+for vendored/bundled assets live under [LICENSES/](LICENSES).
