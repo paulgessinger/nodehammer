@@ -12,9 +12,9 @@ enum class ReadbackStatus { Idle, Pending, Ready, Failed };
 
 /// Backend-specific GPU→CPU readback of a 2D color image, used by the PNG
 /// export path. The public interface is uniform; the implementation is selected
-/// at build time (one TU per graphics backend — Metal / WebGPU / WebGL2). The
-/// remaining native backends (D3D11 / Vulkan / GLCORE) are intentionally a
-/// build-time #error until someone can implement and test them.
+/// at build time (one TU per graphics backend — Metal / WebGPU / GL (GLES3 +
+/// desktop GLCORE) / D3D11). Any backend not covered by those TUs (e.g. Vulkan)
+/// is a build-time #error until someone can implement and test it.
 ///
 /// Usage, driven across frames by the exporter:
 ///   begin(img, w, h, fmt);             // issue the copy/blit/map

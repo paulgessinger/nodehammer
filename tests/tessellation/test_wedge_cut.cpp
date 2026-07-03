@@ -228,7 +228,7 @@ TEST_CASE("wedge cut: degenerate sectors are a no-op", "[tessellation][wedgecut]
     CHECK(full.scene.shapes.size() == shapesBefore);
 }
 
-TEST_CASE("wedge cut: wrap-around sector across 0°", "[tessellation][wedgecut]") {
+TEST_CASE("wedge cut: wrap-around sector across 0 degrees", "[tessellation][wedgecut]") {
     auto ts = makeScene();
     // Removed 10° straddling the +x axis (355°→5°), narrower than D's ~14°
     // angular span so D crosses both boundaries → straddle; A and B (third
