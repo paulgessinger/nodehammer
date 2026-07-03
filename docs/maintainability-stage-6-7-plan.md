@@ -12,9 +12,16 @@ that shape them, the order to land them in, and how much is machine-verifiable.
 
 ## Status
 
-Design landed; implementation not started. The two detail docs above are
-committed; the code changes they describe are executed against
-`maintainability-1-6`, each numbered item a standalone PR.
+Implemented. All items landed: Stage 7 (`BuildPipeline` core + the four
+call-site rewires) and the rest of Stage 6 (`DynamicRenderScale`, `IblBaker`,
+`PngExporter`, `BuildController`). The CI-verifiable pieces are covered by unit
+tests — `tests/tessellation/test_build_pipeline.cpp` (7a/7e, six cases) and
+`tests/viewer/test_dynamic_render_scale.cpp` (6f) — and the full suite passes.
+The viewer-coupled pieces (7b native, 6g/6h/6i) were compiled *and* run-verified
+in a native D3D11 viewer build: loading the ODD through the reworked
+`SceneBuildJob`/`BuildPipeline`, applying an angle cut, tessellating (1299 nodes
+/ 1063 meshes), rendering, and driving the export state machine end-to-end. The
+web rewires (7c/7d) are Emscripten-only and reviewed against their native twins.
 
 ---
 

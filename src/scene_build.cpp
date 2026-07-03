@@ -5,9 +5,11 @@
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/semantic/importer.hpp>
 #include <nodehammer/selection/selector.hpp>
+#include <nodehammer/tessellation/build_pipeline.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 #include <nodehammer/tessellation/wedge_cut.hpp>
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -86,21 +88,19 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
         return result;
     }
 
-    auto prep =
-        prepareSceneForTessellationFromInputs(std::move(cfg), std::move(importResult.scene));
-    result.diags.append(prep.diags);
-    if (!prep.ok) {
-        return result;
+    // Drive the shared BuildPipeline to completion — the same prep → (wedge) →
+    // tessellate core the viewer backends use, so this synchronous shim is no
+    // longer a hand-copied 4th sequence. `buildSceneFromPaths` applies no wedge
+    // (nullopt), and prep now runs with a deferred wedge like every other site
+    // (invariant #1). A single unbounded slice finishes in one drive loop.
+    BuildPipeline pipe;
+    pipe.start(std::make_shared<const NHConfig>(std::move(cfg)),
+               std::make_shared<const SemanticScene>(std::move(importResult.scene)), std::nullopt);
+    while (!pipe.advance(std::numeric_limits<std::uint64_t>::max())) {
     }
-
-    TessellationPass pass{prep.config};
-    auto tessResult = pass.lower(prep.scene);
-    result.diags.append(tessResult.diags);
-    if (tessResult.diags.hasErrors()) {
-        return result;
-    }
-
-    result.scene = std::make_shared<RenderScene>(std::move(tessResult.scene));
+    SceneBuildResult built = pipe.take();
+    result.diags.append(built.diags);
+    result.scene = std::move(built.scene); // null when prep/tessellation failed
     return result;
 }
 

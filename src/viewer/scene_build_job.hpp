@@ -1,6 +1,7 @@
 #pragma once
 
 #include <nodehammer/scene_build.hpp>
+#include <nodehammer/tessellation/build_pipeline.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -75,7 +76,12 @@ class SceneBuildJob {
     /// dedup stages; `Cutting` covers the cooperative azimuthal wedge cut
     /// (only when one was requested); `Tessellating` covers the cooperative
     /// iterator; `Finalizing` is the brief packaging step.
-    enum class Phase : uint8_t { Idle, Preparing, Cutting, Tessellating, Finalizing, Done };
+    // The phase enum is owned by the core BuildPipeline — the single source of
+    // truth shared across every backend (and asserted against the web-worker's
+    // numeric wire protocol), so a future reorder can't silently drift the UI
+    // labels out of sync with the pipeline. All existing `SceneBuildJob::Phase::
+    // Cutting`-style references keep compiling through this alias.
+    using Phase = ::nodehammer::BuildPipeline::Phase;
     [[nodiscard]] Phase phase() const;
 
   private:

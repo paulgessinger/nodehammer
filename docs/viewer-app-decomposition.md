@@ -11,14 +11,17 @@ the *bounded* slice landed in the 2026-07 maintainability series (commit
 
 ## Status
 
-Not started. Line numbers below are against `maintainability-1-6`
-(`src/viewer/app.cpp`, 2440 lines).
-
-**Why this is a design doc rather than landed code:** the native viewer cannot
-be linked or run in the CI sandbox (GTK/DBus + GL-loader gaps), so three of the
-four controllers are verifiable only in a real viewer environment. The one
-exception — `DynamicRenderScale` — is deliberately designed to be headless
-unit-testable and can land first with tests.
+Implemented. All four controllers landed —
+[`DynamicRenderScale`](../src/viewer/dynamic_render_scale.cpp),
+[`IblBaker`](../src/viewer/ibl_baker.cpp),
+[`PngExporter`](../src/viewer/png_exporter.cpp), and
+[`BuildController`](../src/viewer/build_controller.cpp) — each an owned member
+of `App::Impl`, and `render()`/`onFrame()` shrank to thin drivers (`app.cpp`
+dropped ~1000 lines). `DynamicRenderScale` is headless and covered by
+`tests/viewer/test_dynamic_render_scale.cpp`; all four were compiled and
+run-verified in a native D3D11 viewer build (load ODD → build/tessellate → angle
+cut → render → export state machine, end to end). Line numbers below are against
+the pre-refactor `maintainability-1-6` `src/viewer/app.cpp` (2440 lines).
 
 ---
 

@@ -49,6 +49,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
 
     add_library(${name} STATIC
         ${_dir}/app.cpp
+        ${_dir}/build_controller.cpp
         ${_dir}/scene_renderer.cpp
         ${_dir}/scene_render_target.cpp
         ${_dir}/ao_render_target.cpp
@@ -56,6 +57,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
         ${_dir}/ao_denoise_pass.cpp
         ${_dir}/composite_pass.cpp
         ${_dir}/png_export.cpp
+        ${_dir}/png_exporter.cpp
         ${_dir}/stb_image_write_impl.cpp
         ${_readback}
         ${_dir}/imgui_backend.cpp
@@ -68,6 +70,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
         ${_dir}/ui/view_panel.cpp
         ${_dir}/ui/viewer_ui.cpp
         ${_dir}/ibl.cpp
+        ${_dir}/ibl_baker.cpp
         ${_dir}/scene_build_job_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
         $<$<BOOL:${EMSCRIPTEN}>:${_dir}/scene_build_job_web_worker.cpp>

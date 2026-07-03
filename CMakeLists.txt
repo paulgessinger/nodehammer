@@ -128,6 +128,7 @@ add_library(nodehammer_lib STATIC
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
     src/tessellation/wedge_cut.cpp
+    src/tessellation/build_pipeline.cpp
     src/ir/gltf/render/exporter.cpp
     src/ir/obj/render/exporter.cpp
     src/ir/render/exporter_registry.cpp
@@ -138,6 +139,10 @@ add_library(nodehammer_lib STATIC
     src/scene_build.cpp
     src/viewer/app_state.cpp
     src/viewer/camera.cpp
+    # Headless, GPU-free viewer controller: the adaptive render-scale state
+    # machine. Lives in nodehammer_lib (no sokol deps, like camera.cpp) so the
+    # unit tests can link it without the viewer.
+    src/viewer/dynamic_render_scale.cpp
     # ProjectFs-based build orchestration. The bag (in-memory key→bytes
     # store) and BuildSession (resolve→parse→import driver) live under
     # src/viewer/ for organisational reasons but have no sokol/GUI deps,

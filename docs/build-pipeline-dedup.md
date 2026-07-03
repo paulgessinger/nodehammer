@@ -9,9 +9,17 @@ commit-by-commit implementation order, not an implementation record.
 
 ## Status
 
-Not started. The four call sites described below are the current state
-(`maintainability-1-6`). This is "step 7" of the 2026-07 maintainability
-review — deferred from that series so it could be designed deliberately.
+Implemented. The `prep → wedge → tessellate` sequence now lives once in the core
+`BuildPipeline` (`include/nodehammer/tessellation/build_pipeline.hpp`,
+`src/tessellation/build_pipeline.cpp`); the four former copies are thin adapters
+over it — native (`scene_build_job_native.cpp`), web-cooperative
+(`scene_build_job_web.cpp`, ~130 → ~20 lines), web-worker
+(`compute_worker_main.cpp`), and the synchronous `buildSceneFromPaths`. The
+`SceneBuildJob::Phase` enum is now an alias of `BuildPipeline::Phase`, and the
+worker's numeric wire codes are pinned to it with `static_assert`s. Covered by
+`tests/tessellation/test_build_pipeline.cpp` (the six cases below) and
+run-verified on a native viewer build against the ODD. This was "step 7" of the
+2026-07 maintainability review.
 
 ---
 

@@ -3,10 +3,13 @@
 #include "ao_denoise_pass.hpp"
 #include "ao_pass.hpp"
 #include "ao_render_target.hpp"
+#include "build_controller.hpp"
 #include "composite_pass.hpp"
 #include "ibl.hpp"
+#include "ibl_baker.hpp"
 #include "imgui_backend.hpp"
 #include "png_export_readback.hpp"
+#include "png_exporter.hpp"
 #include "scene_build_job.hpp"
 #include "scene_render_target.hpp"
 #include "scene_renderer.hpp"
@@ -25,6 +28,7 @@
 #include <nodehammer/viewer/app_state.hpp>
 #include <nodehammer/viewer/build_session.hpp>
 #include <nodehammer/viewer/camera.hpp>
+#include <nodehammer/viewer/dynamic_render_scale.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <imgui.h>
@@ -133,7 +137,6 @@ std::string makeScreenshotFilename() {
 constexpr const char *kViewerConfigStateKey = "viewer-state.toml";
 constexpr const char *kImGuiStateKey = "imgui.ini";
 constexpr double kPersistenceSaveIntervalSeconds = 1.0;
-constexpr std::chrono::milliseconds kIblRebakeDebounce{300};
 
 struct App::Impl {
     Config cfg;
@@ -192,110 +195,42 @@ struct App::Impl {
     // High-res export: render the scene at the export resolution with every
     // quality knob maxed, composite into a dedicated LDR target, read it back,
     // box-downscale to the requested output size, then write (native) or
-    // download (web) a PNG. Driven as a small state machine across frames from
-    // onFrame because the readback is async on some backends — and even on Metal
-    // we wait for the capture frame's GPU work to drain. The live scene/AO
-    // targets are reused (resized to the export resolution); only the composite
-    // output target `export_out_rt` is export-specific.
-    enum class ExportPhase {
-        Idle,
-        Rendering, // rendering export-res frames so the AO temporal denoise converges
-        WaitGpu,   // capture composite issued; waiting for its GPU work to finish
-        Readback   // reading back, then downscale + encode + deliver
-    };
-    ExportPhase export_phase{ExportPhase::Idle};
-    PngExportSettings export_settings;    // edited by the UI; snapshot taken at request time
-    RenderQualitySettings export_quality; // maxed snapshot used while exporting
-    SceneRenderTarget export_out_rt;      // composite output (LDR, swapchain format)
-    ImageReadback export_readback;
-    uint32_t export_internal_w{0};
-    uint32_t export_internal_h{0};
-    int export_converge_count{0};
-    int export_wait_count{0};
-    bool export_render_active{false}; // render() targets the export resolution this frame
-    bool export_capture{false};       // render() also composites into export_out_rt this frame
-    bool export_readback_started{false};
-    ui::Notifications::ProgressHandle export_progress{0};
-    std::string export_filename;
-    // When set, the encoded PNG is written straight to this path instead of
-    // going through the platform delivery (cwd file / browser download). Used by
-    // the headless --screenshot CLI mode. `export_quit_when_done` makes the app
-    // quit once the export resolves (success or failure).
-    std::string export_explicit_path;
-    bool export_quit_when_done{false};
+    // download (web) a PNG. The whole Idle→Rendering→WaitGpu→Readback machine
+    // lives in PngExporter now; render() consults its flags/target each frame,
+    // and onFrame drives it via preRender()/postRender(). `export_settings` is
+    // the live, UI-edited output size/supersample (the exporter snapshots +
+    // clamps it at request time).
+    PngExportSettings export_settings;
+    PngExporter exporter_;
     // Pending one-shot startup screenshot (set by App::requestScreenshot before
     // run()). Triggered from onFrame once the scene is loaded and settled.
     bool startup_screenshot_pending{false};
     std::string startup_screenshot_path;
     PngExportSettings startup_screenshot_settings;
 
-    // Procedural IBL bake. Runs on the GPU in a single frame the first
-    // time `onFrame` ticks; until then `scene_renderer` samples from 1×1
-    // dummy textures created by `IblResources::createDummy()`. The user
-    // can edit `ibl_settings` and click "Rebake IBL" — the action sets
-    // `ibl_rebake_pending` and onFrame consumes it on the next tick (a
-    // bake pass cannot be issued from inside the swapchain pass that
-    // hosts the UI draw).
-    bool ibl_installed{false};
-    bool ibl_rebake_pending{false};
+    // Procedural IBL bake. Runs on the GPU in a single frame the first time
+    // `onFrame` ticks; until then `scene_renderer` samples from 1×1 dummy
+    // textures created by `IblResources::createDummy()`. `ibl_settings` is the
+    // live, UI-edited tunable (also read by render() for the sun direction); the
+    // debounce/dirty/installed state and the bake loop live in `ibl_baker_`,
+    // which onFrame drives once per tick. The "Rebake IBL" action and any slider
+    // edit flow through the baker (a bake pass cannot be issued from inside the
+    // swapchain pass that hosts the UI draw, so it runs at the top of onFrame).
     IblSettings ibl_settings{};
-    // Debounced auto-rebake: while the user drags an IBL slider, every frame
-    // observes a different value and pushes `ibl_settle_at` forward; the
-    // bake is only triggered after the settings have been stable for
-    // `kIblRebakeDebounce`.
-    IblSettings ibl_last_seen_settings{};
-    IblSettings ibl_last_baked_settings{};
-    std::chrono::steady_clock::time_point ibl_settle_at{};
+    IblBaker ibl_baker_;
 
-    // Off-loop scene tessellation. Native runs the build on a worker
-    // thread so the UI stays smooth. Web defers the synchronous build by
-    // one frame so the previous frame paints a "Tessellating…" message
-    // before the page freezes.
-    SceneBuildJob build_job;
-    bool build_in_progress{false};
-    std::chrono::steady_clock::time_point build_start_time{};
-
-    // Pristine (pre-cut) build inputs, cached on each fresh BuildSession build
-    // so toggling or re-aiming the Boolean angle cut can re-prep + re-tessellate
-    // from uncut geometry without re-walking the project. The cut is applied in
-    // the prep stage, which mutates the scene, so we must always re-derive from
-    // this clean copy rather than from the already-cut result.
-    std::shared_ptr<const ::nodehammer::SemanticScene> pristine_scene;
-    std::shared_ptr<const ::nodehammer::NHConfig> pristine_config;
-    std::string pristine_config_label;
-    std::string pristine_geometry_label;
-
-    // Boolean-cut build state. The base build runs once per project load; the
-    // cut build runs on demand (toggle/commit) from the pristine scene.
-    bool cut_uploaded{false};
-    bool building_cut{false};        ///< the in-flight build is a cut (vs base) build
-    bool pending_cut_rebuild{false}; ///< a cut (re)build was requested
-    bool last_shown_cut{false};      ///< whether last frame drew the cut scene (AO flip reset)
-    float cut_built_start_deg{0.f};  ///< angle the resident cut scene was built at
-    float cut_built_end_deg{0.f};
-    float in_flight_cut_start_deg{0.f}; ///< angle the in-flight cut build is using
-    float in_flight_cut_end_deg{0.f};
-
-    // Live progress-toast handle for the build. 0 means "no toast in flight";
-    // populated when we kick off the build and cleared on finish/cancel.
-    ui::Notifications::ProgressHandle build_progress_handle{0};
-
-    // BuildSession drives the include-graph walk against the project's
-    // resolve() interface and produces parsed config + imported geometry
-    // for the build job. App owns it so the frame loop can poll once
-    // per frame.
-    BuildSession build_session;
-
-    // Root keys the App last fed to the session. Set by external
-    // entry points via App::setRootKeys (URL JS shell, CLI) and by
-    // double-click in the tree panel. The user can override the
-    // initial selection at any time by clicking a different leaf.
-    std::string root_config_key;
-    std::string root_geometry_key;
-
-    // Stashed message after a build failure so the UI can keep showing
-    // it across frames.
-    std::string build_error;
+    // CPU-side build orchestration: the BuildSession (walk → parse → import),
+    // the off-loop SceneBuildJob (validate → select → dedup → wedge →
+    // tessellate), the pristine-inputs cache, the Boolean-cut bookkeeping, the
+    // build-progress toast, the root keys, and the persistent error string all
+    // live in the controller now. It emits CPU RenderScenes via callbacks the
+    // App binds to its GPU/scene state (see onInit). render() reads its
+    // cut-built angles; onFrame drives it once per frame. `cut_uploaded` and
+    // `last_shown_cut` stay here because they track the App's GPU upload of the
+    // cut scene, which the controller doesn't own.
+    BuildController build_controller_;
+    bool cut_uploaded{false};   ///< whether cut_scene is GPU-resident
+    bool last_shown_cut{false}; ///< whether last frame drew the cut scene (AO flip reset)
 
     std::vector<RetainedModal> active_modals;
     std::uint64_t next_modal_id{1};
@@ -322,29 +257,13 @@ struct App::Impl {
     uint64_t last_time{0};
     double delta_seconds{0.0};
 
-    // Dynamic render-scale state. When quality.dynamic_render_scale is on, the
-    // offscreen scale drops while the camera moves (to protect framerate) and
-    // jumps back up to render_scale_max once it settles. dyn_scale is the value
-    // applied this frame. With adaptive scaling on, dyn_motion_scale is the
-    // closed-loop in-motion scale driven by frame timing (dyn_frame_ms_ema is
-    // its smoothed input; dyn_climb_lock pauses upward probing after an
-    // overshoot, and dyn_last_scale_change rate-limits how often the applied
-    // scale changes at all — both directions — so orbiting doesn't reallocate
-    // the offscreen targets every few frames). The dyn_prev_* fields snapshot
-    // last frame's camera to detect motion.
-    float dyn_scale{1.0f};
-    float dyn_motion_scale{0.5f};
-    double dyn_frame_ms_ema{0.0};
-    bool dyn_was_moving{false};
-    uint64_t dyn_settle_anchor{0};
-    uint64_t dyn_climb_lock{0};
-    uint64_t dyn_last_scale_change{0};
-    glm::vec3 dyn_prev_target{0.f};
-    float dyn_prev_yaw{0.f};
-    float dyn_prev_pitch{0.f};
-    float dyn_prev_distance{0.f};
-    float dyn_prev_fov{0.f};
-    ProjectionMode dyn_prev_proj{ProjectionMode::Perspective};
+    // Adaptive render-scale controller. When quality.dynamic_render_scale is on,
+    // the offscreen scale drops while the camera moves (to protect framerate)
+    // and jumps back up to render_scale_max once it settles; the EMA/lock state
+    // and the memory-budget clamp all live inside the controller now. render()
+    // feeds it a camera snapshot + per-frame timing and applies the returned
+    // scale. (See DynamicRenderScale.)
+    DynamicRenderScale dyn_scale_;
 
     // Sokol-time stamp of the last user-input-class event. Drives the
     // idle-throttle decision: a recent input keeps us at full vsync
@@ -425,33 +344,23 @@ struct App::Impl {
     // throttle to a low rate, or hold a cached still. Computed identically at
     // three sites in render()/onFrame(); centralized here.
     [[nodiscard]] bool jobsRunning() const {
-        const auto session_phase = build_session.phase();
-        return !ibl_installed || build_in_progress || (scene && !scene_uploaded) ||
-               (cut_scene && !cut_uploaded) || pending_cut_rebuild ||
-               session_phase == BuildPhase::Walking || session_phase == BuildPhase::ResolvedReady;
-    }
-
-    // True when the IBL environment differs from what was last baked and so
-    // needs a rebake before the frame can settle.
-    [[nodiscard]] bool iblDirty() const {
-        return ibl_rebake_pending || ibl_settings != ibl_last_baked_settings;
+        const auto session_phase = build_controller_.session().phase();
+        return !ibl_baker_.installed() || build_controller_.inProgress() ||
+               (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
+               build_controller_.pendingCutRebuild() || session_phase == BuildPhase::Walking ||
+               session_phase == BuildPhase::ResolvedReady;
     }
 
     void updateCameraInput();
     void applyInitialCamera();
     void render();
-    // Clamp render_scale (a render() local, passed by reference) so the
-    // resolution-scaling offscreen targets (scene color + depth, plus the AO
-    // targets) fit render_scale_memory_budget_mb. Split out of render() as a
-    // self-contained piece of the render-scale logic; reads the fb_* members.
-    void clampRenderScaleToMemoryBudget(float &render_scale);
+    // Per-pixel byte cost of the resolution-scaling offscreen targets (scene
+    // color + depth, plus the AO targets when AO is on), derived from the live
+    // backend pixel formats. Fed to DynamicRenderScale, which owns the
+    // memory-budget clamp arithmetic (the GPU-format part stays here; the pure
+    // math moved into the controller).
+    [[nodiscard]] float sceneTargetBytesPerScenePx() const;
     void ensureSceneTarget(uint32_t width, uint32_t height);
-    void requestPngExport(const PngExportSettings &settings, std::string explicit_path = {},
-                          bool quit_when_done = false);
-    void exportPreRender();
-    void exportPostRender();
-    [[nodiscard]] std::optional<std::string> deliverExport(const std::vector<std::uint8_t> &png);
-    void finishExport(bool ok, const std::string &message);
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
@@ -572,6 +481,67 @@ void App::Impl::onInit() {
     active_renderer = &scene_renderer;
     ao_pass.initialize();
     ao_denoise_pass.initialize();
+
+    // Wire the IBL bake: the baker owns the debounce/dirty/installed state and
+    // decides *when* to bake; the GPU bake + install into both renderers + the
+    // first/rebake toast live here (the App owns the GPU + notification surface).
+    // The IBL images are reference-counted (SharedImage), so the two installs
+    // share one bake and free when the last renderer releases.
+    ibl_baker_.setBake([this](const IblSettings &settings, bool first) {
+        const auto bake_start = std::chrono::steady_clock::now();
+        const auto baked = bakeIblGpu(settings);
+        scene_renderer.installIbl(baked);
+        cut_renderer.installIbl(baked);
+        const auto elapsed_ms =
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bake_start)
+                .count();
+        if (first) {
+            std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
+        } else {
+            std::println("viewer: IBL rebake complete ({:.1f} ms)", elapsed_ms);
+            notifications.info("IBL rebake complete");
+        }
+    });
+
+    // Wire the PNG exporter: it owns the export state machine; the App owns the
+    // notification surface, the screenshot filename, the HDR capability query,
+    // the platform save (native cwd / web download), and the quit-on-done hook.
+    exporter_.configure(PngExporter::Deps{
+        .notifications = &notifications,
+        .make_filename = [] { return makeScreenshotFilename(); },
+        .hdr_supported = [this] { return hdrSupported(); },
+        .save_image =
+            [this](const std::string &filename, std::span<const std::byte> bytes) {
+                return platform_->saveExportedImage(filename, bytes);
+            },
+        .on_quit = [] { sapp_quit(); },
+    });
+
+    // Wire the build controller: it owns the CPU build orchestration and hands
+    // finished scenes back through these callbacks. The App binds them to its
+    // GPU/scene state — GPU uploads still happen in render().
+    build_controller_.configure(&notifications,
+                                BuildController::Callbacks{
+                                    .on_base_scene_ready =
+                                        [this](std::shared_ptr<const RenderScene> s) {
+                                            scene = std::move(s);
+                                            scene_uploaded = false;
+                                            camera_framed = false;
+                                        },
+                                    .on_cut_scene_ready =
+                                        [this](std::shared_ptr<const RenderScene> s) {
+                                            cut_scene = std::move(s);
+                                            cut_uploaded = false;
+                                        },
+                                    .on_project_build_starting =
+                                        [this] {
+                                            // A new base build invalidates any
+                                            // resident cut bake.
+                                            cut_scene.reset();
+                                            cut_uploaded = false;
+                                            cut_renderer.clearScene();
+                                        },
+                                });
     composite.initialize();
 
     stm_setup();
@@ -587,7 +557,7 @@ void App::Impl::onInit() {
     loadImGuiState();
     ui::icon_font::initialize();
     project_->setLogSink(&notifications);
-    build_session.setLogSink(&notifications);
+    build_controller_.session().setLogSink(&notifications);
 
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
@@ -918,59 +888,46 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     }
 }
 
-void App::Impl::clampRenderScaleToMemoryBudget(float &render_scale) {
-    // Cap the scale so the resolution-scaling offscreen targets stay within a
-    // memory budget — protects memory-constrained backends from OOMing on a
-    // large window times a high settled scale. The targets that grow with
-    // resolution are scene color + scene depth (full res) and, when AO is on,
-    // the two AO targets at ao_resolution_scale² of the scene area. Everything
-    // else (IBL cubemaps, the 1x1 AO dummy, the swapchain) is fixed-size and
-    // excluded. The per-pixel cost mirrors the format choices ensureSceneTarget
-    // makes below, so the estimate tracks HDR / AO toggles automatically.
-    if (quality.render_scale_memory_budget_mb > 0.f && fb_width > 0 && fb_height > 0) {
-        const auto bytes_per_pixel = [](sg_pixel_format f) -> float {
-            switch (f) {
-            case SG_PIXELFORMAT_RGBA16F:
-                return 8.f;
-            case SG_PIXELFORMAT_RGBA8:
-                return 4.f;
-            default:
-                return 4.f; // depth32f / depth-stencil
-            }
-        };
-        const sg_environment env = sglue_environment();
-        const sg_pixel_format swap_fmt = env.defaults.color_format == SG_PIXELFORMAT_NONE
-                                             ? SG_PIXELFORMAT_RGBA8
-                                             : env.defaults.color_format;
-        const sg_pixel_format depth_fmt = env.defaults.depth_format == SG_PIXELFORMAT_NONE
-                                              ? SG_PIXELFORMAT_DEPTH
-                                              : env.defaults.depth_format;
-        const sg_pixel_format hdr_fmt = pickHdrColorFormat();
-        const sg_pixel_format color_fmt =
-            (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
-        float bytes_per_scene_px = bytes_per_pixel(color_fmt) + bytes_per_pixel(depth_fmt);
-        if (quality.enable_ao) {
-            const float ao_scale = std::clamp(quality.ao_resolution_scale, 0.25f, 1.0f);
-            // AO is coupled to the scaled scene resolution: two ping-pong history
-            // buffers, plus the raw target when denoise is on (three total),
-            // each at ao_scale² of the scene area.
-            const float ao_buffers = quality.enable_ao_denoise ? 3.f : 2.f;
-            bytes_per_scene_px +=
-                ao_buffers * bytes_per_pixel(pickAoColorFormat()) * ao_scale * ao_scale;
+float App::Impl::sceneTargetBytesPerScenePx() const {
+    // Per-pixel byte cost of the resolution-scaling offscreen targets — the
+    // GPU-format-dependent input to DynamicRenderScale's memory-budget clamp.
+    // The targets that grow with resolution are scene color + scene depth (full
+    // res) and, when AO is on, the two/three AO targets at ao_resolution_scale²
+    // of the scene area. Everything else (IBL cubemaps, the 1x1 AO dummy, the
+    // swapchain) is fixed-size and excluded. The per-pixel cost mirrors the
+    // format choices ensureSceneTarget makes below, so the estimate tracks
+    // HDR / AO toggles automatically.
+    const auto bytes_per_pixel = [](sg_pixel_format f) -> float {
+        switch (f) {
+        case SG_PIXELFORMAT_RGBA16F:
+            return 8.f;
+        case SG_PIXELFORMAT_RGBA8:
+            return 4.f;
+        default:
+            return 4.f; // depth32f / depth-stencil
         }
-        const double budget_bytes =
-            static_cast<double>(quality.render_scale_memory_budget_mb) * 1024.0 * 1024.0;
-        const double base_px = static_cast<double>(fb_width) * static_cast<double>(fb_height);
-        // total_bytes(scale) = base_px * scale² * bytes_per_scene_px ≤ budget.
-        const double max_scale_sq = budget_bytes / (base_px * bytes_per_scene_px);
-        float budget_cap = static_cast<float>(std::sqrt(std::max(0.0, max_scale_sq)));
-        if (budget_cap < 0.25f) {
-            budget_cap = 0.25f; // never strangle below the hard floor, even on a tiny budget
-        }
-        if (render_scale > budget_cap) {
-            render_scale = budget_cap;
-        }
+    };
+    const sg_environment env = sglue_environment();
+    const sg_pixel_format swap_fmt = env.defaults.color_format == SG_PIXELFORMAT_NONE
+                                         ? SG_PIXELFORMAT_RGBA8
+                                         : env.defaults.color_format;
+    const sg_pixel_format depth_fmt = env.defaults.depth_format == SG_PIXELFORMAT_NONE
+                                          ? SG_PIXELFORMAT_DEPTH
+                                          : env.defaults.depth_format;
+    const sg_pixel_format hdr_fmt = pickHdrColorFormat();
+    const sg_pixel_format color_fmt =
+        (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
+    float bytes_per_scene_px = bytes_per_pixel(color_fmt) + bytes_per_pixel(depth_fmt);
+    if (quality.enable_ao) {
+        const float ao_scale = std::clamp(quality.ao_resolution_scale, 0.25f, 1.0f);
+        // AO is coupled to the scaled scene resolution: two ping-pong history
+        // buffers, plus the raw target when denoise is on (three total), each at
+        // ao_scale² of the scene area.
+        const float ao_buffers = quality.enable_ao_denoise ? 3.f : 2.f;
+        bytes_per_scene_px +=
+            ao_buffers * bytes_per_pixel(pickAoColorFormat()) * ao_scale * ao_scale;
     }
+    return bytes_per_scene_px;
 }
 
 void App::Impl::render() {
@@ -984,11 +941,11 @@ void App::Impl::render() {
     // frame, so it still shows the user's live settings) and restore it before
     // returning. The dims override happens below, and the captured frame gets an
     // extra composite into `export_out_rt` after the swapchain pass.
-    const bool exporting_frame = export_render_active;
+    const bool exporting_frame = exporter_.renderActive();
     RenderQualitySettings saved_quality;
     if (exporting_frame) {
         saved_quality = quality;
-        quality = export_quality;
+        quality = exporter_.quality();
     }
 
     // Drive the chunked GPU uploads BEFORE sg_begin_pass so any new sokol
@@ -1021,142 +978,28 @@ void App::Impl::render() {
     // All passes already size off scene_rt's dimensions, so scaling here is
     // self-consistent (incl. the scene shader's gl_FragCoord-based AO sampling,
     // which uses scene_rt.width/height). Clamp to a sane range.
-    // Detect interaction this frame. Two sources, both of which re-render the
-    // scene and should drop resolution:
-    //   - a camera change (orbit/pan/zoom/fov/projection), and
-    //   - any active ImGui widget. IsAnyItemActive() is true for the whole time
-    //     a slider is held, so dragging the wedge/angle cut, exposure, AO, etc.
-    //     keeps us in the low-res interactive state until release. (The cut
-    //     sliders feed the shader live, so they're exactly as interactive as
-    //     the camera.)
-    // The camera snapshot is refreshed every frame — even when dynamic scaling
-    // is off — so toggling it back on doesn't see a false change.
-    const bool cam_changed = camera.yaw != dyn_prev_yaw || camera.pitch != dyn_prev_pitch ||
-                             camera.distance != dyn_prev_distance ||
-                             camera.fov_deg != dyn_prev_fov || camera.target != dyn_prev_target ||
-                             camera.projection != dyn_prev_proj;
-    dyn_prev_yaw = camera.yaw;
-    dyn_prev_pitch = camera.pitch;
-    dyn_prev_distance = camera.distance;
-    dyn_prev_fov = camera.fov_deg;
-    dyn_prev_target = camera.target;
-    dyn_prev_proj = camera.projection;
-    const bool interacting = cam_changed || ImGui::IsAnyItemActive();
-
-    const auto clamp_scale = [](float s) { return s < 0.25f ? 0.25f : (s > 4.0f ? 4.0f : s); };
-    float render_scale;
-    if (quality.dynamic_render_scale) {
-        float lo = clamp_scale(quality.render_scale_min);
-        float hi = clamp_scale(quality.render_scale_max);
-        if (lo > hi) {
-            const float t = lo;
-            lo = hi;
-            hi = t;
-        }
-        // While the camera moves the scale stays low; once it settles it jumps
-        // straight to `hi`. The settle transition is a single step (not a ramp
-        // through intermediate resolutions) because each step reallocates the
-        // offscreen targets *and* resets the AO temporal history — a staircase
-        // of AO re-converges on a still image reads as flicker. One jump = one
-        // realloc + one AO reset per settle, and it avoids reallocating through
-        // huge intermediate targets now that `hi` can reach 4x.
-        constexpr double kSettleDelaySeconds = 0.2;
-        if (interacting) {
-            if (quality.adaptive_render_scale) {
-                // Closed-loop: hold the highest scale in [lo, hi] that meets the
-                // target frame time. frame_interval_ms is last frame's wall time
-                // (its render cost); smooth it so a single hitch doesn't yank the
-                // scale. React asymmetrically — drop fast when over budget, probe
-                // up slowly — and rate-limit changes so we don't reallocate every
-                // frame near the budget boundary (during motion the resolution
-                // step and AO reset are both masked, but churn still costs time).
-                const double target_ms = 1000.0 / std::max(15.0f, quality.render_scale_target_fps);
-                if (!dyn_was_moving) {
-                    // Interaction just started: resume from the last sustainable
-                    // in-motion scale rather than dropping to the floor and
-                    // re-climbing the staircase — repeated orbits shouldn't keep
-                    // re-running the ramp. Re-seed the average at target and clear
-                    // the climb/hold locks so the controller can react right away,
-                    // and so the slow full-res settled frame we just showed
-                    // doesn't drag the controller down. (dyn_motion_scale is left
-                    // as-is and clamped to [lo, hi] below; on the very first
-                    // interaction it starts from its default.)
-                    dyn_frame_ms_ema = target_ms;
-                    dyn_climb_lock = 0;
-                    dyn_last_scale_change = 0;
-                } else {
-                    constexpr double kAlpha = 0.25;           // EMA smoothing
-                    constexpr double kClimbLockSeconds = 1.5; // pause up-probing after overshoot
-                    // Minimum wall time between applied scale changes, in either
-                    // direction. The controller still samples every frame, but it
-                    // only reallocates the offscreen targets this often — so a
-                    // steady orbit holds a resolution instead of churning through
-                    // fine steps. A severe overshoot bypasses this to recover from
-                    // a real hitch immediately.
-                    constexpr double kScaleHoldSeconds = 0.4;
-                    dyn_frame_ms_ema =
-                        dyn_frame_ms_ema * (1.0 - kAlpha) + frame_interval_ms * kAlpha;
-                    const bool hold_elapsed =
-                        stm_sec(stm_diff(stm_now(), dyn_last_scale_change)) > kScaleHoldSeconds;
-                    if (dyn_frame_ms_ema > target_ms * 1.6) {
-                        // Severely over budget — drop hard immediately, bypassing
-                        // the hold so a real hitch recovers at once, and stop
-                        // probing upward: we just found the ceiling.
-                        dyn_motion_scale -= 0.5f;
-                        dyn_climb_lock = stm_now();
-                        dyn_last_scale_change = stm_now();
-                    } else if (dyn_frame_ms_ema > target_ms * 1.15) {
-                        // Mildly over budget — coarsen, but no more often than the
-                        // hold so we don't reallocate every frame near the
-                        // boundary. Lock upward probing regardless.
-                        if (hold_elapsed) {
-                            dyn_motion_scale -= 0.125f;
-                            dyn_last_scale_change = stm_now();
-                        }
-                        dyn_climb_lock = stm_now();
-                    } else if (hold_elapsed &&
-                               stm_sec(stm_diff(stm_now(), dyn_climb_lock)) > kClimbLockSeconds) {
-                        // Under budget, or vsync-capped at it — probe finer. If
-                        // this step overshoots, the branch above pulls it back and
-                        // locks probing, so it settles at the sustainable scale.
-                        dyn_motion_scale += 0.125f;
-                        dyn_last_scale_change = stm_now();
-                    }
-                }
-                dyn_motion_scale =
-                    dyn_motion_scale < lo ? lo : (dyn_motion_scale > hi ? hi : dyn_motion_scale);
-                dyn_scale = dyn_motion_scale;
-            } else {
-                // Non-adaptive: fixed floor while moving (blurry-but-smooth).
-                dyn_scale = lo;
-            }
-            dyn_settle_anchor = stm_now();
-        } else if (stm_sec(stm_diff(stm_now(), dyn_settle_anchor)) >= kSettleDelaySeconds) {
-            // Settled and not interacting (auto-orbit counts as interaction, so
-            // it never lands here): jump to `hi` unconditionally — the still
-            // image is allowed to exceed the frame-time budget to maximize
-            // fidelity, since slowness no longer costs interactivity.
-            dyn_scale = hi;
-        }
-        dyn_was_moving = interacting;
-        render_scale = dyn_scale;
-    } else {
-        render_scale = clamp_scale(quality.render_scale);
-        dyn_scale = render_scale;
-    }
-    // Don't let a high settled scale (up to 4x) push the offscreen target past
-    // the backend's max texture size on a large window. Cap uniformly so the
-    // aspect ratio is preserved.
-    const float max_tex = static_cast<float>(sg_query_limits().max_image_size_2d);
-    if (max_tex > 0.f && fb_width > 0 && fb_height > 0) {
-        const float cap = std::min(max_tex / static_cast<float>(fb_width),
-                                   max_tex / static_cast<float>(fb_height));
-        if (render_scale > cap) {
-            render_scale = cap;
-        }
-    }
-    // Clamp the render scale to the offscreen-target memory budget.
-    clampRenderScaleToMemoryBudget(render_scale);
+    // Adaptive render scale + all its caps (max texture size, memory budget) are
+    // owned by DynamicRenderScale now. Feed it a camera snapshot (a held slider
+    // counts as interaction just like a camera move — ImGui::IsAnyItemActive()),
+    // per-frame timing, and the GPU-format-derived per-pixel byte cost.
+    const CameraSnapshot cam_snapshot{
+        .target = camera.target,
+        .yaw = camera.yaw,
+        .pitch = camera.pitch,
+        .distance = camera.distance,
+        .fov = camera.fov_deg,
+        .proj = camera.projection,
+    };
+    const DynamicRenderScale::Inputs dyn_inputs{
+        .frame_ms = frame_interval_ms,
+        .now_seconds = stm_sec(stm_now()),
+        .ui_active = ImGui::IsAnyItemActive(),
+        .fb_w = fb_width,
+        .fb_h = fb_height,
+        .limits = {static_cast<std::uint32_t>(sg_query_limits().max_image_size_2d)},
+        .bytes_per_scene_px = sceneTargetBytesPerScenePx(),
+    };
+    const float render_scale = dyn_scale_.update(quality, cam_snapshot, dyn_inputs);
     const auto scale_dim = [render_scale](uint32_t d) -> uint32_t {
         const auto s = static_cast<uint32_t>(static_cast<float>(d) * render_scale + 0.5f);
         return s < 1u ? 1u : s;
@@ -1166,8 +1009,8 @@ void App::Impl::render() {
     // it — and its result is overridden here). The scene/composite aspect ratio
     // follows scene_rt's dimensions, so this also gives the exported frame the
     // requested output aspect, independent of the window.
-    const uint32_t want_w = exporting_frame ? export_internal_w : scale_dim(fb_width);
-    const uint32_t want_h = exporting_frame ? export_internal_h : scale_dim(fb_height);
+    const uint32_t want_w = exporting_frame ? exporter_.internalWidth() : scale_dim(fb_width);
+    const uint32_t want_h = exporting_frame ? exporter_.internalHeight() : scale_dim(fb_height);
     // A resize / scale change reallocates scene_rt; if it does we MUST render
     // into it this frame (an empty target can't be composited).
     const bool scene_target_resized = scene_rt.width != want_w || scene_rt.height != want_h;
@@ -1181,7 +1024,8 @@ void App::Impl::render() {
     // settle jump converge before we hold the frame.
     bool render_scene = true;
     if (quality.pause_when_static) {
-        const bool scene_changing = interacting || jobsRunning() || iblDirty();
+        const bool scene_changing =
+            dyn_scale_.interacting() || jobsRunning() || ibl_baker_.dirty(ibl_settings);
         if (scene_changing) {
             last_scene_change = stm_now();
         }
@@ -1231,9 +1075,10 @@ void App::Impl::render() {
             // otherwise (cut disabled, mid-drag, or a rebuild in flight) we show the
             // base scene with the live shader cut. The two cut methods are never
             // active together, which is what avoids the discard-vs-cut-face z-fight.
-            const bool cut_ready = cfg.boolean_cut && cut_uploaded &&
-                                   cut_built_start_deg == cfg.angle_cut_start_deg &&
-                                   cut_built_end_deg == cfg.angle_cut_end_deg;
+            const bool cut_ready =
+                cfg.boolean_cut && cut_uploaded &&
+                build_controller_.cutBuiltStartDeg() == cfg.angle_cut_start_deg &&
+                build_controller_.cutBuiltEndDeg() == cfg.angle_cut_end_deg;
             SceneRenderer &renderer = cut_ready ? cut_renderer : scene_renderer;
             active_renderer = &renderer;
             // Flipping which scene is drawn changes the geometry under the temporal
@@ -1424,12 +1269,12 @@ void App::Impl::render() {
     sg_end_pass();
 
     // Export capture: composite the same converged frame into the full-res
-    // offscreen LDR target (no ImGui). exportPostRender reads it back next.
-    if (exporting_frame && export_capture && export_out_rt.color.id != SG_INVALID_ID) {
+    // offscreen LDR target (no ImGui). PngExporter::postRender reads it back next.
+    if (exporting_frame && exporter_.capture() && exporter_.outTarget().color.id != SG_INVALID_ID) {
         sg_pass export_pass{};
         export_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
         export_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
-        export_pass.attachments = export_out_rt.passAttachments();
+        export_pass.attachments = exporter_.outTarget().passAttachments();
         export_pass.label = "export_pass";
         sg_begin_pass(&export_pass);
         composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
@@ -1449,214 +1294,6 @@ void App::Impl::render() {
     encode_ms = stm_sec(stm_diff(present_start, render_submit_start)) * 1000.0;
     present_ms = stm_sec(stm_diff(render_end, present_start)) * 1000.0;
     render_submit_ms = stm_sec(stm_diff(render_end, render_submit_start)) * 1000.0;
-}
-
-void App::Impl::requestPngExport(const PngExportSettings &settings, std::string explicit_path,
-                                 bool quit_when_done) {
-    if (export_phase != ExportPhase::Idle) {
-        notifications.warning("A screenshot export is already in progress");
-        return;
-    }
-    if (!scene || !scene_uploaded) {
-        notifications.error("Load a scene before exporting a screenshot");
-        return;
-    }
-
-    export_explicit_path = std::move(explicit_path);
-    export_quit_when_done = quit_when_done;
-    export_settings = settings;
-    // Clamp the output and derive the internal (supersampled) resolution. Reduce
-    // the supersample factor as needed so the internal target fits the backend's
-    // max texture size — keeping the downscale an exact integer ratio.
-    uint32_t out_w = std::clamp<uint32_t>(export_settings.out_width, 16u, 16384u);
-    uint32_t out_h = std::clamp<uint32_t>(export_settings.out_height, 16u, 16384u);
-    uint32_t ss =
-        std::clamp<uint32_t>(export_settings.supersample, 1u, PngExportSettings::kMaxSupersample);
-    const uint32_t max_tex = static_cast<uint32_t>(sg_query_limits().max_image_size_2d);
-    if (max_tex > 0) {
-        out_w = std::min(out_w, max_tex);
-        out_h = std::min(out_h, max_tex);
-        while (ss > 1 && (out_w * ss > max_tex || out_h * ss > max_tex)) {
-            --ss;
-        }
-    }
-    export_settings.out_width = out_w;
-    export_settings.out_height = out_h;
-    export_settings.supersample = ss;
-    export_internal_w = out_w * ss;
-    export_internal_h = out_h * ss;
-
-    // Maxed quality snapshot for the export frames. Start from the live settings
-    // to keep the user's "look" (tonemap curve, exposure, contrast, saturation,
-    // sun) and force every cost/quality lever to its best.
-    export_quality = quality;
-    export_quality.dynamic_render_scale = false;
-    export_quality.render_scale = 1.0f;
-    export_quality.render_scale_memory_budget_mb = 0.0f; // no memory cap for a one-shot export
-    export_quality.cap_fps = false;
-    export_quality.pause_when_static = false;
-    export_quality.enable_fxaa = true;
-    export_quality.fxaa_quality = FxaaQualityPreset::Ultra;
-    export_quality.enable_ao = true;
-    export_quality.ao_quality = AoQualityPreset::Ultra;
-    export_quality.ao_resolution_scale = 1.0f;
-    export_quality.enable_ao_denoise = true;
-    export_quality.enable_advanced_ao = true;
-    export_quality.enable_tonemap = true;
-    export_quality.debug_view = DebugView::Off;
-    if (hdrSupported()) {
-        export_quality.enable_hdr = true;
-    }
-
-    export_converge_count = 0;
-    export_readback_started = false;
-    export_readback.reset();
-    export_filename = makeScreenshotFilename();
-    export_phase = ExportPhase::Rendering;
-    export_progress = notifications.startProgress("Rendering screenshot...");
-    std::println("viewer: PNG export started ({}×{} ×{} SSAA → {}×{})", out_w, out_h, ss, out_w,
-                 out_h);
-}
-
-void App::Impl::exportPreRender() {
-    export_render_active = false;
-    export_capture = false;
-    if (export_phase != ExportPhase::Rendering) {
-        return;
-    }
-    // Allocate the composite output target at the export resolution, using the
-    // swapchain's color/depth formats so the composite pipeline (which bakes the
-    // swapchain formats) validates against it. Created here, before render()
-    // begins any pass.
-    sg_environment env = sglue_environment();
-    sg_pixel_format color_fmt = env.defaults.color_format;
-    if (color_fmt == SG_PIXELFORMAT_NONE) {
-        color_fmt = SG_PIXELFORMAT_RGBA8;
-    }
-    sg_pixel_format depth_fmt = env.defaults.depth_format;
-    if (depth_fmt == SG_PIXELFORMAT_NONE) {
-        depth_fmt = SG_PIXELFORMAT_DEPTH;
-    }
-    if (!export_out_rt.matches(export_internal_w, export_internal_h, color_fmt, depth_fmt)) {
-        export_out_rt.create(export_internal_w, export_internal_h, color_fmt, depth_fmt,
-                             /*for_readback=*/true);
-    }
-    export_render_active = true;
-    // Render a handful of export-res frames so the GTAO temporal denoise (and the
-    // frame-late AO history the PBR path samples) converge before we capture.
-    constexpr int kConvergeFrames = 8;
-    export_capture = (export_converge_count >= kConvergeFrames);
-}
-
-void App::Impl::exportPostRender() {
-    switch (export_phase) {
-    case ExportPhase::Idle:
-        return;
-    case ExportPhase::Rendering:
-        if (export_capture) {
-            // The capture composite was issued this frame; wait for its GPU work
-            // to drain before reading back. A few normal frames in between let
-            // sokol's in-flight semaphore guarantee the capture frame completed.
-            export_phase = ExportPhase::WaitGpu;
-            export_wait_count = 3;
-        } else {
-            ++export_converge_count;
-        }
-        return;
-    case ExportPhase::WaitGpu:
-        if (--export_wait_count <= 0) {
-            export_phase = ExportPhase::Readback;
-            export_readback_started = false;
-        }
-        return;
-    case ExportPhase::Readback: {
-        if (!export_readback_started) {
-            export_readback_started = true;
-            if (!export_readback.begin(export_out_rt.color, export_internal_w, export_internal_h,
-                                       export_out_rt.color_format)) {
-                finishExport(false, "Screenshot readback is not supported on this build");
-                return;
-            }
-        }
-        std::vector<std::uint8_t> pixels;
-        const ReadbackStatus st = export_readback.poll(pixels);
-        if (st == ReadbackStatus::Pending) {
-            return; // try again next frame
-        }
-        if (st != ReadbackStatus::Ready) {
-            finishExport(false, "Screenshot GPU readback failed");
-            return;
-        }
-        // SSAA resolve (box-downscale by the supersample factor) → PNG → deliver.
-        const uint32_t ss = export_settings.supersample;
-        auto small = downscaleBoxRgba8(pixels, export_internal_w, export_internal_h, ss);
-        const uint32_t out_w = export_internal_w / ss;
-        const uint32_t out_h = export_internal_h / ss;
-        auto png = encodePngRgba8(small, out_w, out_h);
-        if (png.empty()) {
-            finishExport(false, "Screenshot PNG encoding failed");
-            return;
-        }
-        auto dest = deliverExport(png);
-        if (!dest) {
-            finishExport(false, "Failed to save screenshot");
-            return;
-        }
-        const bool downloaded = platform::kIsWeb && export_explicit_path.empty();
-        finishExport(true, (downloaded ? "Downloaded " : "Saved ") + *dest);
-        return;
-    }
-    }
-}
-
-std::optional<std::string> App::Impl::deliverExport(const std::vector<std::uint8_t> &png) {
-    // Headless CLI path: write straight to the requested file.
-    if (!export_explicit_path.empty()) {
-        std::ofstream out{export_explicit_path, std::ios::binary | std::ios::trunc};
-        if (!out) {
-            return std::nullopt;
-        }
-        out.write(reinterpret_cast<const char *>(png.data()),
-                  static_cast<std::streamsize>(png.size()));
-        if (!out) {
-            return std::nullopt;
-        }
-        return export_explicit_path;
-    }
-    // Interactive path: native writes to cwd, web triggers a download.
-    return platform_->saveExportedImage(
-        export_filename, std::as_bytes(std::span<const std::uint8_t>{png.data(), png.size()}));
-}
-
-void App::Impl::finishExport(bool ok, const std::string &message) {
-    if (export_progress != 0) {
-        if (ok) {
-            notifications.finishProgress(export_progress, message);
-        } else {
-            notifications.cancelProgress(export_progress);
-        }
-        export_progress = 0;
-    }
-    if (ok) {
-        std::println("viewer: PNG export complete — {}", message);
-    } else {
-        std::println(stderr, "viewer: PNG export failed — {}", message);
-        notifications.error(message);
-    }
-    export_readback.reset();
-    export_render_active = false;
-    export_capture = false;
-    export_phase = ExportPhase::Idle;
-    // The export target can be large; free it until the next export.
-    export_out_rt.destroy();
-
-    const bool quit_now = export_quit_when_done;
-    export_explicit_path.clear();
-    export_quit_when_done = false;
-    if (quit_now) {
-        // Headless screenshot mode: shut the window down once the file is out.
-        sapp_quit();
-    }
 }
 
 std::string App::Impl::browserUrlStateQuery() const {
@@ -1707,7 +1344,7 @@ void App::Impl::addProjectPath(const std::filesystem::path &path) {
     auto decision = project_->planAddPath(path);
     if (decision.kind == Accept) {
         project_->addPath(path);
-        build_error.clear();
+        build_controller_.clearError();
         return;
     }
 
@@ -1717,7 +1354,7 @@ void App::Impl::addProjectPath(const std::filesystem::path &path) {
                 return;
             }
             project_->addPath(path);
-            build_error.clear();
+            build_controller_.clearError();
         });
     } else {
         enqueueProjectDropModal(std::move(decision), {});
@@ -1732,7 +1369,7 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
     auto decision = project_->planAddBytes(filename, bytes);
     if (decision.kind == Accept) {
         project_->addBytes(filename, bytes);
-        build_error.clear();
+        build_controller_.clearError();
         return;
     }
 
@@ -1742,7 +1379,7 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
                 return;
             }
             project_->addBytes(filename, std::span<const std::byte>{bytes.data(), bytes.size()});
-            build_error.clear();
+            build_controller_.clearError();
         });
     } else {
         enqueueProjectDropModal(std::move(decision), {});
@@ -1829,137 +1466,26 @@ void App::Impl::onFrame() {
     // pause / fps-cap gate below. A *pending* startup screenshot counts too —
     // otherwise an unfocused/backgrounded window would park at the idle gate
     // before the loop ever reaches the trigger.
-    const bool exporting = export_phase != ExportPhase::Idle;
+    const bool exporting = exporter_.active();
     const bool keep_loop_awake = exporting || startup_screenshot_pending;
 
-    // Auto-rebake on settings change, debounced. Each frame we check whether
-    // the user has touched any IBL slider since last frame; if so, reset the
-    // settle timer. Once settings have been stable for `kIblRebakeDebounce`
-    // and differ from the last bake, set `ibl_rebake_pending`. Manual
-    // "Rebake IBL" still works through the same flag.
-    {
-        const auto now = std::chrono::steady_clock::now();
-        if (ibl_settings != ibl_last_seen_settings) {
-            ibl_last_seen_settings = ibl_settings;
-            ibl_settle_at = now + kIblRebakeDebounce;
-        }
-        if (ibl_installed && !ibl_rebake_pending && ibl_settings != ibl_last_baked_settings &&
-            now >= ibl_settle_at) {
-            ibl_rebake_pending = true;
-        }
-    }
+    // Procedural IBL bake — debounce, dirty-track, bake, install. Runs at the
+    // top of onFrame (before the swapchain pass that draws the scene) because a
+    // bake pass can't be issued from inside that pass; same-frame ordering is
+    // fine — sokol guarantees images written by an earlier pass are sampleable
+    // in a later pass within the same frame. The GPU bake + install + toast is
+    // wired into ibl_baker_ in onInit().
+    ibl_baker_.poll(ibl_settings, std::chrono::steady_clock::now());
 
-    // Procedural IBL bake — runs on the GPU in the first frame, before the
-    // swapchain pass that draws the scene. Same-frame ordering is fine:
-    // sokol guarantees images written by an earlier pass are sampleable in
-    // a later pass within the same frame.
-    if (!ibl_installed || ibl_rebake_pending) {
-        const bool first = !ibl_installed;
-        const auto bake_start = std::chrono::steady_clock::now();
-        // Bake once and install into both renderers; the IBL images are
-        // reference-counted (SharedImage), so the two installs share one bake
-        // and the GPU images free when the last renderer releases.
-        const auto baked = bakeIblGpu(ibl_settings);
-        scene_renderer.installIbl(baked);
-        cut_renderer.installIbl(baked);
-        const auto elapsed_ms =
-            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - bake_start)
-                .count();
-        if (first) {
-            std::println("viewer: IBL bake complete ({:.1f} ms)", elapsed_ms);
-        } else {
-            std::println("viewer: IBL rebake complete ({:.1f} ms)", elapsed_ms);
-            notifications.info("IBL rebake complete");
-        }
-        ibl_installed = true;
-        ibl_rebake_pending = false;
-        ibl_last_baked_settings = ibl_settings;
-        ibl_last_seen_settings = ibl_settings;
-    }
-
-    // Drive the off-loop tessellation. On native this is a poll of an
-    // atomic flag set by the worker thread; on web it runs the build
-    // synchronously on the second poll (the first paints a frame).
-    if (build_in_progress) {
-        if (build_progress_handle != 0) {
-            std::string label;
-            float frac = 0.0f;
-            if (build_job.phase() == SceneBuildJob::Phase::Cutting) {
-                // Cooperative wedge cut — bar the placement-classification sweep.
-                const auto total = build_job.wedgeCutTotal();
-                const auto processed = build_job.wedgeCutProcessed();
-                frac = total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
-                label = total > 0 ? std::format("Applying cut ({}/{} placements)", processed, total)
-                                  : std::string{"Applying cut..."};
-            } else {
-                const auto total = build_job.tessellationTotal();
-                const auto processed = build_job.tessellationProcessed();
-                frac = total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
-                if (total > 0) {
-                    label = std::format("Tessellating ({}/{} nodes)", processed, total);
-                }
-            }
-            notifications.updateProgress(build_progress_handle, frac, label);
-        }
-    }
-    if (build_in_progress && build_job.poll()) {
-        auto built = build_job.take();
-        for (const auto &d : built.diags.items()) {
-            std::println(stderr, "scene_build: {} {}", d.code, d.message);
-            notifications.diagnostic(d);
-        }
-        if (built.scene) {
-            const auto build_ms = std::chrono::duration<double, std::milli>(
-                                      std::chrono::steady_clock::now() - build_start_time)
-                                      .count();
-            std::println("viewer: tessellation complete ({:.1f} ms, {} nodes, {} mesh assets, "
-                         "{} materials)",
-                         build_ms, built.scene->nodes.size(), built.scene->meshAssets.size(),
-                         built.scene->materials.size());
-            if (build_progress_handle != 0) {
-                notifications.finishProgress(build_progress_handle, "Tessellation complete");
-                build_progress_handle = 0;
-            }
-            if (building_cut) {
-                // Boolean-cut bake → cut renderer. Record the angle it was built
-                // at (not the live cfg, which may have moved during the build) so
-                // the render selector knows whether it's still fresh.
-                cut_scene = std::move(built.scene);
-                cut_uploaded = false;
-                cut_built_start_deg = in_flight_cut_start_deg;
-                cut_built_end_deg = in_flight_cut_end_deg;
-            } else {
-                scene = std::move(built.scene);
-                scene_uploaded = false;
-                camera_framed = false;
-                // The freshly loaded base scene needs a cut bake if the Boolean
-                // cut is already enabled (e.g. from persisted state / URL).
-                if (cfg.boolean_cut) {
-                    pending_cut_rebuild = true;
-                }
-            }
-            build_error.clear();
-        } else {
-            // Errors are already surfaced as toasts via diagnostic() above;
-            // stash the first one for the persistent status-bar message.
-            build_error = "scene build failed";
-            for (const auto &d : built.diags.items()) {
-                if (d.severity >= DiagnosticSeverity::Error) {
-                    build_error = d.message;
-                    break;
-                }
-            }
-            if (build_progress_handle != 0) {
-                notifications.cancelProgress(build_progress_handle);
-                build_progress_handle = 0;
-            }
-        }
-        build_in_progress = false;
-        // Project is long-lived: we keep it so additional drops/picks
-        // accumulate into the existing bag (or so a UrlProjectFs's state
-        // survives in case the user wants to inspect what loaded). The
-        // build job already has the paths it needs; nothing else to do.
-    }
+    // Drive the CPU build orchestration: the in-flight tessellation job, the
+    // project walk / session, and any queued Boolean-cut rebuild. Completed
+    // scenes route back to the App's GPU/scene state via the callbacks wired in
+    // onInit(). The project is long-lived (drops/picks accumulate into the bag),
+    // so the controller keeps polling it every frame.
+    build_controller_.poll(
+        project_.get(),
+        BuildController::AngleCut{cfg.boolean_cut, cfg.angle_cut_start_deg, cfg.angle_cut_end_deg},
+        cut_uploaded);
 
     // Idle gate, with a dynamic cadence based on whether there's
     // anything that wants visible progress. Two cases:
@@ -2013,8 +1539,9 @@ void App::Impl::onFrame() {
         const bool input_recent =
             last_activity_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_activity_time)) < kIdleInputSeconds;
-        const bool full_rate = input_recent || jobsRunning() || iblDirty() || cfg.auto_orbit ||
-                               drag_hover || pending_gesture || notifications.hasActiveToasts();
+        const bool full_rate = input_recent || jobsRunning() || ibl_baker_.dirty(ibl_settings) ||
+                               cfg.auto_orbit || drag_hover || pending_gesture ||
+                               notifications.hasActiveToasts();
         if (!full_rate && last_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
             return;
@@ -2081,96 +1608,22 @@ void App::Impl::onFrame() {
                      0.f);
     }
 
-    // Drive the project + build pipeline unconditionally — running this
-    // only when `!scene` means double-clicking a different config in the
-    // tree panel after a scene is already rendered would update the
-    // session's root keys but never actually walk → parse → build the
-    // new selection. The build-job completion above swaps `scene` over
-    // when the new build lands.
-    // Kick off a build. `wedge` is nullopt for the uncut base scene and set for
-    // a Boolean-cut bake; `building_cut` records which so completion routes the
-    // result to `scene` vs `cut_scene`. Inputs come in as shared_ptr<const> so
-    // both callers (a fresh BuildSession build and a re-aimed cut) just refcount
-    // here — the build job takes the deep copy on its worker thread.
-    auto start_build = [this](std::shared_ptr<const ::nodehammer::NHConfig> config,
-                              std::shared_ptr<const ::nodehammer::SemanticScene> semantic_scene,
-                              std::string config_label, std::string geometry_label,
-                              std::optional<::nodehammer::WedgeCutParams> wedge) {
-        build_start_time = std::chrono::steady_clock::now();
-        building_cut = wedge.has_value();
-        if (building_cut) {
-            in_flight_cut_start_deg = cfg.angle_cut_start_deg;
-            in_flight_cut_end_deg = cfg.angle_cut_end_deg;
-        }
-        build_job.start(std::move(config), std::move(semantic_scene), std::move(config_label),
-                        std::move(geometry_label), wedge);
-        build_in_progress = true;
-        build_progress_handle =
-            notifications.startProgress(building_cut ? "Applying cut..." : "Tessellating...");
-    };
-
-    if (project_) {
-        project_->poll();
-        build_session.poll(project_.get());
-
-        if (!build_in_progress && build_session.phase() == BuildPhase::ResolvedReady) {
-            if (auto inputs = build_session.takeInputs()) {
-                // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
-                // Held as shared_ptr<const> and handed straight to the build job,
-                // so the move out of `inputs` is the only copy and the cut path
-                // later re-uses these without re-walking the project.
-                pristine_config = std::make_shared<const ::nodehammer::NHConfig>(
-                    std::move(inputs->config.config));
-                pristine_scene = std::make_shared<const ::nodehammer::SemanticScene>(
-                    std::move(inputs->import.scene));
-                pristine_config_label = std::move(inputs->config_key);
-                pristine_geometry_label = std::move(inputs->geometry_key);
-                // A new base build invalidates any resident cut bake.
-                cut_scene.reset();
-                cut_uploaded = false;
-                cut_renderer.clearScene();
-                pending_cut_rebuild = false;
-                // The base scene is always uncut (wedge = nullopt); the cut bake
-                // follows once the base lands (see completion handler).
-                start_build(pristine_config, pristine_scene, pristine_config_label,
-                            pristine_geometry_label, std::nullopt);
-            }
-        }
-    }
-
-    // Boolean-cut (re)build: re-prep + re-tessellate the wedge cut from the
-    // cached pristine scene (never from already-cut geometry). Skipped if a
-    // resident cut already matches the committed angle.
-    const bool cut_fresh = cut_uploaded && cut_built_start_deg == cfg.angle_cut_start_deg &&
-                           cut_built_end_deg == cfg.angle_cut_end_deg;
-    if (pending_cut_rebuild && !build_in_progress && pristine_scene) {
-        pending_cut_rebuild = false;
-        if (cfg.boolean_cut && !cut_fresh) {
-            // Hand the cached pristine inputs straight through (refcount bump);
-            // the worker thread takes the scene copy that prep consumes, so the
-            // frame that locks the angle no longer stalls on the deep copy.
-            start_build(
-                pristine_config, pristine_scene, pristine_config_label, pristine_geometry_label,
-                ::nodehammer::WedgeCutParams{cfg.angle_cut_start_deg, cfg.angle_cut_end_deg});
-        }
-    }
-
     ui::ViewerUiContext ui_ctx{
         .cfg = cfg,
         .quality = quality,
         .export_settings = export_settings,
         .project = project_.get(),
-        .build_session = build_session,
-        .build_job = build_job,
+        .build_session = build_controller_.session(),
+        .build_job = build_controller_.job(),
         // Stats reflect the renderer drawn last frame (base or cut). active_
         // renderer is updated in render(); a one-frame lag here is harmless.
         .scene_renderer = (active_renderer != nullptr) ? *active_renderer : scene_renderer,
         .camera = camera,
         .notifications = &notifications,
         .platform_window_state = platform_window_state,
-        .root_config_key = root_config_key,
-        .root_geometry_key = root_geometry_key,
-        .build_error = build_error,
+        .root_config_key = build_controller_.rootConfigKey(),
+        .root_geometry_key = build_controller_.rootGeometryKey(),
+        .build_error = build_controller_.error(),
         .fb_width = fb_width,
         .fb_height = fb_height,
         .scene_width = scene_rt.width,
@@ -2199,9 +1652,9 @@ void App::Impl::onFrame() {
         .perf_history = &perf_history,
         .has_scene = static_cast<bool>(scene),
         .scene_uploaded = scene_uploaded,
-        .build_in_progress = build_in_progress,
+        .build_in_progress = build_controller_.inProgress(),
         .export_in_progress = exporting,
-        .ibl_installed = ibl_installed,
+        .ibl_installed = ibl_baker_.installed(),
         .hdr_supported = hdrSupported(),
         .ibl_settings = &ibl_settings,
     };
@@ -2209,9 +1662,11 @@ void App::Impl::onFrame() {
     ui::UiActions ui_actions;
     ui_actions.sync_browser_url = [this]() { syncBrowserUrl(); };
     ui_actions.open_url = [this](const std::string &url) { platform_->openUrl(url); };
-    ui_actions.rebake_ibl = [this]() { ibl_rebake_pending = true; };
-    ui_actions.request_scene_rebuild = [this]() { pending_cut_rebuild = true; };
-    ui_actions.export_png = [this]() { requestPngExport(export_settings); };
+    ui_actions.rebake_ibl = [this]() { ibl_baker_.requestRebake(); };
+    ui_actions.request_scene_rebuild = [this]() { build_controller_.requestCutRebuild(); };
+    ui_actions.export_png = [this]() {
+        exporter_.request(export_settings, quality, scene != nullptr && scene_uploaded);
+    };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
     ui_actions.frame_scene = [this]() {
@@ -2228,37 +1683,30 @@ void App::Impl::onFrame() {
         cut_renderer.clearScene();
         scene.reset();
         cut_scene.reset();
-        pristine_scene.reset();
         project_ = platform::makeEmptyBag();
         project_->setLogSink(&notifications);
-        root_config_key.clear();
-        root_geometry_key.clear();
-        build_session.setRootKeys({}, {});
+        // Drops the pristine cache, root keys, session keys, the pending-cut
+        // flag, and the persistent error in one shot.
+        build_controller_.reset();
         active_modals.clear();
         scene_uploaded = false;
         cut_uploaded = false;
-        pending_cut_rebuild = false;
         camera_framed = false;
         scene_radius = 0.f;
-        build_error.clear();
         notifications.info("Project closed");
     };
     ui_actions.rescan_project = [this]() {
         if (project_) {
             project_->rescan();
-            build_error.clear();
+            build_controller_.clearError();
             notifications.info("Project rescan requested");
         }
     };
     ui_actions.select_config_key = [this](std::string key) {
-        root_config_key = std::move(key);
-        build_session.setRootKeys(root_config_key, root_geometry_key);
-        build_error.clear();
+        build_controller_.setRootConfigKey(std::move(key));
     };
     ui_actions.select_geometry_key = [this](std::string key) {
-        root_geometry_key = std::move(key);
-        build_session.setRootKeys(root_config_key, root_geometry_key);
-        build_error.clear();
+        build_controller_.setRootGeometryKey(std::move(key));
     };
 
     ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
@@ -2267,22 +1715,22 @@ void App::Impl::onFrame() {
 
     // Headless screenshot: once the scene is loaded, uploaded, lit and framed,
     // fire the one-shot export (which quits when the file is written).
-    if (startup_screenshot_pending && export_phase == ExportPhase::Idle && scene &&
-        scene_uploaded && ibl_installed && camera_framed && !build_in_progress) {
+    if (startup_screenshot_pending && !exporter_.active() && scene && scene_uploaded &&
+        ibl_baker_.installed() && camera_framed && !build_controller_.inProgress()) {
         startup_screenshot_pending = false;
-        requestPngExport(startup_screenshot_settings, startup_screenshot_path,
-                         /*quit_when_done=*/true);
+        exporter_.request(startup_screenshot_settings, quality, scene != nullptr && scene_uploaded,
+                          startup_screenshot_path, /*quit_when_done=*/true);
     }
 
     // Set up any export-frame state (target allocation, dims/quality override
     // flags) before render() reads it; advance the export state machine after.
-    exportPreRender();
+    exporter_.preRender();
 
     // simgui_render (called from inside render() → ImGui_ImplSokol_Render)
     // internally calls ImGui::Render itself before issuing draws.
     render();
 
-    exportPostRender();
+    exporter_.postRender();
 
     // Drain any pending native picker modal. ImGui frame is ended,
     // sokol pass is committed; if NFD spawns a nested run loop and
@@ -2303,8 +1751,7 @@ void App::Impl::onCleanup() {
     ao_hist[0].destroy();
     ao_hist[1].destroy();
     ao_rt_raw.destroy();
-    export_out_rt.destroy();
-    export_readback.reset();
+    exporter_.destroyTargets();
     scene_rt.destroy();
     scene_renderer.release();
     cut_renderer.release();
@@ -2335,16 +1782,12 @@ void App::setProject(std::unique_ptr<ProjectFs> project) {
     // an old project's stale keys against a new backend. Root keys
     // either come back via setRootKeys (URL mode) or via App-side
     // recognition on the next generation bump (bag mode).
-    impl_->root_config_key.clear();
-    impl_->root_geometry_key.clear();
-    impl_->build_session.setRootKeys({}, {});
+    impl_->build_controller_.setRootKeys({}, {});
     impl_->active_modals.clear();
 }
 
 void App::setRootKeys(std::string config_key, std::string geometry_key) {
-    impl_->root_config_key = config_key;
-    impl_->root_geometry_key = geometry_key;
-    impl_->build_session.setRootKeys(std::move(config_key), std::move(geometry_key));
+    impl_->build_controller_.setRootKeys(std::move(config_key), std::move(geometry_key));
 }
 
 ProjectFs *App::project() const noexcept { return impl_->project_.get(); }
