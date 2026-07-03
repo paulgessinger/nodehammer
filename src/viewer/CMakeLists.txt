@@ -34,7 +34,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
     # and sokol's exposed native-handle surface are backend-specific, and a
     # backend like WebGPU or GL can be compiled on native as well as web — so
     # the choice follows the SOKOL_<backend> being built, not the platform).
-    # GL covers both GLES3 and desktop GLCORE. D3D11 is a #error stub for now.
+    # GL covers both GLES3 and desktop GLCORE; D3D11 covers Windows.
     if(backend STREQUAL "SOKOL_METAL")
         set(_readback ${_dir}/png_export_readback_metal.mm)
     elseif(backend STREQUAL "SOKOL_WGPU")

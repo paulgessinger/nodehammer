@@ -1,6 +1,8 @@
 #include "png_export_readback.hpp"
 
-// GL GPU→CPU readback for the PNG export, covering the GLES3 (WebGL2) backend.
+// GL GPU→CPU readback for the PNG export, covering both the GLES3 (WebGL2) and
+// the desktop GLCORE backends — the readback code is identical, only the GL
+// header (and how the entry points are resolved) differs per backend.
 //
 // sokol exposes the backing GL texture name behind an sg_image via
 // sg_gl_query_image_info (tex[] per inflight slot + tex_target). We attach that
@@ -17,15 +19,24 @@
 //     of the color buffer's internal byte order, so there is never a swizzle to
 //     do here (unlike Metal/WGPU, which read raw texels). The GLES3 swapchain is
 //     RGBA8 anyway.
-//
-// Desktop GLCORE would also land here, but it needs a GL function loader that
-// isn't wired into this TU yet — gate it off with #error until that exists.
 
 #if defined(SOKOL_GLES3)
+// Emscripten/WebGL2 ships the GLES3 prototypes and links them for us.
 #include <GLES3/gl3.h>
 #elif defined(SOKOL_GLCORE)
-#error                                                                                             \
-    "PNG export GL readback needs a GL function loader on desktop GLCORE; not wired yet (GLES3/WebGL2 only for now)."
+// Desktop GL. Every entry point this TU touches (FBO objects, glReadBuffer,
+// glReadPixels, the GL_PACK_* pixel-store state) is core since GL 3.0 and is
+// exported directly by the platform's libGL, which the viewer already links
+// (see the UNIX branch of nh_add_sokol_lib in cmake/Sokol.cmake). So we don't
+// need a dynamic function loader (GLAD/GLEW) — asking <GL/gl.h> for the
+// extension prototypes via GL_GLEXT_PROTOTYPES lets the linker bind them
+// straight against libGL. This matches how sokol_app.h itself pulls in GL on
+// the GLX/EGL desktop paths.
+#ifndef GL_GLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES
+#endif
+#include <GL/gl.h>
+#include <GL/glext.h>
 #else
 #error                                                                                             \
     "png_export_readback_gl.cpp compiled without a GL backend define (SOKOL_GLES3 / SOKOL_GLCORE)."

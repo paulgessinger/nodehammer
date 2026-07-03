@@ -2,8 +2,9 @@
 
 Status: native/Metal path landed and verified. Backend-based readback in place
 for Metal (verified), WebGL2/GLES3 and WebGPU (both compile + link in the wasm
-build; browser runtime verification still pending). D3D11 is a build-time
-`#error` stub.
+build; browser runtime verification still pending), desktop GLCORE (Linux) and
+D3D11 (Windows) — the latter two compile + link in CI; runtime verification on
+those backends is still pending.
 
 ## Goal
 
@@ -95,8 +96,8 @@ sokol_lib backend)` maps:
 | `SOKOL_METAL`    | `png_export_readback_metal.mm`      | Done + verified.                     |
 | `SOKOL_WGPU`     | `png_export_readback_wgpu.cpp`      | Done (compiles/links); browser verify pending. `copyTextureToBuffer` + async map. |
 | `SOKOL_GLES3`    | `png_export_readback_gl.cpp`        | Done (compiles/links); browser verify pending. FBO + `glReadPixels` (flip rows). |
-| `SOKOL_GLCORE`   | `png_export_readback_gl.cpp`        | `#error` — needs a desktop GL loader. |
-| `SOKOL_D3D11`    | `png_export_readback_d3d11.cpp`     | `#error` stub for now.               |
+| `SOKOL_GLCORE`   | `png_export_readback_gl.cpp`        | Done (compiles/links in CI); runtime verify pending. Same FBO path; libGL entry points via `GL_GLEXT_PROTOTYPES`. |
+| `SOKOL_D3D11`    | `png_export_readback_d3d11.cpp`     | Done (compiles/links in CI); runtime verify pending. Staging-texture `CopyResource` + `Map` (swizzle BGRA→RGBA). |
 
 sokol exposes the native handles needed for each:
 `sg_mtl_device` / `sg_mtl_query_image_info`,
@@ -128,8 +129,11 @@ sokol exposes the native handles needed for each:
     the platform-named `png_export_readback_web.cpp` / `_native_other.cpp` stubs.
   - `png_export_readback_gl.cpp` — scratch FBO + `glReadPixels`, rows flipped for
     the top-left contract. No swizzle: `glReadPixels(GL_RGBA)` returns *logical*
-    RGBA regardless of internal byte order. Synchronous (like Metal). `#error`
-    on `SOKOL_GLCORE` (needs a desktop GL function loader, not wired).
+    RGBA regardless of internal byte order. Synchronous (like Metal). Covers both
+    `SOKOL_GLES3` and desktop `SOKOL_GLCORE`: the readback code is identical, and
+    on GLCORE the FBO/`glReadPixels` entry points (all core since GL 3.0) bind
+    straight against the platform `libGL` the viewer already links, requested via
+    `GL_GLEXT_PROTOTYPES` — no GLAD/GLEW loader needed.
   - `png_export_readback_wgpu.cpp` — `copyTextureToBuffer` into a
     `MapRead|CopyDst` buffer (256-byte `bytesPerRow` align), submitted on
     `sg_wgpu_queue()`, then `wgpuBufferMapAsync` with
@@ -140,7 +144,10 @@ sokol exposes the native handles needed for each:
     signature (`WGPUBufferMapCallbackInfo`, `WGPUTexelCopy*Info`).
   - `makeReadbackColorImage` hook + `SceneRenderTarget::create(..., for_readback)`
     so the WebGPU export target gets a `CopySrc` texture (see the caveat above).
-  - `png_export_readback_d3d11.cpp` — `#error` stub (no Windows env to test).
+  - `png_export_readback_d3d11.cpp` — `CopyResource` the render-target texture
+    into a `D3D11_USAGE_STAGING` + `CPU_ACCESS_READ` texture, `Map` it, de-pad
+    rows by `RowPitch`, swizzle BGRA→RGBA. Top-left origin like Metal, so no row
+    flip. Synchronous (`Map` blocks on the pending GPU copy).
   - Verified: native Metal screenshot still correct after the shared-file
     changes; the emscripten build configures and both `nodehammer-{gles3,wgpu}`
     bundles compile + link with their readback TUs.
