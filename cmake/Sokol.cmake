@@ -15,6 +15,11 @@
 include(CMakeParseArguments)
 find_package(sokol REQUIRED CONFIG)
 
+# This module's own directory, captured at include time. CMAKE_CURRENT_LIST_DIR
+# inside a function resolves to the *caller's* list dir, so functions below
+# reference sibling scripts (e.g. validate_shader_hlsl.cmake) through this.
+set(NH_SOKOL_LIST_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
 # ── sokol headers ────────────────────────────────────────────────────────────
 # Pinned by recipes/sokol, including nodehammer's WGPU null-vertex-buffer
 # workaround for emdawnwebgpu.
@@ -35,6 +40,24 @@ if(NOT TARGET sokol::shdc)
             "NODEHAMMER_WITH_VIEWER is ON but sokol-shdc was not found on PATH. "
             "Run `just recipes && just deps` (or `just wasm-deps`) — the local "
             "Conan recipe at recipes/sokol-shdc/ ships the prebuilt binary.")
+    endif()
+endif()
+
+# ── HLSL shader validation (fxc /WX) ─────────────────────────────────────────
+# The D3D11 backend cross-compiles GLSL → HLSL and only compiles it at runtime,
+# so FXC warnings never fail the build — they surface as viewer log spam. When
+# ON (default), nh_compile_shader runs each shader's hlsl5 output through
+# `fxc /WX` at build time so those warnings become build errors. Windows-only
+# (fxc ships with the Windows SDK); a no-op elsewhere.
+option(NODEHAMMER_SHADER_STRICT
+    "Validate cross-compiled HLSL shaders with fxc /WX at build time" ON)
+if(NODEHAMMER_SHADER_STRICT AND WIN32)
+    find_program(NODEHAMMER_FXC fxc DOC "D3DCompile CLI (fxc.exe) from the Windows SDK")
+    if(NOT NODEHAMMER_FXC)
+        message(WARNING
+            "NODEHAMMER_SHADER_STRICT is ON but fxc.exe was not found; "
+            "HLSL shader validation will be skipped. Build from an MSVC/SDK "
+            "environment (or set NODEHAMMER_FXC) to enable it.")
     endif()
 endif()
 
@@ -147,6 +170,22 @@ function(nh_compile_shader input)
     # Join the slang list with ':' for sokol-shdc.
     string(REPLACE ";" ":" _slang_arg "${NH_SLANGS}")
 
+    # Optional fxc /WX validation of the hlsl5 output, appended as an extra
+    # build step so it re-runs whenever the shader changes (and fails the build
+    # on any D3DCompile warning). Only meaningful when the shader actually
+    # targets hlsl5 and fxc was located.
+    set(_validate_cmd "")
+    if(NODEHAMMER_SHADER_STRICT AND WIN32 AND NODEHAMMER_FXC AND "hlsl5" IN_LIST NH_SLANGS)
+        set(_validate_cmd
+            COMMAND ${CMAKE_COMMAND}
+                    -DSHDC=$<TARGET_FILE:sokol::shdc>
+                    -DFXC=${NODEHAMMER_FXC}
+                    -DINPUT=${_in_abs}
+                    -DSTEM=${_stem}
+                    -DTMPDIR=${_out_dir}/hlsl_validate/${_stem}
+                    -P ${NH_SOKOL_LIST_DIR}/validate_shader_hlsl.cmake)
+    endif()
+
     add_custom_command(
         OUTPUT  "${_out_abs}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
@@ -157,6 +196,7 @@ function(nh_compile_shader input)
                 -f sokol
                 --ifdef
                 --reflection
+        ${_validate_cmd}
         DEPENDS "${_in_abs}" ${_include_deps} sokol::shdc
         COMMENT "sokol-shdc ${_stem}.glsl -> ${_stem}.glsl.h (${_slang_arg})"
         VERBATIM
