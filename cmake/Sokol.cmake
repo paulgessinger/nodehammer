@@ -1,4 +1,4 @@
-# Sokol viewer dependencies — sokol headers via FetchContent, sokol-shdc
+# Sokol viewer dependencies — sokol headers via Conan, sokol-shdc
 # resolved as an IMPORTED executable from the build PATH (typically supplied
 # by the local Conan recipe under recipes/sokol-shdc).
 #
@@ -12,35 +12,12 @@
 # backend on Emscripten — GLES3 + WGPU); see top-level CMakeLists.txt for the
 # call sites.
 
-include(FetchContent)
 include(CMakeParseArguments)
+find_package(sokol REQUIRED CONFIG)
 
-# ── sokol headers (FetchContent only — no Conan recipe) ──────────────────────
-# Pinned to a recent master commit on floooh/sokol that matches the
-# sokol-shdc release in recipes/sokol-shdc/conandata.yml.
-#
-# PATCH_COMMAND applies the emdawnwebgpu WGPU null-vb workaround to sokol_gfx.h
-# at populate time via a pure-CMake `-P` script (no external `sed`; works in
-# any shell/CI environment). Re-runs automatically if the pinned commit changes
-# or the source is re-fetched. See cmake/patch_sokol_wgpu.cmake.
-FetchContent_Declare(sokol
-    SYSTEM
-    GIT_REPOSITORY https://github.com/floooh/sokol.git
-    GIT_TAG        17d1b01344f724f598c241aa8d11e621f6cc911f
-    PATCH_COMMAND  ${CMAKE_COMMAND}
-        -Dsokol_gfx_h=<SOURCE_DIR>/sokol_gfx.h
-        -P ${CMAKE_CURRENT_LIST_DIR}/patch_sokol_wgpu.cmake
-)
-FetchContent_MakeAvailable(sokol)
-
-if(NOT TARGET sokol::headers)
-    add_library(sokol::headers INTERFACE IMPORTED)
-    target_include_directories(sokol::headers SYSTEM INTERFACE
-        ${sokol_SOURCE_DIR}
-        ${sokol_SOURCE_DIR}/util
-    )
-endif()
-
+# ── sokol headers ────────────────────────────────────────────────────────────
+# Pinned by recipes/sokol, including nodehammer's WGPU null-vertex-buffer
+# workaround for emdawnwebgpu.
 # ── sokol-shdc binary (resolved from PATH / Conan tool_requires) ─────────────
 # Mirrors the bgfx::shaderc resolver pattern that lived in cmake/Dependencies.cmake
 # before this rewrite. Conan's CMakeToolchain prepends build-context tool dirs
@@ -102,7 +79,7 @@ endif()
 
 function(nh_add_sokol_lib name backend_define)
     add_library(${name} STATIC ${NH_SOKOL_IMPL_SOURCES})
-    target_link_libraries(${name} PUBLIC sokol::headers imgui)
+    target_link_libraries(${name} PUBLIC sokol::headers ImGui::ImGui)
     # SOKOL_NO_ENTRY: we provide our own main() (the CLI dispatcher in
     # src/cli/main.cpp) and call sapp_run() from inside the viewer
     # subcommand. Without this, sokol_app.h synthesises a main() which

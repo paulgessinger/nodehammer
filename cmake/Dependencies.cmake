@@ -196,71 +196,15 @@ endif()
 # the small impl TUs in src/sokol/. No SDL3 — sokol_app owns the window/event
 # loop on every platform, including Emscripten.
 if(NODEHAMMER_WITH_VIEWER)
-    # Dear ImGui — no upstream CMake. Fetch sources and build the core lib.
-    # No SDL3 backend; input + rendering are wired through util/sokol_imgui.h
-    # in the sokol headers package.
-    FetchContent_Declare(imgui
-        SYSTEM
-        GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        # Docking branch commit. 1.92 introduced the ImTextureData /
-        # RendererHasTextures API that the pinned sokol_imgui.h requires;
-        # keep this on/after that surface when bumping.
-        GIT_TAG        ed9d1e742793f7e4333565f891b4e3821b205f09
-    )
-    FetchContent_MakeAvailable(imgui)
-
-    if(NOT TARGET imgui)
-        add_library(imgui STATIC
-            ${imgui_SOURCE_DIR}/imgui.cpp
-            ${imgui_SOURCE_DIR}/imgui_demo.cpp
-            ${imgui_SOURCE_DIR}/imgui_draw.cpp
-            ${imgui_SOURCE_DIR}/imgui_tables.cpp
-            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        )
-        target_include_directories(imgui SYSTEM PUBLIC
-            ${imgui_SOURCE_DIR}
-            ${imgui_SOURCE_DIR}/backends
-        )
-        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-            target_compile_options(imgui PRIVATE -w)
-        elseif(MSVC)
-            target_compile_options(imgui PRIVATE /W0)
-        endif()
-    endif()
-    if(TARGET imgui AND NOT TARGET ImGui::ImGui)
-        add_library(ImGui::ImGui ALIAS imgui)
-    endif()
+    # Dear ImGui. Pinned and packaged by the local recipe under recipes/imgui.
+    # No SDL3 backend; input + rendering are wired through util/sokol_imgui.h.
+    find_package(imgui REQUIRED CONFIG)
 
     # ── ImPlot ───────────────────────────────────────────────────────────────
     # Plotting widgets for Dear ImGui (live perf graphs in the Debug panel).
-    # No upstream CMake — fetch sources and build the core lib against imgui,
-    # mirroring the imgui block above. Master HEAD guards the recent imgui
-    # texture / ImDrawList API changes with IMGUI_VERSION_NUM, so it builds
-    # against the pinned docking imgui above.
-    FetchContent_Declare(implot
-        SYSTEM
-        GIT_REPOSITORY https://github.com/epezent/implot.git
-        GIT_TAG        1351ab2c46d7a05a60f3533047bfba8a953520a1
-    )
-    FetchContent_MakeAvailable(implot)
-
-    if(NOT TARGET implot)
-        add_library(implot STATIC
-            ${implot_SOURCE_DIR}/implot.cpp
-            ${implot_SOURCE_DIR}/implot_items.cpp
-            ${implot_SOURCE_DIR}/implot_demo.cpp
-        )
-        target_include_directories(implot SYSTEM PUBLIC ${implot_SOURCE_DIR})
-        target_link_libraries(implot PUBLIC imgui)
-        if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-            target_compile_options(implot PRIVATE -w)
-        elseif(MSVC)
-            target_compile_options(implot PRIVATE /W0)
-        endif()
-    endif()
-    if(TARGET implot AND NOT TARGET ImPlot::ImPlot)
-        add_library(ImPlot::ImPlot ALIAS implot)
-    endif()
+    # Packaged by the local recipe under recipes/implot against the pinned
+    # Dear ImGui snapshot above.
+    find_package(implot REQUIRED CONFIG)
 
     # Vendored Font Awesome 7 (free-solid). Header from juliettef/IconFontCppHeaders,
     # compressed font blob generated from the official FA7 desktop OTF via
@@ -292,20 +236,12 @@ if(NODEHAMMER_WITH_VIEWER)
     # Native-only file picker (NFD::nfd target). The web build uses an
     # HTML <input type=file> + FileSystemAccess API instead; skip the dep
     # entirely under emscripten so the wasm binary doesn't grow a useless
-    # AppKit/GTK/win32 stub. NFD_PORTAL=ON makes Linux use xdg-desktop-portal
-    # (works in Wayland/Flatpak without bundling GTK).
-    #
+    # AppKit/GTK/win32 stub. The local recipe defaults Linux to
+    # xdg-desktop-portal instead of bundling GTK.
     # NODEHAMMER_VIEWER_NATIVE_DIALOG=OFF skips the dep entirely: the viewer
     # compiles a no-op picker (drag-and-drop and CLI --input still work) so it
     # can build on headless hosts / minimal containers without GTK or DBus.
     if(NOT EMSCRIPTEN AND NODEHAMMER_VIEWER_NATIVE_DIALOG)
-        set(NFD_PORTAL ON CACHE BOOL "" FORCE)
-        set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        FetchContent_Declare(nfd
-            SYSTEM
-            GIT_REPOSITORY https://github.com/btzy/nativefiledialog-extended.git
-            GIT_TAG        v1.2.1
-        )
-        FetchContent_MakeAvailable(nfd)
+        find_package(nfd REQUIRED CONFIG)
     endif()
 endif()

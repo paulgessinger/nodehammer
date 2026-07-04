@@ -1,0 +1,4 @@
+sources:
+  "1.92.0":
+    # ocornut/imgui docking branch commit. Required by the pinned sokol_imgui.h.
+    url: "https://github.com/ocornut/imgui/archive/ed9d1e742793f7e4333565f891b4e3821b205f09.tar.gz"
