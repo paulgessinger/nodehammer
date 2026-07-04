@@ -48,8 +48,6 @@ struct SceneBuildJob::Impl {
     std::shared_ptr<const ::nodehammer::NHConfig> preset_config;
     std::shared_ptr<const ::nodehammer::SemanticScene> preset_scene;
     std::optional<::nodehammer::WedgeCutParams> wedge_cut;
-
-    ::nodehammer::SceneBuildResult result;
 };
 
 namespace {
@@ -80,7 +78,6 @@ void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
     impl_->preset_config = std::move(config);
     impl_->preset_scene = std::move(scene);
     impl_->wedge_cut = wedge_cut;
-    impl_->result = {};
 
     impl_->done.store(false, std::memory_order_release);
     impl_->worker_phase.store(Phase::Preparing, std::memory_order_relaxed);
@@ -97,7 +94,10 @@ void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
             impl->worker_phase.store(impl->pipe.phase(), std::memory_order_relaxed);
         }
         impl->worker_phase.store(impl->pipe.phase(), std::memory_order_relaxed);
-        impl->result = impl->pipe.take();
+        // Leave the finished pipeline intact and only publish `done`. The main
+        // thread drains the result via pipe.take() after it joins the worker
+        // (see SceneBuildJob::take), so the progress getters that sample
+        // tess_job/wedge_job can never race with take()'s reset of those jobs.
         impl->done.store(true, std::memory_order_release);
     });
 }
@@ -120,8 +120,11 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
 }
 
 ::nodehammer::SceneBuildResult SceneBuildJob::take() {
-    ::nodehammer::SceneBuildResult out = std::move(impl_->result);
-    impl_->result = {};
+    // Only reached after poll() observed `done` and joined the worker, so
+    // draining the pipeline here — which resets its nested wedge/tess jobs —
+    // runs single-threaded and cannot race with the worker or the progress
+    // getters that sample those jobs while the build is Running.
+    ::nodehammer::SceneBuildResult out = impl_->pipe.take();
     impl_->state = Impl::State::Idle;
     impl_->config_label.clear();
     impl_->geometry_label.clear();
