@@ -44,7 +44,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <format>
@@ -607,12 +606,6 @@ void App::Impl::benchInit() {
     quality.render_scale = std::clamp(bench_render_scale_, 0.25f, 4.0f);
     quality.cap_fps = false;
     quality.pause_when_static = false;
-    // Perf-attribution lever: NH_BENCH_NO_HDR=1 renders the scene target as
-    // RGBA8 instead of RGBA16F, isolating HDR color-ROP bandwidth (the bulk of
-    // per-fragment fill cost) from shading. Off by default.
-    if (const char *e = std::getenv("NH_BENCH_NO_HDR"); e && e[0] == '1') {
-        quality.enable_hdr = false;
-    }
 
     std::string temp_dir;
     std::error_code ec;
@@ -1288,32 +1281,6 @@ void App::Impl::render() {
             flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
             flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
             flags.enable_pbr = cfg.enable_pbr;
-            // --- Perf-attribution diagnostics (env-gated; no-op unless set) ---
-            // Used to localize scene-pass GPU cost under the bench harness:
-            //   NH_BENCH_FORCE_LAMBERT=1 → drop PBR/IBL to the cheap Lambert FS,
-            //     isolating fragment-shading cost from raster/overdraw.
-            //   NH_BENCH_FORCE_CULL=1 → force back-face culling, isolating the
-            //     double-sided overdraw component. Read once (static).
-            static const bool bench_force_lambert = [] {
-                const char *e = std::getenv("NH_BENCH_FORCE_LAMBERT");
-                return e && e[0] == '1';
-            }();
-            static const bool bench_force_cull = [] {
-                const char *e = std::getenv("NH_BENCH_FORCE_CULL");
-                return e && e[0] == '1';
-            }();
-            //   NH_BENCH_ZPREPASS=1 → run the depth prepass (overdraw fix).
-            static const bool bench_z_prepass = [] {
-                const char *e = std::getenv("NH_BENCH_ZPREPASS");
-                return e && e[0] == '1';
-            }();
-            if (bench_force_lambert) {
-                flags.enable_pbr = false;
-            }
-            if (bench_force_cull) {
-                flags.cull = CullOverride::ForceCull;
-            }
-            flags.z_prepass = bench_z_prepass;
             // Single source of truth for sun direction: ibl_settings.sun_dir
             // drives both the IBL bake and the analytical light, so the baked
             // reflected sun lines up with the analytical highlight (docs §9.1).
