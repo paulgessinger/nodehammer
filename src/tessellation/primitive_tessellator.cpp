@@ -4,7 +4,6 @@
 
 #include <glm/glm.hpp>
 
-#include <algorithm>
 #include <cmath>
 #include <numbers>
 
@@ -39,89 +38,15 @@ inline float loopAngle(int j, int n) {
     return 2.0f * kPi * static_cast<float>(j) / static_cast<float>(n);
 }
 
-// Lexicographic less-than on raw positions, used only to break diagonal-length
-// ties deterministically (see pickAcDiagonal below). Not a spatial ordering of
-// any significance — just needs to be a total order that two callers holding
-// the same set of positions will agree on.
-bool lexLess(const glm::vec3 &p, const glm::vec3 &q) {
-    if (p.x != q.x)
-        return p.x < q.x;
-    if (p.y != q.y)
-        return p.y < q.y;
-    return p.z < q.z;
-}
-
-// Decide whether a quad with corners a,b,c,d (in cyclic order) should be split
-// on the a–c diagonal (true) or the b–d diagonal (false).
-//
-// Why this matters: two touching primitives (e.g. two stacked calorimeter
-// slabs) can each emit a face that covers the exact same 4 corner positions,
-// but built independently — e.g. one is a +Z box face and the other is the
-// mating -Z face of its neighbour, whose corners are listed in a *rotated or
-// mirrored* cyclic order relative to the first. If the split were picked from
-// argument position alone (always a–c), the two faces would triangulate on
-// geometrically DIFFERENT diagonals and the coincident-interior-face removal
-// pass (removeCoincidentInteriorFaces in tessellation_pass.cpp) would never
-// find a matching triangle key, even though the quads are identical in space.
-//
-// The fix: choose the diagonal from the corner POSITIONS, not from which
-// argument slot they arrived in. Two quads that share the same 4 positions —
-// regardless of winding/rotation/starting corner — must derive the same
-// decision from those positions alone, so they always agree on the split.
-//
-//   Rule: pick the SHORTER diagonal (by squared length: a–c vs b–d).
-//   Tie-break (e.g. a perfect square/rectangle face): compare the two
-//   diagonals' endpoint-position pairs, each sorted into a canonical
-//   (lexicographically-smaller-first) order, and pick whichever diagonal's
-//   sorted pair is lexicographically smaller. This is symmetric in the
-//   positions themselves (doesn't care which corner was labelled a/b/c/d), so
-//   both mating faces reach the same conclusion.
-//
-// Returns true  → split a–c, emit (a,b,c) + (a,c,d)
-// Returns false → split b–d, emit (a,b,d) + (b,c,d)
-bool pickAcDiagonal(const glm::vec3 &a, const glm::vec3 &b, const glm::vec3 &c,
-                    const glm::vec3 &d) {
-    const float acLenSq = glm::dot(c - a, c - a);
-    const float bdLenSq = glm::dot(d - b, d - b);
-    // Use a relative epsilon so the tie-break (order-independent) kicks in for
-    // any pair of diagonals that are equal up to float noise, not just exact
-    // ties — otherwise two mating faces whose vertices were computed via
-    // slightly different arithmetic paths could disagree on which is
-    // "shorter" by a rounding hair and pick opposite diagonals.
-    const float scale = std::max({acLenSq, bdLenSq, 1e-12f});
-    if (std::abs(acLenSq - bdLenSq) > 1e-6f * scale) {
-        return acLenSq < bdLenSq;
-    }
-    // Tie: canonicalize each diagonal as its two endpoints sorted
-    // lexicographically, then compare the two canonical pairs. Whichever
-    // diagonal's canonical pair is lexicographically smaller wins. This
-    // depends only on the *set* of 4 positions, not on a/b/c/d labelling.
-    const auto &ac0 = lexLess(a, c) ? a : c;
-    const auto &ac1 = lexLess(a, c) ? c : a;
-    const auto &bd0 = lexLess(b, d) ? b : d;
-    const auto &bd1 = lexLess(b, d) ? d : b;
-    if (lexLess(ac0, bd0))
-        return true;
-    if (lexLess(bd0, ac0))
-        return false;
-    return lexLess(ac1, bd1);
-}
-
-// Append a quad as two triangles, winding CCW when viewed from the outside
-// (i.e. along the direction opposite to the face normal). The split diagonal
-// is chosen by pickAcDiagonal — see its comment for why this must be
-// position-determined rather than always a–c.
+// Append a quad as two triangles (a,b,c) + (a,c,d), winding CCW when viewed
+// from the outside (i.e. along the direction opposite to the face normal).
 //
 //   d --- c
 //   |  \  |
 //   a --- b
 //
-// a–c split → Triangle 1: a → b → c   Triangle 2: a → c → d
-// b–d split → Triangle 1: a → b → d   Triangle 2: b → c → d
-//
-// Both splits preserve the cyclic corner order a→b→c→d and CCW winding by
-// construction; only the reader's choice of which diagonal to cut along
-// changes. Per-vertex normals (carried on a/b/c/d) are untouched either way.
+// Triangle 1: a → b → c
+// Triangle 2: a → c → d
 void appendQuad(TessellationOutput &out, const Vertex &a, const Vertex &b, const Vertex &c,
                 const Vertex &d) {
     const auto base = static_cast<uint32_t>(out.vertices.size());
@@ -129,21 +54,12 @@ void appendQuad(TessellationOutput &out, const Vertex &a, const Vertex &b, const
     out.vertices.push_back(b);
     out.vertices.push_back(c);
     out.vertices.push_back(d);
-    if (pickAcDiagonal(a.position, b.position, c.position, d.position)) {
-        out.indices.push_back(base + 0);
-        out.indices.push_back(base + 1);
-        out.indices.push_back(base + 2);
-        out.indices.push_back(base + 0);
-        out.indices.push_back(base + 2);
-        out.indices.push_back(base + 3);
-    } else {
-        out.indices.push_back(base + 0);
-        out.indices.push_back(base + 1);
-        out.indices.push_back(base + 3);
-        out.indices.push_back(base + 1);
-        out.indices.push_back(base + 2);
-        out.indices.push_back(base + 3);
-    }
+    out.indices.push_back(base + 0);
+    out.indices.push_back(base + 1);
+    out.indices.push_back(base + 2);
+    out.indices.push_back(base + 0);
+    out.indices.push_back(base + 2);
+    out.indices.push_back(base + 3);
 }
 
 // Append a single triangle a → b → c (CCW when viewed from outside).
