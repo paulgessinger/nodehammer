@@ -173,8 +173,19 @@ bool aabbOutsideFrustum(const glm::vec3 &min, const glm::vec3 &max,
 struct SceneRenderer::Impl {
     bool initialised{false};
     sg_shader shader{};
+    sg_shader depth_shader{};
     sg_pipeline pipeline_no_cull{};
     sg_pipeline pipeline_back_cull{};
+    // EQUAL-depth, no-write variants used as the shaded pass *after* a depth
+    // prepass. Cull mode still matches the group so the prepass and shaded
+    // pass agree on which faces exist.
+    sg_pipeline pipeline_no_cull_eq{};
+    sg_pipeline pipeline_back_cull_eq{};
+    // Depth-only prepass pipelines (colour writes masked off). One per cull
+    // mode so the depth we lay down is exactly the set of faces the matching
+    // shaded pipeline will test against.
+    sg_pipeline pipeline_depth_no_cull{};
+    sg_pipeline pipeline_depth_back_cull{};
     sg_pixel_format current_color_format{SG_PIXELFORMAT_NONE};
     // Per-group dynamic buffer of mat4 instance transforms. Allocated once
     // at upload() to fit the largest group; reused across frames since the
@@ -238,6 +249,7 @@ void SceneRenderer::Impl::ensureInit() {
         return;
     }
     shader = sg_make_shader(scene_scene_shader_desc(sg_query_backend()));
+    depth_shader = sg_make_shader(scene_scene_depth_shader_desc(sg_query_backend()));
 
     // IBL bindings start as 1×1 placeholder textures so the shader always
     // has something to sample from. The App owns the real bake and calls
@@ -254,13 +266,13 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     if (pipeline_no_cull.id != SG_INVALID_ID && current_color_format == color_fmt) {
         return;
     }
-    if (pipeline_no_cull.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(pipeline_no_cull);
-        pipeline_no_cull = sg_pipeline{};
-    }
-    if (pipeline_back_cull.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(pipeline_back_cull);
-        pipeline_back_cull = sg_pipeline{};
+    for (sg_pipeline *p :
+         {&pipeline_no_cull, &pipeline_back_cull, &pipeline_no_cull_eq, &pipeline_back_cull_eq,
+          &pipeline_depth_no_cull, &pipeline_depth_back_cull}) {
+        if (p->id != SG_INVALID_ID) {
+            sg_destroy_pipeline(*p);
+            *p = sg_pipeline{};
+        }
     }
 
     sg_pipeline_desc pdesc{};
@@ -314,10 +326,42 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     pdesc.color_count = 1;
     pdesc.colors[0].pixel_format = color_fmt;
 
+    // Shaded pass, no prepass: writes depth, GREATER_EQUAL/LESS_EQUAL test.
     pdesc.cull_mode = SG_CULLMODE_NONE;
     pipeline_no_cull = sg_make_pipeline(&pdesc);
     pdesc.cull_mode = SG_CULLMODE_BACK;
     pipeline_back_cull = sg_make_pipeline(&pdesc);
+
+    // Shaded pass *after* a depth prepass: depth already laid down, so test
+    // EQUAL and disable depth writes. Same shader/layout/format, cull matched
+    // per group by the caller. The compare flips GE→EQUAL / LE→EQUAL — under
+    // reversed-Z the prepass wrote the max-Z fragment; EQUAL re-selects exactly
+    // that fragment because scene_vs is byte-for-byte identical here.
+    const sg_pipeline_desc eq_base = [&] {
+        sg_pipeline_desc d = pdesc;
+        d.depth.write_enabled = false;
+        d.depth.compare = SG_COMPAREFUNC_EQUAL;
+        return d;
+    }();
+    {
+        sg_pipeline_desc d = eq_base;
+        d.cull_mode = SG_CULLMODE_NONE;
+        pipeline_no_cull_eq = sg_make_pipeline(&d);
+        d.cull_mode = SG_CULLMODE_BACK;
+        pipeline_back_cull_eq = sg_make_pipeline(&d);
+    }
+
+    // Depth-only prepass: cheap FS (discards only), colour writes masked off,
+    // depth written with the same convention as the no-prepass shaded pass.
+    {
+        sg_pipeline_desc d = pdesc;
+        d.shader = depth_shader;
+        d.colors[0].write_mask = SG_COLORMASK_NONE;
+        d.cull_mode = SG_CULLMODE_NONE;
+        pipeline_depth_no_cull = sg_make_pipeline(&d);
+        d.cull_mode = SG_CULLMODE_BACK;
+        pipeline_depth_back_cull = sg_make_pipeline(&d);
+    }
 
     current_color_format = color_fmt;
 }
@@ -395,19 +439,23 @@ void SceneRenderer::release() {
         return;
     }
     impl_->destroyGpu();
-    if (impl_->pipeline_no_cull.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(impl_->pipeline_no_cull);
-        impl_->pipeline_no_cull = sg_pipeline{};
-    }
-    if (impl_->pipeline_back_cull.id != SG_INVALID_ID) {
-        sg_destroy_pipeline(impl_->pipeline_back_cull);
-        impl_->pipeline_back_cull = sg_pipeline{};
+    for (sg_pipeline *p : {&impl_->pipeline_no_cull, &impl_->pipeline_back_cull,
+                           &impl_->pipeline_no_cull_eq, &impl_->pipeline_back_cull_eq,
+                           &impl_->pipeline_depth_no_cull, &impl_->pipeline_depth_back_cull}) {
+        if (p->id != SG_INVALID_ID) {
+            sg_destroy_pipeline(*p);
+            *p = sg_pipeline{};
+        }
     }
     impl_->current_color_format = SG_PIXELFORMAT_NONE;
     impl_->ibl.release();
     if (impl_->shader.id != SG_INVALID_ID) {
         sg_destroy_shader(impl_->shader);
         impl_->shader = sg_shader{};
+    }
+    if (impl_->depth_shader.id != SG_INVALID_ID) {
+        sg_destroy_shader(impl_->depth_shader);
+        impl_->depth_shader = sg_shader{};
     }
     impl_->initialised = false;
 }
@@ -637,6 +685,79 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     const glm::vec3 to_sun = glm::normalize(flags.sun_dir);
     const glm::vec4 light_dir{-to_sun, flags.sun_intensity};
 
+    // Azimuthal cut parameters are frame-constant (they depend only on flags,
+    // not per-group), so compute once and share between the depth prepass and
+    // the shaded pass — both must apply the *same* discard or the prepass's
+    // depth won't line up with what the shaded pass keeps.
+    const float shader_cut_start = glm::radians(flags.angle_cut_start_deg);
+    const float shader_cut_end = glm::radians(flags.angle_cut_end_deg);
+    const bool large_cut = angleSpan(shader_cut_start, shader_cut_end) > 0.5f * kTau;
+    const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
+                               large_cut ? 1.f : 0.f, 0.f, 0.f};
+    const glm::vec4 cut_start_vec{std::cos(shader_cut_start), std::sin(shader_cut_start), 0.f, 0.f};
+    const glm::vec4 cut_end_vec{std::cos(shader_cut_end), std::sin(shader_cut_end), 0.f, 0.f};
+
+    // Per-group cull decision, shared by the prepass and shaded loops so the
+    // depth laid down covers exactly the faces the shaded pass will test.
+    const auto useBackCull = [&](const Impl::DrawGroup &g) {
+        bool back = !g.double_sided;
+        // Shader angle-cut exposes interior back-faces; render two-sided so the
+        // cut-away stays solid (the baked boolean cut keeps culling instead).
+        if (flags.shader_angle_cut) {
+            back = false;
+        }
+        if (flags.cull == CullOverride::ForceCull) {
+            back = true;
+        } else if (flags.cull == CullOverride::ForceNoCull) {
+            back = false;
+        }
+        return back;
+    };
+
+    // ---- Depth prepass -----------------------------------------------------
+    // Lay down nearest-Z with a cheap discard-only FS so the expensive shaded
+    // pass runs once per visible pixel instead of once per overdrawn fragment.
+    // Worth an extra geometry pass on fill/overdraw-bound frames (see bench).
+    if (flags.z_prepass) {
+        sg_pipeline current_depth_pipeline{};
+        for (const auto &g : impl_->groups) {
+            auto mesh_it = impl_->meshes.find(g.mesh);
+            if (mesh_it == impl_->meshes.end() || g.visible_count == 0) {
+                continue;
+            }
+            const auto &mesh = mesh_it->second;
+            const sg_pipeline pipeline =
+                useBackCull(g) ? impl_->pipeline_depth_back_cull : impl_->pipeline_depth_no_cull;
+            if (pipeline.id != current_depth_pipeline.id) {
+                sg_apply_pipeline(pipeline);
+                sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
+                current_depth_pipeline = pipeline;
+            }
+
+            auto mat_it = impl_->materials.find(g.material);
+            const Impl::GpuMaterial gmat =
+                (mat_it != impl_->materials.end()) ? mat_it->second : Impl::GpuMaterial{};
+            scene_depth_params_t dp{};
+            std::memcpy(dp.cut_params, glm::value_ptr(cut_params), sizeof(dp.cut_params));
+            std::memcpy(dp.cut_start, glm::value_ptr(cut_start_vec), sizeof(dp.cut_start));
+            std::memcpy(dp.cut_end, glm::value_ptr(cut_end_vec), sizeof(dp.cut_end));
+            // alpha_cut = (mask_enable, cutoff, base_alpha, unused) — mirrors
+            // scene_fs's `alpha_params.x>0.5 && base_color.a < alpha_params.y`.
+            const glm::vec4 alpha_cut{gmat.alpha_params.x, gmat.alpha_params.y, gmat.base_color.a,
+                                      0.f};
+            std::memcpy(dp.alpha_cut, glm::value_ptr(alpha_cut), sizeof(dp.alpha_cut));
+            sg_apply_uniforms(UB_scene_depth_params, SG_RANGE(dp));
+
+            sg_bindings bind{};
+            bind.vertex_buffers[0] = mesh.vbuf;
+            bind.vertex_buffers[1] = impl_->instance_buf;
+            bind.vertex_buffer_offsets[1] = static_cast<int>(g.visible_byte_offset);
+            bind.index_buffer = mesh.ibuf;
+            sg_apply_bindings(&bind);
+            sg_draw(0, static_cast<int>(mesh.index_count), static_cast<int>(g.visible_count));
+        }
+    }
+
     sg_pipeline current_pipeline{};
     for (const auto &g : impl_->groups) {
         auto mesh_it = impl_->meshes.find(g.mesh);
@@ -653,25 +774,16 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const Impl::GpuMaterial gmat =
             (mat_it != impl_->materials.end()) ? mat_it->second : Impl::GpuMaterial{};
 
-        // Per-material doubleSided picks the cull pipeline by default. The
-        // `cull` override is a debug knob that can force one mode globally.
-        // Switch only when the pipeline actually changes; VS uniforms must
-        // be reapplied after each pipeline change.
-        bool use_back_cull = !g.double_sided;
-        // The shader angle-cut discards the near wedge and exposes the interior
-        // back-faces of the far wall; culling them makes the cut-away look
-        // hollow. Render double-sided while it's active so cuts stay solid.
-        // (The baked boolean cut adds watertight caps, so it keeps culling.)
-        if (flags.shader_angle_cut) {
-            use_back_cull = false;
-        }
-        if (flags.cull == CullOverride::ForceCull) {
-            use_back_cull = true;
-        } else if (flags.cull == CullOverride::ForceNoCull) {
-            use_back_cull = false;
-        }
+        // Per-material doubleSided picks the cull pipeline by default (see
+        // useBackCull). When a depth prepass ran, use the EQUAL/no-write
+        // variants so the shaded FS executes once per visible pixel; otherwise
+        // the plain depth-writing pipelines. Switch only when it actually
+        // changes; VS uniforms must be reapplied after each pipeline change.
+        const bool use_back_cull = useBackCull(g);
         const sg_pipeline pipeline =
-            use_back_cull ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
+            flags.z_prepass
+                ? (use_back_cull ? impl_->pipeline_back_cull_eq : impl_->pipeline_no_cull_eq)
+                : (use_back_cull ? impl_->pipeline_back_cull : impl_->pipeline_no_cull);
         if (pipeline.id != current_pipeline.id) {
             sg_apply_pipeline(pipeline);
             sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
@@ -682,14 +794,6 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         std::memcpy(fs_params.base_color, glm::value_ptr(gmat.base_color),
                     sizeof(fs_params.base_color));
         std::memcpy(fs_params.light_dir, glm::value_ptr(light_dir), sizeof(fs_params.light_dir));
-        const float shader_cut_start = glm::radians(flags.angle_cut_start_deg);
-        const float shader_cut_end = glm::radians(flags.angle_cut_end_deg);
-        const bool large_cut = angleSpan(shader_cut_start, shader_cut_end) > 0.5f * kTau;
-        const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
-                                   large_cut ? 1.f : 0.f, 0.f, 0.f};
-        const glm::vec4 cut_start_vec{std::cos(shader_cut_start), std::sin(shader_cut_start), 0.f,
-                                      0.f};
-        const glm::vec4 cut_end_vec{std::cos(shader_cut_end), std::sin(shader_cut_end), 0.f, 0.f};
         std::memcpy(fs_params.cut_params, glm::value_ptr(cut_params), sizeof(fs_params.cut_params));
         std::memcpy(fs_params.cut_start, glm::value_ptr(cut_start_vec),
                     sizeof(fs_params.cut_start));

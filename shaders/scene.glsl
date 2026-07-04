@@ -318,3 +318,48 @@ void main() {
 @end
 
 @program scene scene_vs scene_fs
+
+// ---------------------------------------------------------------------------
+// Depth-only prepass. Shares scene_vs (identical clip-space transform, so the
+// depth it writes matches scene_fs's fragments bit-for-bit under an EQUAL test
+// in the main pass). The FS does nothing but replicate scene_fs's *discards*
+// — the azimuthal angle cut and the alpha-mask cut — so it never writes depth
+// where the main pass would drop the fragment (which would punch holes in
+// whatever is behind). No lighting, no texture taps, no colour write (the
+// pipeline masks colour off): this pass exists purely to lay down nearest-Z
+// so the expensive scene_fs runs once per visible pixel instead of once per
+// overdrawn fragment. See scene_renderer.cpp for the two-loop driver.
+@fs scene_depth_fs
+layout(binding=1) uniform depth_params {
+    vec4 cut_params;  // x = enabled, y = large-cut flag (matches scene_fs)
+    vec4 cut_start;   // xy = unit vector at start phi
+    vec4 cut_end;     // xy = unit vector at end phi
+    vec4 alpha_cut;   // x = mask_enable, y = cutoff, z = base_alpha, w unused
+};
+
+// Must mirror scene_vs's outputs so varying locations line up; v_normal_world
+// is unused here but kept so the linker assigns matching slots.
+in vec3 v_normal_world;
+in vec3 v_world_pos;
+out vec4 frag_color;
+
+void main() {
+    if (cut_params.x > 0.5) {
+        vec2 p = v_world_pos.xy;
+        float side_start = cut_start.x * p.y - cut_start.y * p.x;
+        float side_end = cut_end.x * p.y - cut_end.y * p.x;
+        bool in_cut = cut_params.y > 0.5
+            ? (side_start >= 0.0 || side_end <= 0.0)
+            : (side_start >= 0.0 && side_end <= 0.0);
+        if (in_cut) {
+            discard;
+        }
+    }
+    if (alpha_cut.x > 0.5 && alpha_cut.z < alpha_cut.y) {
+        discard;
+    }
+    frag_color = vec4(0.0);
+}
+@end
+
+@program scene_depth scene_vs scene_depth_fs

@@ -83,6 +83,13 @@ class SceneRenderer {
         float angle_cut_end_deg{90.f};
         bool enable_pbr{false}; ///< When on: Cook-Torrance + IBL ambient.
 
+        /// Run a depth-only prepass before the shaded pass so the expensive
+        /// scene_fs executes once per visible pixel instead of once per
+        /// overdrawn fragment. Pays an extra geometry pass to win on
+        /// fill/overdraw-bound frames (nested detector shells). The shaded
+        /// pass then uses an EQUAL depth test with depth writes off.
+        bool z_prepass{false};
+
         /// Toward-sun direction for the analytical directional light. Should
         /// match the IBL bake's sun_dir so the analytical highlight aligns
         /// with the reflected sun in the cubemap (per docs §9.1).
