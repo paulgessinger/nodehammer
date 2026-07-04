@@ -108,12 +108,17 @@ void registerCmdViewer(CLI::App &app) {
     // stdout), then quit. D3D11 only for the GPU timings.
     auto *benchOpt =
         sub->add_option("--bench", "Run the headless GPU benchmark, write results JSON here, quit");
+    auto benchScale = std::make_shared<float>(1.0f);
+    sub->add_option("--bench-scale", *benchScale,
+                    "Bench SSAA on the scene/AO passes (render_scale, 0.25-4). >1 pushes the GPU "
+                    "past the refresh so total/composite timings aren't present-paced")
+        ->capture_default_str();
 
     sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt, cullModeStr,
                    screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt,
                    angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, inputOpt, configOpt, benchOpt]() {
+                   cameraPitchOpt, inputOpt, configOpt, benchOpt, benchScale]() {
         if (*cullModeOpt) {
             using nodehammer::viewer::CullOverride;
             CullOverride mode = CullOverride::Auto;
@@ -205,7 +210,7 @@ void registerCmdViewer(CLI::App &app) {
             application->requestScreenshot(screenshotPath, *screenshot);
         }
         if (!benchPath.empty()) {
-            application->requestBench(benchPath, inputPath);
+            application->requestBench(benchPath, inputPath, *benchScale);
         }
 
         // Native CLI flow: if both roots live under the launch CWD, mount that

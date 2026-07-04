@@ -117,7 +117,8 @@ class App {
     /// the results JSON to `json_out_path` (and stdout), then quit. `scene_label`
     /// is echoed into the JSON. Call before run(). D3D11 is the only backend with
     /// real GPU timings; elsewhere the timing fields are marked invalid.
-    void requestBench(std::string json_out_path, std::string scene_label);
+    void requestBench(std::string json_out_path, std::string scene_label,
+                      float render_scale = 1.0f);
 
     /// Native: blocks until the window closes; returns the exit code.
     /// Emscripten: registers the main loop with the runtime and returns 0

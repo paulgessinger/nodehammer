@@ -221,6 +221,7 @@ struct App::Impl {
     bool bench_pending_{false};
     std::string bench_json_path_;
     std::string bench_scene_label_;
+    float bench_render_scale_{1.0f}; // SSAA on the scene/AO passes — push GPU-bound for 4K-equiv
     std::unique_ptr<BenchRunner> bench_;
     std::string bench_capture_request_; // non-empty: composite+read back to this path this frame
     bool bench_capture_issued_{false};  // the grab composite ran in render() this frame
@@ -602,7 +603,7 @@ void App::Impl::benchInit() {
     cfg.auto_orbit = false;
     cfg.boolean_cut = true;
     quality.dynamic_render_scale = false;
-    quality.render_scale = 1.0f;
+    quality.render_scale = std::clamp(bench_render_scale_, 0.25f, 4.0f);
     quality.cap_fps = false;
     quality.pause_when_static = false;
 
@@ -1997,10 +1998,11 @@ void App::requestScreenshot(std::string path, PngExportSettings settings) {
     impl_->startup_screenshot_settings = settings;
 }
 
-void App::requestBench(std::string json_out_path, std::string scene_label) {
+void App::requestBench(std::string json_out_path, std::string scene_label, float render_scale) {
     impl_->bench_pending_ = true;
     impl_->bench_json_path_ = std::move(json_out_path);
     impl_->bench_scene_label_ = std::move(scene_label);
+    impl_->bench_render_scale_ = render_scale;
     // vsync feeds swap_interval, which run() reads before onInit — so it must be
     // forced here, before run(). The rest of the determinism knobs are asserted
     // in benchInit() (after persisted state loads and could clobber them).

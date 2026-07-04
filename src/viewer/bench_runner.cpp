@@ -294,6 +294,16 @@ void BenchRunner::writeResults(const char *backend_name, std::uint32_t width,
     j += "  \"scene\": \"" + escapeJson(scene_label_) + "\",\n";
     j += "  \"backend\": \"" + escapeJson(backend_name) + "\",\n";
     j += "  \"resolution\": [" + std::to_string(width) + ", " + std::to_string(height) + "],\n";
+    // The scene/AO passes render at render_scale × the window (SSAA), so the
+    // scene-pass cost tracks scene_resolution, not the window. Recorded so a run
+    // is self-describing (a scale-2 run is ~4× the scene pixels of a scale-1 run).
+    const float scale = quality_.render_scale;
+    const auto scaled = [scale](std::uint32_t d) {
+        return static_cast<std::uint32_t>(static_cast<float>(d) * scale + 0.5f);
+    };
+    j += "  \"render_scale\": " + std::format("{:.3f}", scale) + ",\n";
+    j += "  \"scene_resolution\": [" + std::to_string(scaled(width)) + ", " +
+         std::to_string(scaled(height)) + "],\n";
     j += "  \"segments\": [\n";
     for (std::size_t i = 0; i < results_.size(); ++i) {
         const SegResult &r = results_[i];
