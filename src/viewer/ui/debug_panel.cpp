@@ -26,6 +26,7 @@ constexpr ImVec4 kEncodeColor{0.30f, 0.80f, 0.85f, 1.f};  // cyan  — CPU encod
 constexpr ImVec4 kPresentColor{0.93f, 0.32f, 0.34f, 1.f}; // red   — present / GPU backpressure
 constexpr ImVec4 kWaitColor{0.85f, 0.40f, 0.90f, 1.f};    // magenta — GPU wait (in encode)
 constexpr ImVec4 kSceneColor{0.36f, 0.86f, 0.30f, 1.f};   // green
+constexpr ImVec4 kGpuColor{0.98f, 0.55f, 0.15f, 1.f};     // orange — real GPU time (timestamps)
 constexpr ImVec4 kFpsColor{0.85f, 0.85f, 0.85f, 1.f};     // light grey
 
 const char *backendName() {
@@ -173,6 +174,23 @@ void renderPerfSection(const ViewerUiContext &ctx) {
     std::snprintf(buf, sizeof(buf), "%7.2f ms", v_scene);
     readoutRow(kSceneColor, "Scene submit", buf);
 
+    // Real GPU time from timestamp queries (D3D11 only today). This is the cost
+    // the CPU submit rows above can't see: on D3D11 the frame stalls inside
+    // sokol_app's Present(), which runs after sg_commit() where every timer here
+    // has already stopped. A GPU total far above CPU submit ⇒ GPU-bound.
+    const GpuPassTimings *gpu = ctx.gpu_pass_times;
+    if (gpu != nullptr && gpu->valid) {
+        ImGui::Spacing();
+        std::snprintf(buf, sizeof(buf), "%7.2f ms", gpu->total_ms);
+        readoutRow(kGpuColor, "GPU total", buf);
+        for (int i = 0; i < gpu->count; ++i) {
+            char label[32];
+            std::snprintf(label, sizeof(label), "  %s", gpu->segments[i].label);
+            std::snprintf(buf, sizeof(buf), "%7.2f ms", gpu->segments[i].ms);
+            readoutRow(kGpuColor, label, buf);
+        }
+    }
+
     // Per-frame sokol draw-submission counters. The encode cost is dominated by
     // these calls, so they attribute where the CPU submit time goes.
     const RenderCallStats &cs = ctx.call_stats;
@@ -210,7 +228,8 @@ void renderPerfSection(const ViewerUiContext &ctx) {
     static AxisTracker timing_axis;
     const float timing_max =
         std::max({windowMax(h.frame_ms, x_min), windowMax(h.encode_ms, x_min),
-                  windowMax(h.present_ms, x_min), windowMax(h.scene_submit_ms, x_min)});
+                  windowMax(h.present_ms, x_min), windowMax(h.scene_submit_ms, x_min),
+                  windowMax(h.gpu_total_ms, x_min)});
     const float timing_top = stableTop(timing_axis, timing_max, 2.f, dt);
 
     if (ImPlot::BeginPlot("Frame timing (ms)", ImVec2(-1.f, 140.f), kPlotFlags)) {
@@ -223,6 +242,7 @@ void renderPerfSection(const ViewerUiContext &ctx) {
         plotSeries("GPU wait", h.gpu_wait_ms, kWaitColor);
         plotSeries("Present", h.present_ms, kPresentColor);
         plotSeries("Scene", h.scene_submit_ms, kSceneColor);
+        plotSeries("GPU", h.gpu_total_ms, kGpuColor);
         ImPlot::EndPlot();
     }
 

@@ -3,8 +3,10 @@
 #include "ao_denoise_pass.hpp"
 #include "ao_pass.hpp"
 #include "ao_render_target.hpp"
+#include "bench_runner.hpp"
 #include "build_controller.hpp"
 #include "composite_pass.hpp"
+#include "gpu_pass_timer.hpp"
 #include "ibl.hpp"
 #include "ibl_baker.hpp"
 #include "imgui_backend.hpp"
@@ -188,6 +190,9 @@ struct App::Impl {
     AoPass ao_pass;
     AoDenoisePass ao_denoise_pass;
     CompositePass composite;
+    // Per-pass GPU timestamps (real timing on D3D11, no-op elsewhere). Surfaces
+    // the GPU cost the CPU submit timers can't see — see gpu_pass_timer.hpp.
+    GpuPassTimer gpu_pass_timer_;
     RenderQualitySettings quality;
     Camera camera;
 
@@ -207,6 +212,25 @@ struct App::Impl {
     bool startup_screenshot_pending{false};
     std::string startup_screenshot_path;
     PngExportSettings startup_screenshot_settings;
+
+    // Headless benchmark mode (set by App::requestBench before run()). When
+    // active, onFrame bypasses the UI/input/idle path and drives `bench_` through
+    // a fixed camera/state sequence. The capture members mirror the exporter's
+    // grab-then-readback, but at window resolution and the live (not maxed)
+    // quality — "the current frame", per the bench design.
+    bool bench_pending_{false};
+    std::string bench_json_path_;
+    std::string bench_scene_label_;
+    std::unique_ptr<BenchRunner> bench_;
+    std::string bench_capture_request_; // non-empty: composite+read back to this path this frame
+    bool bench_capture_issued_{false};  // the grab composite ran in render() this frame
+    bool bench_capture_done_{false};    // a capture finished writing since the last bench update
+    SceneRenderTarget bench_grab_rt_;
+    ImageReadback bench_readback_;
+    std::uint64_t bench_wait_frames_{0};
+    void benchInit();
+    void benchFrame();
+    void benchCaptureReadback();
 
     // Procedural IBL bake. Runs on the GPU in a single frame the first time
     // `onFrame` ticks; until then `scene_renderer` samples from 1×1 dummy
@@ -562,6 +586,150 @@ void App::Impl::onInit() {
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
     platform_->attachWindow(window_customization);
+
+    benchInit();
+}
+
+void App::Impl::benchInit() {
+    if (!bench_pending_) {
+        return;
+    }
+    // Determinism, asserted after persisted config/quality has loaded (it could
+    // otherwise clobber these). No idle/throttle/cap, fixed resolution, cut on for
+    // the first build. vsync is already off (forced in requestBench before run()).
+    cfg.vsync = false;
+    cfg.pause_when_unfocused = false;
+    cfg.auto_orbit = false;
+    cfg.boolean_cut = true;
+    quality.dynamic_render_scale = false;
+    quality.render_scale = 1.0f;
+    quality.cap_fps = false;
+    quality.pause_when_static = false;
+
+    std::string temp_dir;
+    std::error_code ec;
+    const auto tmp = std::filesystem::temp_directory_path(ec);
+    if (!ec) {
+        temp_dir = tmp.string();
+    }
+    bench_ = std::make_unique<BenchRunner>(camera, cfg, quality, bench_json_path_,
+                                           bench_scene_label_, temp_dir);
+    std::println("viewer: benchmark mode — sequence will run once the scene settles");
+}
+
+void App::Impl::benchFrame() {
+    fb_width = static_cast<uint32_t>(sapp_width());
+    fb_height = static_cast<uint32_t>(sapp_height());
+    delta_seconds = stm_sec(stm_laptime(&last_time));
+    frame_interval_ms = delta_seconds * 1000.0;
+
+    // Empty ImGui frame so render()'s swapchain pass (which draws ImGui) still has
+    // valid draw data — the bench shows no panels.
+    ImGui_ImplSokol_NewFrame(static_cast<int>(fb_width), static_cast<int>(fb_height), delta_seconds,
+                             sapp_dpi_scale());
+
+    // The runner reads the *previous* frame's results (GPU timers + stats lag one
+    // frame by construction — exactly what a measure window accumulates).
+    BenchFrameInput in;
+    in.settled = scene_uploaded && !jobsRunning();
+    glm::vec3 bmin{0.f}, bmax{0.f};
+    // Base-scene bounds: stable across the cut-on/cut-off laps, so the framed pose
+    // is identical for the A/B.
+    in.has_bounds = scene_renderer.worldBounds(bmin, bmax);
+    in.bounds_min = bmin;
+    in.bounds_max = bmax;
+    in.gpu = gpu_pass_timer_.results();
+    const SceneRenderer::FrameStats fs =
+        (active_renderer != nullptr ? active_renderer : &scene_renderer)->lastFrameStats();
+    in.stats = BenchSceneStats{fs.draw_calls, fs.instances, fs.triangles};
+    in.frame_ms = frame_interval_ms;
+    in.cpu_submit_ms = encode_ms + present_ms;
+    in.capture_done = bench_capture_done_;
+    bench_capture_done_ = false;
+
+    if (!in.settled && (bench_wait_frames_++ % 120) == 0) {
+        std::println(stderr,
+                     "viewer: bench waiting to settle — session_phase={} ibl={} build={} scene={} "
+                     "uploaded={} pending_cut={} err='{}'",
+                     static_cast<int>(build_controller_.session().phase()), ibl_baker_.installed(),
+                     build_controller_.inProgress(), static_cast<bool>(scene), scene_uploaded,
+                     build_controller_.pendingCutRebuild(), build_controller_.error());
+    }
+
+    const BenchFrameOutput out = bench_->update(in);
+    if (out.request_capture && bench_capture_request_.empty()) {
+        bench_capture_request_ = out.capture_path;
+    }
+
+    render();
+    benchCaptureReadback();
+
+    if (out.finished) {
+        const char *backend = "?";
+        switch (sg_query_backend()) {
+        case SG_BACKEND_D3D11:
+            backend = "D3D11";
+            break;
+        case SG_BACKEND_GLCORE:
+            backend = "GL";
+            break;
+        case SG_BACKEND_GLES3:
+            backend = "GLES3";
+            break;
+        case SG_BACKEND_METAL_MACOS:
+        case SG_BACKEND_METAL_IOS:
+        case SG_BACKEND_METAL_SIMULATOR:
+            backend = "Metal";
+            break;
+        case SG_BACKEND_WGPU:
+            backend = "WebGPU";
+            break;
+        default:
+            break;
+        }
+        bench_->writeResults(backend, fb_width, fb_height);
+        bench_.reset();
+        sapp_quit();
+    }
+}
+
+void App::Impl::benchCaptureReadback() {
+    if (!bench_capture_issued_) {
+        return;
+    }
+    // render() composited the current frame into bench_grab_rt_ this frame. Read
+    // it back (synchronous on D3D11 — Map blocks until the composite completes),
+    // encode a PNG, and write it. Tell the runner to advance regardless of
+    // success so a readback hiccup can't wedge the sequence.
+    bench_capture_issued_ = false;
+    const std::string path = bench_capture_request_;
+    bench_capture_request_.clear();
+    bench_capture_done_ = true;
+
+    if (bench_grab_rt_.color.id == SG_INVALID_ID) {
+        return;
+    }
+    if (!bench_readback_.begin(bench_grab_rt_.color, bench_grab_rt_.width, bench_grab_rt_.height,
+                               bench_grab_rt_.color_format)) {
+        std::println(stderr, "viewer: bench screenshot readback unsupported on this backend");
+        return;
+    }
+    std::vector<std::uint8_t> pixels;
+    const ReadbackStatus st = bench_readback_.poll(pixels);
+    bench_readback_.reset();
+    if (st != ReadbackStatus::Ready) {
+        std::println(stderr, "viewer: bench screenshot not ready (async readback backend?)");
+        return;
+    }
+    const auto png = encodePngRgba8(pixels, bench_grab_rt_.width, bench_grab_rt_.height);
+    if (png.empty()) {
+        return;
+    }
+    std::ofstream out{path, std::ios::binary | std::ios::trunc};
+    if (out) {
+        out.write(reinterpret_cast<const char *>(png.data()),
+                  static_cast<std::streamsize>(png.size()));
+    }
 }
 
 void App::Impl::onEvent(const sapp_event *ev) {
@@ -1036,6 +1204,11 @@ void App::Impl::render() {
         render_scene = scene_changing || converging || scene_target_resized;
     }
 
+    // Open the GPU-timeline frame. stamp() after each sg_end_pass() below records
+    // that pass's GPU cost; endFrame() closes it before sg_commit(). On D3D11 this
+    // is the only timing that sees past sokol_app's uninstrumented Present().
+    gpu_pass_timer_.beginFrame();
+
     if (render_scene) {
         // Pass 1 — scene into offscreen color + depth. Depth-clear convention
         // is backend-conditional (see useReversedZ): 0.0 paired with
@@ -1151,6 +1324,7 @@ void App::Impl::render() {
         }
 
         sg_end_pass();
+        gpu_pass_timer_.stamp("scene");
 
         // Pass 2 (optional) — GTAO, then an optional bilateral denoise, with the
         // final AO landing in the ping-pong *write* buffer (the one the scene
@@ -1186,6 +1360,7 @@ void App::Impl::render() {
             sg_begin_pass(&ao_pass_desc);
             ao_pass.draw(scene_rt, camera, gtao_target.width, gtao_target.height, quality);
             sg_end_pass();
+            gpu_pass_timer_.stamp("ao");
 
             if (quality.enable_ao_denoise) {
                 sg_pass denoise_pass_desc{};
@@ -1195,6 +1370,7 @@ void App::Impl::render() {
                 sg_begin_pass(&denoise_pass_desc);
                 ao_denoise_pass.draw(ao_rt_raw, scene_rt, camera, ao_write.width, ao_write.height);
                 sg_end_pass();
+                gpu_pass_timer_.stamp("denoise");
             }
 
             // The write buffer now holds this frame's final AO — promote it to
@@ -1267,6 +1443,9 @@ void App::Impl::render() {
                    scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
     ImGui_ImplSokol_Render();
     sg_end_pass();
+    // Swapchain pass GPU cost: the fullscreen composite (tonemap + FXAA at full
+    // window res) plus the ImGui draw on top.
+    gpu_pass_timer_.stamp("composite");
 
     // Export capture: composite the same converged frame into the full-res
     // offscreen LDR target (no ImGui). PngExporter::postRender reads it back next.
@@ -1281,8 +1460,40 @@ void App::Impl::render() {
                        camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
                        scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
         sg_end_pass();
+        gpu_pass_timer_.stamp("export");
     }
 
+    // Bench capture: composite the current frame into a window-res LDR target at
+    // the *live* quality (not the supersampled export path) so the bench grabs
+    // "the current frame". Read back in benchCaptureReadback() after render().
+    // Not stamped — this runs on a non-measured frame, so it can't skew timings.
+    if (bench_ && !bench_capture_request_.empty() && !bench_capture_issued_) {
+        sg_environment benv = sglue_environment();
+        sg_pixel_format cfmt = benv.defaults.color_format;
+        if (cfmt == SG_PIXELFORMAT_NONE) {
+            cfmt = SG_PIXELFORMAT_RGBA8;
+        }
+        sg_pixel_format dfmt = benv.defaults.depth_format;
+        if (dfmt == SG_PIXELFORMAT_NONE) {
+            dfmt = SG_PIXELFORMAT_DEPTH;
+        }
+        if (!bench_grab_rt_.matches(fb_width, fb_height, cfmt, dfmt)) {
+            bench_grab_rt_.create(fb_width, fb_height, cfmt, dfmt, /*for_readback=*/true);
+        }
+        sg_pass grab_pass{};
+        grab_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+        grab_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
+        grab_pass.attachments = bench_grab_rt_.passAttachments();
+        grab_pass.label = "bench_grab_pass";
+        sg_begin_pass(&grab_pass);
+        composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
+                       camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
+                       scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
+        sg_end_pass();
+        bench_capture_issued_ = true;
+    }
+
+    gpu_pass_timer_.endFrame();
     sg_commit();
     if (exporting_frame) {
         quality = saved_quality;
@@ -1487,6 +1698,15 @@ void App::Impl::onFrame() {
         BuildController::AngleCut{cfg.boolean_cut, cfg.angle_cut_start_deg, cfg.angle_cut_end_deg},
         cut_uploaded);
 
+    // Benchmark mode takes over the frame entirely: it drives the camera/state
+    // sequence and renders at full rate, bypassing the idle/UI/input path below.
+    // The async polls above still run, so builds/bakes (incl. the cut rebuild the
+    // sequence triggers) progress normally.
+    if (bench_) {
+        benchFrame();
+        return;
+    }
+
     // Idle gate, with a dynamic cadence based on whether there's
     // anything that wants visible progress. Two cases:
     //
@@ -1584,8 +1804,9 @@ void App::Impl::onFrame() {
     // Sample the rolling timing history once per rendered frame. The submit
     // timings still hold last frame's values here (they're measured during
     // render() further down), which is harmless for a scrolling graph.
+    const GpuPassTimings &gpu_times = gpu_pass_timer_.results();
     perf_history.push(delta_seconds, frame_interval_ms, encode_ms, present_ms, gpu_wait_ms,
-                      scene_submit_ms, fps);
+                      scene_submit_ms, gpu_times.valid ? gpu_times.total_ms : 0.0, fps);
 
     // simgui_new_frame internally calls ImGui::NewFrame after configuring
     // io display size + delta time. Don't double-call NewFrame.
@@ -1650,6 +1871,7 @@ void App::Impl::onFrame() {
                     render_stats.metal.bindings.num_skip_redundant_vertex_buffer,
             },
         .perf_history = &perf_history,
+        .gpu_pass_times = &gpu_pass_timer_.results(),
         .has_scene = static_cast<bool>(scene),
         .scene_uploaded = scene_uploaded,
         .build_in_progress = build_controller_.inProgress(),
@@ -1752,6 +1974,8 @@ void App::Impl::onCleanup() {
     ao_hist[1].destroy();
     ao_rt_raw.destroy();
     exporter_.destroyTargets();
+    bench_grab_rt_.destroy();
+    bench_readback_.reset();
     scene_rt.destroy();
     scene_renderer.release();
     cut_renderer.release();
@@ -1771,6 +1995,16 @@ void App::requestScreenshot(std::string path, PngExportSettings settings) {
     impl_->startup_screenshot_pending = true;
     impl_->startup_screenshot_path = std::move(path);
     impl_->startup_screenshot_settings = settings;
+}
+
+void App::requestBench(std::string json_out_path, std::string scene_label) {
+    impl_->bench_pending_ = true;
+    impl_->bench_json_path_ = std::move(json_out_path);
+    impl_->bench_scene_label_ = std::move(scene_label);
+    // vsync feeds swap_interval, which run() reads before onInit — so it must be
+    // forced here, before run(). The rest of the determinism knobs are asserted
+    // in benchInit() (after persisted state loads and could clobber them).
+    impl_->cfg.vsync = false;
 }
 
 void App::setProject(std::unique_ptr<ProjectFs> project) {

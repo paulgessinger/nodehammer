@@ -47,17 +47,24 @@ struct PerfHistory {
     // gpu_wait is the true CPU command-encoding cost.
     ScrollingBuffer gpu_wait_ms;
     ScrollingBuffer scene_submit_ms;
+    // Real GPU frame time (sum of the per-pass timestamp spans). Distinct from
+    // the CPU timers above: on D3D11 the frame's stall lives in sokol_app's
+    // Present() — after sg_commit() — so it never shows up in encode/present, and
+    // this is the only series that reflects it. Zero on backends without
+    // timestamp queries.
+    ScrollingBuffer gpu_total_ms;
     ScrollingBuffer fps;
 
     void push(double dt_seconds, double frame_interval_ms, double encode_ms_value,
               double present_ms_value, double gpu_wait_ms_value, double scene_submit_ms_value,
-              float fps_value) {
+              double gpu_total_ms_value, float fps_value) {
         t += static_cast<float>(dt_seconds);
         frame_ms.add(t, static_cast<float>(frame_interval_ms));
         encode_ms.add(t, static_cast<float>(encode_ms_value));
         present_ms.add(t, static_cast<float>(present_ms_value));
         gpu_wait_ms.add(t, static_cast<float>(gpu_wait_ms_value));
         scene_submit_ms.add(t, static_cast<float>(scene_submit_ms_value));
+        gpu_total_ms.add(t, static_cast<float>(gpu_total_ms_value));
         fps.add(t, fps_value);
     }
 };

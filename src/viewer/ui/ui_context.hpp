@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../gpu_pass_timer.hpp"
+
 #include <nodehammer/viewer/config.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/png_export.hpp>
@@ -104,6 +106,10 @@ struct ViewerUiContext {
     /// Rolling timing history for the Debug panel's live perf graphs. Owned by
     /// the App; null only in contexts that don't track frame timings.
     PerfHistory *perf_history{nullptr};
+    /// Most recent completed frame's per-pass GPU times. `valid` is false on
+    /// backends without timestamp support (everything but D3D11 today). Owned by
+    /// the App; null in contexts that don't render.
+    const GpuPassTimings *gpu_pass_times{nullptr};
 
     bool has_scene{false};
     bool scene_uploaded{false};
