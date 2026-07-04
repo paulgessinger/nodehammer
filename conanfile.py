@@ -39,6 +39,12 @@ class Nodehammer(ConanFile):
         # build for that target anyway.
         if self.options.viewer and self.settings.os != "Emscripten":
             self.requires("platformfolders/4.3.0")
+        if self.options.viewer:
+            self.requires("sokol/2026.04.25")
+            self.requires("imgui/1.92.0")
+            self.requires("implot/0.17.0")
+            if self.settings.os != "Emscripten":
+                self.requires("nfd/1.2.1")
 
     def build_requirements(self):
         # sokol-shdc is the shader compiler: a prebuilt static binary wrapped

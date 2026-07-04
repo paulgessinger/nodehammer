@@ -5,6 +5,10 @@
 # Cheap to re-export every time; conan dedupes by recipe revision.
 recipes:
     conan export recipes/manifold --version=3.2.1
+    conan export recipes/sokol --version=2026.04.25
+    conan export recipes/imgui --version=1.92.0
+    conan export recipes/implot --version=0.17.0
+    conan export recipes/nfd --version=1.2.1
     conan export recipes/sokol-shdc --version=2026.04.25
 
 deps: recipes

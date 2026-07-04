@@ -80,7 +80,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
         # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib
         # (no sokol deps, headless `buildSceneFromPaths` shares them).
     )
-    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7 nh_stb implot)
+    target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7 nh_stb ImPlot::ImPlot)
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
     add_dependencies(${name} nodehammer_shaders)
     nodehammer_set_compiler_options(${name})
@@ -88,12 +88,12 @@ function(nh_add_viewer_lib name sokol_lib backend)
     if(NOT EMSCRIPTEN)
         # Native file picker (NFD-extended). The web build uses an HTML
         # <input type=file> + FileSystemAccess API, so it never needs this
-        # dep. nfd::nfd is only declared when NOT EMSCRIPTEN — see
+        # dep. NFD::nfd is only declared when NOT EMSCRIPTEN — see
         # cmake/Dependencies.cmake. NODEHAMMER_VIEWER_NATIVE_DIALOG=OFF drops
         # it: platform_native_common.cpp compiles a no-op picker instead.
         if(NODEHAMMER_VIEWER_NATIVE_DIALOG)
             target_compile_definitions(${name} PRIVATE NH_VIEWER_NATIVE_DIALOG=1)
-            target_link_libraries(${name} PUBLIC nfd::nfd)
+            target_link_libraries(${name} PUBLIC NFD::nfd)
         endif()
         # PlatformFolders resolves the OS cache/config directory on native.
         # Web doesn't need it (no on-disk paths). Conan recipe is
