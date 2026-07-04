@@ -147,9 +147,11 @@ vec3 skyNishita(vec3 dir) {
     // Phase functions
     float phase_r = (3.0 / (16.0 * PI)) * (1.0 + mu * mu);
     float g = kMieG;
+    // Base is (1-g)²…(1+g)² ≥ 0 for |g|<1; max() makes that provable to the
+    // HLSL/FXC back-end (X3571) without changing the value.
     float phase_m = (3.0 / (8.0 * PI))
         * ((1.0 - g * g) * (1.0 + mu * mu))
-        / ((2.0 + g * g) * pow(1.0 + g * g - 2.0 * g * mu, 1.5));
+        / ((2.0 + g * g) * pow(max(1.0 + g * g - 2.0 * g * mu, 0.0), 1.5));
 
     float turbidity = max(sky_params.x, 1.0);
     float beta_m = kBetaM * turbidity;
@@ -216,10 +218,13 @@ vec3 skyNishita(vec3 dir) {
 
 vec3 sky(vec3 dir_in) {
     vec3 dir = normalize(dir_in);
+    // Single exit with an initialized local: the multi-return form makes the
+    // HLSL/FXC back-end flag the return value as possibly uninitialized (X4000).
+    vec3 result = skyGradient(dir);
     if (sky_params.y > 0.5) {
-        return skyNishita(dir);
+        result = skyNishita(dir);
     }
-    return skyGradient(dir);
+    return result;
 }
 
 // Standard sokol cube face order: 0=+X, 1=-X, 2=+Y, 3=-Y, 4=+Z, 5=-Z.

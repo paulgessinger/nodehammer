@@ -325,7 +325,10 @@ void main() {
             vec2 du = dir * step_len * float(i);
 
             vec2 uv_p = uv + du;
-            float dp = texture(sampler2D(scene_depth, smp_depth), uv_p).r;
+            // Explicit LOD 0: sampling inside this varying-count loop with an
+            // implicit-derivative texture() forces the HLSL/FXC back-end to
+            // unroll (X3570). The depth buffer is single-mip, so this is exact.
+            float dp = textureLod(sampler2D(scene_depth, smp_depth), uv_p, 0.0).r;
             if (!isFarSample(dp)) {
                 float zp = linearize_depth(dp, depth_params.z, depth_params.y,
                                            depth_params.x, depth_params.y);
@@ -338,7 +341,7 @@ void main() {
             }
 
             vec2 uv_n = uv - du;
-            float dn = texture(sampler2D(scene_depth, smp_depth), uv_n).r;
+            float dn = textureLod(sampler2D(scene_depth, smp_depth), uv_n, 0.0).r;
             if (!isFarSample(dn)) {
                 float zn = linearize_depth(dn, depth_params.z, depth_params.y,
                                            depth_params.x, depth_params.y);

@@ -22,7 +22,9 @@
 // `far` is only read in log-Z mode. Pass the camera far_plane there.
 float linearize_depth(float d, float n, float f, float mode, float far) {
     if (mode > 1.5) {
-        return pow(far + 1.0, d) - 1.0;
+        // max() keeps the base provably non-negative for the HLSL/FXC
+        // back-end (X3571); far ≥ near > 0 in practice, so this is a no-op.
+        return pow(max(far + 1.0, 0.0), d) - 1.0;
     }
     float reversed = step(0.5, mode);
     float dr = mix(1.0 - d, d, reversed);
