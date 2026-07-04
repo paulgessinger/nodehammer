@@ -86,6 +86,16 @@ jobs:
             echo "$stable/upstream/emscripten"
           } >> "$GITHUB_PATH"
 
+      - name: Restore Emscripten cache
+        if: matrix.kind == 'wasm'
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/emsdk-stable/upstream/emscripten/cache
+          key: emscripten-cache-5.0.6-${{ hashFiles('CMakeLists.txt', 'cmake/**/*.cmake', 'profiles/emscripten', 'conanfile.py') }}-${{ github.run_id }}
+          restore-keys: |
+            emscripten-cache-5.0.6-${{ hashFiles('CMakeLists.txt', 'cmake/**/*.cmake', 'profiles/emscripten', 'conanfile.py') }}-
+            emscripten-cache-5.0.6-
+
       # WGSL shader validation (see cmake/Sokol.cmake). naga-cli has no prebuilt
       # binary, so cargo-install it; cache the resulting binary keyed on the
       # pinned version so only the first run pays the build cost.
@@ -162,6 +172,13 @@ jobs:
         if: always()
         shell: bash
         run: ccache -sv
+
+      - name: Save Emscripten cache
+        if: always() && matrix.kind == 'wasm'
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/emsdk-stable/upstream/emscripten/cache
+          key: emscripten-cache-5.0.6-${{ hashFiles('CMakeLists.txt', 'cmake/**/*.cmake', 'profiles/emscripten', 'conanfile.py') }}-${{ github.run_id }}
 
       - name: Test
         shell: bash
