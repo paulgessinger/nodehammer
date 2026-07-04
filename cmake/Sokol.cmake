@@ -18,37 +18,20 @@ include(CMakeParseArguments)
 # ── sokol headers (FetchContent only — no Conan recipe) ──────────────────────
 # Pinned to a recent master commit on floooh/sokol that matches the
 # sokol-shdc release in recipes/sokol-shdc/conandata.yml.
+#
+# PATCH_COMMAND applies the emdawnwebgpu WGPU null-vb workaround to sokol_gfx.h
+# at populate time via a pure-CMake `-P` script (no external `sed`; works in
+# any shell/CI environment). Re-runs automatically if the pinned commit changes
+# or the source is re-fetched. See cmake/patch_sokol_wgpu.cmake.
 FetchContent_Declare(sokol
     SYSTEM
     GIT_REPOSITORY https://github.com/floooh/sokol.git
     GIT_TAG        17d1b01344f724f598c241aa8d11e621f6cc911f
+    PATCH_COMMAND  ${CMAKE_COMMAND}
+        -Dsokol_gfx_h=<SOURCE_DIR>/sokol_gfx.h
+        -P ${CMAKE_CURRENT_LIST_DIR}/patch_sokol_wgpu.cmake
 )
 FetchContent_MakeAvailable(sokol)
-
-# emdawnwebgpu's JS wrapper rejects setVertexBuffer(slot, null, 0, 0) — it
-# requires a GPUBuffer object even though the WebGPU spec lists the buffer
-# parameter as nullable. sokol_gfx already has the same workaround for
-# setIndexBuffer (see the comment around line 17856 of sokol_gfx.h); apply
-# the matching skip-when-null patch for setVertexBuffer here. Idempotent
-# via marker file; safe to re-run on every configure.
-set(_nh_wgpu_patch_marker "${sokol_SOURCE_DIR}/.nh_wgpu_setvertexbuffer_patched")
-if(NOT EXISTS "${_nh_wgpu_patch_marker}")
-    # Single-line sed: replace the bare null-buffer call with a no-op stat
-    # tick so the surrounding else-branch stays well-formed.
-    execute_process(
-        COMMAND sed -i.nhbak
-            -e "s|wgpuRenderPassEncoderSetVertexBuffer(_sg.wgpu.rpass_enc, slot, 0, 0, 0)|((void)0)  /* nodehammer: emdawnwebgpu rejects null vb */|"
-            "${sokol_SOURCE_DIR}/sokol_gfx.h"
-        RESULT_VARIABLE _nh_sed_rc
-    )
-    if(NOT _nh_sed_rc EQUAL 0)
-        message(FATAL_ERROR "Failed to patch sokol_gfx.h for WGPU null-vb workaround (sed rc=${_nh_sed_rc})")
-    endif()
-    file(REMOVE "${sokol_SOURCE_DIR}/sokol_gfx.h.nhbak")
-    file(WRITE "${_nh_wgpu_patch_marker}" "patched\n")
-    message(STATUS "sokol_gfx.h: patched WGPU setVertexBuffer null-skip for emdawnwebgpu")
-endif()
-unset(_nh_wgpu_patch_marker)
 
 if(NOT TARGET sokol::headers)
     add_library(sokol::headers INTERFACE IMPORTED)
