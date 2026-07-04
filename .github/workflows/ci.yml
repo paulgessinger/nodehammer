@@ -49,7 +49,7 @@ jobs:
         run: brew untap aws/tap || true
 
       - name: Install CMake and Ninja
-        uses: lukka/get-cmake@ea83089aa35e08e459464341fe24ad024ee2466f # v4.3.1
+        uses: lukka/get-cmake@f5b8fbb4d77cec1acc5a5f9f0df4beffaf5d98d9 # v4.3.4
 
       - name: Install GCC 14 and viewer deps (Linux)
         if: runner.os == 'Linux'
