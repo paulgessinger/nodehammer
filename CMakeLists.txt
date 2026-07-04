@@ -51,6 +51,7 @@ option(NODEHAMMER_ENABLE_ASAN   "Enable AddressSanitizer"                       
 option(NODEHAMMER_WERROR        "Treat project warnings as errors"                     OFF)
 option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                           OFF)
 option(NODEHAMMER_PROFILING     "Preserve symbols and frame pointers for sampling profilers" OFF)
+option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at build time (consumed in cmake/Sokol.cmake)" ON)
 
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
