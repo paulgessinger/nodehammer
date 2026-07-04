@@ -297,114 +297,115 @@ vec3 fxaa(vec2 uv, vec2 inv_res) {
     float lumaMax = max(lumaM, max(max(lumaN, lumaS), max(lumaE, lumaW)));
     float range   = lumaMax - lumaMin;
 
-    // Flat region (or near-black noise) — leave the pixel untouched.
-    if (range < max(edge_min, lumaMax * edge_rel)) {
-        return sampleScene(uv);
-    }
-
-    float lumaNW = fxaaLuma(uv + vec2(-inv_res.x, -inv_res.y));
-    float lumaNE = fxaaLuma(uv + vec2( inv_res.x, -inv_res.y));
-    float lumaSW = fxaaLuma(uv + vec2(-inv_res.x,  inv_res.y));
-    float lumaSE = fxaaLuma(uv + vec2( inv_res.x,  inv_res.y));
-
-    // Sub-pixel term: how far the center deviates from the 3×3 lowpass,
-    // smoothed, squared, and scaled by the subpix knob.
-    float lumaAvg = (2.0 * (lumaN + lumaS + lumaE + lumaW) +
-                     lumaNW + lumaNE + lumaSW + lumaSE) * (1.0 / 12.0);
-    float subpixBlend = clamp(abs(lumaAvg - lumaM) / range, 0.0, 1.0);
-    subpixBlend = smoothstep(0.0, 1.0, subpixBlend);
-    subpixBlend = subpixBlend * subpixBlend * subpix;
-
-    // Edge orientation: weighted second derivatives along each axis.
-    float edgeHorz =
-        abs(lumaN  + lumaS  - 2.0 * lumaM) * 2.0 +
-        abs(lumaNE + lumaSE - 2.0 * lumaE) +
-        abs(lumaNW + lumaSW - 2.0 * lumaW);
-    float edgeVert =
-        abs(lumaE  + lumaW  - 2.0 * lumaM) * 2.0 +
-        abs(lumaNE + lumaNW - 2.0 * lumaN) +
-        abs(lumaSE + lumaSW - 2.0 * lumaS);
-    bool horizontal = edgeHorz >= edgeVert;
-
-    // Gradient: the steeper of the two sides perpendicular to the edge picks
-    // the blend direction (one texel toward the higher-contrast neighbor).
-    float lumaP = horizontal ? lumaN : lumaE;
-    float lumaQ = horizontal ? lumaS : lumaW;
-    float gradP = abs(lumaP - lumaM);
-    float gradQ = abs(lumaQ - lumaM);
-
-    float pixelStep = horizontal ? inv_res.y : inv_res.x;
-    float oppositeLuma;
-    float gradient;
-    if (gradP < gradQ) {
-        pixelStep   = -pixelStep;
-        oppositeLuma = lumaQ;
-        gradient     = gradQ;
-    } else {
-        oppositeLuma = lumaP;
-        gradient     = gradP;
-    }
-
-    // Edge-end search: from the midline between the center and its steeper
-    // neighbor, walk along the edge until the average luma diverges past a
-    // quarter of the gradient (the edge end) or the step budget runs out.
-    vec2 edgeUV = uv;
-    vec2 stepUV = vec2(0.0);
-    if (horizontal) {
-        edgeUV.y += 0.5 * pixelStep;
-        stepUV.x  = inv_res.x;
-    } else {
-        edgeUV.x += 0.5 * pixelStep;
-        stepUV.y  = inv_res.y;
-    }
-    float edgeLuma   = 0.5 * (lumaM + oppositeLuma);
-    float gradThresh = 0.25 * gradient;
-
-    vec2  uvP   = edgeUV + stepUV * FXAA_STEPS[0];
-    float dP    = fxaaLuma(uvP) - edgeLuma;
-    bool  doneP = abs(dP) >= gradThresh;
-    for (int i = 1; i < FXAA_MAX_STEPS; ++i) {
-        if (i >= max_steps || doneP) break;
-        uvP  += stepUV * FXAA_STEPS[i];
-        dP    = fxaaLuma(uvP) - edgeLuma;
-        doneP = abs(dP) >= gradThresh;
-    }
-    if (!doneP) uvP += stepUV * FXAA_LAST_STEP_GUESS;
-
-    vec2  uvN   = edgeUV - stepUV * FXAA_STEPS[0];
-    float dN    = fxaaLuma(uvN) - edgeLuma;
-    bool  doneN = abs(dN) >= gradThresh;
-    for (int i = 1; i < FXAA_MAX_STEPS; ++i) {
-        if (i >= max_steps || doneN) break;
-        uvN  -= stepUV * FXAA_STEPS[i];
-        dN    = fxaaLuma(uvN) - edgeLuma;
-        doneN = abs(dN) >= gradThresh;
-    }
-    if (!doneN) uvN -= stepUV * FXAA_LAST_STEP_GUESS;
-
-    // Distance to each end along the edge axis; blend from the nearer end.
-    float distP, distN;
-    if (horizontal) { distP = uvP.x - uv.x; distN = uv.x - uvN.x; }
-    else            { distP = uvP.y - uv.y; distN = uv.y - uvN.y; }
-
-    bool  nearestIsP   = distP <= distN;
-    float nearestDist  = nearestIsP ? distP : distN;
-    float nearestDelta = nearestIsP ? dP : dN;
-    float edgeLength   = distP + distN;
-
-    // Only blend when the center is on the opposite side of the edge midline
-    // from the divergence at the nearest end — otherwise blending would push
-    // the edge the wrong way.
-    float edgeBlend = 0.0;
-    if (((lumaM - edgeLuma) >= 0.0) != (nearestDelta >= 0.0)) {
-        edgeBlend = 0.5 - nearestDist / edgeLength;
-    }
-
-    float blend = max(subpixBlend, edgeBlend);
-
+    // Flat region (or near-black noise) — leave the pixel untouched. Everything
+    // below runs only for edges. Written as a single exit with `finalUV`
+    // defaulting to the source texel: a mid-function return here trips the
+    // HLSL/FXC back-end's uninitialized-return check (X4000).
     vec2 finalUV = uv;
-    if (horizontal) finalUV.y += blend * pixelStep;
-    else            finalUV.x += blend * pixelStep;
+    if (range >= max(edge_min, lumaMax * edge_rel)) {
+        float lumaNW = fxaaLuma(uv + vec2(-inv_res.x, -inv_res.y));
+        float lumaNE = fxaaLuma(uv + vec2( inv_res.x, -inv_res.y));
+        float lumaSW = fxaaLuma(uv + vec2(-inv_res.x,  inv_res.y));
+        float lumaSE = fxaaLuma(uv + vec2( inv_res.x,  inv_res.y));
+
+        // Sub-pixel term: how far the center deviates from the 3×3 lowpass,
+        // smoothed, squared, and scaled by the subpix knob.
+        float lumaAvg = (2.0 * (lumaN + lumaS + lumaE + lumaW) +
+                         lumaNW + lumaNE + lumaSW + lumaSE) * (1.0 / 12.0);
+        float subpixBlend = clamp(abs(lumaAvg - lumaM) / range, 0.0, 1.0);
+        subpixBlend = smoothstep(0.0, 1.0, subpixBlend);
+        subpixBlend = subpixBlend * subpixBlend * subpix;
+
+        // Edge orientation: weighted second derivatives along each axis.
+        float edgeHorz =
+            abs(lumaN  + lumaS  - 2.0 * lumaM) * 2.0 +
+            abs(lumaNE + lumaSE - 2.0 * lumaE) +
+            abs(lumaNW + lumaSW - 2.0 * lumaW);
+        float edgeVert =
+            abs(lumaE  + lumaW  - 2.0 * lumaM) * 2.0 +
+            abs(lumaNE + lumaNW - 2.0 * lumaN) +
+            abs(lumaSE + lumaSW - 2.0 * lumaS);
+        bool horizontal = edgeHorz >= edgeVert;
+
+        // Gradient: the steeper of the two sides perpendicular to the edge picks
+        // the blend direction (one texel toward the higher-contrast neighbor).
+        float lumaP = horizontal ? lumaN : lumaE;
+        float lumaQ = horizontal ? lumaS : lumaW;
+        float gradP = abs(lumaP - lumaM);
+        float gradQ = abs(lumaQ - lumaM);
+
+        float pixelStep = horizontal ? inv_res.y : inv_res.x;
+        float oppositeLuma;
+        float gradient;
+        if (gradP < gradQ) {
+            pixelStep   = -pixelStep;
+            oppositeLuma = lumaQ;
+            gradient     = gradQ;
+        } else {
+            oppositeLuma = lumaP;
+            gradient     = gradP;
+        }
+
+        // Edge-end search: from the midline between the center and its steeper
+        // neighbor, walk along the edge until the average luma diverges past a
+        // quarter of the gradient (the edge end) or the step budget runs out.
+        vec2 edgeUV = uv;
+        vec2 stepUV = vec2(0.0);
+        if (horizontal) {
+            edgeUV.y += 0.5 * pixelStep;
+            stepUV.x  = inv_res.x;
+        } else {
+            edgeUV.x += 0.5 * pixelStep;
+            stepUV.y  = inv_res.y;
+        }
+        float edgeLuma   = 0.5 * (lumaM + oppositeLuma);
+        float gradThresh = 0.25 * gradient;
+
+        vec2  uvP   = edgeUV + stepUV * FXAA_STEPS[0];
+        float dP    = fxaaLuma(uvP) - edgeLuma;
+        bool  doneP = abs(dP) >= gradThresh;
+        for (int i = 1; i < FXAA_MAX_STEPS; ++i) {
+            if (i >= max_steps || doneP) break;
+            uvP  += stepUV * FXAA_STEPS[i];
+            dP    = fxaaLuma(uvP) - edgeLuma;
+            doneP = abs(dP) >= gradThresh;
+        }
+        if (!doneP) uvP += stepUV * FXAA_LAST_STEP_GUESS;
+
+        vec2  uvN   = edgeUV - stepUV * FXAA_STEPS[0];
+        float dN    = fxaaLuma(uvN) - edgeLuma;
+        bool  doneN = abs(dN) >= gradThresh;
+        for (int i = 1; i < FXAA_MAX_STEPS; ++i) {
+            if (i >= max_steps || doneN) break;
+            uvN  -= stepUV * FXAA_STEPS[i];
+            dN    = fxaaLuma(uvN) - edgeLuma;
+            doneN = abs(dN) >= gradThresh;
+        }
+        if (!doneN) uvN -= stepUV * FXAA_LAST_STEP_GUESS;
+
+        // Distance to each end along the edge axis; blend from the nearer end.
+        float distP, distN;
+        if (horizontal) { distP = uvP.x - uv.x; distN = uv.x - uvN.x; }
+        else            { distP = uvP.y - uv.y; distN = uv.y - uvN.y; }
+
+        bool  nearestIsP   = distP <= distN;
+        float nearestDist  = nearestIsP ? distP : distN;
+        float nearestDelta = nearestIsP ? dP : dN;
+        float edgeLength   = distP + distN;
+
+        // Only blend when the center is on the opposite side of the edge midline
+        // from the divergence at the nearest end — otherwise blending would push
+        // the edge the wrong way.
+        float edgeBlend = 0.0;
+        if (((lumaM - edgeLuma) >= 0.0) != (nearestDelta >= 0.0)) {
+            edgeBlend = 0.5 - nearestDist / edgeLength;
+        }
+
+        float blend = max(subpixBlend, edgeBlend);
+
+        if (horizontal) finalUV.y += blend * pixelStep;
+        else            finalUV.x += blend * pixelStep;
+    }
     return sampleScene(finalUV);
 }
 

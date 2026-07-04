@@ -15,6 +15,11 @@
 include(CMakeParseArguments)
 find_package(sokol REQUIRED CONFIG)
 
+# This module's own directory, captured at include time. CMAKE_CURRENT_LIST_DIR
+# inside a function resolves to the *caller's* list dir, so functions below
+# reference sibling scripts (e.g. validate_shader_hlsl.cmake) through this.
+set(NH_SOKOL_LIST_DIR "${CMAKE_CURRENT_LIST_DIR}")
+
 # ── sokol headers ────────────────────────────────────────────────────────────
 # Pinned by recipes/sokol, including nodehammer's WGPU null-vertex-buffer
 # workaround for emdawnwebgpu.
@@ -36,6 +41,56 @@ if(NOT TARGET sokol::shdc)
             "Run `just recipes && just deps` (or `just wasm-deps`) — the local "
             "Conan recipe at recipes/sokol-shdc/ ships the prebuilt binary.")
     endif()
+endif()
+
+# ── Cross-compiled shader validation ─────────────────────────────────────────
+# The GPU backends cross-compile these GLSL sources to their native shading
+# language and only compile that at runtime, so back-end compiler diagnostics
+# never fail the build — they surface as viewer log spam. When ON (default),
+# nh_compile_shader validates each backend's output at build time:
+#   - HLSL (hlsl5, Windows)     → fxc /WX   (fxc ships with the Windows SDK)
+#   - WGSL (wgsl, Emscripten)   → naga      (`cargo install naga-cli`)
+# Each is a no-op on platforms that don't emit that backend. The
+# NODEHAMMER_SHADER_STRICT option itself is declared in the top-level
+# CMakeLists.txt (all options live there); it is ON by default.
+
+# GitHub Actions (and most CI) set CI=true. In CI a missing validator is a hard
+# error — the check must never silently no-op there — while locally it degrades
+# to a warning so a dev without the tool isn't blocked.
+set(_nh_ci FALSE)
+if(DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS})
+    set(_nh_ci TRUE)
+endif()
+
+# nh_require_validator(<pretty-name> <found-var> <hint>): FATAL in CI, WARNING
+# locally when a validator binary is missing.
+function(nh_require_validator name found hint)
+    if(${found})
+        return()
+    endif()
+    if(_nh_ci)
+        message(FATAL_ERROR
+            "NODEHAMMER_SHADER_STRICT is ON and this is a CI run, but ${name} was "
+            "not found — shader validation would be silently skipped in CI. ${hint}")
+    else()
+        message(WARNING
+            "NODEHAMMER_SHADER_STRICT is ON but ${name} was not found; the "
+            "matching shader validation will be skipped. ${hint}")
+    endif()
+endfunction()
+
+if(NODEHAMMER_SHADER_STRICT AND WIN32)
+    find_program(NODEHAMMER_FXC fxc DOC "D3DCompile CLI (fxc.exe) from the Windows SDK")
+    nh_require_validator("fxc.exe (Windows SDK)" NODEHAMMER_FXC
+        "Build from an MSVC/SDK environment, or set NODEHAMMER_FXC.")
+endif()
+
+if(NODEHAMMER_SHADER_STRICT AND EMSCRIPTEN)
+    find_program(NODEHAMMER_NAGA naga
+        HINTS "$ENV{HOME}/.cargo/bin" "$ENV{USERPROFILE}/.cargo/bin"
+        DOC "naga-cli WGSL validator (cargo install naga-cli)")
+    nh_require_validator("naga (naga-cli)" NODEHAMMER_NAGA
+        "Run `cargo install naga-cli`.")
 endif()
 
 # ── nh_silence_sokol_warnings(target) ────────────────────────────────────────
@@ -147,6 +202,37 @@ function(nh_compile_shader input)
     # Join the slang list with ':' for sokol-shdc.
     string(REPLACE ";" ":" _slang_arg "${NH_SLANGS}")
 
+    # Optional fxc /WX validation of the hlsl5 output, appended as an extra
+    # build step so it re-runs whenever the shader changes (and fails the build
+    # on any D3DCompile warning). Only meaningful when the shader actually
+    # targets hlsl5 and fxc was located.
+    set(_validate_cmd "")
+    if(NODEHAMMER_SHADER_STRICT AND WIN32 AND NODEHAMMER_FXC AND "hlsl5" IN_LIST NH_SLANGS)
+        set(_validate_cmd
+            COMMAND ${CMAKE_COMMAND}
+                    -DSHDC=$<TARGET_FILE:sokol::shdc>
+                    -DFXC=${NODEHAMMER_FXC}
+                    -DINPUT=${_in_abs}
+                    -DSTEM=${_stem}
+                    -DTMPDIR=${_out_dir}/hlsl_validate/${_stem}
+                    -P ${NH_SOKOL_LIST_DIR}/validate_shader_hlsl.cmake)
+    endif()
+
+    # Same idea for the wgsl output (Emscripten builds): validate each stage
+    # with naga so a bad WGSL cross-compile fails the build instead of only
+    # erroring in the browser at runtime.
+    set(_validate_wgsl_cmd "")
+    if(NODEHAMMER_SHADER_STRICT AND EMSCRIPTEN AND NODEHAMMER_NAGA AND "wgsl" IN_LIST NH_SLANGS)
+        set(_validate_wgsl_cmd
+            COMMAND ${CMAKE_COMMAND}
+                    -DSHDC=$<TARGET_FILE:sokol::shdc>
+                    -DNAGA=${NODEHAMMER_NAGA}
+                    -DINPUT=${_in_abs}
+                    -DSTEM=${_stem}
+                    -DTMPDIR=${_out_dir}/wgsl_validate/${_stem}
+                    -P ${NH_SOKOL_LIST_DIR}/validate_shader_wgsl.cmake)
+    endif()
+
     add_custom_command(
         OUTPUT  "${_out_abs}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_out_dir}"
@@ -157,6 +243,8 @@ function(nh_compile_shader input)
                 -f sokol
                 --ifdef
                 --reflection
+        ${_validate_cmd}
+        ${_validate_wgsl_cmd}
         DEPENDS "${_in_abs}" ${_include_deps} sokol::shdc
         COMMENT "sokol-shdc ${_stem}.glsl -> ${_stem}.glsl.h (${_slang_arg})"
         VERBATIM
