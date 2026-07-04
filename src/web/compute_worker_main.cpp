@@ -26,8 +26,7 @@
 #include <nodehammer/ir/fb/render/flatbuffer.hpp>
 #include <nodehammer/ir/fb/semantic/importer.hpp>
 #include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/tessellation_job.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <nodehammer/tessellation/build_pipeline.hpp>
 #include <nodehammer/tessellation/wedge_cut.hpp>
 
 #include <emscripten/emscripten.h>
@@ -35,6 +34,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <utility>
@@ -44,8 +45,16 @@ namespace {
 using namespace nodehammer;
 
 // Phase codes posted to the main thread; the JS side maps them to labels.
-// Ordered to mirror SceneBuildJob::Phase (Preparing/Cutting/Tessellating/Finalizing).
+// Ordered to mirror BuildPipeline::Phase (Preparing/Cutting/Tessellating/Finalizing).
 enum Phase : int { kPreparing = 1, kCutting = 2, kTessellating = 3, kFinalizing = 4 };
+
+// The wire codes cross a JS boundary so they can't just be the enum, but they
+// must stay bound to it: a future reorder of BuildPipeline::Phase then becomes a
+// compile error here instead of a silent UI mislabel (invariant #2).
+static_assert(kPreparing == static_cast<int>(BuildPipeline::Phase::Preparing));
+static_assert(kCutting == static_cast<int>(BuildPipeline::Phase::Cutting));
+static_assert(kTessellating == static_cast<int>(BuildPipeline::Phase::Tessellating));
+static_assert(kFinalizing == static_cast<int>(BuildPipeline::Phase::Finalizing));
 
 // Off-thread, so the slice budget only governs how often we emit progress (not
 // frame responsiveness). ~50 ms keeps postMessage traffic light while still
@@ -146,41 +155,48 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
         return nullptr;
     }
 
-    // Prep (validate / select / dedup) copies the cached scene + config, so the
-    // cache stays pristine for the next re-aim. The wedge cut is driven
-    // separately below for progress, matching the native/cooperative jobs.
+    // Drive the shared core BuildPipeline. Prep copies the cached scene + config
+    // internally and never mutates the pointee, so the cache stays pristine for
+    // the next wedge re-aim; the wedge is deferred to a WedgeCutJob for progress,
+    // exactly like the native/cooperative backends. The inputs are handed in as
+    // *non-owning* aliasing shared_ptrs over the cache — the pipeline never takes
+    // ownership of the cached scene/config (invariant #5).
+    auto cfg = std::shared_ptr<const NHConfig>(std::shared_ptr<void>{}, &c.config);
+    auto scn = std::shared_ptr<const SemanticScene>(std::shared_ptr<void>{}, &c.scene);
+
     nh_compute_emit_progress(kPreparing, 0, 0);
-    ScenePrepResult prep = prepareSceneForTessellationFromInputs(c.config, c.scene, std::nullopt);
-    if (!prep.ok) {
-        reportError(prep.diags, "compute: scene preparation failed");
-        return nullptr;
-    }
-
-    if (has_wedge != 0) {
-        WedgeCutJob wedge;
-        wedge.start(prep.scene, WedgeCutParams{wedge_start_deg, wedge_end_deg, wedge_margin});
-        while (!wedge.advance(kSliceNs)) {
-            nh_compute_emit_progress(kCutting, static_cast<double>(wedge.processedPlacements()),
-                                     static_cast<double>(wedge.totalPlacements()));
+    BuildPipeline pipe;
+    pipe.start(cfg, scn,
+               has_wedge != 0 ? std::optional<WedgeCutParams>{WedgeCutParams{
+                                    wedge_start_deg, wedge_end_deg, wedge_margin}}
+                              : std::nullopt);
+    while (!pipe.advance(kSliceNs)) {
+        switch (pipe.phase()) {
+        case BuildPipeline::Phase::Cutting:
+            nh_compute_emit_progress(kCutting, static_cast<double>(pipe.wedgeCutProcessed()),
+                                     static_cast<double>(pipe.wedgeCutTotal()));
+            break;
+        case BuildPipeline::Phase::Tessellating:
+            nh_compute_emit_progress(kTessellating,
+                                     static_cast<double>(pipe.tessellationProcessed()),
+                                     static_cast<double>(pipe.tessellationTotal()));
+            break;
+        case BuildPipeline::Phase::Finalizing:
+            nh_compute_emit_progress(kFinalizing, 0, 0);
+            break;
+        default:
+            nh_compute_emit_progress(kPreparing, 0, 0);
+            break;
         }
-        (void)wedge.take();
     }
-
-    TessellationJob tess;
-    tess.start(prep.config, prep.scene);
-    while (!tess.advance(kSliceNs)) {
-        nh_compute_emit_progress(kTessellating, static_cast<double>(tess.processedNodes()),
-                                 static_cast<double>(tess.totalNodes()));
-    }
-    TessellationPassResult result = tess.take();
-    prep.diags.append(result.diags);
-    if (result.diags.hasErrors()) {
-        reportError(result.diags, "compute: tessellation failed");
+    SceneBuildResult result = pipe.take();
+    if (result.scene == nullptr) {
+        reportError(result.diags, "compute: build failed");
         return nullptr;
     }
 
     nh_compute_emit_progress(kFinalizing, 0, 0);
-    std::vector<std::byte> bytes = renderSceneToBytes(result.scene);
+    std::vector<std::byte> bytes = renderSceneToBytes(*result.scene);
     auto *buffer = static_cast<std::uint8_t *>(std::malloc(bytes.size()));
     if (buffer == nullptr) {
         nh_compute_emit_error("compute: out of memory packaging render scene");

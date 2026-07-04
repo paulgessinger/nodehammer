@@ -10,4 +10,7 @@
 *.nhb
 *.nhb.zst
 !/odd.nhb.zst
+
+# config-flatten output written to the repo root (generated from fixtures/).
+/*_flat.toml
 CMakeUserPresets.json

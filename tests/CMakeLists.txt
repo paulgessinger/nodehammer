@@ -16,6 +16,7 @@ add_executable(nodehammer_tests
     tessellation/test_boolean_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
     tessellation/test_wedge_cut.cpp
+    tessellation/test_build_pipeline.cpp
     export/test_gltf_exporter.cpp
     export/test_render_exporter_registry.cpp
     export/test_semantic_exporter_registry.cpp
@@ -23,6 +24,7 @@ add_executable(nodehammer_tests
     viewer/test_build_session.cpp
     viewer/test_byte_buffer.cpp
     viewer/test_app_state.cpp
+    viewer/test_dynamic_render_scale.cpp
     test_scene_build.cpp
     test_compute_pipeline.cpp
     test_markup.cpp

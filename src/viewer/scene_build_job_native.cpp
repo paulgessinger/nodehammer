@@ -3,13 +3,10 @@
 #include "scene_build_job_internal.hpp"
 
 #include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/tessellation_job.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <nodehammer/tessellation/build_pipeline.hpp>
 
 #include <atomic>
 #include <cstdint>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -25,14 +22,17 @@ struct SceneBuildJob::Impl {
     std::atomic<bool> done{false};
     // Finer-grained phase published by the worker so the UI can distinguish the
     // (cooperative) wedge cut from tessellation. Read by the main thread while
-    // `state == Running`; relaxed ordering — the label tolerates staleness.
+    // `state == Running`; relaxed ordering — the label tolerates staleness, and
+    // BuildPipeline::phase() itself isn't safe to read concurrently, so we
+    // mirror it into this atomic from the worker loop and the main thread reads
+    // only the mirror.
     std::atomic<Phase> worker_phase{Phase::Preparing};
 
-    // Owned by the worker thread while running; main thread reads only the
-    // atomics until the worker has signalled `done`.
-    ::nodehammer::ScenePrepResult prep;
-    ::nodehammer::WedgeCutJob wedge_job;
-    ::nodehammer::TessellationJob tess_job;
+    // The shared build core. Owned and driven entirely by the worker thread
+    // while running; the main thread only samples the progress counters (the
+    // same tolerated cross-thread read the previous inline jobs had) and the
+    // atomic phase mirror above.
+    ::nodehammer::BuildPipeline pipe;
 
     // Diagnostic labels for the pre-build log. The byte-driven build job
     // doesn't have real filesystem paths — these are just whatever the
@@ -42,14 +42,24 @@ struct SceneBuildJob::Impl {
     std::string geometry_label;
 
     // Pre-prepared inputs handed in by `start`. Held as shared_ptr<const> so
-    // `start` (main thread) just refcounts; the worker takes the deep copy that
-    // prep consumes (see the worker body below).
+    // `start` (main thread) just refcounts; the worker hands them to the
+    // pipeline, which takes the deep copy prep consumes on its first advance —
+    // on this worker thread, off the main loop.
     std::shared_ptr<const ::nodehammer::NHConfig> preset_config;
     std::shared_ptr<const ::nodehammer::SemanticScene> preset_scene;
     std::optional<::nodehammer::WedgeCutParams> wedge_cut;
-
-    ::nodehammer::SceneBuildResult result;
 };
+
+namespace {
+// The build runs on a dedicated worker thread with no frame-responsiveness
+// constraint, so the slice budget only governs how often the worker publishes
+// its phase + progress counters to the main thread. A coarse slice keeps
+// throughput near drive-to-completion while still updating the toast several
+// times across a multi-second ODD build. (Driving with UINT64_MAX would run a
+// whole phase inside one advance and leave the mirror/counters stale until it
+// finished.)
+constexpr std::uint64_t kNativeSliceNs = 50'000'000;
+} // namespace
 
 SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
 
@@ -68,54 +78,26 @@ void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
     impl_->preset_config = std::move(config);
     impl_->preset_scene = std::move(scene);
     impl_->wedge_cut = wedge_cut;
-    impl_->result = {};
-
-    impl_->prep = {};
-    impl_->wedge_job = ::nodehammer::WedgeCutJob{};
-    impl_->tess_job = ::nodehammer::TessellationJob{};
 
     impl_->done.store(false, std::memory_order_release);
     impl_->worker_phase.store(Phase::Preparing, std::memory_order_relaxed);
     impl_->state = Impl::State::Running;
     logPreBuild(impl_->config_label, impl_->geometry_label);
     impl_->worker = std::thread([impl = impl_.get()] {
-        // Prep (validate / select / dedup) runs without the wedge cut — the cut
-        // is driven cooperatively below so we can publish its progress, matching
-        // the web path. Tests / CLI still get the synchronous cut via prep.
-        //
-        // The inputs are shared_ptr<const> (other refs may outlive us, e.g. the
-        // App's pristine cache), so prep gets a copy. That copy runs *here*, on
-        // the worker thread, rather than on the main thread at the call site —
-        // this is what keeps re-aiming the wedge cut from freezing the frame.
-        impl->prep = ::nodehammer::prepareSceneForTessellationFromInputs(
-            *impl->preset_config, *impl->preset_scene, std::nullopt);
-        impl->preset_config.reset();
-        impl->preset_scene.reset();
-        if (!impl->prep.ok) {
-            impl->result.scene = nullptr;
-            impl->result.diags = std::move(impl->prep.diags);
-            impl->done.store(true, std::memory_order_release);
-            return;
+        // The pipeline defers the wedge to a WedgeCutJob and takes its deep copy
+        // of the inputs on the first advance — both happen here, on the worker
+        // thread, so re-aiming the wedge cut never freezes the frame. The main
+        // thread reads only `done` and the atomics until we signal completion.
+        impl->pipe.start(std::move(impl->preset_config), std::move(impl->preset_scene),
+                         impl->wedge_cut);
+        while (!impl->pipe.advance(kNativeSliceNs)) {
+            impl->worker_phase.store(impl->pipe.phase(), std::memory_order_relaxed);
         }
-        if (impl->wedge_cut) {
-            impl->worker_phase.store(Phase::Cutting, std::memory_order_relaxed);
-            impl->wedge_job.start(impl->prep.scene, *impl->wedge_cut);
-            while (!impl->wedge_job.advance(std::numeric_limits<uint64_t>::max())) {
-            }
-            (void)impl->wedge_job.take();
-        }
-        impl->worker_phase.store(Phase::Tessellating, std::memory_order_relaxed);
-        impl->tess_job.start(impl->prep.config, impl->prep.scene);
-        while (!impl->tess_job.advance(std::numeric_limits<uint64_t>::max())) {
-        }
-        ::nodehammer::TessellationPassResult tess = impl->tess_job.take();
-        impl->prep.diags.append(tess.diags);
-        if (tess.diags.hasErrors()) {
-            impl->result.scene = nullptr;
-        } else {
-            impl->result.scene = std::make_shared<::nodehammer::RenderScene>(std::move(tess.scene));
-        }
-        impl->result.diags = std::move(impl->prep.diags);
+        impl->worker_phase.store(impl->pipe.phase(), std::memory_order_relaxed);
+        // Leave the finished pipeline intact and only publish `done`. The main
+        // thread drains the result via pipe.take() after it joins the worker
+        // (see SceneBuildJob::take), so the progress getters that sample
+        // tess_job/wedge_job can never race with take()'s reset of those jobs.
         impl->done.store(true, std::memory_order_release);
     });
 }
@@ -138,22 +120,22 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
 }
 
 ::nodehammer::SceneBuildResult SceneBuildJob::take() {
-    ::nodehammer::SceneBuildResult out = std::move(impl_->result);
-    impl_->result = {};
+    // Only reached after poll() observed `done` and joined the worker, so
+    // draining the pipeline here — which resets its nested wedge/tess jobs —
+    // runs single-threaded and cannot race with the worker or the progress
+    // getters that sample those jobs while the build is Running.
+    ::nodehammer::SceneBuildResult out = impl_->pipe.take();
     impl_->state = Impl::State::Idle;
     impl_->config_label.clear();
     impl_->geometry_label.clear();
-    impl_->prep = {};
-    impl_->wedge_job = ::nodehammer::WedgeCutJob{};
-    impl_->tess_job = ::nodehammer::TessellationJob{};
     return out;
 }
 
-size_t SceneBuildJob::tessellationTotal() const { return impl_->tess_job.totalNodes(); }
-size_t SceneBuildJob::tessellationProcessed() const { return impl_->tess_job.processedNodes(); }
+size_t SceneBuildJob::tessellationTotal() const { return impl_->pipe.tessellationTotal(); }
+size_t SceneBuildJob::tessellationProcessed() const { return impl_->pipe.tessellationProcessed(); }
 
-size_t SceneBuildJob::wedgeCutTotal() const { return impl_->wedge_job.totalPlacements(); }
-size_t SceneBuildJob::wedgeCutProcessed() const { return impl_->wedge_job.processedPlacements(); }
+size_t SceneBuildJob::wedgeCutTotal() const { return impl_->pipe.wedgeCutTotal(); }
+size_t SceneBuildJob::wedgeCutProcessed() const { return impl_->pipe.wedgeCutProcessed(); }
 
 SceneBuildJob::Phase SceneBuildJob::phase() const {
     switch (impl_->state) {

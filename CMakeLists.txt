@@ -41,12 +41,12 @@ endif()
 
 # ── Options ───────────────────────────────────────────────────────────────────
 # Declared before Dependencies.cmake so dep fetching can gate on them
-# (the viewer pulls bgfx/SDL3/ImGui only when NODEHAMMER_WITH_VIEWER is ON).
+# (the viewer pulls sokol/Dear ImGui only when NODEHAMMER_WITH_VIEWER is ON).
 option(NODEHAMMER_WITH_TGEO     "Enable TGeo/ROOT importer"                            OFF)
 option(NODEHAMMER_WITH_DD4HEP   "Enable DD4hep importer"                               OFF)
 option(NODEHAMMER_WITH_GEANT4   "Enable GDML/Geant4 importer"                          OFF)
-option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel importer"                             OFF)
 option(NODEHAMMER_WITH_VIEWER   "Build the sokol/Dear ImGui interactive viewer"        OFF)
+option(NODEHAMMER_VIEWER_NATIVE_DIALOG "Use the native file dialog (NFD); OFF compiles a no-op picker and drops the GTK/DBus dependency" ON)
 option(NODEHAMMER_ENABLE_ASAN   "Enable AddressSanitizer"                              OFF)
 option(NODEHAMMER_WERROR        "Treat project warnings as errors"                     OFF)
 option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                           OFF)
@@ -112,6 +112,7 @@ endif()
 # header-only template forest) into their closure.
 add_library(nodehammer_lib STATIC
     src/ir/semantic.cpp
+    src/ir/semantic_json.cpp
     src/config/config_loader.cpp
     src/config/config_writer.cpp
     src/config/config_validator.cpp
@@ -127,6 +128,7 @@ add_library(nodehammer_lib STATIC
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
     src/tessellation/wedge_cut.cpp
+    src/tessellation/build_pipeline.cpp
     src/ir/gltf/render/exporter.cpp
     src/ir/obj/render/exporter.cpp
     src/ir/render/exporter_registry.cpp
@@ -137,6 +139,10 @@ add_library(nodehammer_lib STATIC
     src/scene_build.cpp
     src/viewer/app_state.cpp
     src/viewer/camera.cpp
+    # Headless, GPU-free viewer controller: the adaptive render-scale state
+    # machine. Lives in nodehammer_lib (no sokol deps, like camera.cpp) so the
+    # unit tests can link it without the viewer.
+    src/viewer/dynamic_render_scale.cpp
     # ProjectFs-based build orchestration. The bag (in-memory key→bytes
     # store) and BuildSession (resolve→parse→import driver) live under
     # src/viewer/ for organisational reasons but have no sokol/GUI deps,

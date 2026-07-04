@@ -6,7 +6,6 @@
 // Ranges:
 //   NH0001–NH0099  config
 //   NH0100–NH0199  import (general)
-//   NH0200–NH0299  GDML importer
 //   NH0300–NH0399  TGeo importer
 //   NH0400–NH0499  selection engine
 //   NH0500–NH0599  tessellation
@@ -29,10 +28,6 @@ inline constexpr std::string_view kErrImportFormatUnknown = "NH0101";
 inline constexpr std::string_view kWarnImportUnknownShape = "NH0102";
 inline constexpr std::string_view kWarnImportNoMaterial = "NH0103";
 
-// ── GDML importer ─────────────────────────────────────────────────────────────
-inline constexpr std::string_view kErrGdmlParseFailed = "NH0200";
-inline constexpr std::string_view kWarnGdmlUnknownSolid = "NH0201";
-
 // ── TGeo importer ─────────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrTgeoOpenFailed = "NH0300";
 inline constexpr std::string_view kWarnTgeoUnknownShape = "NH0301";
@@ -46,7 +41,6 @@ inline constexpr std::string_view kErrTessUnknownShape = "NH0500";
 inline constexpr std::string_view kWarnTessBooleanSkipped = "NH0501";
 inline constexpr std::string_view kWarnTessBooleanBbox = "NH0502";
 inline constexpr std::string_view kErrTessBooleanFail = "NH0503";
-inline constexpr std::string_view kWarnTessMergeMixedMaterials = "NH0504";
 inline constexpr std::string_view kWarnTessMergeEmpty = "NH0505";
 inline constexpr std::string_view kWarnTessBooleanManifoldFail = "NH0506";
 inline constexpr std::string_view kWarnTessDefaultMaterial = "NH0507";

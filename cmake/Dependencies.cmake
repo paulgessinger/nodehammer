@@ -294,7 +294,11 @@ if(NODEHAMMER_WITH_VIEWER)
     # entirely under emscripten so the wasm binary doesn't grow a useless
     # AppKit/GTK/win32 stub. NFD_PORTAL=ON makes Linux use xdg-desktop-portal
     # (works in Wayland/Flatpak without bundling GTK).
-    if(NOT EMSCRIPTEN)
+    #
+    # NODEHAMMER_VIEWER_NATIVE_DIALOG=OFF skips the dep entirely: the viewer
+    # compiles a no-op picker (drag-and-drop and CLI --input still work) so it
+    # can build on headless hosts / minimal containers without GTK or DBus.
+    if(NOT EMSCRIPTEN AND NODEHAMMER_VIEWER_NATIVE_DIALOG)
         set(NFD_PORTAL ON CACHE BOOL "" FORCE)
         set(NFD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
         FetchContent_Declare(nfd
