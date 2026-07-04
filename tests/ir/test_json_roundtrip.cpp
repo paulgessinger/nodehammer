@@ -1,7 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/render.hpp>
+#include <nodehammer/ir/render_json.hpp>
 #include <nodehammer/ir/semantic_json.hpp>
 
 TEST_CASE("to_json: BoxShape serialization", "[ir][json]") {
@@ -76,6 +76,24 @@ TEST_CASE("to_json: MeshAsset serialization", "[ir][json]") {
     REQUIRE(j["vertexCount"] == 1);
     REQUIRE(j["indexCount"] == 3);
     REQUIRE(j["provenance"]["sourceSystem"] == "synthetic");
+}
+
+TEST_CASE("to_json: RenderNode extras", "[ir][json]") {
+    nodehammer::RenderNode node;
+    node.id = nodehammer::RenderNodeId{1};
+    node.name = "volume";
+    node.semanticNodeId = nodehammer::SemanticNodeId{9};
+
+    SECTION("populated extras are emitted") {
+        node.extras = {{"detector", "tracker"}};
+        nlohmann::json j = node;
+        REQUIRE(j["extras"]["detector"] == "tracker");
+    }
+
+    SECTION("null/empty extras are omitted") {
+        nlohmann::json j = node;
+        REQUIRE_FALSE(j.contains("extras"));
+    }
 }
 
 TEST_CASE("to_json: TubeShape serialization", "[ir][json]") {

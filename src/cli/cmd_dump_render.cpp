@@ -5,7 +5,7 @@
 #include <nodehammer/config/config_ast.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/render.hpp>
+#include <nodehammer/ir/render_json.hpp>
 #include <nodehammer/ir/synthetic/semantic/importer.hpp>
 #include <nodehammer/tessellation/tessellation_pass.hpp>
 #include <print>

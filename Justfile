@@ -28,6 +28,9 @@ build:
 test:
     ctest --preset conan-relwithdebinfo --output-on-failure -j14
 
+lint:
+    prek run --all-files
+
 configure-full:
     #!/bin/bash
     . /Users/pagessin/spack/share/spack/setup-env.sh
