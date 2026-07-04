@@ -1,0 +1,13 @@
+# Deterministic line endings across platforms.
+#
+# `text=auto` lets git detect text vs binary per file; `eol=lf` forces LF in
+# the working tree on every checkout. Without this, core.autocrlf=true on
+# Windows checks files out as CRLF, which makes the prek line-ending hooks
+# rewrite them and report phantom "Fixing" churn on `just lint`.
+* text=auto eol=lf
+
+# Binary assets — never normalize or diff as text.
+*.png       binary
+*.pdf       binary
+*.zst       binary
+*.afdesign  binary
