@@ -25,7 +25,7 @@ skip_geometry = true
 
 [[rules]]
 match = 'path ~= "**/MuonSpectrometerBarrel/chamber1"'
-material = "muon"
+material = "support"
 [rules.tessellation]
 # merge_descendants = true
 skip_geometry = true
@@ -33,7 +33,7 @@ max_segments_circle = 10
 fallback = "fail"
 
 [[rules]]
-material = "muon"
+material = "support"
 
 [[rules]]
 [rules.tessellation]
