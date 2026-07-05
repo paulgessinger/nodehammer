@@ -720,10 +720,19 @@ struct TessellationJob::Impl {
     // number of removable interior faces it's a good candidate for the option.
     // Candidates are grouped by parent structure (the node's path minus its own
     // segment) so take() can name *which* structures in a single suggestion
-    // diagnostic — value is {node count, removable face count}. Plain (not
-    // atomic): only written by the single-threaded BFS and read in take() after
-    // the worker joins, exactly like result.diags.
+    // diagnostic — value is {instance count, removable faces × instances}. Plain
+    // (not atomic): only written by the single-threaded BFS and read in take()
+    // after the worker joins, exactly like result.diags.
+    //
+    // Merged prototypes are deduplicated by the merge cache: detection runs once
+    // (on the first, cache-miss instance) but the reduced mesh is reused by every
+    // other instance. To report the true footprint we remember each candidate
+    // prototype's removable-face count keyed by its merge key, and on each later
+    // cache hit attribute one more instance (and its faces) to the structure that
+    // hit actually lives in — so e.g. both barrel layers sharing one stave
+    // prototype are each credited their instances, not just the first-seen one.
     std::map<std::string, std::pair<size_t, size_t>> coincidentCandidatesByParent;
+    ankerl::unordered_dense::map<MergeCacheKey, size_t, MergeCacheKeyHash> dropCandidateByKey;
 
     NodeView makeNodeView(const SemanticNode &node) const {
         std::string_view matName;
@@ -1021,6 +1030,14 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     // Check the merge cache only after the placement-aware key is known.
     auto mcIt = mergeCache.find(mergeKey);
     if (mcIt != mergeCache.end()) {
+        // Reused prototype. If it was flagged a drop_coincident_faces candidate
+        // on its first (cache-miss) instance, credit this reuse to the structure
+        // it actually lives in so the suggestion reflects the real footprint.
+        if (auto cand = dropCandidateByKey.find(mergeKey); cand != dropCandidateByKey.end()) {
+            auto &agg = coincidentCandidatesByParent[candidateStructureLabel(semNode)];
+            agg.first += 1;
+            agg.second += cand->second;
+        }
         rn.meshBindings = mcIt->second;
         result.scene.nodes[rnId] = std::move(rn);
         return true;
@@ -1170,9 +1187,13 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         // by parent structure so take() can name which structures are affected.
         const size_t removable = removeCoincidentInteriorFaces(groups, /*apply=*/false);
         if (removable >= kCoincidentCandidateMinFaces) {
+            // Count this first (cache-miss) instance, and remember the prototype
+            // so later cache hits reusing it credit their own structures too
+            // (mergeKey is still alive here — it is moved into mergeCache below).
             auto &agg = coincidentCandidatesByParent[candidateStructureLabel(semNode)];
             agg.first += 1;
             agg.second += removable;
+            dropCandidateByKey[mergeKey] = removable;
         }
     }
 
