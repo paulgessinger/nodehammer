@@ -184,9 +184,10 @@ void renderPerfSection(const ViewerUiContext &ctx) {
         std::snprintf(buf, sizeof(buf), "%7.2f ms", gpu->total_ms);
         readoutRow(kGpuColor, "GPU total", buf);
         for (int i = 0; i < gpu->count; ++i) {
+            const auto &seg = gpu->segments[static_cast<std::size_t>(i)];
             char label[32];
-            std::snprintf(label, sizeof(label), "  %s", gpu->segments[i].label);
-            std::snprintf(buf, sizeof(buf), "%7.2f ms", gpu->segments[i].ms);
+            std::snprintf(label, sizeof(label), "  %s", seg.label);
+            std::snprintf(buf, sizeof(buf), "%7.2f ms", seg.ms);
             readoutRow(kGpuColor, label, buf);
         }
     }

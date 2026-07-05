@@ -44,8 +44,9 @@ double percentile(std::vector<double> v, double p) {
 // GPU ms of a named pass in a frame's timing set, or 0 if that pass didn't run.
 double segMs(const GpuPassTimings &g, const char *label) {
     for (int i = 0; i < g.count; ++i) {
-        if (std::strcmp(g.segments[i].label, label) == 0) {
-            return g.segments[i].ms;
+        const auto &seg = g.segments[static_cast<std::size_t>(i)];
+        if (std::strcmp(seg.label, label) == 0) {
+            return seg.ms;
         }
     }
     return 0.0;
@@ -110,7 +111,11 @@ BenchRunner::BenchRunner(Camera &camera, Config &cfg, RenderQualitySettings &qua
         return s;
     };
 
-    steps_.push_back({K::AwaitSettle});
+    {
+        Step s;
+        s.kind = K::AwaitSettle;
+        steps_.push_back(s);
+    }
     // Cut ON lap.
     steps_.push_back(frame_cam(30.f, 20.f, 1.0f));
     steps_.push_back(measure("hold_cut_on", 0.f, true));
