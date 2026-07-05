@@ -19,7 +19,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <cstring>
 #include <format>
 #include <limits>
@@ -371,28 +370,14 @@ const std::string *resolveMaterial(const std::vector<CompiledRule> &rules, const
 // comfortably separates "same point after roundoff" from "different point"
 // without merging distinct nearby vertices. Tune here if a future geometry's
 // units or roundoff characteristics differ.
-constexpr float kCoincidentSnapToleranceDefault = 1e-4f;
-
-// Runtime-tunable snap tolerance (env NH_COINCIDENT_TOL, mm) for sweeping the
-// coincidence threshold during investigation. Falls back to the default.
-inline float coincidentSnapTolerance() {
-    static const float tol = [] {
-        if (const char *e = std::getenv("NH_COINCIDENT_TOL")) {
-            const float v = std::strtof(e, nullptr);
-            if (v > 0.f)
-                return v;
-        }
-        return kCoincidentSnapToleranceDefault;
-    }();
-    return tol;
-}
+constexpr float kCoincidentSnapTolerance = 1e-4f;
 
 // Quantizes a single float to the snap grid, rounding to the nearest grid line
 // so that two floats within tolerance of each other always snap to the same
 // integer.
 inline int64_t snapCoord(float v) {
     return static_cast<int64_t>(
-        std::llround(static_cast<double>(v) / static_cast<double>(coincidentSnapTolerance())));
+        std::llround(static_cast<double>(v) / static_cast<double>(kCoincidentSnapTolerance)));
 }
 
 // Quantized 3D point used as (part of) the coincident-triangle key.
