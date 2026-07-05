@@ -6,6 +6,12 @@ enum class DebugView : int {
     Off = 0,
     Depth = 1,
     LinearDepth = 2,
+    /// Overdraw heatmap: re-renders the scene with additive blending and no
+    /// depth test so each pixel accumulates the number of fragments that
+    /// cover it, then the composite maps that count through a jet ramp.
+    /// Diagnoses where geometry stacks up in depth (dense calorimeter /
+    /// tracker plane stacks) -- the density that drives moire aliasing.
+    Overdraw = 3,
 };
 
 enum class TonemapMode : int {
@@ -161,6 +167,12 @@ struct RenderQualitySettings {
     /// `enable_advanced_ao` is on.
     float ao_bent_strength{0.5f};
     DebugView debug_view{DebugView::Off};
+    /// Overdraw heatmap (DebugView::Overdraw) scale: the per-pixel fragment
+    /// count that maps to the hot end of the ramp. Pixels covered more than
+    /// this many times clamp to white to flag the worst hotspots. Raise it
+    /// for very dense scenes (calorimeter / tracker stacks) where the
+    /// interesting depth-complexity range runs higher.
+    float overdraw_range{16.0f};
     float exposure_stops{1.6f};
     /// AgX has more contrast than the Narkowicz ACES fit at neutral
     /// exposure, so diffuse-lit interior scenes (typical detector views)

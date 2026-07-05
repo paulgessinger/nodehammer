@@ -210,6 +210,14 @@ void CompositePass::draw(const SceneRenderTarget &scene_target, const AoRenderTa
     params.look_params[2] = 0.0f;
     params.look_params[3] = 0.0f;
 
+    // Overdraw heatmap (DebugView::Overdraw). The count scale is the inverse
+    // of the per-fragment increment the scene FS emitted; both derive from
+    // the same scene-target color format so encode and decode agree.
+    params.overdraw_params[0] = 1.0f / overdrawColorIncrement(scene_target.color_format);
+    params.overdraw_params[1] = quality.overdraw_range;
+    params.overdraw_params[2] = 0.0f;
+    params.overdraw_params[3] = 0.0f;
+
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_composite_composite_params, &u);
 

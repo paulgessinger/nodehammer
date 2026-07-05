@@ -10,6 +10,7 @@
 
 #include "ibl.hpp"
 #include "scene.glsl.h"
+#include "scene_render_target.hpp"
 
 #include <sokol_time.h>
 
@@ -175,6 +176,11 @@ struct SceneRenderer::Impl {
     sg_shader shader{};
     sg_pipeline pipeline_no_cull{};
     sg_pipeline pipeline_back_cull{};
+    // Overdraw debug pipeline: same shader + vertex layout, but additive
+    // blending, depth test/write off, and no cull, so every covered fragment
+    // accumulates a count regardless of occlusion. Rebuilt with the others
+    // when the target color format changes.
+    sg_pipeline pipeline_overdraw{};
     sg_pixel_format current_color_format{SG_PIXELFORMAT_NONE};
     // Per-group dynamic buffer of mat4 instance transforms. Allocated once
     // at upload() to fit the largest group; reused across frames since the
@@ -262,6 +268,10 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
         sg_destroy_pipeline(pipeline_back_cull);
         pipeline_back_cull = sg_pipeline{};
     }
+    if (pipeline_overdraw.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(pipeline_overdraw);
+        pipeline_overdraw = sg_pipeline{};
+    }
 
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader;
@@ -318,6 +328,23 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     pipeline_no_cull = sg_make_pipeline(&pdesc);
     pdesc.cull_mode = SG_CULLMODE_BACK;
     pipeline_back_cull = sg_make_pipeline(&pdesc);
+
+    // Overdraw variant: count every covering fragment regardless of
+    // occlusion or facing. Depth test/write off (ALWAYS), no cull, and
+    // additive ONE/ONE blend so the FS's constant increment accumulates
+    // into the color target. Reuses the shared layout/format above.
+    pdesc.cull_mode = SG_CULLMODE_NONE;
+    pdesc.depth.write_enabled = false;
+    pdesc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    pdesc.colors[0].blend.enabled = true;
+    pdesc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.op_rgb = SG_BLENDOP_ADD;
+    pdesc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.op_alpha = SG_BLENDOP_ADD;
+    pdesc.label = "scene_overdraw_pipeline";
+    pipeline_overdraw = sg_make_pipeline(&pdesc);
 
     current_color_format = color_fmt;
 }
@@ -402,6 +429,10 @@ void SceneRenderer::release() {
     if (impl_->pipeline_back_cull.id != SG_INVALID_ID) {
         sg_destroy_pipeline(impl_->pipeline_back_cull);
         impl_->pipeline_back_cull = sg_pipeline{};
+    }
+    if (impl_->pipeline_overdraw.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(impl_->pipeline_overdraw);
+        impl_->pipeline_overdraw = sg_pipeline{};
     }
     impl_->current_color_format = SG_PIXELFORMAT_NONE;
     impl_->ibl.release();
@@ -637,6 +668,14 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     const glm::vec3 to_sun = glm::normalize(flags.sun_dir);
     const glm::vec4 light_dir{-to_sun, flags.sun_intensity};
 
+    // Overdraw debug emits a constant per-fragment increment (through
+    // mode_flags.z) that additive-blends into the color target. The value is
+    // format-dependent so an 8-bit target doesn't clamp to 1.0 after the
+    // first fragment (see overdrawColorIncrement). 0 outside overdraw mode
+    // leaves the FS on its normal shading path.
+    const float overdraw_increment =
+        flags.overdraw ? overdrawColorIncrement(impl_->current_color_format) : 0.f;
+
     sg_pipeline current_pipeline{};
     for (const auto &g : impl_->groups) {
         auto mesh_it = impl_->meshes.find(g.mesh);
@@ -653,25 +692,33 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const Impl::GpuMaterial gmat =
             (mat_it != impl_->materials.end()) ? mat_it->second : Impl::GpuMaterial{};
 
-        // Per-material doubleSided picks the cull pipeline by default. The
-        // `cull` override is a debug knob that can force one mode globally.
-        // Switch only when the pipeline actually changes; VS uniforms must
-        // be reapplied after each pipeline change.
-        bool use_back_cull = !g.double_sided;
-        // The shader angle-cut discards the near wedge and exposes the interior
-        // back-faces of the far wall; culling them makes the cut-away look
-        // hollow. Render double-sided while it's active so cuts stay solid.
-        // (The baked boolean cut adds watertight caps, so it keeps culling.)
-        if (flags.shader_angle_cut) {
-            use_back_cull = false;
+        // Overdraw debug overrides pipeline selection entirely: every group
+        // draws through the additive / no-depth / no-cull overdraw pipeline
+        // so the count reflects all covering fragments regardless of the
+        // material's cull mode.
+        sg_pipeline pipeline;
+        if (flags.overdraw) {
+            pipeline = impl_->pipeline_overdraw;
+        } else {
+            // Per-material doubleSided picks the cull pipeline by default. The
+            // `cull` override is a debug knob that can force one mode globally.
+            // Switch only when the pipeline actually changes; VS uniforms must
+            // be reapplied after each pipeline change.
+            bool use_back_cull = !g.double_sided;
+            // The shader angle-cut discards the near wedge and exposes the interior
+            // back-faces of the far wall; culling them makes the cut-away look
+            // hollow. Render double-sided while it's active so cuts stay solid.
+            // (The baked boolean cut adds watertight caps, so it keeps culling.)
+            if (flags.shader_angle_cut) {
+                use_back_cull = false;
+            }
+            if (flags.cull == CullOverride::ForceCull) {
+                use_back_cull = true;
+            } else if (flags.cull == CullOverride::ForceNoCull) {
+                use_back_cull = false;
+            }
+            pipeline = use_back_cull ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
         }
-        if (flags.cull == CullOverride::ForceCull) {
-            use_back_cull = true;
-        } else if (flags.cull == CullOverride::ForceNoCull) {
-            use_back_cull = false;
-        }
-        const sg_pipeline pipeline =
-            use_back_cull ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
         if (pipeline.id != current_pipeline.id) {
             sg_apply_pipeline(pipeline);
             sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
@@ -697,7 +744,8 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         std::memcpy(fs_params.material_mr, glm::value_ptr(gmat.mr), sizeof(fs_params.material_mr));
         const float prefilter_max_lod =
             std::max(0.f, static_cast<float>(impl_->ibl.prefilter_mip_count - 1));
-        const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, prefilter_max_lod, 0.f, 0.f};
+        const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, prefilter_max_lod,
+                                   overdraw_increment, 0.f};
         std::memcpy(fs_params.mode_flags, glm::value_ptr(mode_flags), sizeof(fs_params.mode_flags));
         const glm::vec3 eye = camera.eye();
         const glm::vec4 cam_pos{eye.x, eye.y, eye.z, 0.f};

@@ -146,11 +146,20 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
 
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Render Quality")) {
-        const char *kDebugViewLabels[] = {"off", "depth (raw)", "depth (linear)"};
+        const char *kDebugViewLabels[] = {"off", "depth (raw)", "depth (linear)", "overdraw"};
         int debug_idx = static_cast<int>(ctx.quality.debug_view);
         if (ImGui::Combo("debug view", &debug_idx, kDebugViewLabels,
                          IM_ARRAYSIZE(kDebugViewLabels))) {
             ctx.quality.debug_view = static_cast<DebugView>(debug_idx);
+        }
+
+        // Overdraw heatmap range: only meaningful in the overdraw view, so
+        // it's shown only when that view is active.
+        if (ctx.quality.debug_view == DebugView::Overdraw) {
+            ImGui::SliderFloat("overdraw range", &ctx.quality.overdraw_range, 2.0f, 128.0f, "%.0f");
+            ImGui::SetItemTooltip("Fragment count mapped to the hot (red) end of the ramp.\n"
+                                  "Blue = few layers deep, red = many; white = above range.\n"
+                                  "Raise for dense calorimeter / tracker plane stacks.");
         }
 
         // FXAA is live; greyed out only while a depth debug view is active

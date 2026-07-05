@@ -71,7 +71,11 @@ layout(binding=1) uniform fs_params {
     vec4 cut_start;    // xy = unit vector at start phi
     vec4 cut_end;      // xy = unit vector at end phi
     vec4 material_mr;  // x = metallic, y = roughness, z/w = unused
-    vec4 mode_flags;   // x = pbr_enable, y = prefilter_max_lod, z/w = unused
+    // x = pbr_enable, y = prefilter_max_lod,
+    // z = overdraw_increment (0 = off; >0 = emit this constant per fragment
+    //     for the overdraw debug view, which runs this shader under an
+    //     additive-blend / no-depth pipeline), w = unused.
+    vec4 mode_flags;
     vec4 camera_pos;   // xyz = world-space camera position
     vec4 emissive;     // xyz = emissive factor (linear, can be > 1.0), w = unused
     vec4 alpha_params; // x = alpha_mode (0 = OPAQUE, 1 = MASK), y = alpha_cutoff, z/w = unused
@@ -176,6 +180,16 @@ void main() {
 
     if (alpha_params.x > 0.5 && base_color.a < alpha_params.y) {
         discard;
+    }
+
+    // Overdraw debug: the pipeline binds additive blending with the depth
+    // test off, so every covered fragment adds `increment` to the color
+    // target and the composite recovers a per-pixel draw count. Emit and
+    // bail before any lighting. Placed after the cut / alpha-mask discards
+    // so cut-away and masked fragments don't inflate the count.
+    if (mode_flags.z > 0.0) {
+        frag_color = vec4(mode_flags.z, 0.0, 0.0, mode_flags.z);
+        return;
     }
 
     vec3 n = normalize(v_normal_world);

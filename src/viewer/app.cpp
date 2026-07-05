@@ -326,6 +326,13 @@ struct App::Impl {
     // correctly. Both only matter while pause_when_static is on.
     uint64_t last_scene_change{0};
     bool last_scene_consumed_ao{false};
+    // Whether the cached scene_rt color holds an overdraw count (vs a shaded
+    // beauty frame). The overdraw debug view replaces the scene color content,
+    // so toggling it on or off must force one scene re-render even under
+    // pause_when_static -- unlike the depth views, which read cached depth and
+    // leave the color untouched. Compared against the current debug view each
+    // frame to detect the transition.
+    bool last_rendered_overdraw{false};
 
     uint64_t frame_count{0};
     uint64_t fps_window_start{0};
@@ -1264,7 +1271,12 @@ void App::Impl::render() {
         const bool converging =
             last_scene_change != 0 &&
             stm_sec(stm_diff(stm_now(), last_scene_change)) < kSceneStableSeconds;
-        render_scene = scene_changing || converging || scene_target_resized;
+        // Entering or leaving the overdraw view swaps the scene color between a
+        // shaded frame and an accumulated count, so the cached color is invalid
+        // across that transition -- force a re-render for the switch frame.
+        const bool overdraw_toggled =
+            (quality.debug_view == DebugView::Overdraw) != last_rendered_overdraw;
+        render_scene = scene_changing || converging || scene_target_resized || overdraw_toggled;
     }
 
     // Open the GPU-timeline frame. stamp() after each sg_end_pass() below records
@@ -1279,7 +1291,12 @@ void App::Impl::render() {
         // LESS_EQUAL on GLES3.
         sg_pass scene_pass{};
         scene_pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-        scene_pass.action.colors[0].clear_value = {0.125f, 0.157f, 0.188f, 1.0f}; // 0x202830
+        // The overdraw debug view accumulates a fragment count additively, so
+        // it needs a zero clear; every other view uses the neutral background
+        // gray (0x202830).
+        scene_pass.action.colors[0].clear_value = (quality.debug_view == DebugView::Overdraw)
+                                                      ? sg_color{0.0f, 0.0f, 0.0f, 0.0f}
+                                                      : sg_color{0.125f, 0.157f, 0.188f, 1.0f};
         scene_pass.action.depth.load_action = SG_LOADACTION_CLEAR;
         scene_pass.action.depth.clear_value = useReversedZ() ? 0.0f : 1.0f;
         // STORE so the composite pass's depth-debug view can sample the
@@ -1343,6 +1360,10 @@ void App::Impl::render() {
             flags.angle_cut_start_deg = cfg.angle_cut_start_deg;
             flags.angle_cut_end_deg = cfg.angle_cut_end_deg;
             flags.enable_pbr = cfg.enable_pbr;
+            // Overdraw debug view: draw every group through the additive
+            // no-depth pipeline so the color target accumulates a per-pixel
+            // fragment count for the composite's heatmap.
+            flags.overdraw = quality.debug_view == DebugView::Overdraw;
             // Single source of truth for sun direction: ibl_settings.sun_dir
             // drives both the IBL bake and the analytical light, so the baked
             // reflected sun lines up with the analytical highlight (docs §9.1).
@@ -1447,6 +1468,9 @@ void App::Impl::render() {
         // composite (when we skip the scene pass) gates the AO multiply the same
         // way the cached scene_rt was actually rendered.
         last_scene_consumed_ao = scene_consumed_ao_this_frame;
+        // Remember whether the cached color now holds overdraw counts, so the
+        // next frame's pause-when-static gate re-renders on a view transition.
+        last_rendered_overdraw = quality.debug_view == DebugView::Overdraw;
     } else {
         // Reusing the cached scene_rt + AO targets — no offscreen GPU work this
         // frame; only the composite + ImGui below run.

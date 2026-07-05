@@ -83,6 +83,14 @@ class SceneRenderer {
         float angle_cut_end_deg{90.f};
         bool enable_pbr{false}; ///< When on: Cook-Torrance + IBL ambient.
 
+        /// Overdraw debug view. When on, every group draws through the
+        /// additive-blend / no-depth / no-cull overdraw pipeline and the
+        /// scene FS emits a constant per-fragment increment instead of
+        /// shading, so the color target accumulates a per-pixel fragment
+        /// count for the composite's overdraw heatmap. Overrides cull and
+        /// shading; the angle cut still discards (cut fragments don't count).
+        bool overdraw{false};
+
         /// Toward-sun direction for the analytical directional light. Should
         /// match the IBL bake's sun_dir so the analytical highlight aligns
         /// with the reflected sun in the cubemap (per docs §9.1).
