@@ -266,6 +266,7 @@ lua.set_function("use", [&, cache](std::string rel) -> sol::object {
     auto bytes = fetcher(key);
     if (!bytes) { diags.error(codes::kErrImportFileNotFound, /*…*/); return sol::lua_nil; }
     sol::object mod = lua.safe_script(asStringView(*bytes), key);           // capture the RETURN value
+    mod = readonly(lua, mod);                                               // deep-freeze the import (§7.1)
     (*cache)[key] = mod;
     return mod;
 });
@@ -283,6 +284,61 @@ DSL-free env (`string`/`table`/`math`/`use`, but no `keep`/`rule`), forcing
 imported libraries to be *pure* — they compute and return values, they cannot
 secretly mutate the config. A shared env (libs may call the DSL) is also
 defensible; it is a policy dial, not a limitation.
+
+### 7.1 `constants.lua` and read-only imports
+
+The prime `use` case is a shared-constants module — a single source of truth
+imported across fragments:
+
+```lua
+-- lib/constants.lua — pure data, returns a table
+return {
+  endcaps = { "EndcapN", "EndcapP" },
+  seg     = { coarse = 10, fine = 48 },
+  palette = { silicon = "#60666E", kapton = "#9A5516", copper = "#B66A3C" },
+}
+```
+
+```lua
+local K = use("lib/constants.lua")
+material("silicon", { color = K.palette.silicon, metallic = 1.0, roughness = 0.05 })
+rule { match = '…', tessellation = { max_segments_circle = K.seg.fine } }
+```
+
+Because `use` is cached, `constants.lua` evaluates **exactly once** even under a
+diamond import, and every importer sees the same values — bound to a local, no
+globals. It is also a natural fit for the DSL-free env (§7): a constants module
+never calls `keep`/`rule`, so running it pure *structurally* forbids side
+effects.
+
+The one hazard is that the cache hands back the *same* table instance, so a
+careless `K.seg.fine = 12` in one consumer would leak to every other. `use`
+closes this by **deep-freezing** the return value before caching, so a write
+raises a loud error at the offending site instead of silently corrupting shared
+state:
+
+```lua
+local function readonly(t)
+  if type(t) ~= "table" then return t end
+  local backing = {}
+  for k, v in pairs(t) do backing[k] = readonly(v) end       -- freeze nested tables too
+  return setmetatable({}, {
+    __index    = backing,
+    __newindex = function(_, k) error(("cannot modify read-only import (key %q)"):format(k), 2) end,
+    __pairs    = function() return next, backing, nil end,    -- keep pairs() working over the proxy
+    __len      = function() return #backing end,
+    __metatable = false,                                       -- lock the metatable
+  })
+end
+```
+
+An empty proxy table (rather than guarding the real table) is required because
+Lua's `__newindex` only fires for *absent* keys — a populated table's existing
+keys would stay writable. Reads/`ipairs`/`#` forward through `__index`/`__len`,
+and `pairs` works via `__pairs` (retained in Lua 5.4 — only `__ipairs` was
+removed). The freeze lives inside `use` (implemented in C++ over sol2, or via a
+tiny injected prelude); the guarantee is that imported modules are immutable, so
+`constants.lua` behaves like a genuine constants file.
 
 **This does not cap Lua.** Closures, higher-order functions, returning
 functions/tables, metatables, coroutines — all intact. The only removals are
