@@ -151,20 +151,17 @@ void warnUnknownKeysImpl(const toml::table &tbl, const Range &known, std::string
     }
 }
 
-void warnUnknownKeys(const toml::table &tbl, std::initializer_list<std::string_view> known,
-                     std::string_view context, DiagnosticList &diags) {
-    warnUnknownKeysImpl(tbl, known, context, diags);
-}
-
-void warnUnknownKeys(const toml::table &tbl, const std::vector<std::string_view> &known,
-                     std::string_view context, DiagnosticList &diags) {
-    warnUnknownKeysImpl(tbl, known, context, diags);
-}
-
 // Overload for the shared, fixed allowlists in config_keys.hpp (std::array
 // converts to this span). This is the path the section parsers use so their
 // valid-key set stays identical to the writer's and the Lua front-end's.
 void warnUnknownKeys(const toml::table &tbl, std::span<const std::string_view> known,
+                     std::string_view context, DiagnosticList &diags) {
+    warnUnknownKeysImpl(tbl, known, context, diags);
+}
+
+// Overload for the export section, whose valid keys depend on the format and are
+// assembled into a vector at parse time.
+void warnUnknownKeys(const toml::table &tbl, const std::vector<std::string_view> &known,
                      std::string_view context, DiagnosticList &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
 }
