@@ -678,6 +678,11 @@ struct TessellationJob::Impl {
     // take()-time stats print so an A/B config toggle is verifiable without
     // a debugger (see tessellation_pass.cpp's merge-finalization step).
     std::atomic<size_t> coincidentFacesRemoved{0};
+    // Number of merge_descendants nodes that had at least one coincident face
+    // removed — paired with coincidentFacesRemoved so take() can emit a single
+    // aggregate diagnostic instead of one toast per node (there are 100+ calo
+    // staves; per-node info diags flood the viewer's toast area).
+    std::atomic<size_t> coincidentNodesAffected{0};
 
     NodeView makeNodeView(const SemanticNode &node) const {
         std::string_view matName;
@@ -1111,13 +1116,11 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     if (rule.mergeCoincident) {
         const size_t removed = removeCoincidentInteriorFaces(groups);
         if (removed > 0) {
+            // Accumulate only — the per-node counts are summed into a single
+            // aggregate diagnostic in take(). Emitting one info diag per node
+            // here floods the viewer toast area (100+ calo staves).
             coincidentFacesRemoved.fetch_add(removed, std::memory_order_relaxed);
-            result.diags.info(
-                codes::kInfoTessCoincidentRemoved,
-                std::format("merge_coincident on '{}' removed {} interior face(s) "
-                            "({} triangle pair(s) of coincident, opposite-wound faces)",
-                            semNode.name, removed, removed / 2),
-                semNode.name);
+            coincidentNodesAffected.fetch_add(1, std::memory_order_relaxed);
         }
     }
 
@@ -1352,8 +1355,20 @@ TessellationPassResult TessellationJob::take() {
     std::println(stderr, "  Unique materials: {}", impl_->result.scene.materials.size());
     std::println(stderr, "  Mesh cache entries (shapes with tessellation): {}",
                  impl_->meshCache.size());
+    const size_t coincRemoved = impl_->coincidentFacesRemoved.load(std::memory_order_relaxed);
     std::println(stderr, "  Coincident interior faces removed (merge_coincident): {}",
-                 impl_->coincidentFacesRemoved.load(std::memory_order_relaxed));
+                 coincRemoved);
+    // Single aggregate diagnostic for the whole pass (one toast), replacing the
+    // former per-node info diags that flooded the viewer.
+    if (coincRemoved > 0) {
+        const size_t coincNodes = impl_->coincidentNodesAffected.load(std::memory_order_relaxed);
+        impl_->result.diags.info(
+            codes::kInfoTessCoincidentRemoved,
+            std::format("merge_coincident removed {} interior face(s) ({} coincident, "
+                        "opposite-wound triangle pair(s)) across {} node(s)",
+                        coincRemoved, coincRemoved / 2, coincNodes),
+            "merge_coincident");
+    }
     return std::move(impl_->result);
 }
 
