@@ -232,8 +232,8 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
             if (tess.mergeDescendants) {
                 tessTbl.insert("merge_descendants", *tess.mergeDescendants);
             }
-            if (tess.mergeCoincident) {
-                tessTbl.insert("merge_coincident", *tess.mergeCoincident);
+            if (tess.dropCoincidentFaces) {
+                tessTbl.insert("drop_coincident_faces", *tess.dropCoincidentFaces);
             }
             if (tess.maxSegmentsCircle) {
                 tessTbl.insert("max_segments_circle",
@@ -259,7 +259,7 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
 toml::table buildDefaultsTable(const NHConfig &cfg) {
     toml::table out;
     const auto &td = cfg.tessellationDefaults;
-    const bool any_tess = td.skipGeometry || td.mergeDescendants || td.mergeCoincident ||
+    const bool any_tess = td.skipGeometry || td.mergeDescendants || td.dropCoincidentFaces ||
                           td.maxSegmentsCircle || td.fallback;
     if (any_tess) {
         toml::table tessTbl;
@@ -269,8 +269,8 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
         if (td.mergeDescendants) {
             tessTbl.insert("merge_descendants", *td.mergeDescendants);
         }
-        if (td.mergeCoincident) {
-            tessTbl.insert("merge_coincident", *td.mergeCoincident);
+        if (td.dropCoincidentFaces) {
+            tessTbl.insert("drop_coincident_faces", *td.dropCoincidentFaces);
         }
         if (td.maxSegmentsCircle) {
             tessTbl.insert("max_segments_circle", static_cast<int64_t>(*td.maxSegmentsCircle));

@@ -141,9 +141,10 @@ struct Rule {
         // before the merged mesh is emitted. Only meaningful together with
         // mergeDescendants — see tessellation_pass.cpp's coincident-face removal
         // helper for the exact algorithm. Valid only for fully-opaque geometry:
-        // it assumes the interior faces can never be seen, which is false if the
-        // stack is later cut open (that's a phase-2 concern, not handled here).
-        std::optional<bool> mergeCoincident;
+        // it assumes the interior faces can never be seen, which holds for uncut
+        // and Boolean-cut views (the cut re-tessellation adds cap faces) but not
+        // for the shader angle-cut preview, which exposes the raw interior.
+        std::optional<bool> dropCoincidentFaces;
         std::optional<int> maxSegmentsCircle;
         std::optional<BooleanFallback> fallback;
     };

@@ -606,13 +606,13 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
         // ── tessellation sub-table ───────────────────────────────────────────
         if (const auto *tessTbl = (*tbl)["tessellation"].as_table()) {
             warnUnknownKeys(*tessTbl,
-                            {"skip_geometry", "merge_descendants", "merge_coincident",
+                            {"skip_geometry", "merge_descendants", "drop_coincident_faces",
                              "max_segments_circle", "fallback"},
                             "rules.tessellation", diags);
             Rule::Tessellation tess;
             tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
-            tess.mergeCoincident = (*tessTbl)["merge_coincident"].value<bool>();
+            tess.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();
             tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);
@@ -764,13 +764,13 @@ ConfigResult parseTable(const toml::table &tbl) {
         warnUnknownKeys(*defTbl, {"tessellation", "extras"}, "defaults", diags);
         if (const auto *tessTbl = (*defTbl)["tessellation"].as_table()) {
             warnUnknownKeys(*tessTbl,
-                            {"skip_geometry", "merge_descendants", "merge_coincident",
+                            {"skip_geometry", "merge_descendants", "drop_coincident_faces",
                              "max_segments_circle", "fallback"},
                             "defaults.tessellation", diags);
             auto &td = cfg.tessellationDefaults;
             td.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             td.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
-            td.mergeCoincident = (*tessTbl)["merge_coincident"].value<bool>();
+            td.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();
             td.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);
