@@ -1938,8 +1938,21 @@ void App::Impl::onFrame() {
 
     // Headless screenshot: once the scene is loaded, uploaded, lit and framed,
     // fire the one-shot export (which quits when the file is written).
+    //
+    // When a Boolean cut is enabled the base (uncut) scene lands first and the
+    // cut bake follows asynchronously (see BuildController: base build is always
+    // wedge=nullopt, then a pending cut rebuild re-tessellates the wedge). In
+    // that interim the app draws the uncut base with the live *shader* discard —
+    // which exposes raw interior faces and is not the intended capped cut view.
+    // Gate the export on the cut bake being resident and matching the committed
+    // angle so headless renders capture the finished Boolean-cut scene, not the
+    // interim preview. (No-op when boolean_cut is off — nothing to wait for.)
+    const bool cut_settled =
+        !cfg.boolean_cut || (cut_uploaded && !build_controller_.pendingCutRebuild() &&
+                             build_controller_.cutBuiltStartDeg() == cfg.angle_cut_start_deg &&
+                             build_controller_.cutBuiltEndDeg() == cfg.angle_cut_end_deg);
     if (startup_screenshot_pending && !exporter_.active() && scene && scene_uploaded &&
-        ibl_baker_.installed() && camera_framed && !build_controller_.inProgress()) {
+        ibl_baker_.installed() && camera_framed && !build_controller_.inProgress() && cut_settled) {
         startup_screenshot_pending = false;
         exporter_.request(startup_screenshot_settings, quality, scene != nullptr && scene_uploaded,
                           startup_screenshot_path, /*quit_when_done=*/true);
