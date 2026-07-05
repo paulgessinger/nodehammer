@@ -505,7 +505,7 @@ void SceneRenderer::Impl::finalizeUpload() {
 
     uploadInstanceBuffer();
 
-    std::println("viewer: scene uploaded — meshes={} materials={} nodes={} groups={} tris={} "
+    std::println("viewer: scene uploaded -- meshes={} materials={} nodes={} groups={} tris={} "
                  "bbox=[{:.1f} {:.1f} {:.1f} .. {:.1f} {:.1f} {:.1f}]\n",
                  meshes.size(), materials.size(), node_count, groups.size(),
                  static_cast<unsigned long long>(triangle_count), bmin.x, bmin.y, bmin.z, bmax.x,

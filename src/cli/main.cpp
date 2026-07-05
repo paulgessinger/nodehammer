@@ -18,7 +18,7 @@ void registerCmdViewer(CLI::App &app);
 #endif
 
 int main(int argc, char **argv) {
-    CLI::App app{"nodehammer — HEP geometry conversion pipeline"};
+    CLI::App app{"nodehammer -- HEP geometry conversion pipeline"};
     app.require_subcommand(1);
 
     // --version flag: print and exit

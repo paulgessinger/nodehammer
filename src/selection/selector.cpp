@@ -203,7 +203,7 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
                     disposition[childIt->second] == SelectionAction::KeepIf) {
                     result.diags.warn(
                         codes::kWarnSelectionOrphan,
-                        std::format("node '{}' kept but parent '{}' dropped — forcing drop",
+                        std::format("node '{}' kept but parent '{}' dropped -- forcing drop",
                                     scene.nodes.at(childId).name, node.name),
                         scene.nodes.at(childId).name);
                     disposition[childIt->second] = SelectionAction::DropIf;

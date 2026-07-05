@@ -194,7 +194,7 @@ void BenchRunner::finalizeSegment(const Step &s, std::string screenshot) {
     r.stats = accum_.stats;
     r.screenshot = std::move(screenshot);
     results_.push_back(std::move(r));
-    std::println("viewer: bench segment '{}' done — GPU {:.2f} ms (scene {:.2f}), {} frames",
+    std::println("viewer: bench segment '{}' done -- GPU {:.2f} ms (scene {:.2f}), {} frames",
                  s.label, r.total.median, r.scene.median, r.frames);
 }
 

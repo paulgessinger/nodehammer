@@ -1,6 +1,15 @@
+set windows-shell := ["cmd.exe", "/C"]
+
 # Vendored Conan recipes:
 #   - sokol-shdc: wraps the prebuilt shader compiler binary from
 #     floooh/sokol-tools-bin (used as a tool_requires when viewer=True).
+
+ccache_launcher_arg := if os_family() == "windows" { "" } else { "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache" }
+configure_native_cmd := if os_family() == "windows" { "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msvc-cmake.ps1 configure" } else { "cmake --preset conan-relwithdebinfo --fresh -GNinja " + ccache_launcher_arg + " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNODEHAMMER_BUILD_TESTS=ON -DNODEHAMMER_WITH_VIEWER=ON" }
+configure_native_incremental_cmd := if os_family() == "windows" { "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msvc-cmake.ps1 configure-incremental" } else { "cmake --preset conan-relwithdebinfo -GNinja " + ccache_launcher_arg + " -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DNODEHAMMER_BUILD_TESTS=ON -DNODEHAMMER_WITH_VIEWER=ON" }
+build_native_cmd := if os_family() == "windows" { "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msvc-cmake.ps1 build" } else { "cmake --build --preset conan-relwithdebinfo" }
+build_nodehammer_cmd := if os_family() == "windows" { "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/windows-msvc-cmake.ps1 build-nodehammer" } else { "cmake --build --preset conan-relwithdebinfo --target nodehammer" }
+
 # Cheap to re-export every time; conan dedupes by recipe revision.
 recipes:
     conan export recipes/sokol --version=2026.07.02
@@ -10,18 +19,19 @@ recipes:
     conan export recipes/sokol-shdc --version=2026.06.13
 
 deps: recipes
-    conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja -o '&:viewer=True'
+    conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja -o "&:viewer=True"
 
 configure:
-    cmake --preset conan-relwithdebinfo --fresh \
-        -GNinja \
-        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
-        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-        -DNODEHAMMER_BUILD_TESTS=ON \
-        -DNODEHAMMER_WITH_VIEWER=ON
+    {{configure_native_cmd}}
+
+configure-incremental:
+    {{configure_native_incremental_cmd}}
 
 build:
-    cmake --build --preset conan-relwithdebinfo
+    {{build_native_cmd}}
+
+build-nodehammer:
+    {{build_nodehammer_cmd}}
 
 test:
     ctest --preset conan-relwithdebinfo --output-on-failure -j14
@@ -185,7 +195,7 @@ wasm-copy scene='odd' target='build/wasm-viewer':
 # Headless smoke for the compute-worker module: generates a small synthetic
 # semantic scene with the native build, then drives nh_compute_build in node via
 # the wasm compute module, asserting NHR8 render bytes come back. Build both
-# first: `cmake --build build/RelWithDebInfo --target nodehammer` and
+# first: `just build-nodehammer` and
 # `just wasm-build`.
 wasm-compute-smoke:
     #!/usr/bin/env bash

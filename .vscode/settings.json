@@ -1,0 +1,9 @@
+{
+    "cmake.configurePreset": "conan-relwithdebinfo",
+    "cmake.buildPreset": "conan-relwithdebinfo",
+    "cmake.configureArgs": [
+        "-DNODEHAMMER_WITH_VIEWER=ON"
+    ],
+    "cmake.buildBeforeRun": true,
+    "git.detectWorktrees": true
+}

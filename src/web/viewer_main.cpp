@@ -69,7 +69,7 @@ void warnUnknownKeys(const nlohmann::json &j, const std::array<std::string_view,
     for (const auto &item : j.items()) {
         if (!isKnownKey(item.key(), known)) {
             std::fprintf(stderr,
-                         "nh_viewer_start: ignoring unknown %s key \"%s\" — typo or stale "
+                         "nh_viewer_start: ignoring unknown %s key \"%s\" -- typo or stale "
                          "JS shell?\n",
                          scope, item.key().c_str());
         }

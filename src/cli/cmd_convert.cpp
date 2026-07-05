@@ -78,7 +78,7 @@ void registerCmdConvert(CLI::App &app) {
     auto *fmtInOpt =
         sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
-    auto *outputOpt = sub->add_option("-o,--output", "Output file(s) — one per format")
+    auto *outputOpt = sub->add_option("-o,--output", "Output file(s) -- one per format")
                           ->required()
                           ->expected(1, -1);
     auto *fmtOutOpt = sub->add_option(
