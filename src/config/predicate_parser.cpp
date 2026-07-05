@@ -195,10 +195,7 @@ class Parser {
             }
             operands.push_back(std::move(*right));
         }
-        if (operands.size() == 1) {
-            return std::move(operands[0]);
-        }
-        return PredicateExpr{std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
+        return combineOr(std::move(operands));
     }
 
     // and_expr ← unary_expr ('&&' unary_expr)*
@@ -217,10 +214,7 @@ class Parser {
             }
             operands.push_back(std::move(*right));
         }
-        if (operands.size() == 1) {
-            return std::move(operands[0]);
-        }
-        return PredicateExpr{std::make_shared<AndPredicate>(AndPredicate{std::move(operands)})};
+        return combineAnd(std::move(operands));
     }
 
     // unary_expr ← '!' unary_expr / primary
@@ -439,6 +433,26 @@ std::expected<PredicateExpr, std::string> parsePredicateExpr(std::string_view in
     }
     Parser parser{std::move(*tokens)};
     return parser.parse();
+}
+
+PredicateExpr combineOr(std::vector<PredicateExpr> operands) {
+    if (operands.empty()) {
+        return PredicateExpr{BoolPredicate{false}};
+    }
+    if (operands.size() == 1) {
+        return std::move(operands[0]);
+    }
+    return PredicateExpr{std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
+}
+
+PredicateExpr combineAnd(std::vector<PredicateExpr> operands) {
+    if (operands.empty()) {
+        return PredicateExpr{BoolPredicate{true}};
+    }
+    if (operands.size() == 1) {
+        return std::move(operands[0]);
+    }
+    return PredicateExpr{std::make_shared<AndPredicate>(AndPredicate{std::move(operands)})};
 }
 
 } // namespace nodehammer

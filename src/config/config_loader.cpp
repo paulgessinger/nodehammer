@@ -1,4 +1,6 @@
+#include <nodehammer/config/color_parse.hpp>
 #include <nodehammer/config/config_enums.hpp>
+#include <nodehammer/config/config_keys.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/predicate_parser.hpp>
 #include <nodehammer/detail/file_io.hpp>
@@ -149,11 +151,16 @@ void warnUnknownKeysImpl(const toml::table &tbl, const Range &known, std::string
     }
 }
 
-void warnUnknownKeys(const toml::table &tbl, std::initializer_list<std::string_view> known,
+// Overload for the shared, fixed allowlists in config_keys.hpp (std::array
+// converts to this span). This is the path the section parsers use so their
+// valid-key set stays identical to the writer's and the Lua front-end's.
+void warnUnknownKeys(const toml::table &tbl, std::span<const std::string_view> known,
                      std::string_view context, DiagnosticList &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
 }
 
+// Overload for the export section, whose valid keys depend on the format and are
+// assembled into a vector at parse time.
 void warnUnknownKeys(const toml::table &tbl, const std::vector<std::string_view> &known,
                      std::string_view context, DiagnosticList &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
@@ -283,12 +290,7 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
                         std::format("materials.{} must be a table, not a scalar", key.str()));
             continue;
         }
-        warnUnknownKeys(*tbl,
-                        {"base_color", "metallic", "roughness", "double_sided", "emissive",
-                         "alpha_mode", "alpha_cutoff", "ior", "transmission", "clearcoat",
-                         "clearcoat_roughness", "anisotropy", "anisotropy_rotation", "specular",
-                         "specular_color"},
-                        std::format("materials.{}", key.str()), diags);
+        warnUnknownKeys(*tbl, keys::kMaterialKeys, std::format("materials.{}", key.str()), diags);
         MaterialDef def;
         def.name = key.str();
 
@@ -302,39 +304,8 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
                 }
             }
         } else if (auto colorStr = (*tbl)["base_color"].value<std::string>()) {
-            // Parse hex color: "#RRGGBB" or "#RRGGBBAA"
-            std::string_view hex = *colorStr;
-            if (!hex.empty() && hex[0] == '#') {
-                hex.remove_prefix(1);
-            }
-            // sRGB → linear conversion (hex colors are assumed sRGB).
-            auto srgbToLinear = [](float c) -> float {
-                return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-            };
-            auto parseHexByte = [&](std::string_view s, std::size_t offset,
-                                    bool linearize = true) -> float {
-                unsigned val = 0;
-                for (int i = 0; i < 2; ++i) {
-                    char c = s[offset + static_cast<std::size_t>(i)];
-                    val <<= 4;
-                    if (c >= '0' && c <= '9') {
-                        val += static_cast<unsigned>(c - '0');
-                    } else if (c >= 'a' && c <= 'f') {
-                        val += static_cast<unsigned>(c - 'a' + 10);
-                    } else if (c >= 'A' && c <= 'F') {
-                        val += static_cast<unsigned>(c - 'A' + 10);
-                    }
-                }
-                float f = static_cast<float>(val) / 255.0f;
-                return linearize ? srgbToLinear(f) : f;
-            };
-            if (hex.size() >= 6) {
-                def.baseColor.r = parseHexByte(hex, 0, true);
-                def.baseColor.g = parseHexByte(hex, 2, true);
-                def.baseColor.b = parseHexByte(hex, 4, true);
-                if (hex.size() >= 8) {
-                    def.baseColor.a = parseHexByte(hex, 6, false); // alpha is linear
-                }
+            if (auto parsed = parseHexColor(*colorStr)) {
+                def.baseColor = *parsed;
             } else {
                 diags.warn(codes::kWarnConfigUnknownKey,
                            std::format("materials.{}: invalid hex color '{}'; "
@@ -411,7 +382,7 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
             continue;
         }
 
-        warnUnknownKeys(*tbl, {"keep_if", "drop_if", "scope"}, "selection_rules", diags);
+        warnUnknownKeys(*tbl, keys::kSelectionRuleKeys, "selection_rules", diags);
 
         SelectionAction action{};
         std::optional<PredicateExpr> pred;
@@ -469,12 +440,7 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
                                "selection_rules");
                     break;
                 }
-                if (operands.size() == 1) {
-                    pred = std::move(operands[0]);
-                } else if (!operands.empty()) {
-                    pred = PredicateExpr{
-                        std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
-                }
+                pred = combineOr(std::move(operands));
                 break;
             }
         }
@@ -540,7 +506,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             continue;
         }
 
-        warnUnknownKeys(*tbl, {"match", "material", "tessellation", "extras"}, "rules", diags);
+        warnUnknownKeys(*tbl, keys::kRuleKeys, "rules", diags);
 
         Rule rule;
 
@@ -590,12 +556,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             if (!ok) {
                 continue;
             }
-            if (operands.size() == 1) {
-                rule.match = std::move(operands[0]);
-            } else {
-                rule.match =
-                    PredicateExpr{std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
-            }
+            rule.match = combineOr(std::move(operands));
         }
 
         // ── material ─────────────────────────────────────────────────────────
@@ -605,10 +566,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
 
         // ── tessellation sub-table ───────────────────────────────────────────
         if (const auto *tessTbl = (*tbl)["tessellation"].as_table()) {
-            warnUnknownKeys(*tessTbl,
-                            {"skip_geometry", "merge_descendants", "drop_coincident_faces",
-                             "max_segments_circle", "fallback"},
-                            "rules.tessellation", diags);
+            warnUnknownKeys(*tessTbl, keys::kTessellationKeys, "rules.tessellation", diags);
             Rule::Tessellation tess;
             tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
@@ -643,10 +601,7 @@ ConfigResult parseTable(const toml::table &tbl) {
     DiagnosticList diags;
     NHConfig cfg;
 
-    warnUnknownKeys(tbl,
-                    {"hoist_orphans", "deduplicate_shapes", "export", "materials",
-                     "selection_rules", "rules", "defaults"},
-                    "<top-level>", diags);
+    warnUnknownKeys(tbl, keys::kTopLevelKeys, "<top-level>", diags);
     if (auto v = tbl["hoist_orphans"].value<bool>()) {
         cfg.hoistOrphans = *v;
     }
@@ -668,10 +623,10 @@ ConfigResult parseTable(const toml::table &tbl) {
             std::span<const std::string_view> formats;
         };
         static constexpr ExportKeyDef kExportKeys[] = {
-            {"unit_scale", {}},
-            {"bake_unit_scale", {}},
-            {"multi_scene", kGltfGlbFormats},
-            {"scene_name_separator", kGltfGlbFormats},
+            {keys::kUnitScale, {}},
+            {keys::kBakeUnitScale, {}},
+            {keys::kMultiScene, kGltfGlbFormats},
+            {keys::kSceneNameSeparator, kGltfGlbFormats},
         };
 
         struct FormatGroup {
@@ -761,12 +716,9 @@ ConfigResult parseTable(const toml::table &tbl) {
 
     // ── [defaults] — global fallback for tessellation and extras ─────────────
     if (const auto *defTbl = tbl["defaults"].as_table()) {
-        warnUnknownKeys(*defTbl, {"tessellation", "extras"}, "defaults", diags);
+        warnUnknownKeys(*defTbl, keys::kDefaultsKeys, "defaults", diags);
         if (const auto *tessTbl = (*defTbl)["tessellation"].as_table()) {
-            warnUnknownKeys(*tessTbl,
-                            {"skip_geometry", "merge_descendants", "drop_coincident_faces",
-                             "max_segments_circle", "fallback"},
-                            "defaults.tessellation", diags);
+            warnUnknownKeys(*tessTbl, keys::kTessellationKeys, "defaults.tessellation", diags);
             auto &td = cfg.tessellationDefaults;
             td.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             td.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
