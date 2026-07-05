@@ -66,6 +66,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
         ${_dir}/ao_pass.cpp
         ${_dir}/ao_denoise_pass.cpp
         ${_dir}/composite_pass.cpp
+        ${_dir}/blit_pass.cpp
         ${_dir}/png_export.cpp
         ${_dir}/png_exporter.cpp
         ${_dir}/stb_image_write_impl.cpp

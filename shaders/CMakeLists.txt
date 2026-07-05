@@ -60,6 +60,12 @@ nh_compile_shader(ao_denoise.glsl
     INCLUDES         ${NH_SHADER_DEPTH_HELPERS}
 )
 
+nh_compile_shader(blit.glsl
+    OUT_HEADER       NH_SHADER_BLIT_HEADER
+    SLANGS           ${NH_SCENE_SLANGS}
+    DEPENDS_TARGET   nodehammer_shaders
+)
+
 # Expose the generated header's directory for consumers (the viewer lib).
 set(NH_SHADER_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_shaders"
     CACHE INTERNAL "Directory containing sokol-shdc-generated headers")
