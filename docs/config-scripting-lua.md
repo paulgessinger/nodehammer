@@ -1,8 +1,10 @@
 # Scripted configuration (Lua) — design exploration
 
-**Status:** exploration / not implemented. This document captures the design
-space for an alternative *scripting* front-end to the config system, so the
-work can be picked up (or declined) with the trade-offs already mapped.
+**Status:** Option A implemented — the `config-lua` CLI command (backed by the
+native-only `nodehammer_lua` library) evaluates a Lua script into an `NHConfig`
+and emits flattened TOML. Option B (embedding the engine so scripts run inside
+the app/browser) remains future work. This document captures the design space so
+the remaining trade-offs stay mapped.
 
 The existing TOML config is described operationally in
 [predicate-expressions.md](predicate-expressions.md); the parser lives in
@@ -132,7 +134,7 @@ config { hoist_orphans = true, deduplicate_shapes = true }
 export("gltf", { unit_scale = 0.1, bake_unit_scale = true })
 
 -- material def     → MaterialDef (name is the first arg)
-material("silicon", { color = "#60666E", metallic = 1.0, roughness = 0.05 })
+material("silicon", { base_color = "#60666E", metallic = 1.0, roughness = 0.05 })
 
 -- selection rule   → SelectionRule (list = OR, mirrors TOML array form)
 keep { 'path ~= "**/Pixels"', 'name == "BeamPipe"' }
@@ -164,7 +166,7 @@ local tk = use("lib/tracker.lua")    -- import a library value (returns, cached)
   replacing it.
 - Rule / selection **order is preserved by call order** (matters: material
   resolution is last-match-wins).
-- `color` accepts `"#RRGGBB[AA]"` or `{r,g,b,a}`, exactly like `base_color`.
+- `base_color` accepts `"#RRGGBB[AA]"` or `{r,g,b,a}`, mirroring the TOML field.
 
 ---
 
@@ -301,7 +303,7 @@ return {
 
 ```lua
 local K = use("lib/constants.lua")
-material("silicon", { color = K.palette.silicon, metallic = 1.0, roughness = 0.05 })
+material("silicon", { base_color = K.palette.silicon, metallic = 1.0, roughness = 0.05 })
 rule { match = '…', tessellation = { max_segments_circle = K.seg.fine } }
 ```
 

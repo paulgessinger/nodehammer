@@ -14,6 +14,7 @@
 #include <format>
 #include <fstream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <sstream>
@@ -92,7 +93,19 @@ std::optional<PredicateExpr> predicateFromLua(const sol::object &val, const std:
     }
     if (val.get_type() == sol::type::table) {
         const sol::table arr = val.as<sol::table>();
-        const std::size_t n = arr.size();
+        const std::size_t n = arr.size(); // luaL_len — only meaningful for arrays
+        // A predicate list must be a clean 1..n sequence. Reject map-like tables
+        // or holey arrays (where the key count disagrees with the length) so a
+        // mistyped list surfaces an error instead of silently dropping entries.
+        std::size_t keyCount = 0;
+        for ([[maybe_unused]] const auto &kv : arr) {
+            ++keyCount;
+        }
+        if (keyCount != n) {
+            diags.error(codes::kErrConfigParse,
+                        std::format("{}: expected an array of predicate strings", ctx), ctx);
+            return std::nullopt;
+        }
         std::vector<PredicateExpr> operands;
         operands.reserve(n);
         for (std::size_t i = 1; i <= n; ++i) {
@@ -262,10 +275,25 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
         sol::state lua;
         lua.open_libraries(sol::lib::base, sol::lib::string, sol::lib::table, sol::lib::math);
 
+        // Guard against a runaway script (e.g. `while true do end`) wedging the
+        // CLI or the test/CI process: abort once the instruction budget is spent.
+        // The budget is generous — real configs run a handful of loops — so only
+        // pathological scripts trip it. (Design doc §9.)
+        static constexpr int kInstructionBudget = 100'000'000;
+        lua_sethook(
+            lua.lua_state(),
+            [](lua_State *L, lua_Debug *) {
+                luaL_error(L, "config script exceeded the instruction budget "
+                              "(possible infinite loop)");
+            },
+            LUA_MASKCOUNT, kInstructionBudget);
+
         // Include-resolution state. `dirStack.back()` is the directory of the
         // currently-executing chunk, so nested include()/use() resolve relative
         // to the including file (mirrors the TOML loader's parent-relative keys).
-        std::vector<std::filesystem::path> dirStack{baseDir};
+        // `root` is the canonical baseDir; include()/use() may not escape it.
+        const std::filesystem::path root = std::filesystem::weakly_canonical(baseDir);
+        std::vector<std::filesystem::path> dirStack{root};
         std::set<std::string> includeStack;                    // on-stack cycle guard for include()
         std::unordered_map<std::string, sol::object> useCache; // run-once cache for use()
         std::set<std::string> useStack;                        // in-progress guard for use()
@@ -291,6 +319,33 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
             }
             ok = true;
             return r;
+        };
+
+        // Resolve an include()/use() target under the config root. Rejects
+        // absolute paths and any result that escapes `root` (e.g. via `..`),
+        // emitting a diagnostic and returning nullopt.
+        auto resolveUnder = [&](const std::string &rel,
+                                const std::string &ctx) -> std::optional<std::filesystem::path> {
+            if (std::filesystem::path(rel).is_absolute()) {
+                diags.error(codes::kErrConfigParse,
+                            std::format("{}: absolute paths are not allowed ('{}')", ctx, rel),
+                            ctx);
+                return std::nullopt;
+            }
+            const std::filesystem::path abs =
+                std::filesystem::weakly_canonical(dirStack.back() / rel);
+            const std::string rootStr = root.generic_string();
+            const std::string absStr = abs.generic_string();
+            const bool under = absStr.size() >= rootStr.size() &&
+                               absStr.compare(0, rootStr.size(), rootStr) == 0 &&
+                               (absStr.size() == rootStr.size() || absStr[rootStr.size()] == '/');
+            if (!under) {
+                diags.error(codes::kErrConfigParse,
+                            std::format("{}: '{}' resolves outside the config root", ctx, rel),
+                            ctx);
+                return std::nullopt;
+            }
+            return abs;
         };
 
         // ── config { hoist_orphans=, deduplicate_shapes= } ───────────────────
@@ -467,22 +522,24 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 
         // ── include(path) — run a fragment into the shared cfg ───────────────
         lua.set_function("include", [&](const std::string &rel) {
-            const std::filesystem::path abs =
-                std::filesystem::weakly_canonical(dirStack.back() / rel);
-            const std::string key = abs.generic_string();
+            const auto abs = resolveUnder(rel, "include");
+            if (!abs) {
+                return;
+            }
+            const std::string key = abs->generic_string();
             if (includeStack.contains(key)) {
                 diags.error(codes::kErrConfigParse,
                             std::format("include cycle detected: '{}'", rel), key);
                 return;
             }
-            auto contents = readFileToString(abs);
+            auto contents = readFileToString(*abs);
             if (!contents) {
                 diags.error(codes::kErrImportFileNotFound,
                             std::format("include target not found: '{}'", rel), key);
                 return;
             }
             includeStack.insert(key);
-            dirStack.push_back(abs.parent_path());
+            dirStack.push_back(abs->parent_path());
             bool ok = false;
             runChunk(*contents, key, ok);
             dirStack.pop_back();
@@ -491,9 +548,11 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 
         // ── use(path) — import a library value, cached + deep-frozen ──────────
         lua.set_function("use", [&](const std::string &rel) -> sol::object {
-            const std::filesystem::path abs =
-                std::filesystem::weakly_canonical(dirStack.back() / rel);
-            const std::string key = abs.generic_string();
+            const auto abs = resolveUnder(rel, "use");
+            if (!abs) {
+                return sol::lua_nil;
+            }
+            const std::string key = abs->generic_string();
             if (const auto it = useCache.find(key); it != useCache.end()) {
                 return it->second;
             }
@@ -502,14 +561,14 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
                             key);
                 return sol::lua_nil;
             }
-            auto contents = readFileToString(abs);
+            auto contents = readFileToString(*abs);
             if (!contents) {
                 diags.error(codes::kErrImportFileNotFound,
                             std::format("use target not found: '{}'", rel), key);
                 return sol::lua_nil;
             }
             useStack.insert(key);
-            dirStack.push_back(abs.parent_path());
+            dirStack.push_back(abs->parent_path());
             bool ok = false;
             sol::object mod = runChunk(*contents, key, ok);
             dirStack.pop_back();

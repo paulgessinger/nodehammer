@@ -33,18 +33,30 @@ float hexByte(std::string_view s, std::size_t offset, bool linearize) {
 
 } // namespace
 
+bool isHexDigit(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
 std::optional<Color> parseHexColor(std::string_view hex) {
     if (!hex.empty() && hex.front() == '#') {
         hex.remove_prefix(1);
     }
-    if (hex.size() < 6) {
+    // Only exact #RRGGBB / #RRGGBBAA forms are valid, and every character must be
+    // a hex digit — otherwise return nullopt so the caller reports the error
+    // rather than silently decoding garbage (e.g. "#GGGGGG" or a 7-digit string).
+    if (hex.size() != 6 && hex.size() != 8) {
         return std::nullopt;
+    }
+    for (const char c : hex) {
+        if (!isHexDigit(c)) {
+            return std::nullopt;
+        }
     }
     Color c;
     c.r = hexByte(hex, 0, true);
     c.g = hexByte(hex, 2, true);
     c.b = hexByte(hex, 4, true);
-    if (hex.size() >= 8) {
+    if (hex.size() == 8) {
         c.a = hexByte(hex, 6, false); // alpha is linear
     }
     return c;

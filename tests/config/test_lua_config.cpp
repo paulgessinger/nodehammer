@@ -217,6 +217,36 @@ TEST_CASE("config front-ends agree: Lua and TOML produce an identical NHConfig",
     REQUIRE(configToToml(lua.config) == configToToml(toml.config));
 }
 
+TEST_CASE("evalLuaConfig: include()/use() cannot escape the config root", "[config][lua]") {
+    // A `..` that climbs above baseDir is rejected before any file read.
+    REQUIRE(eval(R"LUA(include("../escape.lua"))LUA").diags.hasErrors());
+    REQUIRE(eval(R"LUA(use("../escape.lua"))LUA").diags.hasErrors());
+    REQUIRE(eval(R"LUA(include("../../etc/passwd"))LUA").diags.hasErrors());
+}
+
+TEST_CASE("evalLuaConfig: invalid hex colors are reported, not silently decoded", "[config][lua]") {
+    const auto hasHexWarning = [](const DiagnosticList &diags) {
+        for (const auto &d : diags.items()) {
+            if (d.message.find("invalid hex color") != std::string::npos) {
+                return true;
+            }
+        }
+        return false;
+    };
+    REQUIRE(hasHexWarning(eval(R"LUA(material("m", { base_color = "#GGGGGG" }))LUA").diags));
+    REQUIRE(hasHexWarning(eval(R"LUA(material("m", { base_color = "#1234567" }))LUA").diags));
+    REQUIRE_FALSE(hasHexWarning(eval(R"LUA(material("m", { base_color = "#123456" }))LUA").diags));
+}
+
+TEST_CASE("evalLuaConfig: a map-like predicate table is rejected", "[config][lua]") {
+    REQUIRE(eval(R"LUA(rule { match = { foo = "bar" } })LUA").diags.hasErrors());
+}
+
+TEST_CASE("evalLuaConfig: a runaway loop is stopped by the instruction budget", "[config][lua]") {
+    // Bounded by the lua_sethook count guard rather than hanging the process.
+    REQUIRE(eval("while true do end").diags.hasErrors());
+}
+
 TEST_CASE("evalLuaConfig: unknown keys are reported like the TOML loader", "[config][lua]") {
     // A typo'd key used to vanish silently on the Lua path; it now warns against
     // the shared per-section allowlist (config_keys.hpp).
