@@ -226,6 +226,10 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
                 ImGui::SetItemTooltip("Transition-distance dial. >1 keeps crisp bands closer "
                                       "(blend later); <1 blends earlier. Tune per view.");
             }
+            ImGui::Checkbox("hull LOD (preview)", &ctx.quality.lod_hull_preview);
+            ImGui::SetItemTooltip("Draw tagged stacks as their coarse convex hull (painted the "
+                                  "stack average) instead of the detailed slabs -- gap-free, no "
+                                  "moire. Global preview of the LOD proxy look.");
             ImGui::EndDisabled();
         }
 

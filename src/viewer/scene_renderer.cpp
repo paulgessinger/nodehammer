@@ -205,6 +205,11 @@ struct SceneRenderer::Impl {
 
     IblResources ibl;
 
+    // LOD role of a draw group. Normal groups always draw; a stack with an LOD
+    // hull produces a Detail group (its slabs) and a Proxy group (the hull),
+    // and exactly one of the two draws depending on the hull-LOD toggle.
+    enum class LodRole { Normal, Detail, Proxy };
+
     struct DrawGroup {
         MeshAssetId mesh;
         RenderMaterialId material;
@@ -214,6 +219,7 @@ struct SceneRenderer::Impl {
         std::vector<glm::mat4> instances;
         std::vector<glm::vec3> bounds_min;
         std::vector<glm::vec3> bounds_max;
+        LodRole lod_role{LodRole::Normal};
     };
     std::vector<DrawGroup> groups;
     std::vector<glm::mat4> visible_instances;
@@ -507,8 +513,9 @@ void SceneRenderer::Impl::finalizeUpload() {
     glm::vec3 bmax{std::numeric_limits<float>::lowest()};
     bool any_bounds = false;
 
-    for (const auto &[id, node] : scene.nodes) {
-        for (const auto &binding : node.meshBindings) {
+    auto addBindings = [&](const RenderNode &node, const std::vector<MeshBinding> &bindings,
+                           LodRole role) {
+        for (const auto &binding : bindings) {
             auto mesh_it = meshes.find(binding.meshId);
             if (mesh_it == meshes.end()) {
                 continue;
@@ -521,8 +528,12 @@ void SceneRenderer::Impl::finalizeUpload() {
                 // RenderMaterial default for closed solids.
                 const bool double_sided =
                     mat_it != scene.materials.end() ? mat_it->second.doubleSided : false;
-                groups.push_back(
-                    {binding.meshId, binding.materialId, double_sided, 0, 0, {}, {}, {}});
+                DrawGroup g;
+                g.mesh = binding.meshId;
+                g.material = binding.materialId;
+                g.double_sided = double_sided;
+                g.lod_role = role;
+                groups.push_back(std::move(g));
             }
             ++node_count;
             triangle_count += mesh_it->second.triangle_count;
@@ -538,6 +549,15 @@ void SceneRenderer::Impl::finalizeUpload() {
             bmax = glm::max(bmax, wmax);
             any_bounds = true;
         }
+    };
+    for (const auto &[id, node] : scene.nodes) {
+        // A node with an LOD proxy tags its detailed groups as Detail (drawn
+        // only when hull LOD is off); the proxy groups are Proxy (drawn only
+        // when it's on). Nodes without a proxy are Normal (always drawn).
+        const LodRole detailRole =
+            node.lodProxyBindings.empty() ? LodRole::Normal : LodRole::Detail;
+        addBindings(node, node.meshBindings, detailRole);
+        addBindings(node, node.lodProxyBindings, LodRole::Proxy);
     }
     bounds_min = bmin;
     bounds_max = bmax;
@@ -639,6 +659,14 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     const float cut_end = glm::radians(flags.angle_cut_end_deg);
     for (auto &g : impl_->groups) {
         g.visible_byte_offset = impl_->visible_instances.size() * sizeof(glm::mat4);
+        // Hull-LOD gating: draw proxies only when the toggle is on, detailed
+        // stack meshes only when it's off. Skipped groups upload no instances
+        // and the draw loop passes over them (visible_count stays 0).
+        if ((g.lod_role == Impl::LodRole::Proxy && !flags.hull_lod) ||
+            (g.lod_role == Impl::LodRole::Detail && flags.hull_lod)) {
+            g.visible_count = 0;
+            continue;
+        }
         const size_t start_count = impl_->visible_instances.size();
         for (size_t i = 0; i < g.instances.size(); ++i) {
             if (aabbOutsideFrustum(g.bounds_min[i], g.bounds_max[i], planes)) {

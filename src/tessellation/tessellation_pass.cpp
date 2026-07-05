@@ -155,6 +155,14 @@ struct MergeCacheKeyHash {
     }
 };
 
+// Cached output of a merge_descendants node: the detailed per-material meshes
+// plus any coarse LOD proxy (hull) bindings. Both are reused verbatim by every
+// instance sharing the prototype (see mergeCache).
+struct MergeResult {
+    std::vector<MeshBinding> detail;
+    std::vector<MeshBinding> proxy;
+};
+
 struct MergeDescendant {
     SemanticNodeId nodeId;
     glm::dmat4 toMergeLocal{1.0};
@@ -694,8 +702,7 @@ struct TessellationJob::Impl {
     ankerl::unordered_dense::map<std::string, RenderMaterialId> namedMatCache;
     ankerl::unordered_dense::map<SemanticShapeId, ankerl::unordered_dense::map<int, MeshAssetId>>
         meshCache;
-    ankerl::unordered_dense::map<MergeCacheKey, std::vector<MeshBinding>, MergeCacheKeyHash>
-        mergeCache;
+    ankerl::unordered_dense::map<MergeCacheKey, MergeResult, MergeCacheKeyHash> mergeCache;
     ankerl::unordered_dense::map<SemanticNodeId, RenderNodeId> nodeMap;
 
     std::queue<SemanticNodeId> q;
@@ -1044,7 +1051,8 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
             agg.first += 1;
             agg.second += cand->second;
         }
-        rn.meshBindings = mcIt->second;
+        rn.meshBindings = mcIt->second.detail;
+        rn.lodProxyBindings = mcIt->second.proxy;
         result.scene.nodes[rnId] = std::move(rn);
         return true;
     }
@@ -1059,9 +1067,20 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     // Per-descendant slab thickness (min bounding-box dimension in merge-local
     // space), collected to derive the stack's characteristic band width for the
     // material-stack prefilter. Slabs are thin along the stacking axis, so the
-    // min dimension is the band width; the median across descendants is robust
-    // to the odd non-slab descendant.
+    // min dimension is the band width; a low percentile across descendants is
+    // robust to the odd non-slab descendant.
     std::vector<float> slabThicknesses;
+    // Volume-weighted running sum of slab base colors, for the stack average.
+    // Volume (from the slab mesh, divergence theorem) is shape-agnostic -- no
+    // thin-plate / bounding-box assumption -- so it is robust to tilted plates,
+    // non-plate elements, or odd descendants. It is a property of the material
+    // composition, so it is invariant to downstream geometry surgery: a
+    // proportional phi wedge cut removes the same volume fraction from every
+    // slab, leaving the ratios (and thus the average color) unchanged whether
+    // or not the wedge is cut. For thin plates of uniform lateral extent this
+    // matches thickness weighting, which matches the side-view band average.
+    glm::vec3 stackWeightedColor{0.f};
+    float stackTotalWeight{0.f};
 
     for (const auto &mergeDesc : mergeDescendants) {
         const auto descId = mergeDesc.nodeId;
@@ -1166,10 +1185,29 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
             grp.indices.push_back(idx + idxBase);
         }
         // Record this slab's thickness (min extent) for the stack feature size.
+        // (Still a thin-plate heuristic, but the feature size only sets the
+        // prefilter transition distance -- tunable via the scale slider -- not
+        // the color, so it is far less sensitive than the average was.)
         const glm::vec3 ext = slabMax - slabMin;
         const float minDim = std::min({ext.x, ext.y, ext.z});
         if (minDim > 0.f) {
             slabThicknesses.push_back(minDim);
+        }
+        // Fold the slab's material color into the volume-weighted stack average
+        // (divergence theorem over the slab mesh; volume is transform-invariant
+        // for rigid placements, so the untransformed source mesh is fine).
+        float slabVolume = 0.f;
+        for (size_t t = 0; t + 2 < srcMesh.indices.size(); t += 3) {
+            const glm::vec3 &a = srcMesh.vertices[srcMesh.indices[t + 0]].position;
+            const glm::vec3 &b = srcMesh.vertices[srcMesh.indices[t + 1]].position;
+            const glm::vec3 &c = srcMesh.vertices[srcMesh.indices[t + 2]].position;
+            slabVolume += glm::dot(a, glm::cross(b, c));
+        }
+        slabVolume = std::abs(slabVolume) / 6.0f;
+        if (slabVolume > 0.f) {
+            const glm::vec3 slabColor = glm::vec3(result.scene.materials.at(rmId).baseColorFactor);
+            stackWeightedColor += slabVolume * slabColor;
+            stackTotalWeight += slabVolume;
         }
     }
 
@@ -1231,21 +1269,17 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     // weighting.
     std::optional<StackAverage> stackAverage;
     if (rule.averageMaterialStack) {
-        glm::vec3 weightedColor{0.f};
-        float totalArea = 0.f;
-        for (const auto &[rmId, grp] : groups) {
-            float area = 0.f;
-            for (size_t base = 0; base + 2 < grp.indices.size(); base += 3) {
-                const glm::vec3 &p0 = grp.verts[grp.indices[base + 0]].position;
-                const glm::vec3 &p1 = grp.verts[grp.indices[base + 1]].position;
-                const glm::vec3 &p2 = grp.verts[grp.indices[base + 2]].position;
-                area += 0.5f * glm::length(glm::cross(p1 - p0, p2 - p0));
+        // Hull geometry is taken from this scene's (possibly cut) merged groups,
+        // so the proxy follows the cut silhouette; the average *color*, by
+        // contrast, comes from the cut-invariant thickness-weighted sum above so
+        // it stays consistent across the base and wedge-cut scenes.
+        std::vector<glm::vec3> hullPoints;
+        for (const auto &kv : groups) {
+            for (const auto &v : kv.second.verts) {
+                hullPoints.push_back(v.position);
             }
-            const glm::vec3 color = glm::vec3(result.scene.materials.at(rmId).baseColorFactor);
-            weightedColor += area * color;
-            totalArea += area;
         }
-        if (totalArea > 0.f && !slabThicknesses.empty()) {
+        if (stackTotalWeight > 0.f && !slabThicknesses.empty()) {
             // Feature size = a low percentile of slab thickness, not the median:
             // the moire is driven by the THINNEST bands, and a median is dragged
             // up by thick absorber slabs (so a stack with a few thick + many thin
@@ -1255,7 +1289,39 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
             const size_t pIdx = slabThicknesses.size() / 4;
             std::nth_element(slabThicknesses.begin(), slabThicknesses.begin() + pIdx,
                              slabThicknesses.end());
-            stackAverage = StackAverage{weightedColor / totalArea, slabThicknesses[pIdx]};
+            stackAverage =
+                StackAverage{stackWeightedColor / stackTotalWeight, slabThicknesses[pIdx]};
+        }
+
+        // Coarse LOD proxy: the convex hull of the whole stack, painted with
+        // its average color. Gap-free (the hull skin spans the air gaps between
+        // slabs) and low-poly, so at distance -- where the detailed slabs alias
+        // into moire -- the viewer can draw this instead. Instanced per stack
+        // via the merge cache like the detailed meshes.
+        if (stackAverage.has_value()) {
+            const TessellationOutput hullMesh = convexHull(hullPoints);
+            if (!hullMesh.vertices.empty()) {
+                RenderMaterial pm;
+                pm.id = result.scene.nextMaterialId();
+                pm.name = semNode.name + "_lod";
+                pm.baseColorFactor = glm::vec4(stackAverage->avgColorLinear, 1.0f);
+                pm.metallicFactor = 0.0f;
+                pm.roughnessFactor = 1.0f; // matte: the average is already flat
+                const RenderMaterialId pmId = pm.id;
+                result.scene.materials[pmId] = std::move(pm);
+
+                MeshAsset pmesh;
+                pmesh.id = result.scene.nextMeshId();
+                pmesh.name = semNode.name + "_lod_hull";
+                pmesh.vertices = hullMesh.vertices;
+                pmesh.indices = hullMesh.indices;
+                pmesh.provenance.sourceSystem = "tessellation_pass";
+                pmesh.provenance.sourceName = semNode.name;
+                const MeshAssetId pmeshId = pmesh.id;
+                result.scene.meshAssets[pmeshId] = std::move(pmesh);
+
+                rn.lodProxyBindings.push_back({pmeshId, pmId});
+            }
         }
     }
 
@@ -1274,7 +1340,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         rn.meshBindings.push_back({mid, rmId});
     }
 
-    mergeCache[std::move(mergeKey)] = rn.meshBindings;
+    mergeCache[std::move(mergeKey)] = MergeResult{rn.meshBindings, rn.lodProxyBindings};
 
     // Don't enqueue children — they've been consumed by the merge.
     result.scene.nodes[rnId] = std::move(rn);

@@ -117,6 +117,13 @@ struct RenderNode {
     /// Mesh bindings for this instance (placement-aware: material on instance, not asset)
     std::vector<MeshBinding> meshBindings;
 
+    /// Coarse LOD proxy bindings (e.g. the convex hull of a merged sampling
+    /// stack, painted with its average color). Empty for nodes without an LOD
+    /// proxy. The viewer draws these instead of `meshBindings` when the stack
+    /// projects small enough that the detailed geometry aliases; the two are
+    /// never drawn together.
+    std::vector<MeshBinding> lodProxyBindings;
+
     /// Back-reference to the semantic node that produced this render node
     SemanticNodeId semanticNodeId;
 

@@ -94,6 +94,12 @@ class SceneRenderer {
         /// distance dial). See RenderQualitySettings::material_prefilter_scale.
         float material_prefilter_scale{1.0f};
 
+        /// Hull-LOD preview: when on, merged stacks that carry an LOD proxy draw
+        /// the coarse convex-hull proxy (painted with the stack average) instead
+        /// of the detailed slabs. A global switch for now; per-instance
+        /// distance selection comes later.
+        bool hull_lod{false};
+
         /// Overdraw debug view. When on, every group draws through the
         /// additive-blend / no-depth / no-cull overdraw pipeline and the
         /// scene FS emits a constant per-fragment increment instead of

@@ -123,6 +123,11 @@ struct RenderQualitySettings {
     /// <1 blends earlier/more aggressively. A global dial on top of the
     /// per-stack feature size baked at tessellation time.
     float material_prefilter_scale{1.0f};
+    /// Hull-LOD preview toggle: draw merged stacks (with an LOD proxy) as their
+    /// coarse convex hull painted with the stack average, instead of the
+    /// detailed slabs. Global for now -- an evaluation switch for the LOD
+    /// proxy look before per-distance selection lands.
+    bool lod_hull_preview{false};
     bool enable_fxaa{true};
     /// FXAA (PC-quality variant) tunables. Only consulted when enable_fxaa.
     /// Sub-pixel aliasing removal: blends the pixel toward the local 3×3

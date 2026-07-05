@@ -1362,6 +1362,7 @@ void App::Impl::render() {
             flags.enable_pbr = cfg.enable_pbr;
             flags.material_prefilter = quality.enable_material_prefilter;
             flags.material_prefilter_scale = quality.material_prefilter_scale;
+            flags.hull_lod = quality.lod_hull_preview;
             // Overdraw debug view: draw every group through the additive
             // no-depth pipeline so the color target accumulates a per-pixel
             // fragment count for the composite's heatmap.
