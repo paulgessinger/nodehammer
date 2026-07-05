@@ -10,6 +10,8 @@ export("obj",  { unit_scale = 1.0 })
 
 include("materials.lua")
 include("tracker.lua")
+include("calorimeters.lua")
+include("muon.lua")
 
 keep { 'name == "BeamPipe"' }
 rule { match = 'path ~= "/world"',    tessellation = { skip_geometry = true } }
