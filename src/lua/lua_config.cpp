@@ -3,18 +3,22 @@
 #include <nodehammer/config/color_parse.hpp>
 #include <nodehammer/config/config_ast.hpp>
 #include <nodehammer/config/config_enums.hpp>
+#include <nodehammer/config/config_keys.hpp>
 #include <nodehammer/config/predicate_parser.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 
 #include <sol/sol.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <format>
 #include <fstream>
 #include <memory>
 #include <set>
+#include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -44,6 +48,23 @@ std::optional<std::string> readFileToString(const std::filesystem::path &p) {
     std::ostringstream ss;
     ss << in.rdbuf();
     return ss.str();
+}
+
+// Warn on any string key not in the section's allowlist — the Lua mirror of the
+// TOML loader's warnUnknownKeys, drawing on the same lists (config_keys.hpp) so a
+// typo'd or stale key is rejected identically on both front-ends.
+void warnUnknownKeys(const sol::table &t, std::span<const std::string_view> known,
+                     const std::string &ctx, DiagnosticList &diags) {
+    for (const auto &kv : t) {
+        if (kv.first.get_type() != sol::type::string) {
+            continue;
+        }
+        const std::string key = kv.first.as<std::string>();
+        if (std::find(known.begin(), known.end(), key) == known.end()) {
+            diags.warn(codes::kWarnConfigUnknownKey, std::format("{}: unknown key '{}'", ctx, key),
+                       ctx);
+        }
+    }
 }
 
 // ── Predicate parsing (string or list-of-strings → OR) ───────────────────────
@@ -120,13 +141,20 @@ nlohmann::json jsonFromLua(const sol::object &o) {
     switch (o.get_type()) {
     case sol::type::boolean:
         return o.as<bool>();
-    case sol::type::number:
+    case sol::type::number: {
         // Preserve the Lua 5.4 integer/float distinction so extras round-trip
-        // like the TOML loader's int/float handling.
-        if (o.is<std::int64_t>()) {
+        // like the TOML loader's int/float handling. sol2's is<int64_t> accepts
+        // (and rounds) integral-valued floats, so check the actual Lua subtype
+        // via lua_isinteger — 1.0 and 0.5 are both floats, only 1 is an integer.
+        lua_State *L = o.lua_state();
+        o.push();
+        const bool isInt = lua_isinteger(L, -1) != 0;
+        lua_pop(L, 1);
+        if (isInt) {
             return nlohmann::json(o.as<std::int64_t>());
         }
         return nlohmann::json(o.as<double>());
+    }
     case sol::type::string:
         return o.as<std::string>();
     case sol::type::table: {
@@ -167,17 +195,18 @@ nlohmann::json jsonFromLua(const sol::object &o) {
 // ── Tessellation sub-table → Rule::Tessellation ──────────────────────────────
 
 Rule::Tessellation tessFromLua(const sol::table &t, const std::string &ctx, DiagnosticList &diags) {
+    warnUnknownKeys(t, keys::kTessellationKeys, ctx, diags);
     Rule::Tessellation tess;
-    if (const sol::optional<bool> v = t["skip_geometry"]) {
+    if (const sol::optional<bool> v = t[keys::kSkipGeometry]) {
         tess.skipGeometry = *v;
     }
-    if (const sol::optional<bool> v = t["merge_descendants"]) {
+    if (const sol::optional<bool> v = t[keys::kMergeDescendants]) {
         tess.mergeDescendants = *v;
     }
-    if (const sol::optional<int> v = t["max_segments_circle"]) {
+    if (const sol::optional<int> v = t[keys::kMaxSegmentsCircle]) {
         tess.maxSegmentsCircle = *v;
     }
-    if (const sol::optional<std::string> v = t["fallback"]) {
+    if (const sol::optional<std::string> v = t[keys::kFallback]) {
         if (auto parsed = parseBooleanFallback(*v)) {
             tess.fallback = *parsed;
         } else {
@@ -266,34 +295,38 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 
         // ── config { hoist_orphans=, deduplicate_shapes= } ───────────────────
         lua.set_function("config", [&](sol::table t) {
-            if (const sol::optional<bool> v = t["hoist_orphans"]) {
+            warnUnknownKeys(t, keys::kConfigFlagKeys, "config", diags);
+            if (const sol::optional<bool> v = t[keys::kHoistOrphans]) {
                 cfg.hoistOrphans = *v;
             }
-            if (const sol::optional<bool> v = t["deduplicate_shapes"]) {
+            if (const sol::optional<bool> v = t[keys::kDeduplicateShapes]) {
                 cfg.deduplicateShapes = *v;
             }
         });
 
         // ── export(name, { … }) ──────────────────────────────────────────────
         lua.set_function("export", [&](const std::string &name, sol::table t) {
+            const std::string ctx = "export." + name;
             CommonExportConfig common;
-            if (const sol::optional<double> v = t["unit_scale"]) {
+            if (const sol::optional<double> v = t[keys::kUnitScale]) {
                 common.unitScale = *v;
             }
-            if (const sol::optional<bool> v = t["bake_unit_scale"]) {
+            if (const sol::optional<bool> v = t[keys::kBakeUnitScale]) {
                 common.bakeUnitScale = *v;
             }
             if (name == "obj") {
+                warnUnknownKeys(t, keys::kExportCommonKeys, ctx, diags);
                 ObjExportFormatConfig c;
                 c.common = common;
                 cfg.exportFormats[name] = c;
             } else if (name == "gltf" || name == "glb") {
+                warnUnknownKeys(t, keys::kExportGltfKeys, ctx, diags);
                 GltfExportFormatConfig c;
                 c.common = common;
-                if (const sol::optional<bool> v = t["multi_scene"]) {
+                if (const sol::optional<bool> v = t[keys::kMultiScene]) {
                     c.multiScene = *v;
                 }
-                if (const sol::optional<std::string> v = t["scene_name_separator"]) {
+                if (const sol::optional<std::string> v = t[keys::kSceneNameSeparator]) {
                     c.sceneNameSeparator = *v;
                 }
                 cfg.exportFormats[name] = c;
@@ -307,9 +340,11 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 
         // ── material(name, { … }) ────────────────────────────────────────────
         lua.set_function("material", [&](const std::string &name, sol::table t) {
+            const std::string ctx = std::format("material.{}", name);
+            warnUnknownKeys(t, keys::kMaterialKeys, ctx, diags);
             MaterialDef def;
             def.name = name;
-            const sol::object bc = t["base_color"];
+            const sol::object bc = t[keys::kBaseColor];
             if (bc.get_type() == sol::type::table) {
                 def.baseColor = colorFromArray(bc.as<sol::table>(), def.baseColor);
             } else if (bc.get_type() == sol::type::string) {
@@ -321,22 +356,22 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
                                std::format("material '{}': invalid hex color '{}'; expected "
                                            "#RRGGBB or #RRGGBBAA",
                                            name, hex),
-                               std::format("material.{}", name));
+                               ctx);
                 }
             }
-            if (const sol::optional<float> v = t["metallic"]) {
+            if (const sol::optional<float> v = t[keys::kMetallic]) {
                 def.metallic = *v;
             }
-            if (const sol::optional<float> v = t["roughness"]) {
+            if (const sol::optional<float> v = t[keys::kRoughness]) {
                 def.roughness = *v;
             }
-            if (const sol::optional<bool> v = t["double_sided"]) {
+            if (const sol::optional<bool> v = t[keys::kDoubleSided]) {
                 def.doubleSided = *v;
             }
-            if (const sol::object em = t["emissive"]; em.get_type() == sol::type::table) {
+            if (const sol::object em = t[keys::kEmissive]; em.get_type() == sol::type::table) {
                 def.emissive = colorFromArray(em.as<sol::table>(), def.emissive);
             }
-            if (const sol::optional<std::string> am = t["alpha_mode"]) {
+            if (const sol::optional<std::string> am = t[keys::kAlphaMode]) {
                 if (auto parsed = parseAlphaMode(*am)) {
                     def.alphaMode = *parsed;
                 } else {
@@ -344,34 +379,34 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
                                std::format("material '{}': unknown alpha_mode '{}'; expected "
                                            "opaque, mask, or blend",
                                            name, *am),
-                               std::format("material.{}", name));
+                               ctx);
                 }
             }
-            if (const sol::optional<float> v = t["alpha_cutoff"]) {
+            if (const sol::optional<float> v = t[keys::kAlphaCutoff]) {
                 def.alphaCutoff = *v;
             }
-            if (const sol::optional<float> v = t["ior"]) {
+            if (const sol::optional<float> v = t[keys::kIor]) {
                 def.ior = *v;
             }
-            if (const sol::optional<float> v = t["transmission"]) {
+            if (const sol::optional<float> v = t[keys::kTransmission]) {
                 def.transmission = *v;
             }
-            if (const sol::optional<float> v = t["clearcoat"]) {
+            if (const sol::optional<float> v = t[keys::kClearcoat]) {
                 def.clearcoat = *v;
             }
-            if (const sol::optional<float> v = t["clearcoat_roughness"]) {
+            if (const sol::optional<float> v = t[keys::kClearcoatRoughness]) {
                 def.clearcoatRoughness = *v;
             }
-            if (const sol::optional<float> v = t["anisotropy"]) {
+            if (const sol::optional<float> v = t[keys::kAnisotropy]) {
                 def.anisotropy = *v;
             }
-            if (const sol::optional<float> v = t["anisotropy_rotation"]) {
+            if (const sol::optional<float> v = t[keys::kAnisotropyRotation]) {
                 def.anisotropyRotation = *v;
             }
-            if (const sol::optional<float> v = t["specular"]) {
+            if (const sol::optional<float> v = t[keys::kSpecular]) {
                 def.specularFactor = *v;
             }
-            if (const sol::object sc = t["specular_color"]; sc.get_type() == sol::type::table) {
+            if (const sol::object sc = t[keys::kSpecularColor]; sc.get_type() == sol::type::table) {
                 def.specularColor =
                     colorFromArray(sc.as<sol::table>(), Color{1.0f, 1.0f, 1.0f, 1.0f});
             }
@@ -393,8 +428,9 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 
         // ── rule{ match=, material=, tessellation=, extras= } ────────────────
         lua.set_function("rule", [&](sol::table t) {
+            warnUnknownKeys(t, keys::kRuleKeys, "rule", diags);
             Rule rule;
-            const sol::object m = t["match"];
+            const sol::object m = t[keys::kMatch];
             if (m.get_type() == sol::type::string || m.get_type() == sol::type::table) {
                 if (auto p = predicateFromLua(m, "rule.match", diags)) {
                     rule.match = std::move(*p);
@@ -405,13 +441,13 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
             }
             // Absent match → matches all nodes (rule.match stays nullopt).
 
-            if (const sol::optional<std::string> mat = t["material"]) {
+            if (const sol::optional<std::string> mat = t[keys::kMaterialRef]) {
                 rule.material = *mat;
             }
-            if (const sol::object te = t["tessellation"]; te.get_type() == sol::type::table) {
+            if (const sol::object te = t[keys::kTessellation]; te.get_type() == sol::type::table) {
                 rule.tessellation = tessFromLua(te.as<sol::table>(), "rule.tessellation", diags);
             }
-            if (const sol::object ex = t["extras"]; ex.get_type() == sol::type::table) {
+            if (const sol::object ex = t[keys::kExtras]; ex.get_type() == sol::type::table) {
                 rule.extras = jsonFromLua(ex);
             }
             cfg.rules.push_back(std::move(rule));
@@ -419,11 +455,12 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 
         // ── defaults{ tessellation=, extras= } ───────────────────────────────
         lua.set_function("defaults", [&](sol::table t) {
-            if (const sol::object te = t["tessellation"]; te.get_type() == sol::type::table) {
+            warnUnknownKeys(t, keys::kDefaultsKeys, "defaults", diags);
+            if (const sol::object te = t[keys::kTessellation]; te.get_type() == sol::type::table) {
                 cfg.tessellationDefaults =
                     tessFromLua(te.as<sol::table>(), "defaults.tessellation", diags);
             }
-            if (const sol::object ex = t["extras"]; ex.get_type() == sol::type::table) {
+            if (const sol::object ex = t[keys::kExtras]; ex.get_type() == sol::type::table) {
                 cfg.extrasDefaults = jsonFromLua(ex);
             }
         });

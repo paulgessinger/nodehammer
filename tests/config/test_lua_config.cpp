@@ -6,7 +6,10 @@
 #include <nodehammer/lua/lua_config.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <variant>
 
@@ -19,6 +22,25 @@ const std::filesystem::path kLuaFixtures =
 
 // Evaluate an inline script with the lua-fixtures dir as the include/use root.
 ConfigResult eval(const std::string &src) { return evalLuaConfig(src, "<test>", kLuaFixtures); }
+
+std::optional<std::string> readFile(const std::filesystem::path &p) {
+    std::ifstream in(p, std::ios::binary);
+    if (!in) {
+        return std::nullopt;
+    }
+    std::ostringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+
+bool hasUnknownKeyWarning(const DiagnosticList &diags) {
+    for (const auto &d : diags.items()) {
+        if (d.message.find("unknown key") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
 
 } // namespace
 
@@ -175,4 +197,36 @@ defaults {
     REQUIRE(back.config.rules.size() == 2);
     REQUIRE(back.config.rules[1].tessellation->fallback == BooleanFallback::BBox);
     REQUIRE(back.config.tessellationDefaults.maxSegmentsCircle == 10);
+}
+
+// ── Cross-front-end parity (guardrail against key/semantics drift) ───────────
+// parity.lua and parity.toml describe the same config exercising every field.
+// configToToml is deterministic, so equal serialisations ⟺ equal NHConfig — if
+// the two front-ends ever map a key differently, this fails loudly.
+TEST_CASE("config front-ends agree: Lua and TOML produce an identical NHConfig", "[config][lua]") {
+    const auto luaSrc = readFile(kLuaFixtures / "parity.lua");
+    const auto tomlSrc = readFile(kLuaFixtures / "parity.toml");
+    REQUIRE(luaSrc.has_value());
+    REQUIRE(tomlSrc.has_value());
+
+    auto lua = evalLuaConfig(*luaSrc, "parity.lua", kLuaFixtures);
+    auto toml = ConfigLoader::loadFromString(*tomlSrc, "parity.toml");
+    REQUIRE_FALSE(lua.diags.hasErrors());
+    REQUIRE_FALSE(toml.diags.hasErrors());
+
+    REQUIRE(configToToml(lua.config) == configToToml(toml.config));
+}
+
+TEST_CASE("evalLuaConfig: unknown keys are reported like the TOML loader", "[config][lua]") {
+    // A typo'd key used to vanish silently on the Lua path; it now warns against
+    // the shared per-section allowlist (config_keys.hpp).
+    REQUIRE(hasUnknownKeyWarning(
+        eval(R"LUA(rule { match = 'path ~= "/w"', mateial = "x" })LUA").diags));
+    REQUIRE(hasUnknownKeyWarning(
+        eval(R"LUA(material("m", { base_color = "#fff", roughnes = 0.5 }))LUA").diags));
+    REQUIRE(
+        hasUnknownKeyWarning(eval(R"LUA(rule { tessellation = { max_segments = 8 } })LUA").diags));
+    // A clean config produces no unknown-key warning.
+    REQUIRE_FALSE(hasUnknownKeyWarning(
+        eval(R"LUA(rule { match = 'path ~= "/w"', material = "x" })LUA").diags));
 }
