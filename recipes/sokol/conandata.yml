@@ -1,4 +1,4 @@
 sources:
-  "2026.04.25":
-    # floooh/sokol@17d1b01344f724f598c241aa8d11e621f6cc911f
-    url: "https://github.com/floooh/sokol/archive/17d1b01344f724f598c241aa8d11e621f6cc911f.tar.gz"
+  "2026.07.02":
+    # floooh/sokol@9205dc118a79442b0d5c3b5542d7d7596e33895c
+    url: "https://github.com/floooh/sokol/archive/9205dc118a79442b0d5c3b5542d7d7596e33895c.tar.gz"

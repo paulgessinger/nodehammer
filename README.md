@@ -123,7 +123,7 @@ Running the executable with no arguments at all (e.g. double-clicking
 Dependencies are managed with [Conan](https://conan.io/); builds with CMake + Ninja.
 
 ```bash
-just recipes    # export vendored recipes (manifold, sokol-shdc)
+just recipes    # export vendored recipes (sokol-shdc)
 just deps       # conan install (viewer=True)
 just configure  # cmake --preset conan-relwithdebinfo
 just build
@@ -164,7 +164,7 @@ src/           core pipeline: cli, config, ir (intermediate representation),
 shaders/       sokol-shdc GLSL sources for the full render pipeline
 schemas/       FlatBuffers schemas (render.fbs, semantic.fbs)
 profiles/      Conan profiles (Emscripten cross-compilation)
-recipes/       vendored/patched Conan recipes (manifold, sokol-shdc)
+recipes/       vendored/patched Conan recipes (sokol, sokol-shdc, imgui, implot, nfd)
 fixtures/      sample detector geometries and configs
 docs/          format specs and design docs (nhb format, predicate expressions,
                orbit navigation, rendering-fidelity strategy, PNG export)

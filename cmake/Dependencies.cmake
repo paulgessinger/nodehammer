@@ -4,9 +4,9 @@ include(FetchContent)
 FetchContent_Declare(zstd
     SYSTEM
     GIT_REPOSITORY https://github.com/facebook/zstd.git
-    GIT_TAG        v1.5.6
+    GIT_TAG        v1.5.7
     SOURCE_SUBDIR  build/cmake
-    FIND_PACKAGE_ARGS 1.5.6
+    FIND_PACKAGE_ARGS 1.5.7
 )
 set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_STATIC ON  CACHE BOOL "" FORCE)
@@ -33,8 +33,8 @@ endif()
 FetchContent_Declare(Catch2
     SYSTEM
     GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-    GIT_TAG        v3.7.1
-    FIND_PACKAGE_ARGS 3.7.1
+    GIT_TAG        v3.15.1
+    FIND_PACKAGE_ARGS 3.15.1
 )
 FetchContent_MakeAvailable(Catch2)
 
@@ -42,8 +42,8 @@ FetchContent_MakeAvailable(Catch2)
 FetchContent_Declare(CLI11
     SYSTEM
     GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
-    GIT_TAG        v2.4.2
-    FIND_PACKAGE_ARGS 2.4.2
+    GIT_TAG        v2.6.2
+    FIND_PACKAGE_ARGS 2.6.2
 )
 FetchContent_MakeAvailable(CLI11)
 
@@ -51,8 +51,8 @@ FetchContent_MakeAvailable(CLI11)
 FetchContent_Declare(nlohmann_json
     SYSTEM
     GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG        v3.11.3
-    FIND_PACKAGE_ARGS 3.11.3
+    GIT_TAG        v3.12.0
+    FIND_PACKAGE_ARGS 3.12.0
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
@@ -60,8 +60,8 @@ FetchContent_MakeAvailable(nlohmann_json)
 FetchContent_Declare(glm
     SYSTEM
     GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG        1.0.1
-    FIND_PACKAGE_ARGS 1.0.1
+    GIT_TAG        1.0.3
+    FIND_PACKAGE_ARGS 1.0.3
 )
 # GLM 1.x uses the global BUILD_SHARED_LIBS to decide shared vs static.
 # This is set before MakeAvailable; if other deps later need the opposite,
@@ -104,8 +104,8 @@ endif()
 FetchContent_Declare(manifold
         SYSTEM
         GIT_REPOSITORY https://github.com/elalish/manifold.git
-        GIT_TAG        v3.2.1
-        FIND_PACKAGE_ARGS 3.2
+        GIT_TAG        v3.5.1
+        FIND_PACKAGE_ARGS 3.5
     )
     set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)
     set(MANIFOLD_PYBIND OFF CACHE BOOL "" FORCE)
@@ -150,8 +150,8 @@ FetchContent_Declare(manifold
 FetchContent_Declare(unordered_dense
     SYSTEM
     GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
-    GIT_TAG        v4.5.0
-    FIND_PACKAGE_ARGS 4.0
+    GIT_TAG        v4.8.1
+    FIND_PACKAGE_ARGS 4.8.1
 )
 FetchContent_MakeAvailable(unordered_dense)
 
