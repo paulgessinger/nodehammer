@@ -234,6 +234,9 @@ Rule::Tessellation tessFromLua(const sol::table &t, const std::string &ctx, Diag
     if (const sol::optional<bool> v = t[keys::kDropCoincidentFaces]) {
         tess.dropCoincidentFaces = *v;
     }
+    if (const sol::optional<bool> v = t[keys::kAverageMaterialStack]) {
+        tess.averageMaterialStack = *v;
+    }
     if (const sol::optional<int> v = t[keys::kMaxSegmentsCircle]) {
         tess.maxSegmentsCircle = *v;
     }

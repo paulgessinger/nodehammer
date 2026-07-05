@@ -110,6 +110,19 @@ struct RenderQualitySettings {
     bool pause_when_static{true};
     bool enable_hdr{true};
     bool enable_tonemap{true};
+    /// Material-stack prefilter: band-limit the cycling-material pattern on
+    /// merged sampling stacks (calorimeter absorber/scintillator layers) by
+    /// blending each stack mesh's albedo toward its area-weighted average as
+    /// the pixel footprint outgrows the band width -- kills the moire those
+    /// thin high-contrast layers produce at distance. Only affects meshes the
+    /// tessellation pass tagged with a StackAverage; a no-op elsewhere.
+    bool enable_material_prefilter{true};
+    /// Scales the stack-prefilter transition: the blend toward the average
+    /// completes once the pixel footprint reaches `scale * featureSize` band
+    /// widths. >1 keeps the crisp bands to a closer distance (blend later);
+    /// <1 blends earlier/more aggressively. A global dial on top of the
+    /// per-stack feature size baked at tessellation time.
+    float material_prefilter_scale{1.0f};
     bool enable_fxaa{true};
     /// FXAA (PC-quality variant) tunables. Only consulted when enable_fxaa.
     /// Sub-pixel aliasing removal: blends the pixel toward the local 3×3

@@ -74,7 +74,9 @@ layout(binding=1) uniform fs_params {
     // x = pbr_enable, y = prefilter_max_lod,
     // z = overdraw_increment (0 = off; >0 = emit this constant per fragment
     //     for the overdraw debug view, which runs this shader under an
-    //     additive-blend / no-depth pipeline), w = unused.
+    //     additive-blend / no-depth pipeline),
+    // w = material_stack_prefilter enable (0/1) -- runtime toggle for the
+    //     sampling-stack AA blend (see stack_prefilter below).
     vec4 mode_flags;
     vec4 camera_pos;   // xyz = world-space camera position
     vec4 emissive;     // xyz = emissive factor (linear, can be > 1.0), w = unused
@@ -92,6 +94,12 @@ layout(binding=1) uniform fs_params {
     // where the camera is mostly still, and the alternative (in-frame AO
     // before forward shading) would require a depth prepass.
     vec4 ao_history_params;
+    // Material-stack prefilter (viewer AA for sampling stacks). Populated per
+    // merged-stack mesh from MeshAsset::stackAverage.
+    //   xyz = area-weighted average base color (linear)
+    //   w   = characteristic band width (world units); 0 = mesh not tagged,
+    //         prefilter skipped. Enable gate is mode_flags.w.
+    vec4 stack_prefilter;
 };
 
 layout(binding=0) uniform textureCube tex_irradiance;
@@ -194,11 +202,31 @@ void main() {
 
     vec3 n = normalize(v_normal_world);
 
+    // Material-stack prefilter: band-limit the cycling slab colors by blending
+    // the albedo toward the stack's area-weighted average (stack_prefilter.xyz)
+    // once the pixel footprint on the surface grows past the band width
+    // (stack_prefilter.w) -- i.e. when the bands can no longer be resolved and
+    // point sampling would alias into moire. The footprint is the world-space
+    // size of the pixel projected onto the surface (from position derivatives),
+    // so it grows with distance and at grazing angles -- exactly where the
+    // moire is worst. Gated by the runtime toggle (mode_flags.w); untagged
+    // meshes carry w = 0 and are skipped. Uniform control flow (both guards are
+    // per-draw uniforms), so the derivatives are well-defined.
+    vec3 albedo = base_color.rgb;
+    float prefilter_t = 0.0;
+    if (mode_flags.w > 0.5 && stack_prefilter.w > 0.0) {
+        vec3 dpdx = dFdx(v_world_pos);
+        vec3 dpdy = dFdy(v_world_pos);
+        float footprint = sqrt(length(cross(dpdx, dpdy)));
+        prefilter_t = smoothstep(stack_prefilter.w, 3.0 * stack_prefilter.w, footprint);
+        albedo = mix(albedo, stack_prefilter.xyz, prefilter_t);
+    }
+
     if (mode_flags.x < 0.5) {
         // Lambert (legacy fast path) — preserved byte-for-byte.
         // Two-sided shading: detector inner/outer faces light regardless of winding.
         float ndl = max(abs(dot(n, -light_dir.xyz)), 0.0);
-        vec3 rgb = base_color.rgb * (0.20 + 0.80 * ndl) + emissive.xyz;
+        vec3 rgb = albedo * (0.20 + 0.80 * ndl) + emissive.xyz;
         frag_color = vec4(rgb, base_color.a);
         return;
     }
@@ -235,10 +263,28 @@ void main() {
 
     float metallic  = clamp(material_mr.x, 0.0, 1.0);
     float roughness = clamp(material_mr.y, 0.04, 1.0);
+
+    // ---- Specular anti-aliasing: raise roughness where sub-pixel detail
+    // makes the specular lobe alias, from two complementary signals ----
+    // (1) Stack prefilter: as the cycling bands blur toward their average
+    //     (prefilter_t -> 1), roughen toward matte so the highlight broadens
+    //     and stops glinting. The footprint-average of a micro-structured
+    //     glossy stack is duller, not just color-averaged.
+    roughness = mix(roughness, 1.0, prefilter_t);
+    // (2) Geometric specular AA (Kaplanyan/Karis): where the surface normal
+    //     varies fast across the pixel (fine facets, edges), widen roughness
+    //     to band-limit the BRDF. Distance-independent, so it also kills
+    //     close-range highlight moire the distance-based prefilter leaves.
+    vec3 dNdx = dFdx(v_normal_world);
+    vec3 dNdy = dFdy(v_normal_world);
+    float normalVar = dot(dNdx, dNdx) + dot(dNdy, dNdy);
+    float kernelRoughness = min(2.0 * normalVar, 0.18);
+    roughness = clamp(sqrt(roughness * roughness + kernelRoughness), 0.04, 1.0);
+
     float a = roughness * roughness;
     float a2 = a * a;
 
-    vec3 F0 = mix(vec3(0.04), base_color.rgb, metallic);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
     vec3 F  = F_Schlick(VdotH, F0);
     float D = D_GGX(NdotH, a2);
@@ -246,7 +292,7 @@ void main() {
 
     vec3 specular = (D * G) * F / max(4.0 * NdotV * NdotL, 1e-4);
     vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
-    vec3 diffuse = kd * base_color.rgb / PI;
+    vec3 diffuse = kd * albedo / PI;
 
     vec3 Lo = (diffuse + specular) * NdotL * light_dir.w;
 
@@ -321,10 +367,10 @@ void main() {
         textureLod(samplerCube(tex_prefilter, smp_cube), R, roughness * max_lod).rgb;
     vec2 brdf = textureLod(sampler2D(tex_brdf_lut, smp_lut), vec2(NdotV, roughness), 0.0).rg;
 
-    vec3 ao_mb = gtaoMultiBounce(ao, base_color.rgb);
+    vec3 ao_mb = gtaoMultiBounce(ao, albedo);
     float so = specularOcclusion(NdotV, ao);
 
-    vec3 ambient = irradiance * kd * base_color.rgb * ao_mb +
+    vec3 ambient = irradiance * kd * albedo * ao_mb +
                    prefiltered * (F0 * brdf.x + vec3(brdf.y)) * so;
 
     frag_color = vec4(ambient + Lo + emissive.xyz, base_color.a);

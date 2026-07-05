@@ -101,6 +101,10 @@ struct ResolvedTessellation {
     // when mergeDescendants is also true; the coincident-face removal pass
     // runs on the merged group, not on individual descendants.
     bool dropCoincidentFaces{false};
+    // See Rule::Tessellation::averageMaterialStack — tag merged sampling-stack
+    // meshes with a StackAverage for the viewer's material-stack prefilter.
+    // Only acted on when mergeDescendants is also true.
+    bool averageMaterialStack{false};
     int maxSegmentsCircle{64};
     BooleanFallback fallback{BooleanFallback::Skip};
 };
@@ -126,6 +130,9 @@ struct MergeCacheKey {
     // reused prototype must match on it or an enabled node could keep its
     // interior faces (or a disabled one lose them) depending on traversal order.
     bool dropCoincidentFaces{false};
+    // Resolved on the merge node: gates whether the merged meshes are tagged
+    // with a StackAverage, so a reused prototype must match on it.
+    bool averageMaterialStack{false};
     std::vector<MergeDescendantSignature> descendants;
 
     bool operator==(const MergeCacheKey &) const = default;
@@ -135,6 +142,7 @@ struct MergeCacheKeyHash {
     std::size_t operator()(const MergeCacheKey &k) const {
         std::size_t h = std::hash<int>{}(static_cast<int>(k.fallback));
         h = hashCombine(h, std::hash<bool>{}(k.dropCoincidentFaces));
+        h = hashCombine(h, std::hash<bool>{}(k.averageMaterialStack));
         h = hashCombine(h, std::hash<std::size_t>{}(k.descendants.size()));
         for (const auto &d : k.descendants) {
             h = hashCombine(h, std::hash<uint64_t>{}(d.shapeId.value));
@@ -310,6 +318,9 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
         if (t.dropCoincidentFaces.has_value()) {
             merged.dropCoincidentFaces = *t.dropCoincidentFaces;
         }
+        if (t.averageMaterialStack.has_value()) {
+            merged.averageMaterialStack = *t.averageMaterialStack;
+        }
         if (t.maxSegmentsCircle.has_value()) {
             merged.maxSegmentsCircle = *t.maxSegmentsCircle;
         }
@@ -324,6 +335,8 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
             merged.mergeDescendants.value_or(defaults.mergeDescendants.value_or(false)),
         .dropCoincidentFaces =
             merged.dropCoincidentFaces.value_or(defaults.dropCoincidentFaces.value_or(false)),
+        .averageMaterialStack =
+            merged.averageMaterialStack.value_or(defaults.averageMaterialStack.value_or(false)),
         .maxSegmentsCircle =
             merged.maxSegmentsCircle.value_or(defaults.maxSegmentsCircle.value_or(64)),
         .fallback = merged.fallback.value_or(defaults.fallback.value_or(BooleanFallback::Skip)),
@@ -964,6 +977,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     MergeCacheKey mergeKey;
     mergeKey.fallback = rule.fallback;
     mergeKey.dropCoincidentFaces = rule.dropCoincidentFaces;
+    mergeKey.averageMaterialStack = rule.averageMaterialStack;
 
     std::vector<MergeDescendant> mergeDescendants;
 
@@ -1041,6 +1055,13 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         std::vector<uint32_t> indices;
     };
     std::map<RenderMaterialId, MatGroup> groups;
+
+    // Per-descendant slab thickness (min bounding-box dimension in merge-local
+    // space), collected to derive the stack's characteristic band width for the
+    // material-stack prefilter. Slabs are thin along the stacking axis, so the
+    // min dimension is the band width; the median across descendants is robust
+    // to the odd non-slab descendant.
+    std::vector<float> slabThicknesses;
 
     for (const auto &mergeDesc : mergeDescendants) {
         const auto descId = mergeDesc.nodeId;
@@ -1131,14 +1152,24 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
 
         auto &grp = groups[rmId];
         const auto idxBase = static_cast<uint32_t>(grp.verts.size());
+        glm::vec3 slabMin{std::numeric_limits<float>::max()};
+        glm::vec3 slabMax{std::numeric_limits<float>::lowest()};
         for (const auto &v : srcMesh.vertices) {
             Vertex tv;
             tv.position = glm::vec3(toLocal * glm::vec4(v.position, 1.0f));
             tv.normal = glm::normalize(normalMat * v.normal);
+            slabMin = glm::min(slabMin, tv.position);
+            slabMax = glm::max(slabMax, tv.position);
             grp.verts.push_back(tv);
         }
         for (const auto idx : srcMesh.indices) {
             grp.indices.push_back(idx + idxBase);
+        }
+        // Record this slab's thickness (min extent) for the stack feature size.
+        const glm::vec3 ext = slabMax - slabMin;
+        const float minDim = std::min({ext.x, ext.y, ext.z});
+        if (minDim > 0.f) {
+            slabThicknesses.push_back(minDim);
         }
     }
 
@@ -1189,6 +1220,45 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         }
     }
 
+    // Material-stack prefilter hint: the area-weighted average base color over
+    // all groups (linear) plus the characteristic band width. The viewer blends
+    // toward this average once a pixel footprint can no longer resolve the
+    // individual bands, band-limiting the cycling-material pattern that
+    // otherwise aliases into moire at distance. Opt-in per rule
+    // (average_material_stack) so it can be excluded on stacks it shouldn't
+    // touch (e.g. the tracker) independently of merge_descendants. Computed
+    // after drop_coincident_faces so removed interior faces don't skew the area
+    // weighting.
+    std::optional<StackAverage> stackAverage;
+    if (rule.averageMaterialStack) {
+        glm::vec3 weightedColor{0.f};
+        float totalArea = 0.f;
+        for (const auto &[rmId, grp] : groups) {
+            float area = 0.f;
+            for (size_t base = 0; base + 2 < grp.indices.size(); base += 3) {
+                const glm::vec3 &p0 = grp.verts[grp.indices[base + 0]].position;
+                const glm::vec3 &p1 = grp.verts[grp.indices[base + 1]].position;
+                const glm::vec3 &p2 = grp.verts[grp.indices[base + 2]].position;
+                area += 0.5f * glm::length(glm::cross(p1 - p0, p2 - p0));
+            }
+            const glm::vec3 color = glm::vec3(result.scene.materials.at(rmId).baseColorFactor);
+            weightedColor += area * color;
+            totalArea += area;
+        }
+        if (totalArea > 0.f && !slabThicknesses.empty()) {
+            // Feature size = a low percentile of slab thickness, not the median:
+            // the moire is driven by the THINNEST bands, and a median is dragged
+            // up by thick absorber slabs (so a stack with a few thick + many thin
+            // layers -- HCal -- would never trigger the blend if keyed on the
+            // median). The 25th percentile tracks the fine layers while staying
+            // robust to a single degenerate sliver.
+            const size_t pIdx = slabThicknesses.size() / 4;
+            std::nth_element(slabThicknesses.begin(), slabThicknesses.begin() + pIdx,
+                             slabThicknesses.end());
+            stackAverage = StackAverage{weightedColor / totalArea, slabThicknesses[pIdx]};
+        }
+    }
+
     // Create one MeshAsset per material group → one MeshBinding each.
     for (auto &[rmId, grp] : groups) {
         MeshAssetId mid = result.scene.nextMeshId();
@@ -1199,6 +1269,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         ma.indices = std::move(grp.indices);
         ma.provenance.sourceSystem = "tessellation_pass";
         ma.provenance.sourceName = semNode.name;
+        ma.stackAverage = stackAverage;
         result.scene.meshAssets[mid] = std::move(ma);
         rn.meshBindings.push_back({mid, rmId});
     }

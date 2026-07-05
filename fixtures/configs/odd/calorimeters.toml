@@ -69,5 +69,8 @@ match = [
 ]
 [rules.tessellation]
 merge_descendants = true
+# Band-limit the cycling absorber/scintillator layer colors so the stack
+# doesn't alias into moire at distance (viewer material-stack prefilter).
+average_material_stack = true
 max_segments_circle = 10
 fallback = "fail"

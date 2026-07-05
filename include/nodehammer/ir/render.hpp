@@ -33,12 +33,28 @@ struct Vertex {
     glm::vec3 normal{0.f};
 };
 
+/// Prefilter hint for a merged sampling-stack mesh (calo absorber/scintillator
+/// layers etc.). Populated by the merge_descendants pass; consumed by the
+/// viewer to band-limit the high-frequency cycling-material pattern that
+/// aliases into moire at distance. `avgColorLinear` is the area-weighted
+/// average base color over the whole stack (linear space); `featureSize` is
+/// the characteristic band width (median slab thickness, world units). The
+/// scene shader blends a fragment toward `avgColorLinear` once the pixel
+/// footprint on the surface exceeds `featureSize` (the bands stop being
+/// resolvable), converging the surface to its correct footprint-average.
+struct StackAverage {
+    glm::vec3 avgColorLinear{0.f};
+    float featureSize{0.f};
+};
+
 struct MeshAsset {
     MeshAssetId id;
     std::string name;
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices; ///< Triangles: every 3 indices = one triangle
     Provenance provenance;
+    /// Set only on merged sampling-stack meshes; nullopt otherwise. See StackAverage.
+    std::optional<StackAverage> stackAverage;
 };
 
 // ── Material (per-instance binding) ──────────────────────────────────────────

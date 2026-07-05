@@ -34,6 +34,11 @@ struct GpuMesh {
     uint64_t triangle_count{0};
     glm::vec3 local_min{0.f};
     glm::vec3 local_max{0.f};
+    // Material-stack prefilter hint (from MeshAsset::stackAverage). feature_size
+    // == 0 means the mesh isn't a tagged sampling stack, so the scene shader
+    // skips the blend. See scene.glsl's stack_prefilter.
+    glm::vec3 stack_avg_color{0.f};
+    float stack_feature_size{0.f};
 };
 
 /// Transform an AABB by a 4x4 affine matrix using Arvo's trick — cheaper
@@ -476,6 +481,10 @@ void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const MeshAsset &asset) 
     }
     gm.local_min = lmin;
     gm.local_max = lmax;
+    if (asset.stackAverage.has_value()) {
+        gm.stack_avg_color = asset.stackAverage->avgColorLinear;
+        gm.stack_feature_size = asset.stackAverage->featureSize;
+    }
     meshes.emplace(id, gm);
 }
 
@@ -745,8 +754,15 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const float prefilter_max_lod =
             std::max(0.f, static_cast<float>(impl_->ibl.prefilter_mip_count - 1));
         const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, prefilter_max_lod,
-                                   overdraw_increment, 0.f};
+                                   overdraw_increment, flags.material_prefilter ? 1.f : 0.f};
         std::memcpy(fs_params.mode_flags, glm::value_ptr(mode_flags), sizeof(fs_params.mode_flags));
+        // Per-mesh material-stack prefilter: average color + band width. w == 0
+        // (untagged mesh) makes the scene FS skip the blend regardless of the
+        // enable flag above.
+        const glm::vec4 stack_prefilter{mesh.stack_avg_color,
+                                        mesh.stack_feature_size * flags.material_prefilter_scale};
+        std::memcpy(fs_params.stack_prefilter, glm::value_ptr(stack_prefilter),
+                    sizeof(fs_params.stack_prefilter));
         const glm::vec3 eye = camera.eye();
         const glm::vec4 cam_pos{eye.x, eye.y, eye.z, 0.f};
         std::memcpy(fs_params.camera_pos, glm::value_ptr(cam_pos), sizeof(fs_params.camera_pos));

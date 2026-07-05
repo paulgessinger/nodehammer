@@ -83,6 +83,17 @@ class SceneRenderer {
         float angle_cut_end_deg{90.f};
         bool enable_pbr{false}; ///< When on: Cook-Torrance + IBL ambient.
 
+        /// Material-stack prefilter (viewer AA for sampling stacks): when on,
+        /// the scene FS blends a merged-stack mesh's albedo toward the stack's
+        /// area-weighted average (MeshAsset::stackAverage) as the pixel
+        /// footprint outgrows the band width, band-limiting the cycling-
+        /// material pattern that aliases into moire at distance. Untagged
+        /// meshes are unaffected. Runtime A/B toggle.
+        bool material_prefilter{false};
+        /// Global multiplier on the stack-prefilter feature size (transition
+        /// distance dial). See RenderQualitySettings::material_prefilter_scale.
+        float material_prefilter_scale{1.0f};
+
         /// Overdraw debug view. When on, every group draws through the
         /// additive-blend / no-depth / no-cull overdraw pipeline and the
         /// scene FS emits a constant per-fragment increment instead of

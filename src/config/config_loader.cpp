@@ -571,6 +571,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
             tess.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();
+            tess.averageMaterialStack = (*tessTbl)["average_material_stack"].value<bool>();
             tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);
@@ -723,6 +724,7 @@ ConfigResult parseTable(const toml::table &tbl) {
             td.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             td.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
             td.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();
+            td.averageMaterialStack = (*tessTbl)["average_material_stack"].value<bool>();
             td.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);

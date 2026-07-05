@@ -209,6 +209,26 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ImGui::EndDisabled();
         }
 
+        // Material-stack prefilter: band-limits the cycling-material moire on
+        // merged sampling stacks (calo layers) by blending toward each stack's
+        // average color as the pixel footprint outgrows the band width. No-op
+        // on meshes the tessellation pass didn't tag with a StackAverage.
+        {
+            const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
+            ImGui::BeginDisabled(depth_debug);
+            ImGui::Checkbox("stack prefilter (AA)", &ctx.quality.enable_material_prefilter);
+            ImGui::SetItemTooltip("Anti-alias sampling-stack moire: blend cycling slab colors "
+                                  "toward the stack average once the pixel can't resolve the "
+                                  "bands. Affects stacks tagged average_material_stack in config.");
+            if (ctx.quality.enable_material_prefilter) {
+                ImGui::SliderFloat("prefilter scale", &ctx.quality.material_prefilter_scale, 0.25f,
+                                   8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+                ImGui::SetItemTooltip("Transition-distance dial. >1 keeps crisp bands closer "
+                                      "(blend later); <1 blends earlier. Tune per view.");
+            }
+            ImGui::EndDisabled();
+        }
+
         // GTAO. Sub-controls collapse entirely when the master AO toggle
         // is off — saves panel real estate and makes "is this knob active?"
         // unambiguous (vs the BeginDisabled grey-out pattern, which leaves
