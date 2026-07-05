@@ -4,6 +4,7 @@
 #include "ao_pass.hpp"
 #include "ao_render_target.hpp"
 #include "bench_runner.hpp"
+#include "blit_pass.hpp"
 #include "build_controller.hpp"
 #include "composite_pass.hpp"
 #include "gpu_pass_timer.hpp"
@@ -190,6 +191,14 @@ struct App::Impl {
     AoPass ao_pass;
     AoDenoisePass ao_denoise_pass;
     CompositePass composite;
+    // The composite + ImGui render into this persistent window-sized target
+    // instead of straight to the swapchain; blit_pass_ then copies it into the
+    // swapchain. "Pause when static" re-presents the cached frame with just the
+    // blit (see presentCachedFrame) — cheaper than a full re-render, and it keeps
+    // sokol's unconditional D3D11 Present() from scanning out a stale flip-model
+    // back buffer on skipped frames (which read as the perf plot going backward).
+    SceneRenderTarget present_cache_;
+    BlitPass blit_pass_;
     // Per-pass GPU timestamps (real timing on D3D11, no-op elsewhere). Surfaces
     // the GPU cost the CPU submit timers can't see — see gpu_pass_timer.hpp.
     GpuPassTimer gpu_pass_timer_;
@@ -388,6 +397,16 @@ struct App::Impl {
     void updateCameraInput();
     void applyInitialCamera();
     void render();
+    // Present-cache helpers. ensurePresentCache (re)allocates present_cache_ to
+    // the window size + swapchain formats; blitPresentCacheToSwapchain copies it
+    // into the current frame's swapchain; presentCachedFrame issues a complete
+    // cheap frame (blit + commit) that re-presents the last full frame — used by
+    // the throttle gates instead of an early return so D3D11 never presents a
+    // stale flip-model buffer. Returns false (does nothing) if no valid cache
+    // exists yet or the window size changed, so the caller renders normally.
+    void ensurePresentCache();
+    void blitPresentCacheToSwapchain();
+    [[nodiscard]] bool presentCachedFrame();
     // Per-pixel byte cost of the resolution-scaling offscreen targets (scene
     // color + depth, plus the AO targets when AO is on), derived from the live
     // backend pixel formats. Fed to DynamicRenderScale, which owns the
@@ -577,6 +596,7 @@ void App::Impl::onInit() {
                                         },
                                 });
     composite.initialize();
+    blit_pass_.initialize();
 
     stm_setup();
     last_time = stm_now();
@@ -1475,20 +1495,32 @@ void App::Impl::render() {
     const AoRenderTarget &composite_ao_target =
         composite_ao_src ? *composite_ao_src : composite_ao_empty;
 
-    sg_pass swap_pass{};
-    swap_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
-    swap_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
-    swap_pass.swapchain = sglue_swapchain();
-    swap_pass.label = "swapchain_pass";
-    sg_begin_pass(&swap_pass);
+    // Render the composite + ImGui into the persistent present-cache target
+    // rather than straight to the swapchain, then blit the cache into the
+    // swapchain. The cache lets the throttle re-present the last full frame with
+    // just the blit (presentCachedFrame) — cheaper than re-running composite +
+    // ImGui, and it means every D3D11 Present() (sokol issues one unconditionally
+    // after every frame callback) scans out a valid frame instead of a stale
+    // flip-model back buffer. present_cache_ mirrors the swapchain's color/depth
+    // format + (single-sample) count so the composite / ImGui pipelines match.
+    ensurePresentCache();
+    sg_pass cache_pass{};
+    cache_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+    cache_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
+    cache_pass.attachments = present_cache_.passAttachments();
+    cache_pass.label = "present_cache_pass";
+    sg_begin_pass(&cache_pass);
     composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
                    camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
                    scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
     ImGui_ImplSokol_Render();
     sg_end_pass();
-    // Swapchain pass GPU cost: the fullscreen composite (tonemap + FXAA at full
-    // window res) plus the ImGui draw on top.
+    // Present-cache pass GPU cost: the fullscreen composite (tonemap + FXAA at
+    // full window res) plus the ImGui draw on top.
     gpu_pass_timer_.stamp("composite");
+
+    // Blit the freshly-rendered cache into the swapchain.
+    blitPresentCacheToSwapchain();
 
     // Export capture: composite the same converged frame into the full-res
     // offscreen LDR target (no ImGui). PngExporter::postRender reads it back next.
@@ -1548,6 +1580,54 @@ void App::Impl::render() {
     encode_ms = stm_sec(stm_diff(present_start, render_submit_start)) * 1000.0;
     present_ms = stm_sec(stm_diff(render_end, present_start)) * 1000.0;
     render_submit_ms = stm_sec(stm_diff(render_end, render_submit_start)) * 1000.0;
+}
+
+void App::Impl::ensurePresentCache() {
+    const sg_environment env = sglue_environment();
+    sg_pixel_format cfmt = env.defaults.color_format;
+    if (cfmt == SG_PIXELFORMAT_NONE) {
+        cfmt = SG_PIXELFORMAT_RGBA8;
+    }
+    sg_pixel_format dfmt = env.defaults.depth_format;
+    if (dfmt == SG_PIXELFORMAT_NONE) {
+        dfmt = SG_PIXELFORMAT_DEPTH;
+    }
+    // Match the swapchain's color+depth format (and single sample count) so the
+    // composite / ImGui pipelines — created against the swapchain defaults —
+    // validate against this offscreen pass.
+    if (!present_cache_.matches(fb_width, fb_height, cfmt, dfmt)) {
+        present_cache_.create(fb_width, fb_height, cfmt, dfmt, /*for_readback=*/false);
+    }
+}
+
+void App::Impl::blitPresentCacheToSwapchain() {
+    sg_pass swap_pass{};
+    swap_pass.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
+    swap_pass.action.depth.load_action = SG_LOADACTION_DONTCARE;
+    swap_pass.swapchain = sglue_swapchain();
+    swap_pass.label = "swapchain_blit_pass";
+    sg_begin_pass(&swap_pass);
+    blit_pass_.draw(present_cache_.color_texture_view);
+    sg_end_pass();
+}
+
+bool App::Impl::presentCachedFrame() {
+    // Nothing cached yet (before the first full frame) — let the caller render
+    // normally so the cache gets populated.
+    if (present_cache_.color.id == SG_INVALID_ID) {
+        return false;
+    }
+    // If the window resized since the cached frame, its dimensions no longer
+    // match the swapchain; blitting would stretch it. A resize bumps the
+    // activity clock (full rate), so the very next frame renders fresh anyway —
+    // fall through to a real render this frame.
+    if (present_cache_.width != static_cast<uint32_t>(sapp_width()) ||
+        present_cache_.height != static_cast<uint32_t>(sapp_height())) {
+        return false;
+    }
+    blitPresentCacheToSwapchain();
+    sg_commit();
+    return true;
 }
 
 std::string App::Impl::browserUrlStateQuery() const {
@@ -1807,7 +1887,16 @@ void App::Impl::onFrame() {
                                notifications.hasActiveToasts();
         if (!full_rate && last_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
-            return;
+            // Re-present the last full frame with a cheap blit instead of an
+            // early return. sokol issues a D3D11 Present() unconditionally after
+            // this callback returns, and on the flip-model swapchain a frame we
+            // didn't draw scans out a stale back buffer — which reads as the perf
+            // plot jumping backward. The blit keeps every present valid and still
+            // skips the expensive composite + ImGui rebuild. If no cache exists
+            // yet, fall through and render a full frame to populate it.
+            if (presentCachedFrame()) {
+                return;
+            }
         }
     }
 
@@ -1821,7 +1910,12 @@ void App::Impl::onFrame() {
         constexpr double kFpsCapInterval = 1.0 / 60.0;
         constexpr double kFpsCapSlack = kFpsCapInterval * 0.1;
         if (stm_sec(stm_diff(stm_now(), last_time)) < kFpsCapInterval - kFpsCapSlack) {
-            return;
+            // Blit the cached frame on the dropped vsync so it still presents a
+            // valid frame on D3D11 rather than a stale flip buffer (see the pause
+            // gate above); fall through to a real render if there's no cache yet.
+            if (presentCachedFrame()) {
+                return;
+            }
         }
     }
 
@@ -2024,6 +2118,8 @@ void App::Impl::onFrame() {
 void App::Impl::onCleanup() {
     savePersistentState(true);
     composite.release();
+    blit_pass_.release();
+    present_cache_.destroy();
     ao_denoise_pass.release();
     ao_pass.release();
     ao_hist[0].destroy();

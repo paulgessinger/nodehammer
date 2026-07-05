@@ -14,6 +14,18 @@
             "problemMatcher": []
         },
         {
+            "label": "nodehammer: configure",
+            "type": "process",
+            "command": "just",
+            "args": [
+                "configure"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
             "label": "nodehammer: build viewer executable",
             "type": "process",
             "command": "cmake",

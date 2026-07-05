@@ -19,7 +19,7 @@ recipes:
     conan export recipes/sokol-shdc --version=2026.06.13
 
 deps: recipes
-    conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja -o "&:viewer=True"
+    conan install . -s build_type=RelWithDebInfo --build=missing -c tools.cmake.cmaketoolchain:generator=Ninja -o viewer=True
 
 configure:
     {{configure_native_cmd}}
@@ -95,7 +95,7 @@ wasm-deps: _require-emsdk recipes
         -s build_type=RelWithDebInfo \
         -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
         --build=missing \
-        -o '&:viewer=True'
+        -o viewer=True
 
 wasm-configure *args: _require-emsdk
     cmake --preset conan-emscripten-relwithdebinfo --fresh \
@@ -128,7 +128,7 @@ wasm-deps-release: _require-emsdk recipes
         -s build_type=Release \
         -c tools.cmake.cmake_layout:build_folder_vars='["settings.os"]' \
         --build=missing \
-        -o '&:viewer=True'
+        -o viewer=True
 
 wasm-configure-release *args: _require-emsdk
     cmake --preset conan-emscripten-release --fresh \
