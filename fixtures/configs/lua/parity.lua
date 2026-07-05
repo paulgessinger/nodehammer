@@ -40,7 +40,7 @@ rule { match = 'name ~= "M1*"', material = "metal",
 rule { match = { 'path ~= "**/X"', 'path ~= "**/Y"' },
        tessellation = { skip_geometry = true } }
 rule { match = 'path ~= "/world"',
-       tessellation = { merge_descendants = true, fallback = "fail" },
+       tessellation = { merge_descendants = true, drop_coincident_faces = true, fallback = "fail" },
        extras = { visible = true, opacity = 0.5 } }
 
 defaults {

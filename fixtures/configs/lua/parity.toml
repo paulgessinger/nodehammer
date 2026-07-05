@@ -58,6 +58,7 @@ skip_geometry = true
 match = 'path ~= "/world"'
 [rules.tessellation]
 merge_descendants = true
+drop_coincident_faces = true
 fallback = "fail"
 [rules.extras]
 visible = true
