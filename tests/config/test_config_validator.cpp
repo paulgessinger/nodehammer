@@ -85,6 +85,51 @@ TEST_CASE("ConfigValidator: positive max_segments_circle -> no error", "[config]
     REQUIRE_FALSE(diags.hasErrors());
 }
 
+// ── drop_coincident_faces requires merge_descendants ──────────────────────────
+
+TEST_CASE("ConfigValidator: drop_coincident_faces without merge_descendants -> Warning",
+          "[config][validator]") {
+    nodehammer::NHConfig cfg;
+    nodehammer::Rule rule;
+    rule.tessellation = nodehammer::Rule::Tessellation{};
+    rule.tessellation->dropCoincidentFaces = true;
+    cfg.rules.push_back(rule);
+    auto diags = nodehammer::ConfigValidator::validate(cfg);
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE(diags.items().size() == 1);
+    REQUIRE(diags.items().front().code == nodehammer::codes::kWarnConfigDropWithoutMerge);
+}
+
+TEST_CASE("ConfigValidator: drop_coincident_faces with merge_descendants in a DIFFERENT rule -> ok",
+          "[config][validator]") {
+    // The supported layered pattern: one rule (e.g. from an included fragment)
+    // enables merge_descendants; an overlay rule matching the same nodes enables
+    // drop_coincident_faces. The two need not live in the same rule.
+    nodehammer::NHConfig cfg;
+    nodehammer::Rule mergeRule;
+    mergeRule.tessellation = nodehammer::Rule::Tessellation{};
+    mergeRule.tessellation->mergeDescendants = true;
+    cfg.rules.push_back(mergeRule);
+    nodehammer::Rule dropRule;
+    dropRule.tessellation = nodehammer::Rule::Tessellation{};
+    dropRule.tessellation->dropCoincidentFaces = true;
+    cfg.rules.push_back(dropRule);
+    auto diags = nodehammer::ConfigValidator::validate(cfg);
+    REQUIRE(diags.empty());
+}
+
+TEST_CASE("ConfigValidator: drop_coincident_faces with merge_descendants in defaults -> ok",
+          "[config][validator]") {
+    nodehammer::NHConfig cfg;
+    cfg.tessellationDefaults.mergeDescendants = true;
+    nodehammer::Rule dropRule;
+    dropRule.tessellation = nodehammer::Rule::Tessellation{};
+    dropRule.tessellation->dropCoincidentFaces = true;
+    cfg.rules.push_back(dropRule);
+    auto diags = nodehammer::ConfigValidator::validate(cfg);
+    REQUIRE(diags.empty());
+}
+
 // ── Multiple errors accumulate ────────────────────────────────────────────────
 
 TEST_CASE("ConfigValidator: multiple violations all reported", "[config][validator]") {

@@ -135,6 +135,16 @@ struct Rule {
     struct Tessellation {
         std::optional<bool> skipGeometry;
         std::optional<bool> mergeDescendants;
+        // Opt-in post-pass on a merge_descendants group: removes exact-coincident,
+        // opposite-wound triangle pairs (the internal interfaces between stacked
+        // opaque slabs, e.g. sampling-calorimeter absorber/scintillator layers)
+        // before the merged mesh is emitted. Only meaningful together with
+        // mergeDescendants — see tessellation_pass.cpp's coincident-face removal
+        // helper for the exact algorithm. Valid only for fully-opaque geometry:
+        // it assumes the interior faces can never be seen, which holds for uncut
+        // and Boolean-cut views (the cut re-tessellation adds cap faces) but not
+        // for the shader angle-cut preview, which exposes the raw interior.
+        std::optional<bool> dropCoincidentFaces;
         std::optional<int> maxSegmentsCircle;
         std::optional<BooleanFallback> fallback;
     };

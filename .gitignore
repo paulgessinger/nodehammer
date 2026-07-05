@@ -14,3 +14,7 @@
 # config-flatten output written to the repo root (generated from fixtures/).
 /*_flat.toml
 CMakeUserPresets.json
+.idea
+
+# Local perf/geometry analysis artifacts (screenshots, dumps)
+/analysis/

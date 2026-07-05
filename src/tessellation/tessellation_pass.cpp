@@ -13,9 +13,11 @@
 #include <ankerl/unordered_dense.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <format>
@@ -95,6 +97,10 @@ bool ruleMatches(const CompiledRule &cr, const NodeView &view) {
 struct ResolvedTessellation {
     bool skipGeometry{false};
     bool mergeDescendants{false};
+    // See Rule::Tessellation::dropCoincidentFaces (config_ast.hpp) — only acted on
+    // when mergeDescendants is also true; the coincident-face removal pass
+    // runs on the merged group, not on individual descendants.
+    bool dropCoincidentFaces{false};
     int maxSegmentsCircle{64};
     BooleanFallback fallback{BooleanFallback::Skip};
 };
@@ -115,6 +121,11 @@ struct MergeDescendantSignature {
 
 struct MergeCacheKey {
     BooleanFallback fallback{BooleanFallback::Skip};
+    // Resolved on the merge_descendants node itself (not its descendants): it
+    // changes the merged mesh — interior faces are dropped only when set — so a
+    // reused prototype must match on it or an enabled node could keep its
+    // interior faces (or a disabled one lose them) depending on traversal order.
+    bool dropCoincidentFaces{false};
     std::vector<MergeDescendantSignature> descendants;
 
     bool operator==(const MergeCacheKey &) const = default;
@@ -123,6 +134,7 @@ struct MergeCacheKey {
 struct MergeCacheKeyHash {
     std::size_t operator()(const MergeCacheKey &k) const {
         std::size_t h = std::hash<int>{}(static_cast<int>(k.fallback));
+        h = hashCombine(h, std::hash<bool>{}(k.dropCoincidentFaces));
         h = hashCombine(h, std::hash<std::size_t>{}(k.descendants.size()));
         for (const auto &d : k.descendants) {
             h = hashCombine(h, std::hash<uint64_t>{}(d.shapeId.value));
@@ -295,6 +307,9 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
         if (t.mergeDescendants.has_value()) {
             merged.mergeDescendants = *t.mergeDescendants;
         }
+        if (t.dropCoincidentFaces.has_value()) {
+            merged.dropCoincidentFaces = *t.dropCoincidentFaces;
+        }
         if (t.maxSegmentsCircle.has_value()) {
             merged.maxSegmentsCircle = *t.maxSegmentsCircle;
         }
@@ -307,6 +322,8 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
         .skipGeometry = merged.skipGeometry.value_or(defaults.skipGeometry.value_or(false)),
         .mergeDescendants =
             merged.mergeDescendants.value_or(defaults.mergeDescendants.value_or(false)),
+        .dropCoincidentFaces =
+            merged.dropCoincidentFaces.value_or(defaults.dropCoincidentFaces.value_or(false)),
         .maxSegmentsCircle =
             merged.maxSegmentsCircle.value_or(defaults.maxSegmentsCircle.value_or(64)),
         .fallback = merged.fallback.value_or(defaults.fallback.value_or(BooleanFallback::Skip)),
@@ -327,6 +344,224 @@ const std::string *resolveMaterial(const std::vector<CompiledRule> &rules, const
         }
     }
     return result;
+}
+
+// ── Coincident interior-face removal (drop_coincident_faces) ──────────────────────
+//
+// A sampling calorimeter is stacked absorber/scintillator slabs, touching
+// face-to-face. Every internal interface between two touching OPAQUE slabs is
+// a pair of geometrically coincident, oppositely-wound triangles that can
+// never be seen (they face directly into each other, buried inside the
+// stack). The rasterizer still pays full price for them — this is the
+// dominant cost of the calo overdraw (see the module-level background in the
+// task that introduced this pass). Stripping exactly those pairs collapses
+// depth complexity from ~2N to ~2 with no visible change, as long as nothing
+// ever exposes the interior (a boolean cut would — that's a phase-2 concern;
+// this pass runs before any such cut is baked, so it is unaware of it).
+//
+// IMPORTANT / scope: this is only correct for fully-opaque geometry. A
+// translucent stack *can* show its interior faces through the material above
+// it, so removing them there would be visibly wrong. Phase 1 does not gate on
+// opacity in code — the flag is opt-in per rule, and it is the config
+// author's job to only set drop_coincident_faces=true on stacks that are actually
+// opaque (e.g. the calo staves). See config_ast.hpp's Tessellation struct.
+
+// Absolute snap tolerance (in merge-local units, i.e. after the per-descendant
+// transform at the `toLocal` multiply above) used to quantize vertex
+// positions before comparing triangles for coincidence. This absorbs the tiny
+// float roundoff introduced by transforming each descendant's vertices into
+// the merge node's local frame — two slabs whose CAD-authored surfaces are
+// bit-for-bit identical will not, in general, transform to bit-identical
+// floats. ODD calo slabs are O(1-100 mm) in local units, so 1e-4 (0.1 micron)
+// comfortably separates "same point after roundoff" from "different point"
+// without merging distinct nearby vertices. Tune here if a future geometry's
+// units or roundoff characteristics differ.
+constexpr float kCoincidentSnapTolerance = 1e-4f;
+
+// Quantizes a single float to the snap grid, rounding to the nearest grid line
+// so that two floats within tolerance of each other always snap to the same
+// integer.
+inline int64_t snapCoord(float v) {
+    return static_cast<int64_t>(
+        std::llround(static_cast<double>(v) / static_cast<double>(kCoincidentSnapTolerance)));
+}
+
+// Quantized 3D point used as (part of) the coincident-triangle key.
+struct SnappedPoint {
+    int64_t x, y, z;
+    bool operator==(const SnappedPoint &) const = default;
+    bool operator<(const SnappedPoint &o) const {
+        if (x != o.x)
+            return x < o.x;
+        if (y != o.y)
+            return y < o.y;
+        return z < o.z;
+    }
+};
+
+SnappedPoint snapPoint(const glm::vec3 &p) {
+    return {snapCoord(p.x), snapCoord(p.y), snapCoord(p.z)};
+}
+
+// A back-reference to one triangle: which material group's index buffer, and
+// the index of its first corner (indices[triBase], [triBase+1], [triBase+2]).
+struct TriRef {
+    RenderMaterialId group;
+    size_t triBase;
+};
+
+// Order-independent key for a triangle's 3 quantized corners — two triangles
+// sharing all 3 points (in any order/winding) share a key. Coincident,
+// opposite-wound interior faces always produce identical keys this way.
+struct TriKey {
+    std::array<SnappedPoint, 3> pts; // sorted ascending
+    bool operator==(const TriKey &) const = default;
+};
+
+struct TriKeyHash {
+    size_t operator()(const TriKey &k) const noexcept {
+        size_t h = 0;
+        for (const auto &p : k.pts) {
+            h = hashCombine(h, std::hash<int64_t>{}(p.x));
+            h = hashCombine(h, std::hash<int64_t>{}(p.y));
+            h = hashCombine(h, std::hash<int64_t>{}(p.z));
+        }
+        return h;
+    }
+};
+
+// Label used to group drop_coincident_faces candidates by structure in the NH0509
+// suggestion: the node's original source path minus its own final segment (i.e.
+// the parent structure that holds the stack, e.g. ".../ECalBarrel"), falling
+// back to the node name when no path is recorded.
+inline std::string candidateStructureLabel(const SemanticNode &node) {
+    const std::string &p = node.originalPath;
+    if (!p.empty()) {
+        const auto slash = p.find_last_of('/');
+        if (slash != std::string::npos && slash > 0) {
+            return p.substr(0, slash);
+        }
+        return p;
+    }
+    return node.name.empty() ? std::string{"<unnamed>"} : node.name;
+}
+
+// Removes exact-coincident, opposite-wound triangle pairs across ALL material
+// groups of a merge_descendants result jointly (the interior interfaces are
+// *between* alternating materials, e.g. absorber → scintillator, so a
+// per-group search would never find them).
+//
+// Conservative removal rule: a key is only acted on when EXACTLY two
+// triangles share it and their geometric normals oppose (dot < -0.9). Keys
+// with a single triangle (an exterior face — nothing to pair with) or 3+
+// triangles (a degenerate/non-manifold coincidence we don't want to guess
+// about) are left untouched. This trades a bit of missed overdraw reduction
+// at weird junctions for never silently deleting a face that was actually
+// visible.
+//
+// Mutates each group's `indices` in place, dropping removed triangles'
+// index triples. Vertex compaction is intentionally skipped — the now-
+// unreferenced vertices are harmless dead weight for an indexed draw, and
+// compacting them would need a remap pass that isn't worth the complexity
+// here. Returns the number of triangles removed (always even — pairs).
+// Templated on the group-map type (rather than named on MatGroup directly)
+// because MatGroup is a local struct defined inside
+// tessellateMergeDescendants — a template lets this free function operate on
+// it without exposing that type at namespace scope.
+// A merge_descendants node is flagged as a drop_coincident_faces *candidate* only
+// when count-only detection finds at least this many removable interior faces.
+// Kept well above the handful of faces two incidentally-touching solids share,
+// so the suggestion fires on genuine stacked-slab structures (sampling calos)
+// rather than on every pair of adjacent boxes.
+inline constexpr size_t kCoincidentCandidateMinFaces = 32;
+
+// When `apply` is false the index buffers are left untouched and the function
+// only *counts* how many faces it would remove — used to flag merge_descendants
+// nodes that are good drop_coincident_faces candidates without mutating them.
+template <typename MatGroupMap>
+size_t removeCoincidentInteriorFaces(MatGroupMap &groups, bool apply = true) {
+    // Pass 1: flatten every triangle in every group into a lookup keyed by its
+    // quantized, order-independent corner set.
+    ankerl::unordered_dense::map<TriKey, std::vector<TriRef>, TriKeyHash> byKey;
+
+    for (auto &[rmId, grp] : groups) {
+        const size_t triCount = grp.indices.size() / 3;
+        for (size_t t = 0; t < triCount; ++t) {
+            const size_t base = t * 3;
+            const glm::vec3 &p0 = grp.verts[grp.indices[base + 0]].position;
+            const glm::vec3 &p1 = grp.verts[grp.indices[base + 1]].position;
+            const glm::vec3 &p2 = grp.verts[grp.indices[base + 2]].position;
+
+            std::array<SnappedPoint, 3> pts{snapPoint(p0), snapPoint(p1), snapPoint(p2)};
+            std::sort(pts.begin(), pts.end());
+            TriKey key{pts};
+
+            byKey[key].push_back(TriRef{rmId, base});
+        }
+    }
+
+    // Pass 2: for keys with exactly 2 triangles and opposing geometric
+    // normals, mark both for removal. Collect (group, triBase) pairs first —
+    // we mutate index buffers afterwards so the flatten pass above stays
+    // valid throughout.
+    ankerl::unordered_dense::map<RenderMaterialId, ankerl::unordered_dense::set<size_t>>
+        toRemoveByGroup;
+
+    auto geometricNormal = [&groups](const TriRef &ref) -> glm::vec3 {
+        auto &grp = groups.at(ref.group);
+        const glm::vec3 &p0 = grp.verts[grp.indices[ref.triBase + 0]].position;
+        const glm::vec3 &p1 = grp.verts[grp.indices[ref.triBase + 1]].position;
+        const glm::vec3 &p2 = grp.verts[grp.indices[ref.triBase + 2]].position;
+        return glm::normalize(glm::cross(p1 - p0, p2 - p0));
+    };
+
+    size_t removedCount = 0;
+    for (const auto &[key, refs] : byKey) {
+        if (refs.size() != 2) {
+            // 1 → genuine exterior face; 3+ → non-manifold/degenerate overlap
+            // we deliberately don't touch (see function comment).
+            continue;
+        }
+        const glm::vec3 n0 = geometricNormal(refs[0]);
+        const glm::vec3 n1 = geometricNormal(refs[1]);
+        if (glm::dot(n0, n1) >= -0.9f) {
+            // Same-facing coincident triangles aren't an interior seam (could
+            // be a degenerate duplicate) — leave them for now, conservative.
+            continue;
+        }
+        toRemoveByGroup[refs[0].group].insert(refs[0].triBase);
+        toRemoveByGroup[refs[1].group].insert(refs[1].triBase);
+        removedCount += 2;
+    }
+
+    // Count-only (candidate detection): report the tally without mutating.
+    if (!apply) {
+        return removedCount;
+    }
+
+    // Pass 3: rebuild each group's index buffer, skipping removed triangles.
+    for (auto &[rmId, grp] : groups) {
+        auto it = toRemoveByGroup.find(rmId);
+        if (it == toRemoveByGroup.end()) {
+            continue; // nothing removed from this group
+        }
+        const auto &removedBases = it->second;
+        std::vector<uint32_t> kept;
+        kept.reserve(grp.indices.size());
+        const size_t triCount = grp.indices.size() / 3;
+        for (size_t t = 0; t < triCount; ++t) {
+            const size_t base = t * 3;
+            if (removedBases.contains(base)) {
+                continue;
+            }
+            kept.push_back(grp.indices[base + 0]);
+            kept.push_back(grp.indices[base + 1]);
+            kept.push_back(grp.indices[base + 2]);
+        }
+        grp.indices = std::move(kept);
+    }
+
+    return removedCount;
 }
 
 // Resolve extras from the first matching rule that has them, falling back to
@@ -461,6 +696,34 @@ struct TessellationJob::Impl {
     // worker joins.
     std::atomic<size_t> totalNodes{0};
     std::atomic<size_t> processedNodes{0};
+    // Running total of triangles dropped by removeCoincidentInteriorFaces()
+    // across every drop_coincident_faces group in this job — surfaced in the
+    // take()-time stats print so an A/B config toggle is verifiable without
+    // a debugger (see tessellation_pass.cpp's merge-finalization step).
+    std::atomic<size_t> coincidentFacesRemoved{0};
+    // Number of merge_descendants nodes that had at least one coincident face
+    // removed — paired with coincidentFacesRemoved so take() can emit a single
+    // aggregate diagnostic instead of one toast per node (there are 100+ calo
+    // staves; per-node info diags flood the viewer's toast area).
+    std::atomic<size_t> coincidentNodesAffected{0};
+    // Discoverability: on merge_descendants nodes where drop_coincident_faces is OFF
+    // we still run the detection in count-only mode. If a node has a meaningful
+    // number of removable interior faces it's a good candidate for the option.
+    // Candidates are grouped by parent structure (the node's path minus its own
+    // segment) so take() can name *which* structures in a single suggestion
+    // diagnostic — value is {instance count, removable faces × instances}. Plain
+    // (not atomic): only written by the single-threaded BFS and read in take()
+    // after the worker joins, exactly like result.diags.
+    //
+    // Merged prototypes are deduplicated by the merge cache: detection runs once
+    // (on the first, cache-miss instance) but the reduced mesh is reused by every
+    // other instance. To report the true footprint we remember each candidate
+    // prototype's removable-face count keyed by its merge key, and on each later
+    // cache hit attribute one more instance (and its faces) to the structure that
+    // hit actually lives in — so e.g. both barrel layers sharing one stave
+    // prototype are each credited their instances, not just the first-seen one.
+    std::map<std::string, std::pair<size_t, size_t>> coincidentCandidatesByParent;
+    ankerl::unordered_dense::map<MergeCacheKey, size_t, MergeCacheKeyHash> dropCandidateByKey;
 
     NodeView makeNodeView(const SemanticNode &node) const {
         std::string_view matName;
@@ -700,6 +963,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
                                                        const ResolvedTessellation &rule) {
     MergeCacheKey mergeKey;
     mergeKey.fallback = rule.fallback;
+    mergeKey.dropCoincidentFaces = rule.dropCoincidentFaces;
 
     std::vector<MergeDescendant> mergeDescendants;
 
@@ -758,6 +1022,14 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     // Check the merge cache only after the placement-aware key is known.
     auto mcIt = mergeCache.find(mergeKey);
     if (mcIt != mergeCache.end()) {
+        // Reused prototype. If it was flagged a drop_coincident_faces candidate
+        // on its first (cache-miss) instance, credit this reuse to the structure
+        // it actually lives in so the suggestion reflects the real footprint.
+        if (auto cand = dropCandidateByKey.find(mergeKey); cand != dropCandidateByKey.end()) {
+            auto &agg = coincidentCandidatesByParent[candidateStructureLabel(semNode)];
+            agg.first += 1;
+            agg.second += cand->second;
+        }
         rn.meshBindings = mcIt->second;
         result.scene.nodes[rnId] = std::move(rn);
         return true;
@@ -882,6 +1154,39 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
                         "tessellatable descendants (did selection remove them?)",
                         semNode.name),
             semNode.name);
+    }
+
+    // drop_coincident_faces: strip exact-coincident, opposite-wound interior faces
+    // (the never-visible seams between stacked opaque slabs) BEFORE emitting
+    // MeshAssets, so the removed triangles' now-dangling vertices simply never
+    // get referenced by the final index buffers. Must run across all groups
+    // jointly — see removeCoincidentInteriorFaces()'s comment: the calo's
+    // absorber/scintillator interfaces are between *different* materials, so
+    // a per-group pass would never see them.
+    if (rule.dropCoincidentFaces) {
+        const size_t removed = removeCoincidentInteriorFaces(groups);
+        if (removed > 0) {
+            // Accumulate only — the per-node counts are summed into a single
+            // aggregate diagnostic in take(). Emitting one info diag per node
+            // here floods the viewer toast area (100+ calo staves).
+            coincidentFacesRemoved.fetch_add(removed, std::memory_order_relaxed);
+            coincidentNodesAffected.fetch_add(1, std::memory_order_relaxed);
+        }
+    } else {
+        // drop_coincident_faces is off for this node. Run detection in count-only
+        // mode (no mutation) so we can suggest the option when the node is a
+        // clear candidate — otherwise the optimisation is easy to miss. Group
+        // by parent structure so take() can name which structures are affected.
+        const size_t removable = removeCoincidentInteriorFaces(groups, /*apply=*/false);
+        if (removable >= kCoincidentCandidateMinFaces) {
+            // Count this first (cache-miss) instance, and remember the prototype
+            // so later cache hits reusing it credit their own structures too
+            // (mergeKey is still alive here — it is moved into mergeCache below).
+            auto &agg = coincidentCandidatesByParent[candidateStructureLabel(semNode)];
+            agg.first += 1;
+            agg.second += removable;
+            dropCandidateByKey[mergeKey] = removable;
+        }
     }
 
     // Create one MeshAsset per material group → one MeshBinding each.
@@ -1115,6 +1420,67 @@ TessellationPassResult TessellationJob::take() {
     std::println(stderr, "  Unique materials: {}", impl_->result.scene.materials.size());
     std::println(stderr, "  Mesh cache entries (shapes with tessellation): {}",
                  impl_->meshCache.size());
+    const size_t coincRemoved = impl_->coincidentFacesRemoved.load(std::memory_order_relaxed);
+    std::println(stderr, "  Coincident interior faces removed (drop_coincident_faces): {}",
+                 coincRemoved);
+    // Single aggregate diagnostic for the whole pass (one toast), replacing the
+    // former per-node info diags that flooded the viewer.
+    if (coincRemoved > 0) {
+        const size_t coincNodes = impl_->coincidentNodesAffected.load(std::memory_order_relaxed);
+        impl_->result.diags.info(
+            codes::kInfoTessCoincidentRemoved,
+            std::format("drop_coincident_faces removed {} interior face(s) ({} coincident, "
+                        "opposite-wound triangle pair(s)) across {} node(s)",
+                        coincRemoved, coincRemoved / 2, coincNodes),
+            "drop_coincident_faces");
+    }
+    // Discoverability suggestion: merge_descendants nodes that would shed a
+    // meaningful number of interior faces but don't have drop_coincident_faces on.
+    // One aggregate diagnostic for the whole pass, grouped by parent structure
+    // so it names *what* is affected without ever flooding.
+    if (!impl_->coincidentCandidatesByParent.empty()) {
+        std::vector<std::pair<std::string, std::pair<size_t, size_t>>> groups(
+            impl_->coincidentCandidatesByParent.begin(), impl_->coincidentCandidatesByParent.end());
+        // Most-impactful structures first.
+        std::sort(groups.begin(), groups.end(),
+                  [](const auto &a, const auto &b) { return a.second.second > b.second.second; });
+
+        size_t totalNodes = 0;
+        size_t totalFaces = 0;
+        for (const auto &[label, agg] : groups) {
+            totalNodes += agg.first;
+            totalFaces += agg.second;
+        }
+
+        // Name the biggest structures; cap the list so a pathological scene with
+        // hundreds of distinct candidate structures can't blow up the message.
+        constexpr size_t kMaxStructuresListed = 6;
+        std::string list;
+        for (size_t i = 0; i < groups.size() && i < kMaxStructuresListed; ++i) {
+            if (!list.empty()) {
+                list += "; ";
+            }
+            list += std::format("{} ({} node(s), {} face(s))", groups[i].first,
+                                groups[i].second.first, groups[i].second.second);
+        }
+        if (groups.size() > kMaxStructuresListed) {
+            list += std::format("; +{} more structure(s)", groups.size() - kMaxStructuresListed);
+        }
+
+        std::println(
+            stderr,
+            "  drop_coincident_faces candidate: {} removable interior face(s) across {} node(s) "
+            "in {} structure(s)",
+            totalFaces, totalNodes, groups.size());
+        impl_->result.diags.warn(
+            codes::kWarnTessCoincidentCandidate,
+            std::format(
+                "drop_coincident_faces is off but would remove {} interior face(s) from {} "
+                "merge_descendants node(s) — candidates: {}. Enable "
+                "'drop_coincident_faces = true' on these structures to cut interior overdraw",
+                totalFaces, totalNodes, list),
+            "drop_coincident_faces");
+    }
     return std::move(impl_->result);
 }
 

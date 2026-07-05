@@ -102,11 +102,23 @@ void registerCmdViewer(CLI::App &app) {
                     "Screenshot supersampling factor (1-4)")
         ->capture_default_str();
 
+    // Headless benchmark mode: drive a fixed camera/state sequence (cut-on
+    // hold/orbit/zoom, then cut-off), measure per-pass GPU time over each window,
+    // grab a screenshot per segment, write the results JSON to this path (and
+    // stdout), then quit. D3D11 only for the GPU timings.
+    auto *benchOpt =
+        sub->add_option("--bench", "Run the headless GPU benchmark, write results JSON here, quit");
+    auto benchScale = std::make_shared<float>(1.0f);
+    sub->add_option("--bench-scale", *benchScale,
+                    "Bench SSAA on the scene/AO passes (render_scale, 0.25-4). >1 pushes the GPU "
+                    "past the refresh so total/composite timings aren't present-paced")
+        ->capture_default_str();
+
     sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt, cullModeStr,
                    screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt,
                    angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, inputOpt, configOpt]() {
+                   cameraPitchOpt, inputOpt, configOpt, benchOpt, benchScale]() {
         if (*cullModeOpt) {
             using nodehammer::viewer::CullOverride;
             CullOverride mode = CullOverride::Auto;
@@ -184,9 +196,21 @@ void registerCmdViewer(CLI::App &app) {
             }
         }
 
+        std::string benchPath;
+        if (*benchOpt) {
+            benchOpt->results(benchPath);
+            if (inputPath.empty()) {
+                std::println(stderr, "viewer: --bench requires --input (no scene to render)");
+                std::exit(1);
+            }
+        }
+
         nodehammer::viewer::App::Handle application(*cfg);
         if (!screenshotPath.empty()) {
             application->requestScreenshot(screenshotPath, *screenshot);
+        }
+        if (!benchPath.empty()) {
+            application->requestBench(benchPath, inputPath, *benchScale);
         }
 
         // Native CLI flow: if both roots live under the launch CWD, mount that

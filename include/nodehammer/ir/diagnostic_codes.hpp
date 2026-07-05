@@ -21,6 +21,10 @@ inline constexpr std::string_view kErrMissingOutputPath = "NH0004";
 inline constexpr std::string_view kWarnConfigUnknownKey = "NH0005";
 inline constexpr std::string_view kWarnConfigEmptyScope = "NH0006";
 inline constexpr std::string_view kWarnConfigUnconditionalMaterialRule = "NH0007";
+// Warning: drop_coincident_faces is enabled somewhere but merge_descendants is
+// never enabled — drop_coincident_faces is a no-op without it (it operates on
+// the merged group), so the option will silently do nothing.
+inline constexpr std::string_view kWarnConfigDropWithoutMerge = "NH0008";
 
 // ── Import (general) ──────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrImportFileNotFound = "NH0100";
@@ -44,6 +48,14 @@ inline constexpr std::string_view kErrTessBooleanFail = "NH0503";
 inline constexpr std::string_view kWarnTessMergeEmpty = "NH0505";
 inline constexpr std::string_view kWarnTessBooleanManifoldFail = "NH0506";
 inline constexpr std::string_view kWarnTessDefaultMaterial = "NH0507";
+// Info: reports how many exact-coincident, opposite-wound triangle pairs the
+// drop_coincident_faces pass stripped out of a merge_descendants group (interior
+// faces between stacked opaque slabs — see tessellation_pass.cpp).
+inline constexpr std::string_view kInfoTessCoincidentRemoved = "NH0508";
+// Warning: a merge_descendants node has many coincident interior faces that
+// drop_coincident_faces would remove, but the option is off — a discoverability hint
+// that the optimisation exists and applies here (see tessellation_pass.cpp).
+inline constexpr std::string_view kWarnTessCoincidentCandidate = "NH0509";
 
 // ── Export ────────────────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrExportWriteFailed = "NH0600";

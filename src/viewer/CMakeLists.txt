@@ -47,8 +47,18 @@ function(nh_add_viewer_lib name sokol_lib backend)
         message(FATAL_ERROR "nh_add_viewer_lib: unknown sokol backend '${backend}'")
     endif()
 
+    # Per-pass GPU timestamp timing. Only D3D11 needs the real implementation
+    # (its Present-side stall is invisible to the CPU submit timers); every other
+    # backend links the no-op TU.
+    if(backend STREQUAL "SOKOL_D3D11")
+        set(_gputimer ${_dir}/gpu_pass_timer_d3d11.cpp)
+    else()
+        set(_gputimer ${_dir}/gpu_pass_timer_noop.cpp)
+    endif()
+
     add_library(${name} STATIC
         ${_dir}/app.cpp
+        ${_dir}/bench_runner.cpp
         ${_dir}/build_controller.cpp
         ${_dir}/scene_renderer.cpp
         ${_dir}/scene_render_target.cpp
@@ -60,6 +70,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
         ${_dir}/png_exporter.cpp
         ${_dir}/stb_image_write_impl.cpp
         ${_readback}
+        ${_gputimer}
         ${_dir}/imgui_backend.cpp
         ${_dir}/ui/debug_panel.cpp
         ${_dir}/ui/icon_font.cpp

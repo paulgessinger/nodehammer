@@ -114,6 +114,10 @@ nodehammer dump-render     # dump the render IR as JSON
 nodehammer viewer          # launch the interactive viewer
 ```
 
+Running the executable with no arguments at all (e.g. double-clicking
+`nodehammer.exe` in a file manager) also launches the viewer, in builds with
+`NODEHAMMER_WITH_VIEWER` enabled.
+
 ## Building
 
 Dependencies are managed with [Conan](https://conan.io/); builds with CMake + Ninja.

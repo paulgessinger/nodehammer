@@ -1,0 +1,48 @@
+# ODD full detector, with calorimeter + long-strip interior-face removal enabled.
+#
+# Layers on top of odd.toml and turns on `drop_coincident_faces` for the calorimeter
+# staves and the long-strip barrel staves. Each ODD sampling-calorimeter stave is a
+# stack of many touching, opposite-wound slabs (alternating absorber / scintillator).
+# `drop_coincident_faces` removes the geometrically-coincident *interior* interface
+# faces between adjacent slabs — keeping every exterior face and all materials —
+# which collapses the stack's depth complexity. On the ODD calo this drops ~47k
+# interior faces; the two long-strip barrel layers share one stave prototype with
+# ~84 coincident faces each (reused across 140 staves — removed once, shared by all).
+#
+# The removed faces are strictly interior, so this is invisible in normal
+# (uncut) views and under the Boolean wedge cut, whose re-tessellation adds
+# watertight cap faces at the cut plane (verified: 0.000% pixel see-through vs
+# the option off). The one caveat: the *shader* angle-cut preview discards fragments
+# WITHOUT capping the cross-section, so it relies on the interior faces to look
+# solid — with this config that preview shows see-through into the calo. Use the
+# Boolean wedge cut (not the shader-only preview) for cutaway views here.
+#
+# `drop_coincident_faces` only takes effect where `merge_descendants` is also set;
+# odd/calorimeters.toml already sets merge_descendants on these staves, and rule
+# resolution is last-match-wins per field, so the rule below just adds the flag.
+
+include = ["odd.toml"]
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+# Enable interior-face removal on every calorimeter stave.
+[[rules]]
+match = [
+  'path ~= "**/ECalBarrel/stave*"',
+  'path ~= "**/ECalEndcap_A/stave*"',
+  'path ~= "**/ECalEndcap_B/stave*"',
+  'path ~= "**/HCalBarrel/stave*"',
+  'path ~= "**/HCalEndcap_A/stave*"',
+  'path ~= "**/HCalEndcap_B/stave*"',
+]
+[rules.tessellation]
+drop_coincident_faces = true
+
+# Enable interior-face removal on the long-strip barrel staves (both barrel
+# layers; endcaps use disks and carry no coincident faces). merge_descendants is
+# already set on these by odd/tracker.toml. ShortStrip barrel staves are not
+# included — they have no coincident interior faces.
+[[rules]]
+match = 'path ~= "**/LongStripLayer*/stave*"'
+[rules.tessellation]
+drop_coincident_faces = true

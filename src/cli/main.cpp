@@ -35,6 +35,29 @@ int main(int argc, char **argv) {
     registerCmdDumpRender(app);
 #ifdef NH_WITH_VIEWER
     registerCmdViewer(app);
+
+    // No subcommand at all (double-clicked in a file manager, or run from a
+    // terminal with zero args) -> default to `viewer` instead of CLI11's
+    // "a subcommand is required" error. On Windows in particular that error
+    // prints to a console window that closes the instant the process exits,
+    // so the app appears to silently do nothing.
+    if (argc == 1) {
+        char viewerArg[] = "viewer";
+        char *defaultArgv[] = {argv[0], viewerArg};
+        CLI11_PARSE(app, 2, defaultArgv);
+        return 0;
+    }
+#else
+    // No viewer to fall back to in this build — show the help text instead
+    // of CLI11's "a subcommand is required" error, so a bare double-click
+    // (or a zero-arg invocation) leaves the user with something readable
+    // rather than a console that opens and closes instantly.
+    if (argc == 1) {
+        char helpArg[] = "--help";
+        char *defaultArgv[] = {argv[0], helpArg};
+        CLI11_PARSE(app, 2, defaultArgv);
+        return 0;
+    }
 #endif
 
     CLI11_PARSE(app, argc, argv);
