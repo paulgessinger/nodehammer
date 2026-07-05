@@ -213,13 +213,9 @@ if(NOT EMSCRIPTEN)
     add_library(nodehammer_lua STATIC src/lua/lua_config.cpp)
     target_link_libraries(nodehammer_lua PUBLIC nodehammer_lib lua::lua sol2::sol2)
     nodehammer_set_compiler_options(nodehammer_lua)
-    # sol2's proxy/reference conversions are not -Wconversion clean, and the
-    # warnings are attributed to our call sites (not the -isystem sol2 headers),
-    # so relax just these two for this one TU. Everything else — including
-    # -Werror — stays in force.
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(nodehammer_lua PRIVATE -Wno-conversion -Wno-sign-conversion)
-    endif()
+    # NB: lua_config.cpp silences -Wconversion/-Wsign-conversion in-source via a
+    # scoped #pragma (sol2's proxy conversions are not -Wconversion clean). It is
+    # kept in the TU rather than here so it can't leak to other sources.
 
     # Compile the subcommand into the native CLI and expose NH_WITH_LUA. The
     # define is PUBLIC so the executables that compile src/cli/main.cpp (the

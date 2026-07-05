@@ -23,6 +23,21 @@
 #include <unordered_map>
 #include <vector>
 
+// sol2's proxy/reference types (table_proxy, load_result, protected_function_result)
+// convert to sol::object / sol::optional / sol::protected_function through
+// user-defined conversion operators. GCC/Clang -Wconversion attributes those to
+// our call sites rather than the -isystem sol2 headers, so it fires throughout
+// this file. The TU is pure sol2↔NHConfig glue with no hand-written narrowing
+// (the real color arithmetic lives in color_parse.cpp, which keeps full
+// -Wconversion), so silence just this warning for just this translation unit.
+// Scoped in-source via pragma rather than a per-target CMake flag so it stays
+// isolated to lua_config.cpp even if the target ever gains more sources.
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion"
+#pragma GCC diagnostic ignored "-Wsign-conversion"
+#endif
+
 // Option-A Lua config front-end: evaluate a script through a global-function
 // builder DSL that assembles an NHConfig. The primitives reuse the existing
 // predicate parser (parsePredicateExpr) and enum converters, and replicate the
@@ -598,3 +613,7 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 }
 
 } // namespace nodehammer
+
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
