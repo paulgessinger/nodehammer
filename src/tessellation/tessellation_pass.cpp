@@ -439,6 +439,22 @@ struct TriKeyHash {
     }
 };
 
+// Label used to group merge_coincident candidates by structure in the NH0509
+// suggestion: the node's original source path minus its own final segment (i.e.
+// the parent structure that holds the stack, e.g. ".../ECalBarrel"), falling
+// back to the node name when no path is recorded.
+inline std::string candidateStructureLabel(const SemanticNode &node) {
+    const std::string &p = node.originalPath;
+    if (!p.empty()) {
+        const auto slash = p.find_last_of('/');
+        if (slash != std::string::npos && slash > 0) {
+            return p.substr(0, slash);
+        }
+        return p;
+    }
+    return node.name.empty() ? std::string{"<unnamed>"} : node.name;
+}
+
 // Removes exact-coincident, opposite-wound triangle pairs across ALL material
 // groups of a merge_descendants result jointly (the interior interfaces are
 // *between* alternating materials, e.g. absorber → scintillator, so a
@@ -701,10 +717,13 @@ struct TessellationJob::Impl {
     std::atomic<size_t> coincidentNodesAffected{0};
     // Discoverability: on merge_descendants nodes where merge_coincident is OFF
     // we still run the detection in count-only mode. If a node has a meaningful
-    // number of removable interior faces it's a good candidate for the option;
-    // these tally into a single suggestion diagnostic in take().
-    std::atomic<size_t> coincidentCandidateFaces{0};
-    std::atomic<size_t> coincidentCandidateNodes{0};
+    // number of removable interior faces it's a good candidate for the option.
+    // Candidates are grouped by parent structure (the node's path minus its own
+    // segment) so take() can name *which* structures in a single suggestion
+    // diagnostic — value is {node count, removable face count}. Plain (not
+    // atomic): only written by the single-threaded BFS and read in take() after
+    // the worker joins, exactly like result.diags.
+    std::map<std::string, std::pair<size_t, size_t>> coincidentCandidatesByParent;
 
     NodeView makeNodeView(const SemanticNode &node) const {
         std::string_view matName;
@@ -1147,11 +1166,13 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     } else {
         // merge_coincident is off for this node. Run detection in count-only
         // mode (no mutation) so we can suggest the option when the node is a
-        // clear candidate — otherwise the optimisation is easy to miss.
+        // clear candidate — otherwise the optimisation is easy to miss. Group
+        // by parent structure so take() can name which structures are affected.
         const size_t removable = removeCoincidentInteriorFaces(groups, /*apply=*/false);
         if (removable >= kCoincidentCandidateMinFaces) {
-            coincidentCandidateFaces.fetch_add(removable, std::memory_order_relaxed);
-            coincidentCandidateNodes.fetch_add(1, std::memory_order_relaxed);
+            auto &agg = coincidentCandidatesByParent[candidateStructureLabel(semNode)];
+            agg.first += 1;
+            agg.second += removable;
         }
     }
 
@@ -1402,19 +1423,48 @@ TessellationPassResult TessellationJob::take() {
     }
     // Discoverability suggestion: merge_descendants nodes that would shed a
     // meaningful number of interior faces but don't have merge_coincident on.
-    // One aggregate diagnostic for the whole pass so it never floods.
-    const size_t candFaces = impl_->coincidentCandidateFaces.load(std::memory_order_relaxed);
-    if (candFaces > 0) {
-        const size_t candNodes = impl_->coincidentCandidateNodes.load(std::memory_order_relaxed);
+    // One aggregate diagnostic for the whole pass, grouped by parent structure
+    // so it names *what* is affected without ever flooding.
+    if (!impl_->coincidentCandidatesByParent.empty()) {
+        std::vector<std::pair<std::string, std::pair<size_t, size_t>>> groups(
+            impl_->coincidentCandidatesByParent.begin(), impl_->coincidentCandidatesByParent.end());
+        // Most-impactful structures first.
+        std::sort(groups.begin(), groups.end(),
+                  [](const auto &a, const auto &b) { return a.second.second > b.second.second; });
+
+        size_t totalNodes = 0;
+        size_t totalFaces = 0;
+        for (const auto &[label, agg] : groups) {
+            totalNodes += agg.first;
+            totalFaces += agg.second;
+        }
+
+        // Name the biggest structures; cap the list so a pathological scene with
+        // hundreds of distinct candidate structures can't blow up the message.
+        constexpr size_t kMaxStructuresListed = 6;
+        std::string list;
+        for (size_t i = 0; i < groups.size() && i < kMaxStructuresListed; ++i) {
+            if (!list.empty()) {
+                list += "; ";
+            }
+            list += std::format("{} ({} node(s), {} face(s))", groups[i].first,
+                                groups[i].second.first, groups[i].second.second);
+        }
+        if (groups.size() > kMaxStructuresListed) {
+            list += std::format("; +{} more structure(s)", groups.size() - kMaxStructuresListed);
+        }
+
         std::println(
-            stderr, "  merge_coincident candidate: {} removable interior face(s) across {} node(s)",
-            candFaces, candNodes);
+            stderr,
+            "  merge_coincident candidate: {} removable interior face(s) across {} node(s) "
+            "in {} structure(s)",
+            totalFaces, totalNodes, groups.size());
         impl_->result.diags.warn(
             codes::kWarnTessCoincidentCandidate,
-            std::format("{} merge_descendants node(s) have {} coincident interior face(s) that "
-                        "merge_coincident would remove but the option is off — enable "
-                        "'merge_coincident = true' on them to cut interior overdraw",
-                        candNodes, candFaces),
+            std::format("merge_coincident is off but would remove {} interior face(s) from {} "
+                        "merge_descendants node(s) — candidates: {}. Enable "
+                        "'merge_coincident = true' on these structures to cut interior overdraw",
+                        totalFaces, totalNodes, list),
             "merge_coincident");
     }
     return std::move(impl_->result);
