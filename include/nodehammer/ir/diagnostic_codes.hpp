@@ -21,6 +21,10 @@ inline constexpr std::string_view kErrMissingOutputPath = "NH0004";
 inline constexpr std::string_view kWarnConfigUnknownKey = "NH0005";
 inline constexpr std::string_view kWarnConfigEmptyScope = "NH0006";
 inline constexpr std::string_view kWarnConfigUnconditionalMaterialRule = "NH0007";
+// Warning: drop_coincident_faces is enabled somewhere but merge_descendants is
+// never enabled — drop_coincident_faces is a no-op without it (it operates on
+// the merged group), so the option will silently do nothing.
+inline constexpr std::string_view kWarnConfigDropWithoutMerge = "NH0008";
 
 // ── Import (general) ──────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrImportFileNotFound = "NH0100";

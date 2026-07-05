@@ -48,6 +48,30 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
         }
     }
 
+    // drop_coincident_faces operates on a merge_descendants group, so it is a
+    // silent no-op unless merge_descendants is enabled for the same nodes.
+    // merge_descendants can come from a *different* rule or from defaults
+    // (last-match-wins per field), so we can't tie the two to a single rule
+    // without the geometry. The soundly-detectable mistake is enabling
+    // drop_coincident_faces while merge_descendants is enabled *nowhere* — then
+    // it can never take effect. (Disjoint-node cases are reported at build time,
+    // where the drop pass simply removes 0 faces.)
+    bool dropEnabledSomewhere = cfg.tessellationDefaults.dropCoincidentFaces.value_or(false);
+    bool mergeEnabledSomewhere = cfg.tessellationDefaults.mergeDescendants.value_or(false);
+    for (const auto &rule : cfg.rules) {
+        if (!rule.tessellation.has_value()) {
+            continue;
+        }
+        dropEnabledSomewhere |= rule.tessellation->dropCoincidentFaces.value_or(false);
+        mergeEnabledSomewhere |= rule.tessellation->mergeDescendants.value_or(false);
+    }
+    if (dropEnabledSomewhere && !mergeEnabledSomewhere) {
+        diags.warn(codes::kWarnConfigDropWithoutMerge,
+                   "drop_coincident_faces is enabled but merge_descendants is never enabled; "
+                   "drop_coincident_faces operates on a merge_descendants group and has no "
+                   "effect without it. Set merge_descendants = true on the same nodes.");
+    }
+
     return diags;
 }
 
