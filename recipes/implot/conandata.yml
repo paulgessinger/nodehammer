@@ -1,4 +1,5 @@
 sources:
-  "0.17.0":
-    # epezent/implot master commit compatible with Dear ImGui 1.92 texture APIs.
-    url: "https://github.com/epezent/implot/archive/1351ab2c46d7a05a60f3533047bfba8a953520a1.tar.gz"
+  "1.0.0":
+    # epezent/implot tag v1.0, first tagged release compatible with Dear ImGui
+    # 1.92's ImTextureRef/ImTextureID texture APIs.
+    url: "https://github.com/epezent/implot/archive/refs/tags/v1.0.tar.gz"

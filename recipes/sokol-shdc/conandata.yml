@@ -6,23 +6,23 @@
 # The version string is the upstream commit date in YYYY.MM.DD form for
 # readability; the commit is recorded in the URL.
 sources:
-  "2026.04.25":
-    # commit floooh/sokol-tools-bin@1a9a4e5409 (2026-04-25, "updated (88)")
+  "2026.06.13":
+    # commit floooh/sokol-tools-bin@b1cdec93b9 (2026-06-13)
     Macos:
       armv8:
-        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/osx_arm64/sokol-shdc"
-        sha256: "6aa53965c88c1a0a2e26be274c98e48dcfc982d3398afa445da1529577bb1516"
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/b1cdec93b99496f41f3862d1d84f8fe2f96f2fb3/bin/osx_arm64/sokol-shdc"
+        sha256: "b8e0b757483ed9b832d5a936eafeca060963b403248f0c930832b9a5d8980a8c"
       x86_64:
-        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/osx/sokol-shdc"
-        sha256: "b669677f144d246707d6f70dc99387edea2573d7e392bb52f68a5f5a6caa8d03"
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/b1cdec93b99496f41f3862d1d84f8fe2f96f2fb3/bin/osx/sokol-shdc"
+        sha256: "9b5c6ad6b556a33f3ccd17a3a6bb1a41059cb600074e5dbbb916f70f68a40581"
     Linux:
       x86_64:
-        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/linux/sokol-shdc"
-        sha256: "cdf68fe56c8982eefb53a613d2bcf20abb6e038db32cbb0c069b49609c717c90"
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/b1cdec93b99496f41f3862d1d84f8fe2f96f2fb3/bin/linux/sokol-shdc"
+        sha256: "a83dc9836c1504ae882407b42d24f20a8249cdd6f45045f381e3276f8bc96328"
       armv8:
-        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/linux_arm64/sokol-shdc"
-        sha256: "33032b3863e5fc6cf8cb521661f803b1759acde5438c7b9ef5c66efed8293087"
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/b1cdec93b99496f41f3862d1d84f8fe2f96f2fb3/bin/linux_arm64/sokol-shdc"
+        sha256: "8199d6df9734809644ca2f8ebf8ea56a01b7b7a09d50850814fecd1af05694d0"
     Windows:
       x86_64:
-        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/1a9a4e5409/bin/win32/sokol-shdc.exe"
-        sha256: "85af3537cc432a44bac568ad64838821cef09c64cd58098a58e99612ccdc0ab8"
+        url: "https://raw.githubusercontent.com/floooh/sokol-tools-bin/b1cdec93b99496f41f3862d1d84f8fe2f96f2fb3/bin/win32/sokol-shdc.exe"
+        sha256: "87417e64c6ac2b1abff0da9d7565b5a765f2004a6b7ea3aed0cb0a95a9508c74"

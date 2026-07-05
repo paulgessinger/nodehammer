@@ -14,25 +14,23 @@ class Nodehammer(ConanFile):
     options = {"viewer": [True, False]}
     default_options = {"viewer": False}
 
-    tool_requires = ("flatbuffers/25.9.23",)
+    tool_requires = ("flatbuffers/25.12.19",)
 
     def requirements(self):
-        self.requires("zstd/1.5.6")
-        self.requires("catch2/3.7.1")
-        self.requires("cli11/2.4.2")
+        self.requires("zstd/1.5.7")
+        self.requires("catch2/3.15.1")
+        self.requires("cli11/2.6.2")
         self.requires("nlohmann_json/3.12.0")
-        self.requires("glm/1.0.1")
+        self.requires("glm/1.0.3")
         self.requires("tomlplusplus/3.4.0")
         self.requires("tinygltf/2.9.7")
-        self.requires("flatbuffers/25.9.23")
+        self.requires("flatbuffers/25.12.19")
         self.requires("unordered_dense/4.8.1")
-        # manifold's upstream CMake early-returns under Emscripten, skipping
-        # the install/export rules. We patch that out via a vendored recipe
-        # under recipes/manifold/ — `conan export` of that recipe runs in the
-        # build flow (see Justfile / ci.yml), and Conan resolves to our local
-        # revision. With the patch applied, manifold's Conan package works
-        # for both native and wasm and we can drop the FetchContent fallback.
-        self.requires("manifold/3.2.1")
+        # manifold's own CMake now runs its install/export rules unconditionally
+        # under Emscripten (fixed upstream well before this pin), so the local
+        # recipe under recipes/manifold/ no longer needs to patch that out —
+        # only the license-copy plumbing remains local.
+        self.requires("manifold/3.5.2")
         # Viewer-only runtime dep. PlatformFolders resolves the OS-appropriate
         # cache / config directory on native; not needed on web. Skip under
         # Emscripten — the wasm viewer never links it and the package fails to
@@ -40,11 +38,11 @@ class Nodehammer(ConanFile):
         if self.options.viewer and self.settings.os != "Emscripten":
             self.requires("platformfolders/4.3.0")
         if self.options.viewer:
-            self.requires("sokol/2026.04.25")
-            self.requires("imgui/1.92.0")
-            self.requires("implot/0.17.0")
+            self.requires("sokol/2026.07.02")
+            self.requires("imgui/1.92.8")
+            self.requires("implot/1.0.0")
             if self.settings.os != "Emscripten":
-                self.requires("nfd/1.2.1")
+                self.requires("nfd/1.3.0")
 
     def build_requirements(self):
         # sokol-shdc is the shader compiler: a prebuilt static binary wrapped
@@ -53,7 +51,7 @@ class Nodehammer(ConanFile):
         # picks the host's binary (verified by Justfile passing `-pr:b default`
         # to wasm-deps). Re-exported by `just recipes` alongside manifold.
         if self.options.viewer:
-            self.tool_requires("sokol-shdc/2026.04.25")
+            self.tool_requires("sokol-shdc/2026.06.13")
 
     def configure(self):
         self.settings.compiler.cppstd = "23"

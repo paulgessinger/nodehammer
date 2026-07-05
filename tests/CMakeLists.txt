@@ -83,7 +83,7 @@ nodehammer_apply_emscripten_exe_options(nodehammer_bench)
 include(CTest)
 # catch_discover_tests runs the test binary to enumerate cases. Under
 # cross-compile the binary is a .js file that needs `node` as emulator, and
-# Catch2 3.7.1's discovery script doesn't thread CMAKE_CROSSCOMPILING_EMULATOR
+# Catch2's discovery script doesn't thread CMAKE_CROSSCOMPILING_EMULATOR
 # through every path — it tries to execve the .js and gets EACCES. Register a
 # single ctest entry invoking node directly. Catch2's own runner still prints
 # per-case results on stdout.
