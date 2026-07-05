@@ -1,0 +1,47 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "nodehammer: conan install",
+            "type": "process",
+            "command": "just",
+            "args": [
+                "deps"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "nodehammer: build viewer executable",
+            "type": "process",
+            "command": "cmake",
+            "args": [
+                "--build",
+                "build/RelWithDebInfo",
+                "--target",
+                "nodehammer"
+            ],
+            "windows": {
+                "command": "powershell",
+                "args": [
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    "scripts/windows-msvc-cmake.ps1",
+                    "build-nodehammer"
+                ]
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": []
+        }
+    ]
+}

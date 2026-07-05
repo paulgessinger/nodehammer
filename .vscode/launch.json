@@ -1,0 +1,90 @@
+{
+    "version": "0.2.0",
+    "inputs": [
+        {
+            "id": "benchScale",
+            "type": "promptString",
+            "description": "Bench render_scale (SSAA on scene/AO). >1 pushes the GPU past the refresh so total/composite timings aren't present-paced.",
+            "default": "2"
+        }
+    ],
+    "configurations": [
+
+        {
+            "name": "viewer-bench (odd)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            // Built from the Conan-generated CMake preset after running
+            // `nodehammer: conan install` or `just deps`.
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer.exe",
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd.toml",
+                "--bench", "${workspaceFolder}/build/bench.json",
+                "--bench-scale", "${input:benchScale}",
+                "--width", "1600",
+                "--height", "900"
+            ],
+            // Relative --input / --config resolve against the launch cwd, and the
+            // build session stays Idle without a config, so keep this at the repo
+            // root where odd.nhb.zst + fixtures/ live.
+            "cwd": "${workspaceFolder}",
+            // integratedTerminal so the results JSON printed to stdout is visible.
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "viewer (odd)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer.exe",
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd.toml",
+                "--width", "2560",
+                "--height", "1440"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "viewer (odd, dropped internal faces)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer.exe",
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd_drop_coincident_faces.toml",
+                "--width", "2561",
+                "--height", "1440"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "viewer (odd simple)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer.exe",
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd_simple.toml",
+                "--width", "2561",
+                "--height", "1440"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        }
+    ]
+}

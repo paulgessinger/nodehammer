@@ -212,9 +212,9 @@ void PngExporter::finish(bool ok, const std::string &message) {
         progress_ = 0;
     }
     if (ok) {
-        std::println("viewer: PNG export complete — {}", message);
+        std::println("viewer: PNG export complete -- {}", message);
     } else {
-        std::println(stderr, "viewer: PNG export failed — {}", message);
+        std::println(stderr, "viewer: PNG export failed -- {}", message);
         if (deps_.notifications != nullptr) {
             deps_.notifications->error(message);
         }

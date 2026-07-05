@@ -624,7 +624,7 @@ void App::Impl::benchInit() {
     }
     bench_ = std::make_unique<BenchRunner>(camera, cfg, quality, bench_json_path_,
                                            bench_scene_label_, temp_dir);
-    std::println("viewer: benchmark mode — sequence will run once the scene settles");
+    std::println("viewer: benchmark mode -- sequence will run once the scene settles");
 }
 
 void App::Impl::benchFrame() {
@@ -659,7 +659,7 @@ void App::Impl::benchFrame() {
 
     if (!in.settled && (bench_wait_frames_++ % 120) == 0) {
         std::println(stderr,
-                     "viewer: bench waiting to settle — session_phase={} ibl={} build={} scene={} "
+                     "viewer: bench waiting to settle -- session_phase={} ibl={} build={} scene={} "
                      "uploaded={} pending_cut={} err='{}'",
                      static_cast<int>(build_controller_.session().phase()), ibl_baker_.installed(),
                      build_controller_.inProgress(), static_cast<bool>(scene), scene_uploaded,

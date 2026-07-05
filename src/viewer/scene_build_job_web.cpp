@@ -116,7 +116,7 @@ bool SceneBuildJob::poll(uint64_t budget_ns) {
         // The worker is unusable (fatal load/run failure). Discard its empty
         // result and transparently rerun this build on the cooperative backend.
         (void)impl_->backend->take();
-        std::println(std::cerr, "scene_build_job: compute worker unavailable — falling back to "
+        std::println(std::cerr, "scene_build_job: compute worker unavailable -- falling back to "
                                 "cooperative main-thread build");
         impl_->backend = makeCooperativeBackend();
         impl_->using_worker = false;

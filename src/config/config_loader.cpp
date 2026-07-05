@@ -435,7 +435,7 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
                 if (operands.empty()) {
                     diags.warn(codes::kWarnConfigEmptyScope,
                                std::format("'{}' is an empty array (all entries commented out?) "
-                                           "— rule will be skipped",
+                                           "-- rule will be skipped",
                                            actKey),
                                "selection_rules");
                     break;
@@ -530,7 +530,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             // Array of string expressions → OR'd together.
             if (matchArr->empty()) {
                 diags.warn(codes::kWarnConfigEmptyScope,
-                           "match is an empty array — rule will match nothing; "
+                           "match is an empty array -- rule will match nothing; "
                            "remove 'match' entirely to match all nodes",
                            "rules");
                 continue;

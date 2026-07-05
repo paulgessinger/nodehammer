@@ -1150,7 +1150,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         // them" config case this diagnostic was meant to catch.
         result.diags.warn(
             codes::kWarnTessMergeEmpty,
-            std::format("merge_descendants on '{}' produced no geometry — node has no "
+            std::format("merge_descendants on '{}' produced no geometry -- node has no "
                         "tessellatable descendants (did selection remove them?)",
                         semNode.name),
             semNode.name);
@@ -1476,7 +1476,7 @@ TessellationPassResult TessellationJob::take() {
             codes::kWarnTessCoincidentCandidate,
             std::format(
                 "drop_coincident_faces is off but would remove {} interior face(s) from {} "
-                "merge_descendants node(s) — candidates: {}. Enable "
+                "merge_descendants node(s) -- candidates: {}. Enable "
                 "'drop_coincident_faces = true' on these structures to cut interior overdraw",
                 totalFaces, totalNodes, list),
             "drop_coincident_faces");

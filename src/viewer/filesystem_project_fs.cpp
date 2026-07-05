@@ -193,7 +193,7 @@ void FilesystemProjectFs::addPath(const std::filesystem::path & /*path*/) {
 void FilesystemProjectFs::addBytes(std::string_view /*filename*/,
                                    std::span<const std::byte> /*bytes*/) {
     auto msg = std::string{
-        "this project is filesystem-mounted; addBytes ignored — write to disk and click Rescan"};
+        "this project is filesystem-mounted; addBytes ignored -- write to disk and click Rescan"};
     impl_->warning_msgs.push_back(msg);
     pushWarning(std::move(msg));
 }
