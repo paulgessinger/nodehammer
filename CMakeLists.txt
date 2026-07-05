@@ -118,6 +118,7 @@ add_library(nodehammer_lib STATIC
     src/config/config_loader.cpp
     src/config/config_writer.cpp
     src/config/config_validator.cpp
+    src/config/color_parse.cpp
     src/config/predicate_parser.cpp
     src/ir/synthetic/semantic/importer.cpp
     src/ir/semantic/importer_registry.cpp
@@ -201,6 +202,26 @@ target_link_libraries(nodehammer_cli PUBLIC
 )
 
 nodehammer_set_compiler_options(nodehammer_cli)
+
+# ── Lua config front-end (native-only) ──────────────────────────────────────────
+# The `config-lua` CLI command evaluates a Lua config script into an NHConfig and
+# emits flattened TOML (Option A of docs/config-scripting-lua.md). lua + sol2 are
+# deliberately kept out of nodehammer_lib — and therefore out of the Emscripten
+# closure — so the interpreter lives in this dedicated library, linked only by the
+# CLI and the unit tests. Skipped entirely under Emscripten.
+if(NOT EMSCRIPTEN)
+    add_library(nodehammer_lua STATIC src/lua/lua_config.cpp)
+    target_link_libraries(nodehammer_lua PUBLIC nodehammer_lib lua::lua sol2::sol2)
+    nodehammer_set_compiler_options(nodehammer_lua)
+
+    # Compile the subcommand into the native CLI and expose NH_WITH_LUA. The
+    # define is PUBLIC so the executables that compile src/cli/main.cpp (the
+    # headless `nodehammer` and the native viewer) see it and register the
+    # subcommand via #ifdef.
+    target_sources(nodehammer_cli PRIVATE src/cli/cmd_config_lua.cpp)
+    target_link_libraries(nodehammer_cli PUBLIC nodehammer_lua)
+    target_compile_definitions(nodehammer_cli PUBLIC NH_WITH_LUA=1)
+endif()
 
 # ── Optional backends ──────────────────────────────────────────────────────────
 if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)

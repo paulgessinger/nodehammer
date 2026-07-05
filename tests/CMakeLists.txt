@@ -41,6 +41,12 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
+# The Lua config front-end (nodehammer_lua) is native-only; its test links it.
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_tests PRIVATE config/test_lua_config.cpp)
+    target_link_libraries(nodehammer_tests PRIVATE nodehammer_lua)
+endif()
+
 target_compile_definitions(nodehammer_tests PRIVATE
     NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
     $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>

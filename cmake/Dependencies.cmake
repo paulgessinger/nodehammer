@@ -190,6 +190,18 @@ if(TARGET flatbuffers)
     endif()
 endif()
 
+# ── Lua config front-end (lua + sol2) ────────────────────────────────────────
+# Powers the native-only `config-lua` CLI command (nodehammer_lua library).
+# Both come from Conan (lua has no clean upstream CMake — it ships a Makefile —
+# so, like imgui/implot below, we resolve via find_package rather than a git
+# FetchContent fallback). Skipped under Emscripten: nothing in the wasm closure
+# links nodehammer_lua, so the interpreter never enters the .wasm.
+# Targets: lua::lua, sol2::sol2 (sol2 links lua transitively).
+if(NOT EMSCRIPTEN)
+    find_package(lua REQUIRED CONFIG)
+    find_package(sol2 REQUIRED CONFIG)
+endif()
+
 # ── Viewer dependencies (sokol_gfx + Dear ImGui) ─────────────────────────────
 # Only set up when NODEHAMMER_WITH_VIEWER is ON. sokol is single-header so we
 # fetch the repo and let cmake/Sokol.cmake build per-backend STATIC libs from

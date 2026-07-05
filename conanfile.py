@@ -33,6 +33,15 @@ class Nodehammer(ConanFile):
         # (3.5.1 vs 3.5.2); reintroduce a local recipe here if we need
         # something ConanCenter hasn't packaged yet.
         self.requires("manifold/3.5.1")
+        # Lua scripting config front-end (the `config-lua` CLI command). Lua is
+        # a small C interpreter; sol2 is its header-only C++ binding (and pulls
+        # lua transitively, but we pin lua explicitly for parity with the CMake
+        # find_package). Native-only: the front-end lives in nodehammer_lua,
+        # linked solely by the CLI + tests, never by the wasm closure — so skip
+        # the deps entirely under Emscripten and keep them out of the .wasm.
+        if self.settings.os != "Emscripten":
+            self.requires("lua/5.4.6")
+            self.requires("sol2/3.5.0")
         # Viewer-only runtime dep. PlatformFolders resolves the OS-appropriate
         # cache / config directory on native; not needed on web. Skip under
         # Emscripten — the wasm viewer never links it and the package fails to

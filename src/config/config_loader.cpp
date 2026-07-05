@@ -1,3 +1,4 @@
+#include <nodehammer/config/color_parse.hpp>
 #include <nodehammer/config/config_enums.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/predicate_parser.hpp>
@@ -302,39 +303,8 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
                 }
             }
         } else if (auto colorStr = (*tbl)["base_color"].value<std::string>()) {
-            // Parse hex color: "#RRGGBB" or "#RRGGBBAA"
-            std::string_view hex = *colorStr;
-            if (!hex.empty() && hex[0] == '#') {
-                hex.remove_prefix(1);
-            }
-            // sRGB → linear conversion (hex colors are assumed sRGB).
-            auto srgbToLinear = [](float c) -> float {
-                return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-            };
-            auto parseHexByte = [&](std::string_view s, std::size_t offset,
-                                    bool linearize = true) -> float {
-                unsigned val = 0;
-                for (int i = 0; i < 2; ++i) {
-                    char c = s[offset + static_cast<std::size_t>(i)];
-                    val <<= 4;
-                    if (c >= '0' && c <= '9') {
-                        val += static_cast<unsigned>(c - '0');
-                    } else if (c >= 'a' && c <= 'f') {
-                        val += static_cast<unsigned>(c - 'a' + 10);
-                    } else if (c >= 'A' && c <= 'F') {
-                        val += static_cast<unsigned>(c - 'A' + 10);
-                    }
-                }
-                float f = static_cast<float>(val) / 255.0f;
-                return linearize ? srgbToLinear(f) : f;
-            };
-            if (hex.size() >= 6) {
-                def.baseColor.r = parseHexByte(hex, 0, true);
-                def.baseColor.g = parseHexByte(hex, 2, true);
-                def.baseColor.b = parseHexByte(hex, 4, true);
-                if (hex.size() >= 8) {
-                    def.baseColor.a = parseHexByte(hex, 6, false); // alpha is linear
-                }
+            if (auto parsed = parseHexColor(*colorStr)) {
+                def.baseColor = *parsed;
             } else {
                 diags.warn(codes::kWarnConfigUnknownKey,
                            std::format("materials.{}: invalid hex color '{}'; "
@@ -469,12 +439,7 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
                                "selection_rules");
                     break;
                 }
-                if (operands.size() == 1) {
-                    pred = std::move(operands[0]);
-                } else if (!operands.empty()) {
-                    pred = PredicateExpr{
-                        std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
-                }
+                pred = combineOr(std::move(operands));
                 break;
             }
         }
@@ -590,12 +555,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             if (!ok) {
                 continue;
             }
-            if (operands.size() == 1) {
-                rule.match = std::move(operands[0]);
-            } else {
-                rule.match =
-                    PredicateExpr{std::make_shared<OrPredicate>(OrPredicate{std::move(operands)})};
-            }
+            rule.match = combineOr(std::move(operands));
         }
 
         // ── material ─────────────────────────────────────────────────────────
