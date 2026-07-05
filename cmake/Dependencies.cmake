@@ -104,7 +104,7 @@ endif()
 FetchContent_Declare(manifold
         SYSTEM
         GIT_REPOSITORY https://github.com/elalish/manifold.git
-        GIT_TAG        v3.5.2
+        GIT_TAG        v3.5.1
         FIND_PACKAGE_ARGS 3.5
     )
     set(MANIFOLD_TEST OFF CACHE BOOL "" FORCE)

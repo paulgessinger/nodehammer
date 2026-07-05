@@ -1,10 +1,8 @@
 # Vendored Conan recipes:
-#   - manifold: local packaging recipe (license copy, clipper2 target rename).
 #   - sokol-shdc: wraps the prebuilt shader compiler binary from
 #     floooh/sokol-tools-bin (used as a tool_requires when viewer=True).
 # Cheap to re-export every time; conan dedupes by recipe revision.
 recipes:
-    conan export recipes/manifold --version=3.5.2
     conan export recipes/sokol --version=2026.07.02
     conan export recipes/imgui --version=1.92.8
     conan export recipes/implot --version=1.0.0

@@ -26,11 +26,13 @@ class Nodehammer(ConanFile):
         self.requires("tinygltf/2.9.7")
         self.requires("flatbuffers/25.12.19")
         self.requires("unordered_dense/4.8.1")
-        # manifold's own CMake now runs its install/export rules unconditionally
-        # under Emscripten (fixed upstream well before this pin), so the local
-        # recipe under recipes/manifold/ no longer needs to patch that out —
-        # only the license-copy plumbing remains local.
-        self.requires("manifold/3.5.2")
+        # Plain ConanCenter package — manifold's own CMake now runs its
+        # install/export rules unconditionally under Emscripten, so the local
+        # patched recipe nodehammer used to carry (recipes/manifold/) is no
+        # longer needed. ConanCenter is one patch release behind upstream
+        # (3.5.1 vs 3.5.2); reintroduce a local recipe here if we need
+        # something ConanCenter hasn't packaged yet.
+        self.requires("manifold/3.5.1")
         # Viewer-only runtime dep. PlatformFolders resolves the OS-appropriate
         # cache / config directory on native; not needed on web. Skip under
         # Emscripten — the wasm viewer never links it and the package fails to
