@@ -121,6 +121,11 @@ struct MergeDescendantSignature {
 
 struct MergeCacheKey {
     BooleanFallback fallback{BooleanFallback::Skip};
+    // Resolved on the merge_descendants node itself (not its descendants): it
+    // changes the merged mesh — interior faces are dropped only when set — so a
+    // reused prototype must match on it or an enabled node could keep its
+    // interior faces (or a disabled one lose them) depending on traversal order.
+    bool dropCoincidentFaces{false};
     std::vector<MergeDescendantSignature> descendants;
 
     bool operator==(const MergeCacheKey &) const = default;
@@ -129,6 +134,7 @@ struct MergeCacheKey {
 struct MergeCacheKeyHash {
     std::size_t operator()(const MergeCacheKey &k) const {
         std::size_t h = std::hash<int>{}(static_cast<int>(k.fallback));
+        h = hashCombine(h, std::hash<bool>{}(k.dropCoincidentFaces));
         h = hashCombine(h, std::hash<std::size_t>{}(k.descendants.size()));
         for (const auto &d : k.descendants) {
             h = hashCombine(h, std::hash<uint64_t>{}(d.shapeId.value));
@@ -957,6 +963,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
                                                        const ResolvedTessellation &rule) {
     MergeCacheKey mergeKey;
     mergeKey.fallback = rule.fallback;
+    mergeKey.dropCoincidentFaces = rule.dropCoincidentFaces;
 
     std::vector<MergeDescendant> mergeDescendants;
 

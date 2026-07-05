@@ -226,12 +226,21 @@ struct App::Impl {
     std::string bench_capture_request_; // non-empty: composite+read back to this path this frame
     bool bench_capture_issued_{false};  // the grab composite ran in render() this frame
     bool bench_capture_done_{false};    // a capture finished writing since the last bench update
+    // Readback runs as a small cross-frame state machine (like PngExporter): the
+    // grab composite is issued, a few frames drain the GPU, then the readback is
+    // polled until Ready. Doing begin+poll in one frame only works on D3D11's
+    // synchronous Map — WebGPU/Metal need to wait, or the PNG is stale/missing.
+    enum class BenchCapturePhase { Idle, WaitGpu, Readback };
+    BenchCapturePhase bench_capture_phase_{BenchCapturePhase::Idle};
+    int bench_capture_wait_{0};          // frames left to drain before readback
+    bool bench_readback_started_{false}; // ImageReadback::begin() has been called
     SceneRenderTarget bench_grab_rt_;
     ImageReadback bench_readback_;
     std::uint64_t bench_wait_frames_{0};
     void benchInit();
     void benchFrame();
     void benchCaptureReadback();
+    void benchFinishCapture();
 
     // Procedural IBL bake. Runs on the GPU in a single frame the first time
     // `onFrame` ticks; until then `scene_renderer` samples from 1×1 dummy
@@ -694,43 +703,76 @@ void App::Impl::benchFrame() {
     }
 }
 
+void App::Impl::benchFinishCapture() {
+    // Release the in-flight capture and tell the runner to advance. Called on
+    // success and on every hard failure so a readback hiccup can't wedge the
+    // sequence.
+    bench_readback_.reset();
+    bench_capture_request_.clear();
+    bench_capture_issued_ = false;
+    bench_readback_started_ = false;
+    bench_capture_phase_ = BenchCapturePhase::Idle;
+    bench_capture_done_ = true;
+}
+
 void App::Impl::benchCaptureReadback() {
     if (!bench_capture_issued_) {
         return;
     }
-    // render() composited the current frame into bench_grab_rt_ this frame. Read
-    // it back (synchronous on D3D11 — Map blocks until the composite completes),
-    // encode a PNG, and write it. Tell the runner to advance regardless of
-    // success so a readback hiccup can't wedge the sequence.
-    bench_capture_issued_ = false;
-    const std::string path = bench_capture_request_;
-    bench_capture_request_.clear();
-    bench_capture_done_ = true;
+    // render() composited the captured frame into bench_grab_rt_. Read it back as
+    // a cross-frame state machine so async backends (WebGPU/Metal) get the frames
+    // they need — begin+poll in a single frame only works on D3D11's blocking Map.
+    switch (bench_capture_phase_) {
+    case BenchCapturePhase::Idle:
+        // Composite was issued this frame; let a few normal frames drain the GPU
+        // so the capture pass has completed before we map it (mirrors PngExporter).
+        bench_capture_phase_ = BenchCapturePhase::WaitGpu;
+        bench_capture_wait_ = 3;
+        return;
+    case BenchCapturePhase::WaitGpu:
+        if (--bench_capture_wait_ > 0) {
+            return;
+        }
+        bench_capture_phase_ = BenchCapturePhase::Readback;
+        bench_readback_started_ = false;
+        return;
+    case BenchCapturePhase::Readback:
+        break;
+    }
 
     if (bench_grab_rt_.color.id == SG_INVALID_ID) {
+        benchFinishCapture();
         return;
     }
-    if (!bench_readback_.begin(bench_grab_rt_.color, bench_grab_rt_.width, bench_grab_rt_.height,
-                               bench_grab_rt_.color_format)) {
-        std::println(stderr, "viewer: bench screenshot readback unsupported on this backend");
-        return;
+    if (!bench_readback_started_) {
+        bench_readback_started_ = true;
+        if (!bench_readback_.begin(bench_grab_rt_.color, bench_grab_rt_.width,
+                                   bench_grab_rt_.height, bench_grab_rt_.color_format)) {
+            std::println(stderr, "viewer: bench screenshot readback unsupported on this backend");
+            benchFinishCapture();
+            return;
+        }
     }
     std::vector<std::uint8_t> pixels;
     const ReadbackStatus st = bench_readback_.poll(pixels);
-    bench_readback_.reset();
+    if (st == ReadbackStatus::Pending) {
+        return; // async backend not done yet — try again next frame
+    }
+    const std::string path = bench_capture_request_;
     if (st != ReadbackStatus::Ready) {
-        std::println(stderr, "viewer: bench screenshot not ready (async readback backend?)");
+        std::println(stderr, "viewer: bench screenshot GPU readback failed");
+        benchFinishCapture();
         return;
     }
     const auto png = encodePngRgba8(pixels, bench_grab_rt_.width, bench_grab_rt_.height);
-    if (png.empty()) {
-        return;
+    if (!png.empty()) {
+        std::ofstream out{path, std::ios::binary | std::ios::trunc};
+        if (out) {
+            out.write(reinterpret_cast<const char *>(png.data()),
+                      static_cast<std::streamsize>(png.size()));
+        }
     }
-    std::ofstream out{path, std::ios::binary | std::ios::trunc};
-    if (out) {
-        out.write(reinterpret_cast<const char *>(png.data()),
-                  static_cast<std::streamsize>(png.size()));
-    }
+    benchFinishCapture();
 }
 
 void App::Impl::onEvent(const sapp_event *ev) {
