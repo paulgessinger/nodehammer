@@ -40,6 +40,27 @@ bool isWatcherError(const wtr::event &ev) {
     return s.size() >= 2 && s[0] == 'e' && s[1] == '/';
 }
 
+bool isHiddenRelativeTo(const std::filesystem::path &path, const std::filesystem::path &root) {
+    const auto rel = path.lexically_relative(root);
+    return !rel.empty() && hasHiddenSegment(rel);
+}
+
+/// True when `ev` (and its rename pair, if any) touches only hidden paths.
+/// A rename delivers the old path in `path_name` and the new one in
+/// `associated->path_name` (see wtr's FSEvents backend): an editor's atomic
+/// save — write to a dot-prefixed temp file, then rename it over the real
+/// one — would otherwise be dropped because only the hidden source name was
+/// ever checked, so the visible destination's change went unnoticed.
+bool touchesOnlyHiddenPaths(const wtr::event &ev, const std::filesystem::path &root) {
+    if (!isHiddenRelativeTo(ev.path_name, root)) {
+        return false;
+    }
+    if (ev.associated && !isHiddenRelativeTo(ev.associated->path_name, root)) {
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 struct WatchedFilesystemProjectFs::Impl {
@@ -87,8 +108,7 @@ WatchedFilesystemProjectFs::WatchedFilesystemProjectFs(std::unique_ptr<Filesyste
             }
             return;
         }
-        const auto rel = ev.path_name.lexically_relative(root);
-        if (!rel.empty() && hasHiddenSegment(rel)) {
+        if (touchesOnlyHiddenPaths(ev, root)) {
             return;
         }
         std::lock_guard<std::mutex> lk(shared->mu);

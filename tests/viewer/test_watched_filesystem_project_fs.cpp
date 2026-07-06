@@ -147,3 +147,36 @@ TEST_CASE("WatchedFilesystemProjectFs detects a real on-disk write",
     }
     REQUIRE(bumped);
 }
+
+// Editors (Vim, Emacs, ...) often save atomically: write the new contents to
+// a dot-prefixed temp file, then rename it over the real one. wtr reports
+// that as a rename whose old (hidden) name is in `path_name` and whose new
+// (visible) name is in `associated`; a filter that only looks at `path_name`
+// drops the event as hidden-path noise and never sees the visible file
+// change. Same [.] slow-integration treatment as the write test above.
+TEST_CASE("WatchedFilesystemProjectFs detects a hidden-temp-file rename over a visible file",
+          "[.][viewer][watched_filesystem_project_fs][slow]") {
+    TempProject tp{"rename_over_visible"};
+    tp.writeFile("detector.toml", "name = \"odd\"\n");
+    WatchedFilesystemProjectFs w{std::make_unique<FilesystemProjectFs>(tp.root), 50ms};
+
+    const auto gen0 = w.generation();
+
+    std::this_thread::sleep_for(200ms);
+    tp.writeFile(".detector.toml.swp", "name = \"odd2\"\n");
+    std::error_code ec;
+    std::filesystem::rename(tp.root / ".detector.toml.swp", tp.root / "detector.toml", ec);
+    REQUIRE_FALSE(ec);
+
+    bool bumped = false;
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (std::chrono::steady_clock::now() < deadline) {
+        w.poll();
+        if (w.generation() > gen0) {
+            bumped = true;
+            break;
+        }
+        std::this_thread::sleep_for(20ms);
+    }
+    REQUIRE(bumped);
+}
