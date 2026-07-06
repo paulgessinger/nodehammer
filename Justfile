@@ -153,12 +153,15 @@ wasm-release: wasm-deps-release wasm-configure-release wasm-build-release
 #   - If 404, the viewer comes up empty and accepts drag-and-drop /
 #     file-picker uploads.
 #
+# `scene` names any fixtures/configs/<scene>.toml; its full include chain is
+# resolved and staged automatically. Pass `none` for upload-only (no manifest).
+#
 # Usage:
-#   just wasm-serve                 # ODD scene, autoload (default)
-#   just wasm-serve odd             # explicit ODD scene, autoload
-#   just wasm-serve odd_simple      # simplified ODD scene, autoload
-#   just wasm-serve none            # no manifest; upload-only deployment
-#   just wasm-serve odd 9000        # ODD scene on a custom port
+#   just wasm-serve                                    # ODD scene, autoload (default)
+#   just wasm-serve odd_simple                         # simplified ODD scene, autoload
+#   just wasm-serve odd_drop_coincident_faces           # ODD with calorimeter/long-strip interior faces dropped
+#   just wasm-serve none                                # no manifest; upload-only deployment
+#   just wasm-serve odd 9000                            # ODD scene on a custom port
 wasm-serve scene='odd' port='8000':
     #!/usr/bin/env bash
     set -euo pipefail
@@ -169,7 +172,12 @@ wasm-serve scene='odd' port='8000':
 
     echo "serving $dir in $mode at:"
     echo "  http://localhost:{{port}}/viewer.html"
-    cd "$dir" && exec python3 -m http.server {{port}}
+    # serve_nocache.py sends Cache-Control: no-store on every response. The
+    # compute worker fetches its .wasm from inside a Web Worker, and browsers
+    # don't honor hard-reload / DevTools "Disable Cache" for worker-initiated
+    # requests -- so a plain http.server silently serves a stale worker module
+    # after a rebuild. no-store sidesteps that; a rebuild is always picked up.
+    cd "$dir" && exec python3 "$root/scripts/serve_nocache.py" {{port}}
 
 # Copy the same static viewer payload that `wasm-serve` exposes into a
 # self-contained directory. Sources from the Release wasm build by default;
@@ -179,12 +187,16 @@ wasm-serve scene='odd' port='8000':
 # chosen config first (`just wasm-release` for Release, `just wasm` for
 # RelWithDebInfo).
 #
+# `scene` names any fixtures/configs/<scene>.toml; its full include chain is
+# resolved and staged automatically. Pass `none` for upload-only (no manifest).
+#
 # Usage:
-#   just wasm-copy                                          # ODD autoload bundle (Release) to build/wasm-viewer
-#   just wasm-copy odd public/viewer                        # ODD autoload bundle (Release) to a custom directory
-#   just wasm-copy odd_simple public/viewer                 # simplified ODD autoload bundle (Release)
-#   just wasm-copy none public/viewer                       # upload-only bundle (Release)
-#   just wasm-copy odd public/viewer RelWithDebInfo         # deploy the RelWithDebInfo build instead
+#   just wasm-copy                                              # ODD autoload bundle (Release) to build/wasm-viewer
+#   just wasm-copy odd public/viewer                            # ODD autoload bundle (Release) to a custom directory
+#   just wasm-copy odd_simple public/viewer                     # simplified ODD autoload bundle (Release)
+#   just wasm-copy odd_drop_coincident_faces public/viewer      # ODD with calorimeter/long-strip interior faces dropped
+#   just wasm-copy none public/viewer                           # upload-only bundle (Release)
+#   just wasm-copy odd public/viewer RelWithDebInfo             # deploy the RelWithDebInfo build instead
 wasm-copy scene='odd' target='build/wasm-viewer' build='Release':
     #!/usr/bin/env bash
     set -euo pipefail
