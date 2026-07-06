@@ -1392,7 +1392,18 @@ bool TessellationJob::advance(uint64_t budget_ns) {
     if (impl_->done) {
         return true;
     }
+    // Sample the wall clock only once every kClockCheckStride processed nodes.
+    // Per-node sampling is wasteful, and — critically — in a Web Worker without
+    // cross-origin isolation the monotonic clock can be coarsened to a
+    // granularity at or above our slice budget. A per-node check would then let
+    // a single node's elapsed read exceed the budget and collapse the slice to
+    // one node per advance() call; a caller that emits progress per slice (the
+    // compute worker) would in turn flood its postMessage channel and appear
+    // frozen. Batching the check guarantees at least kClockCheckStride nodes of
+    // forward progress per call regardless of clock resolution.
+    constexpr unsigned kClockCheckStride = 128;
     const auto start_time = std::chrono::steady_clock::now();
+    unsigned since_check = 0;
     while (!impl_->q.empty() && !impl_->done) {
         if (!impl_->stepOneNode()) {
             // stepOneNode returned false: queue popped a stale id (no-op
@@ -1400,6 +1411,10 @@ bool TessellationJob::advance(uint64_t budget_ns) {
             // fall through to the loop condition.
             continue;
         }
+        if (++since_check < kClockCheckStride) {
+            continue;
+        }
+        since_check = 0;
         const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                  std::chrono::steady_clock::now() - start_time)
                                  .count();

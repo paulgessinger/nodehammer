@@ -273,6 +273,18 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
+# WatchedFilesystemProjectFs (strategy doc step 4) decorates FilesystemProjectFs
+# and uses the wtr.watcher Conan dep to bump generation() on disk changes.
+# Viewer-gated like platform_folders (the dep is only required when
+# `-o '&:viewer=True'`), native-only like the FS backend it wraps. PUBLIC link
+# so the Apple CoreServices/CoreFoundation frameworks the recipe propagates
+# reach the final executables.
+if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
+    target_sources(nodehammer_lib PRIVATE src/viewer/watched_filesystem_project_fs.cpp)
+    find_package(watcher CONFIG REQUIRED)
+    target_link_libraries(nodehammer_lib PUBLIC watcher::watcher)
+endif()
+
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
 # When the viewer is on, we build a per-backend sokol STATIC lib + a viewer
 # executable per backend. Native picks the right backend for the host

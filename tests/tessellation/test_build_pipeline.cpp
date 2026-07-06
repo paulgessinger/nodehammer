@@ -178,7 +178,17 @@ TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
             firsts.push_back(p);
         }
     }
-    REQUIRE(firsts == expected);
+    // `firsts` must be a subsequence of the canonical order, not necessarily
+    // equal to it: WedgeCutJob/TessellationJob only sample the clock every
+    // kClockCheckStride items (coarse-worker-clock guard), so a phase whose
+    // total work is smaller than that stride can run to completion inside a
+    // single advance() call and never surface as its own observed state.
+    auto expected_it = expected.begin();
+    for (auto p : firsts) {
+        expected_it = std::find(expected_it, expected.end(), p);
+        REQUIRE(expected_it != expected.end());
+        ++expected_it;
+    }
 
     // Each processed reached its total.
     REQUIRE(pipe.wedgeCutTotal() > 0);

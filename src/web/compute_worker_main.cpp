@@ -31,6 +31,8 @@
 
 #include <emscripten/emscripten.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -61,16 +63,30 @@ static_assert(kFinalizing == static_cast<int>(BuildPipeline::Phase::Finalizing))
 // giving several updates across a multi-second ODD build.
 constexpr std::uint64_t kSliceNs = 50'000'000;
 
+// Cap on progress messages posted per phase. The advance() loop may iterate far
+// more often than this (a coarsened worker clock can yield very fine slices), so
+// emit only when the processed count crosses the next 1/kProgressUpdates step.
+// This keeps the postMessage channel — and the main thread draining it — from
+// being buried under thousands of updates on a large scene.
+constexpr std::size_t kProgressUpdates = 100;
+
 // clang-format off
+// NOTE: the postMessage object keys are quoted on purpose. This module is
+// compiled with Closure (--closure=1) in the Release build, which renames
+// unquoted object-literal keys; the receiving viewer bundle is a *separate*
+// Closure compilation (and compute_worker.js isn't Closure'd at all), so an
+// unquoted contract renames inconsistently across the worker boundary and the
+// messages stop matching. Quoting pins the wire names. Keep these in sync with
+// compute_worker.js and scene_build_job_web_worker.cpp.
 EM_JS(void, nh_compute_emit_progress, (int phase, double processed, double total), {
     if (typeof postMessage === 'function') {
-        postMessage({ nh: 'progress', phase: phase, processed: processed, total: total });
+        postMessage({ 'nh': 'progress', 'phase': phase, 'processed': processed, 'total': total });
     }
 });
 
 EM_JS(void, nh_compute_emit_error, (const char *msg), {
     if (typeof postMessage === 'function') {
-        postMessage({ nh: 'error', message: UTF8ToString(msg) });
+        postMessage({ 'nh': 'error', 'message': UTF8ToString(msg) });
     }
 });
 // clang-format on
@@ -170,17 +186,34 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
                has_wedge != 0 ? std::optional<WedgeCutParams>{WedgeCutParams{
                                     wedge_start_deg, wedge_end_deg, wedge_margin}}
                               : std::nullopt);
+    // Throttle progress emits to ~kProgressUpdates per phase: advance() may
+    // yield far more often than that on a coarsened worker clock (see
+    // kClockCheckStride in tessellation_pass.cpp/wedge_cut.cpp), and a
+    // postMessage per yield would bury the main thread on a large scene.
+    std::size_t next_cut = 0;
+    std::size_t next_tess = 0;
     while (!pipe.advance(kSliceNs)) {
         switch (pipe.phase()) {
-        case BuildPipeline::Phase::Cutting:
-            nh_compute_emit_progress(kCutting, static_cast<double>(pipe.wedgeCutProcessed()),
-                                     static_cast<double>(pipe.wedgeCutTotal()));
+        case BuildPipeline::Phase::Cutting: {
+            const std::size_t processed = pipe.wedgeCutProcessed();
+            const std::size_t total = pipe.wedgeCutTotal();
+            if (processed >= next_cut) {
+                nh_compute_emit_progress(kCutting, static_cast<double>(processed),
+                                         static_cast<double>(total));
+                next_cut = processed + std::max<std::size_t>(1, total / kProgressUpdates);
+            }
             break;
-        case BuildPipeline::Phase::Tessellating:
-            nh_compute_emit_progress(kTessellating,
-                                     static_cast<double>(pipe.tessellationProcessed()),
-                                     static_cast<double>(pipe.tessellationTotal()));
+        }
+        case BuildPipeline::Phase::Tessellating: {
+            const std::size_t processed = pipe.tessellationProcessed();
+            const std::size_t total = pipe.tessellationTotal();
+            if (processed >= next_tess) {
+                nh_compute_emit_progress(kTessellating, static_cast<double>(processed),
+                                         static_cast<double>(total));
+                next_tess = processed + std::max<std::size_t>(1, total / kProgressUpdates);
+            }
             break;
+        }
         case BuildPipeline::Phase::Finalizing:
             nh_compute_emit_progress(kFinalizing, 0, 0);
             break;

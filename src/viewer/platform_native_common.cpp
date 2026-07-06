@@ -5,6 +5,7 @@
 #include <nodehammer/viewer/native_bag_project_fs.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
+#include <nodehammer/viewer/watched_filesystem_project_fs.hpp>
 
 #ifdef NH_VIEWER_NATIVE_DIALOG
 #include <nfd.hpp>
@@ -74,7 +75,8 @@ void NativePickerState::runFolderPickerModal(App &app) {
     if (NFD::PickFolder(picked) != NFD_OKAY) {
         return;
     }
-    app.setProject(std::make_unique<FilesystemProjectFs>(std::filesystem::path{picked.get()}));
+    app.setProject(std::make_unique<WatchedFilesystemProjectFs>(
+        std::make_unique<FilesystemProjectFs>(std::filesystem::path{picked.get()})));
 }
 
 #else // NH_VIEWER_NATIVE_DIALOG
@@ -110,7 +112,8 @@ void dispatchNativeDroppedFiles(App &app) {
         std::filesystem::path p{sapp_get_dropped_file_path(i)};
         std::error_code ec;
         if (std::filesystem::is_directory(p, ec)) {
-            app.setProject(std::make_unique<FilesystemProjectFs>(std::move(p)));
+            app.setProject(std::make_unique<WatchedFilesystemProjectFs>(
+                std::make_unique<FilesystemProjectFs>(std::move(p))));
             return;
         }
     }
