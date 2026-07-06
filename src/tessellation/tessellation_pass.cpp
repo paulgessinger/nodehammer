@@ -1287,7 +1287,8 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
             // median). The 25th percentile tracks the fine layers while staying
             // robust to a single degenerate sliver.
             const size_t pIdx = slabThicknesses.size() / 4;
-            std::nth_element(slabThicknesses.begin(), slabThicknesses.begin() + pIdx,
+            std::nth_element(slabThicknesses.begin(),
+                             slabThicknesses.begin() + static_cast<std::ptrdiff_t>(pIdx),
                              slabThicknesses.end());
             stackAverage =
                 StackAverage{stackWeightedColor / stackTotalWeight, slabThicknesses[pIdx]};

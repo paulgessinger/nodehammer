@@ -29,11 +29,17 @@ in vec4 inst0;
 in vec4 inst1;
 in vec4 inst2;
 in vec4 inst3;
+// Per-instance LOD cross-fade factor: x = fade (0 = full detail, 1 = full
+// hull proxy); yzw reserved. Computed per frame on the CPU from the
+// instance's projected screen size and uploaded alongside the world matrix.
+in vec4 inst_lod;
 
 out vec3 v_normal_world;
 out vec3 v_world_pos;
+out float v_lod_fade;
 
 void main() {
+    v_lod_fade = inst_lod.x;
     vec4 world_pos =
           a_position.x * inst0
         + a_position.y * inst1
@@ -67,7 +73,10 @@ void main() {
 layout(binding=1) uniform fs_params {
     vec4 base_color;   // rgb = albedo, a = opacity
     vec4 light_dir;    // xyz = direction TO light, world space; w = intensity (PBR only)
-    vec4 cut_params;   // x = enabled, y = large cut flag, z/w = unused
+    // x = angle-cut enabled, y = large cut flag,
+    // z = LOD cross-fade dither role (0 = off, 1 = detail half, 2 = hull half)
+    //     -- see the screen-door discard in main(); w = unused.
+    vec4 cut_params;
     vec4 cut_start;    // xy = unit vector at start phi
     vec4 cut_end;      // xy = unit vector at end phi
     vec4 material_mr;  // x = metallic, y = roughness, z/w = unused
@@ -114,9 +123,22 @@ layout(binding=2) uniform sampler     smp_ao_history;
 
 in vec3 v_normal_world;
 in vec3 v_world_pos;
+in float v_lod_fade;
 out vec4 frag_color;
 
 const float PI = 3.14159265358979323846;
+
+// Blue-noise-style dither threshold in [0,1) from screen pixel coords, via
+// interleaved gradient noise (IGN, Jimenez). Its energy sits in high spatial
+// frequencies with no repeating structure, so the LOD cross-fade stipple reads
+// as fine even grain that AA erases readily -- unlike a 4x4 ordered (Bayer)
+// matrix, whose regular checkerboard survives into the visible frame at the
+// lower effective resolution web backends settle to. Still a stable, purely
+// spatial pattern for a given pixel (no temporal component), so it holds steady
+// under the viewer's pause_when_static settle.
+float ignDither(vec2 frag) {
+    return fract(52.9829189 * fract(dot(frag, vec2(0.06711056, 0.00583715))));
+}
 
 float D_GGX(float NdotH, float a2) {
     float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
@@ -188,6 +210,30 @@ void main() {
 
     if (alpha_params.x > 0.5 && base_color.a < alpha_params.y) {
         discard;
+    }
+
+    // LOD cross-fade (screen-door dither). A stack in the transition band draws
+    // both its detailed slabs and its hull proxy; each keeps a complementary
+    // half of the pixels against a shared ordered-dither threshold, so exactly
+    // one representation survives per pixel and the stack dissolves smoothly
+    // detail<->hull with no pop. v_lod_fade: 0 = full detail, 1 = full hull.
+    // cut_params.z selects the half (1 = detail, 2 = hull); 0 disables (Normal
+    // groups and instances outside the band, which the CPU already emits to a
+    // single group). Kept before the derivative-based prefilter below, matching
+    // the existing cut/alpha discards.
+    if (cut_params.z > 0.5) {
+        float lod_thr = ignDither(gl_FragCoord.xy);
+        if (cut_params.z < 1.5) {
+            // Detail half: drop detail pixels as the hull fades in.
+            if (v_lod_fade > lod_thr) {
+                discard;
+            }
+        } else {
+            // Hull half: the complement of the detail test.
+            if (v_lod_fade <= lod_thr) {
+                discard;
+            }
+        }
     }
 
     // Overdraw debug: the pipeline binds additive blending with the depth

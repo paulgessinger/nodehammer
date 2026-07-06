@@ -45,6 +45,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <format>
@@ -1362,7 +1363,10 @@ void App::Impl::render() {
             flags.enable_pbr = cfg.enable_pbr;
             flags.material_prefilter = quality.enable_material_prefilter;
             flags.material_prefilter_scale = quality.material_prefilter_scale;
-            flags.hull_lod = quality.lod_hull_preview;
+            flags.lod_hull_enable = quality.lod_hull_enable;
+            flags.lod_hull_force = quality.lod_hull_force;
+            flags.lod_hull_screen_px = quality.lod_hull_screen_px;
+            flags.lod_hull_band_px = quality.lod_hull_band_px;
             // Overdraw debug view: draw every group through the additive
             // no-depth pipeline so the color target accumulates a per-pixel
             // fragment count for the composite's heatmap.
@@ -2114,6 +2118,36 @@ void App::Impl::onFrame() {
         !cfg.boolean_cut || (cut_uploaded && !build_controller_.pendingCutRebuild() &&
                              build_controller_.cutBuiltStartDeg() == cfg.angle_cut_start_deg &&
                              build_controller_.cutBuiltEndDeg() == cfg.angle_cut_end_deg);
+
+    // A headless screenshot has no UI to surface a stuck build: without this
+    // check, a missing/unresolvable config or geometry key (or a project/build
+    // failure) would leave startup_screenshot_pending true forever and the
+    // process would hang instead of ever producing the PNG. Fail loudly and
+    // exit non-zero the moment any of those terminal error states appears.
+    if (startup_screenshot_pending) {
+        std::string fatal;
+        if (project_ && project_->status() == ProjectFsStatus::Error) {
+            fatal = "failed to load input project/geometry file";
+        } else if (build_controller_.session().phase() == BuildPhase::Error) {
+            fatal = "failed to resolve or parse the config/geometry";
+        } else if (build_controller_.session().phase() == BuildPhase::WaitingForUser) {
+            std::string missing_keys;
+            for (const auto &key : build_controller_.session().missing()) {
+                if (!missing_keys.empty()) {
+                    missing_keys += ", ";
+                }
+                missing_keys += key;
+            }
+            fatal = std::format("missing required config/geometry: {}", missing_keys);
+        } else if (!build_controller_.error().empty()) {
+            fatal = build_controller_.error();
+        }
+        if (!fatal.empty()) {
+            std::println(stderr, "viewer: --screenshot failed: {}", fatal);
+            std::exit(1);
+        }
+    }
+
     if (startup_screenshot_pending && !exporter_.active() && scene && scene_uploaded &&
         ibl_baker_.installed() && camera_framed && !build_controller_.inProgress() && cut_settled) {
         startup_screenshot_pending = false;

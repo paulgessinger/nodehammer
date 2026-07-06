@@ -226,10 +226,26 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
                 ImGui::SetItemTooltip("Transition-distance dial. >1 keeps crisp bands closer "
                                       "(blend later); <1 blends earlier. Tune per view.");
             }
-            ImGui::Checkbox("hull LOD (preview)", &ctx.quality.lod_hull_preview);
-            ImGui::SetItemTooltip("Draw tagged stacks as their coarse convex hull (painted the "
-                                  "stack average) instead of the detailed slabs -- gap-free, no "
-                                  "moire. Global preview of the LOD proxy look.");
+            ImGui::Checkbox("hull LOD", &ctx.quality.lod_hull_enable);
+            ImGui::SetItemTooltip("Per-distance LOD: tagged stacks draw detailed slabs up close "
+                                  "and their coarse convex hull (stack average) far away, "
+                                  "screen-door cross-fading between the two -- gap-free, no moire, "
+                                  "no pop. Off = detailed slabs everywhere.");
+            if (ctx.quality.lod_hull_enable) {
+                ImGui::Indent();
+                ImGui::SliderFloat("hull switch (px)", &ctx.quality.lod_hull_screen_px, 8.f, 512.f,
+                                   "%.0f", ImGuiSliderFlags_Logarithmic);
+                ImGui::SetItemTooltip("Projected on-screen size at the middle of the cross-fade. "
+                                      "Larger than this -> detailed; smaller -> hull.");
+                ImGui::SliderFloat("hull fade band (px)", &ctx.quality.lod_hull_band_px, 1.f, 128.f,
+                                   "%.0f");
+                ImGui::SetItemTooltip("Half-width of the detail<->hull cross-fade band around the "
+                                      "switch size. Wider = smoother, longer dither zone.");
+                ImGui::Checkbox("force hull (debug)", &ctx.quality.lod_hull_force);
+                ImGui::SetItemTooltip("Pin every tagged stack to its hull regardless of distance, "
+                                      "to eyeball the proxy look.");
+                ImGui::Unindent();
+            }
             ImGui::EndDisabled();
         }
 

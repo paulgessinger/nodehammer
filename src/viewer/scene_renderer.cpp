@@ -77,6 +77,16 @@ struct InstanceGroupKeyHash {
 constexpr int kInstanceVbufSlot = 1;
 constexpr float kTau = 6.28318530717958647692f;
 
+// Per-instance vertex-buffer record: the world matrix plus a LOD cross-fade
+// factor (lod.x in [0,1]; 0 = full detail, 1 = full hull proxy). The matrix
+// maps to attributes inst0..inst3, the fade to inst_lod (see scene.glsl). The
+// fade is recomputed per frame from projected screen size, so it lives only in
+// the per-frame upload buffer, not in the static per-group instance list.
+struct InstanceGpu {
+    glm::mat4 transform;
+    glm::vec4 lod{0.f};
+};
+
 float normalizeAngle(float angle) {
     angle = std::fmod(angle, kTau);
     if (angle < 0.f) {
@@ -219,10 +229,19 @@ struct SceneRenderer::Impl {
         std::vector<glm::mat4> instances;
         std::vector<glm::vec3> bounds_min;
         std::vector<glm::vec3> bounds_max;
+        // Mesh-space bounding sphere (constant per group). Drives the LOD size
+        // metric: transforming this center by the instance matrix and scaling
+        // this radius by the transform's scale gives a *rotation-invariant*
+        // projected size. The world AABB above can't be used for that -- it
+        // inflates with orientation, so azimuthally placed calo staves would
+        // straddle the hull-switch band unevenly (some hull, some detail at the
+        // same distance). The AABB stays for frustum culling only.
+        glm::vec3 local_center{0.f};
+        float local_radius{0.f};
         LodRole lod_role{LodRole::Normal};
     };
     std::vector<DrawGroup> groups;
-    std::vector<glm::mat4> visible_instances;
+    std::vector<InstanceGpu> visible_instances;
 
     uint32_t node_count{0};
     uint64_t triangle_count{0};
@@ -287,7 +306,7 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader;
     pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(Vertex));
-    pdesc.layout.buffers[1].stride = static_cast<int>(sizeof(glm::mat4));
+    pdesc.layout.buffers[1].stride = static_cast<int>(sizeof(InstanceGpu));
     pdesc.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
 
     // Vertex attributes (slot indices come from sokol-shdc's reflection so
@@ -313,9 +332,14 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     for (int i = 0; i < 4; ++i) {
         pdesc.layout.attrs[inst_attrs[i]].buffer_index = kInstanceVbufSlot;
         pdesc.layout.attrs[inst_attrs[i]].format = SG_VERTEXFORMAT_FLOAT4;
-        pdesc.layout.attrs[inst_attrs[i]].offset =
-            static_cast<int>(static_cast<size_t>(i) * sizeof(glm::vec4));
+        pdesc.layout.attrs[inst_attrs[i]].offset = static_cast<int>(
+            offsetof(InstanceGpu, transform) + static_cast<size_t>(i) * sizeof(glm::vec4));
     }
+    // Per-instance LOD cross-fade factor (see InstanceGpu / scene.glsl).
+    pdesc.layout.attrs[ATTR_scene_scene_inst_lod].buffer_index = kInstanceVbufSlot;
+    pdesc.layout.attrs[ATTR_scene_scene_inst_lod].format = SG_VERTEXFORMAT_FLOAT4;
+    pdesc.layout.attrs[ATTR_scene_scene_inst_lod].offset =
+        static_cast<int>(offsetof(InstanceGpu, lod));
 
     pdesc.index_type = SG_INDEXTYPE_UINT32;
     pdesc.depth.write_enabled = true;
@@ -397,8 +421,13 @@ void SceneRenderer::Impl::uploadInstanceBuffer() {
     if (total == 0) {
         return;
     }
+    // Sized for every static instance across all groups. A stack in the LOD
+    // cross-fade band draws to both its Detail and Proxy group in the same
+    // frame, but those are separate static instances (addBindings pushed one to
+    // each), so this sum already covers the worst case of the whole scene mid-
+    // fade.
     visible_instances.reserve(total);
-    const size_t bytes = total * sizeof(glm::mat4);
+    const size_t bytes = total * sizeof(InstanceGpu);
 
     sg_buffer_desc bdesc{};
     bdesc.size = bytes;
@@ -533,6 +562,12 @@ void SceneRenderer::Impl::finalizeUpload() {
                 g.material = binding.materialId;
                 g.double_sided = double_sided;
                 g.lod_role = role;
+                // Mesh-space bounding sphere, computed once from the local AABB.
+                // Rotation-invariant (it lives in the mesh's own frame), so the
+                // per-instance LOD size only picks up the transform's scale.
+                g.local_center = 0.5f * (mesh_it->second.local_min + mesh_it->second.local_max);
+                g.local_radius =
+                    0.5f * glm::length(mesh_it->second.local_max - mesh_it->second.local_min);
                 groups.push_back(std::move(g));
             }
             ++node_count;
@@ -657,16 +692,61 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     impl_->visible_instances.clear();
     const float cut_start = glm::radians(flags.angle_cut_start_deg);
     const float cut_end = glm::radians(flags.angle_cut_end_deg);
+
+    // Per-instance LOD cross-fade factor from projected screen size. `cam_right`
+    // is the camera's world-space right axis (first row of the view rotation);
+    // projecting the instance center and a point offset by its bounding radius
+    // along that axis and measuring the clip-space delta yields a pixel radius
+    // that is correct for both perspective and orthographic cameras (w = 1 for
+    // ortho). Large on screen (close) -> 0 (draw detailed slabs); small (far) ->
+    // 1 (draw hull proxy); the band in between draws both and dithers.
+    //
+    // The size comes from the mesh-space bounding *sphere* (per-group local
+    // center/radius) transformed by the instance matrix -- NOT the world AABB.
+    // A sphere is rotation-invariant, so two identical stacks at different
+    // azimuths get the same projected size and switch together. Deriving the
+    // size from the world AABB instead inflates it by up to ~sqrt(2) for slabs
+    // rotated off the world axes, which splits a ring of calo staves across the
+    // switch band (some hull, some detail at the same distance).
+    const glm::vec3 cam_right{view[0][0], view[1][0], view[2][0]};
+    const float lod_band = std::max(1.f, flags.lod_hull_band_px);
+    const float lod_lo = std::max(0.f, flags.lod_hull_screen_px - lod_band);
+    const float lod_hi = flags.lod_hull_screen_px + lod_band;
+    const float fb_width_f = static_cast<float>(fb_width);
+    auto lodFade = [&](const glm::mat4 &m, const glm::vec3 &local_center,
+                       float local_radius) -> float {
+        const glm::vec3 center = glm::vec3(m * glm::vec4{local_center, 1.f});
+        // Largest axis scale of the instance transform; scales the mesh-space
+        // radius into world space without re-AABB'ing the rotated box.
+        const float scale = std::max({glm::length(glm::vec3(m[0])), glm::length(glm::vec3(m[1])),
+                                      glm::length(glm::vec3(m[2]))});
+        const float radius = local_radius * scale;
+        const glm::vec4 c0 = view_proj * glm::vec4{center, 1.f};
+        const glm::vec4 c1 = view_proj * glm::vec4{center + radius * cam_right, 1.f};
+        const float w0 = std::max(1e-4f, std::abs(c0.w));
+        const float w1 = std::max(1e-4f, std::abs(c1.w));
+        const float screen_px = std::abs(c1.x / w1 - c0.x / w0) * 0.5f * fb_width_f;
+        return 1.f - glm::smoothstep(lod_lo, lod_hi, screen_px);
+    };
+
     for (auto &g : impl_->groups) {
-        g.visible_byte_offset = impl_->visible_instances.size() * sizeof(glm::mat4);
-        // Hull-LOD gating: draw proxies only when the toggle is on, detailed
-        // stack meshes only when it's off. Skipped groups upload no instances
-        // and the draw loop passes over them (visible_count stays 0).
-        if ((g.lod_role == Impl::LodRole::Proxy && !flags.hull_lod) ||
-            (g.lod_role == Impl::LodRole::Detail && flags.hull_lod)) {
+        g.visible_byte_offset = impl_->visible_instances.size() * sizeof(InstanceGpu);
+
+        const bool is_detail = g.lod_role == Impl::LodRole::Detail;
+        const bool is_proxy = g.lod_role == Impl::LodRole::Proxy;
+        // Whole-group skips: with per-distance LOD off, the Proxy side never
+        // draws (detail everywhere); the force debug pins the opposite (hull
+        // everywhere) and drops the Detail side. In between, both sides draw and
+        // each instance decides per representation below.
+        if (is_proxy && !flags.lod_hull_enable && !flags.lod_hull_force) {
             g.visible_count = 0;
             continue;
         }
+        if (is_detail && flags.lod_hull_force) {
+            g.visible_count = 0;
+            continue;
+        }
+
         const size_t start_count = impl_->visible_instances.size();
         for (size_t i = 0; i < g.instances.size(); ++i) {
             if (aabbOutsideFrustum(g.bounds_min[i], g.bounds_max[i], planes)) {
@@ -676,14 +756,32 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
                 aabbFullyInsideAngleCut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
                 continue;
             }
-            impl_->visible_instances.push_back(g.instances[i]);
+            float fade = 0.f;
+            if (is_detail || is_proxy) {
+                if (flags.lod_hull_force) {
+                    fade = 1.f;
+                } else if (flags.lod_hull_enable) {
+                    fade = lodFade(g.instances[i], g.local_center, g.local_radius);
+                }
+                // Skip instances the other representation fully owns: a fully
+                // faded-in stack contributes nothing to Detail, a fully
+                // faded-out one nothing to Proxy. In the band both keep it.
+                if (is_detail && fade >= 1.f) {
+                    continue;
+                }
+                if (is_proxy && fade <= 0.f) {
+                    continue;
+                }
+            }
+            impl_->visible_instances.push_back(
+                InstanceGpu{g.instances[i], glm::vec4{fade, 0.f, 0.f, 0.f}});
         }
         g.visible_count = static_cast<uint32_t>(impl_->visible_instances.size() - start_count);
     }
     if (impl_->visible_instances.empty()) {
         return;
     }
-    const size_t visible_bytes = impl_->visible_instances.size() * sizeof(glm::mat4);
+    const size_t visible_bytes = impl_->visible_instances.size() * sizeof(InstanceGpu);
     sg_update_buffer(impl_->instance_buf, {impl_->visible_instances.data(), visible_bytes});
 
     scene_vs_params_t vs_params{};
@@ -769,8 +867,15 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const float shader_cut_start = glm::radians(flags.angle_cut_start_deg);
         const float shader_cut_end = glm::radians(flags.angle_cut_end_deg);
         const bool large_cut = angleSpan(shader_cut_start, shader_cut_end) > 0.5f * kTau;
+        // cut_params.z selects the LOD cross-fade dither half for this draw:
+        // 1 = detail slabs, 2 = hull proxy, 0 = neither (Normal groups). The FS
+        // dithers the two halves complementarily against a shared threshold; at
+        // fade 0/1 the discard is a no-op, so this is safe even when LOD is off.
+        const float lod_dither_role = g.lod_role == Impl::LodRole::Detail  ? 1.f
+                                      : g.lod_role == Impl::LodRole::Proxy ? 2.f
+                                                                           : 0.f;
         const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
-                                   large_cut ? 1.f : 0.f, 0.f, 0.f};
+                                   large_cut ? 1.f : 0.f, lod_dither_role, 0.f};
         const glm::vec4 cut_start_vec{std::cos(shader_cut_start), std::sin(shader_cut_start), 0.f,
                                       0.f};
         const glm::vec4 cut_end_vec{std::cos(shader_cut_end), std::sin(shader_cut_end), 0.f, 0.f};

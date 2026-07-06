@@ -123,11 +123,21 @@ struct RenderQualitySettings {
     /// <1 blends earlier/more aggressively. A global dial on top of the
     /// per-stack feature size baked at tessellation time.
     float material_prefilter_scale{1.0f};
-    /// Hull-LOD preview toggle: draw merged stacks (with an LOD proxy) as their
-    /// coarse convex hull painted with the stack average, instead of the
-    /// detailed slabs. Global for now -- an evaluation switch for the LOD
-    /// proxy look before per-distance selection lands.
-    bool lod_hull_preview{false};
+    /// Per-distance hull LOD: merged stacks (with an LOD proxy) pick between
+    /// their detailed slabs and the coarse convex-hull proxy per instance by
+    /// projected screen size, screen-door cross-fading through a transition
+    /// band so there is no pop. Kills the geometric coverage moire at zoom-out
+    /// (the hull is gap-free) and buys back geometry-density perf. Off = detail
+    /// everywhere.
+    bool lod_hull_enable{true};
+    /// Debug: force every proxy-tagged stack to its hull regardless of distance
+    /// (the old global preview swap) for eyeballing the proxy look.
+    bool lod_hull_force{false};
+    /// Screen size (px, ~projected bounding diameter) at the middle of the
+    /// detail<->hull cross-fade. Larger on screen -> detailed; smaller -> hull.
+    float lod_hull_screen_px{64.f};
+    /// Half-width (px) of the cross-fade band around lod_hull_screen_px.
+    float lod_hull_band_px{24.f};
     bool enable_fxaa{true};
     /// FXAA (PC-quality variant) tunables. Only consulted when enable_fxaa.
     /// Sub-pixel aliasing removal: blends the pixel toward the local 3×3

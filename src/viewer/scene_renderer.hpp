@@ -94,11 +94,23 @@ class SceneRenderer {
         /// distance dial). See RenderQualitySettings::material_prefilter_scale.
         float material_prefilter_scale{1.0f};
 
-        /// Hull-LOD preview: when on, merged stacks that carry an LOD proxy draw
-        /// the coarse convex-hull proxy (painted with the stack average) instead
-        /// of the detailed slabs. A global switch for now; per-instance
-        /// distance selection comes later.
-        bool hull_lod{false};
+        /// Per-distance hull LOD: merged stacks that carry an LOD proxy pick
+        /// between their detailed slabs and the coarse convex-hull proxy per
+        /// instance by projected screen size, cross-fading with a screen-door
+        /// dither through a transition band (no pop). When off, the detailed
+        /// slabs draw at all distances (the proxy is never shown).
+        bool lod_hull_enable{true};
+        /// Debug: force every LOD-proxy stack to its hull regardless of distance
+        /// (the old global "hull LOD (preview)" swap) — for eyeballing the proxy
+        /// look. Overrides lod_hull_enable when set.
+        bool lod_hull_force{false};
+        /// Projected screen size (px, ~bounding-diameter) at the midpoint of the
+        /// detail<->hull cross-fade: a stack larger than this on screen draws
+        /// detailed, smaller draws the hull.
+        float lod_hull_screen_px{64.f};
+        /// Half-width (px) of the cross-fade band around lod_hull_screen_px.
+        /// Both representations draw and dither within [mid-band, mid+band].
+        float lod_hull_band_px{24.f};
 
         /// Overdraw debug view. When on, every group draws through the
         /// additive-blend / no-depth / no-cull overdraw pipeline and the
