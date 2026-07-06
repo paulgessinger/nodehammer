@@ -65,12 +65,27 @@ flatbuffers::Offset<fbr::MeshAsset> serializeMeshAsset(flatbuffers::FlatBufferBu
         reinterpret_cast<const fbr::Vertex *>(asset.vertices.data()), asset.vertices.size());
     auto indices = b.CreateVector(asset.indices);
     auto prov = serializeProvenance(b, asset.provenance);
+    // Optional stack-average prefilter hint: build the sub-table first (a
+    // nested table can't be open while the MeshAssetBuilder is), leave the
+    // offset null when absent. Dropping this is what made the material-stack
+    // prefilter a no-op in WASM.
+    flatbuffers::Offset<fbr::StackAverage> stackAvg = 0;
+    if (asset.stackAverage.has_value()) {
+        const fbr::Vec3f avgColor = toVec3(asset.stackAverage->avgColorLinear);
+        fbr::StackAverageBuilder sb(b);
+        sb.add_avg_color_linear(&avgColor);
+        sb.add_feature_size(asset.stackAverage->featureSize);
+        stackAvg = sb.Finish();
+    }
     fbr::MeshAssetBuilder mb(b);
     mb.add_id(asset.id.value);
     mb.add_name(name);
     mb.add_vertices(verts);
     mb.add_indices(indices);
     mb.add_provenance(prov);
+    if (!stackAvg.IsNull()) {
+        mb.add_stack_average(stackAvg);
+    }
     return mb.Finish();
 }
 
@@ -134,6 +149,12 @@ flatbuffers::Offset<fbr::RenderNode> serializeNode(flatbuffers::FlatBufferBuilde
         bindings.emplace_back(mb.meshId.value, mb.materialId.value);
     }
     auto meshBindings = b.CreateVectorOfStructs(bindings);
+    std::vector<fbr::MeshBinding> proxyBindings;
+    proxyBindings.reserve(node.lodProxyBindings.size());
+    for (const auto &mb : node.lodProxyBindings) {
+        proxyBindings.emplace_back(mb.meshId.value, mb.materialId.value);
+    }
+    auto lodProxyBindings = b.CreateVectorOfStructs(proxyBindings);
     const fbr::Mat4f local = toMat4(node.localTransform);
     const fbr::Mat4f world = toMat4(node.worldTransform);
     fbr::RenderNodeBuilder nb(b);
@@ -144,6 +165,7 @@ flatbuffers::Offset<fbr::RenderNode> serializeNode(flatbuffers::FlatBufferBuilde
     nb.add_parent_id(node.parentId ? node.parentId->value : 0);
     nb.add_children(children);
     nb.add_mesh_bindings(meshBindings);
+    nb.add_lod_proxy_bindings(lodProxyBindings);
     nb.add_semantic_node_id(node.semanticNodeId.value);
     return nb.Finish();
 }
@@ -223,6 +245,14 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
                             static_cast<size_t>(is->size()) * sizeof(uint32_t));
             }
             asset.provenance = deserializeProvenance(m->provenance());
+            if (const auto *sa = m->stack_average(); sa != nullptr) {
+                StackAverage avg;
+                if (const auto *c = sa->avg_color_linear(); c != nullptr) {
+                    avg.avgColorLinear = fromVec3(*c);
+                }
+                avg.featureSize = sa->feature_size();
+                asset.stackAverage = avg;
+            }
             scene.meshAssets.emplace(asset.id, std::move(asset));
         }
     }
@@ -301,6 +331,13 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
                 node.meshBindings.reserve(bs->size());
                 for (const auto *bnd : *bs) {
                     node.meshBindings.push_back(
+                        {MeshAssetId{bnd->mesh_id()}, RenderMaterialId{bnd->material_id()}});
+                }
+            }
+            if (const auto *ps = n->lod_proxy_bindings(); ps != nullptr) {
+                node.lodProxyBindings.reserve(ps->size());
+                for (const auto *bnd : *ps) {
+                    node.lodProxyBindings.push_back(
                         {MeshAssetId{bnd->mesh_id()}, RenderMaterialId{bnd->material_id()}});
                 }
             }
