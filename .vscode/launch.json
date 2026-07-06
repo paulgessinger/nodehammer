@@ -9,9 +9,8 @@
         }
     ],
     "configurations": [
-
         {
-            "name": "viewer-bench (odd)",
+            "name": "viewer-bench (odd) [Windows]",
             "type": "cppvsdbg",
             "request": "launch",
             // Built from the Conan-generated CMake preset after running
@@ -36,7 +35,33 @@
             "stopAtEntry": false
         },
         {
-            "name": "viewer (odd)",
+            "name": "viewer-bench (odd) [macOS/Linux]",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer",
+            "MIMode": "lldb",
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd.toml",
+                "--bench", "${workspaceFolder}/build/bench.json",
+                "--bench-scale", "${input:benchScale}",
+                "--width", "1600",
+                "--height", "900"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "viewer (odd) [Windows]",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer.exe",
@@ -53,7 +78,31 @@
             "stopAtEntry": false
         },
         {
-            "name": "viewer (odd, dropped internal faces)",
+            "name": "viewer (odd) [macOS/Linux]",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer",
+            "MIMode": "lldb",
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd.toml",
+                "--width", "2560",
+                "--height", "1440"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "viewer (odd, dropped internal faces) [Windows]",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer.exe",
@@ -70,10 +119,58 @@
             "stopAtEntry": false
         },
         {
-            "name": "viewer (odd simple)",
+            "name": "viewer (odd, dropped internal faces) [macOS/Linux]",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer",
+            "MIMode": "lldb",
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "linux": {
+                "MIMode": "gdb"
+            },
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd_drop_coincident_faces.toml",
+                "--width", "2561",
+                "--height", "1440"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "viewer (odd simple) [Windows]",
             "type": "cppvsdbg",
             "request": "launch",
             "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer.exe",
+            "preLaunchTask": "nodehammer: build viewer executable",
+            "args": [
+                "viewer",
+                "--input", "odd.nhb.zst",
+                "--config", "fixtures/configs/odd_simple.toml",
+                "--width", "2561",
+                "--height", "1440"
+            ],
+            "cwd": "${workspaceFolder}",
+            "console": "integratedTerminal",
+            "stopAtEntry": false
+        },
+        {
+            "name": "viewer (odd simple) [macOS/Linux]",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/RelWithDebInfo/nodehammer",
+            "MIMode": "lldb",
+            "osx": {
+                "MIMode": "lldb"
+            },
+            "linux": {
+                "MIMode": "gdb"
+            },
             "preLaunchTask": "nodehammer: build viewer executable",
             "args": [
                 "viewer",
