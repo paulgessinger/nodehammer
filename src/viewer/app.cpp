@@ -520,10 +520,15 @@ void App::Impl::savePersistentState(bool force) {
         last_saved_viewer_config_state = viewer_state;
     }
 
-    const std::string render_quality_state = currentRenderQualityStateToml();
-    if (force || render_quality_state != last_saved_render_quality_state) {
-        platform_->savePersistentText(kRenderQualityStateKey, render_quality_state);
-        last_saved_render_quality_state = render_quality_state;
+    // Bench mode intentionally overrides quality at runtime (fixed scale, no
+    // dynamic scaling/cap). Keep those transient overrides out of persisted
+    // viewer quality so a benchmark run doesn't clobber the user's profile.
+    if (!bench_pending_) {
+        const std::string render_quality_state = currentRenderQualityStateToml();
+        if (force || render_quality_state != last_saved_render_quality_state) {
+            platform_->savePersistentText(kRenderQualityStateKey, render_quality_state);
+            last_saved_render_quality_state = render_quality_state;
+        }
     }
 
     ImGuiIO &io = ImGui::GetIO();
