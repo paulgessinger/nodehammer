@@ -83,6 +83,43 @@ class SceneRenderer {
         float angle_cut_end_deg{90.f};
         bool enable_pbr{false}; ///< When on: Cook-Torrance + IBL ambient.
 
+        /// Material-stack prefilter (viewer AA for sampling stacks): when on,
+        /// the scene FS blends a merged-stack mesh's albedo toward the stack's
+        /// area-weighted average (MeshAsset::stackAverage) as the pixel
+        /// footprint outgrows the band width, band-limiting the cycling-
+        /// material pattern that aliases into moire at distance. Untagged
+        /// meshes are unaffected. Runtime A/B toggle.
+        bool material_prefilter{false};
+        /// Global multiplier on the stack-prefilter feature size (transition
+        /// distance dial). See RenderQualitySettings::material_prefilter_scale.
+        float material_prefilter_scale{1.0f};
+
+        /// Per-distance hull LOD: merged stacks that carry an LOD proxy pick
+        /// between their detailed slabs and the coarse convex-hull proxy per
+        /// instance by projected screen size, cross-fading with a screen-door
+        /// dither through a transition band (no pop). When off, the detailed
+        /// slabs draw at all distances (the proxy is never shown).
+        bool lod_hull_enable{true};
+        /// Debug: force every LOD-proxy stack to its hull regardless of distance
+        /// (the old global "hull LOD (preview)" swap) — for eyeballing the proxy
+        /// look. Overrides lod_hull_enable when set.
+        bool lod_hull_force{false};
+        /// Projected screen size (px, ~bounding-diameter) at the midpoint of the
+        /// detail<->hull cross-fade: a stack larger than this on screen draws
+        /// detailed, smaller draws the hull.
+        float lod_hull_screen_px{64.f};
+        /// Half-width (px) of the cross-fade band around lod_hull_screen_px.
+        /// Both representations draw and dither within [mid-band, mid+band].
+        float lod_hull_band_px{24.f};
+
+        /// Overdraw debug view. When on, every group draws through the
+        /// additive-blend / no-depth / no-cull overdraw pipeline and the
+        /// scene FS emits a constant per-fragment increment instead of
+        /// shading, so the color target accumulates a per-pixel fragment
+        /// count for the composite's overdraw heatmap. Overrides cull and
+        /// shading; the angle cut still discards (cut fragments don't count).
+        bool overdraw{false};
+
         /// Toward-sun direction for the analytical directional light. Should
         /// match the IBL bake's sun_dir so the analytical highlight aligns
         /// with the reflected sun in the cubemap (per docs §9.1).

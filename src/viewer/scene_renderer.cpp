@@ -10,6 +10,7 @@
 
 #include "ibl.hpp"
 #include "scene.glsl.h"
+#include "scene_render_target.hpp"
 
 #include <sokol_time.h>
 
@@ -33,6 +34,11 @@ struct GpuMesh {
     uint64_t triangle_count{0};
     glm::vec3 local_min{0.f};
     glm::vec3 local_max{0.f};
+    // Material-stack prefilter hint (from MeshAsset::stackAverage). feature_size
+    // == 0 means the mesh isn't a tagged sampling stack, so the scene shader
+    // skips the blend. See scene.glsl's stack_prefilter.
+    glm::vec3 stack_avg_color{0.f};
+    float stack_feature_size{0.f};
 };
 
 /// Transform an AABB by a 4x4 affine matrix using Arvo's trick — cheaper
@@ -70,6 +76,16 @@ struct InstanceGroupKeyHash {
 
 constexpr int kInstanceVbufSlot = 1;
 constexpr float kTau = 6.28318530717958647692f;
+
+// Per-instance vertex-buffer record: the world matrix plus a LOD cross-fade
+// factor (lod.x in [0,1]; 0 = full detail, 1 = full hull proxy). The matrix
+// maps to attributes inst0..inst3, the fade to inst_lod (see scene.glsl). The
+// fade is recomputed per frame from projected screen size, so it lives only in
+// the per-frame upload buffer, not in the static per-group instance list.
+struct InstanceGpu {
+    glm::mat4 transform;
+    glm::vec4 lod{0.f};
+};
 
 float normalizeAngle(float angle) {
     angle = std::fmod(angle, kTau);
@@ -175,6 +191,11 @@ struct SceneRenderer::Impl {
     sg_shader shader{};
     sg_pipeline pipeline_no_cull{};
     sg_pipeline pipeline_back_cull{};
+    // Overdraw debug pipeline: same shader + vertex layout, but additive
+    // blending, depth test/write off, and no cull, so every covered fragment
+    // accumulates a count regardless of occlusion. Rebuilt with the others
+    // when the target color format changes.
+    sg_pipeline pipeline_overdraw{};
     sg_pixel_format current_color_format{SG_PIXELFORMAT_NONE};
     // Per-group dynamic buffer of mat4 instance transforms. Allocated once
     // at upload() to fit the largest group; reused across frames since the
@@ -194,6 +215,11 @@ struct SceneRenderer::Impl {
 
     IblResources ibl;
 
+    // LOD role of a draw group. Normal groups always draw; a stack with an LOD
+    // hull produces a Detail group (its slabs) and a Proxy group (the hull),
+    // and exactly one of the two draws depending on the hull-LOD toggle.
+    enum class LodRole { Normal, Detail, Proxy };
+
     struct DrawGroup {
         MeshAssetId mesh;
         RenderMaterialId material;
@@ -203,9 +229,19 @@ struct SceneRenderer::Impl {
         std::vector<glm::mat4> instances;
         std::vector<glm::vec3> bounds_min;
         std::vector<glm::vec3> bounds_max;
+        // Mesh-space bounding sphere (constant per group). Drives the LOD size
+        // metric: transforming this center by the instance matrix and scaling
+        // this radius by the transform's scale gives a *rotation-invariant*
+        // projected size. The world AABB above can't be used for that -- it
+        // inflates with orientation, so azimuthally placed calo staves would
+        // straddle the hull-switch band unevenly (some hull, some detail at the
+        // same distance). The AABB stays for frustum culling only.
+        glm::vec3 local_center{0.f};
+        float local_radius{0.f};
+        LodRole lod_role{LodRole::Normal};
     };
     std::vector<DrawGroup> groups;
-    std::vector<glm::mat4> visible_instances;
+    std::vector<InstanceGpu> visible_instances;
 
     uint32_t node_count{0};
     uint64_t triangle_count{0};
@@ -262,11 +298,15 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
         sg_destroy_pipeline(pipeline_back_cull);
         pipeline_back_cull = sg_pipeline{};
     }
+    if (pipeline_overdraw.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(pipeline_overdraw);
+        pipeline_overdraw = sg_pipeline{};
+    }
 
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader;
     pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(Vertex));
-    pdesc.layout.buffers[1].stride = static_cast<int>(sizeof(glm::mat4));
+    pdesc.layout.buffers[1].stride = static_cast<int>(sizeof(InstanceGpu));
     pdesc.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
 
     // Vertex attributes (slot indices come from sokol-shdc's reflection so
@@ -292,9 +332,14 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     for (int i = 0; i < 4; ++i) {
         pdesc.layout.attrs[inst_attrs[i]].buffer_index = kInstanceVbufSlot;
         pdesc.layout.attrs[inst_attrs[i]].format = SG_VERTEXFORMAT_FLOAT4;
-        pdesc.layout.attrs[inst_attrs[i]].offset =
-            static_cast<int>(static_cast<size_t>(i) * sizeof(glm::vec4));
+        pdesc.layout.attrs[inst_attrs[i]].offset = static_cast<int>(
+            offsetof(InstanceGpu, transform) + static_cast<size_t>(i) * sizeof(glm::vec4));
     }
+    // Per-instance LOD cross-fade factor (see InstanceGpu / scene.glsl).
+    pdesc.layout.attrs[ATTR_scene_scene_inst_lod].buffer_index = kInstanceVbufSlot;
+    pdesc.layout.attrs[ATTR_scene_scene_inst_lod].format = SG_VERTEXFORMAT_FLOAT4;
+    pdesc.layout.attrs[ATTR_scene_scene_inst_lod].offset =
+        static_cast<int>(offsetof(InstanceGpu, lod));
 
     pdesc.index_type = SG_INDEXTYPE_UINT32;
     pdesc.depth.write_enabled = true;
@@ -318,6 +363,23 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     pipeline_no_cull = sg_make_pipeline(&pdesc);
     pdesc.cull_mode = SG_CULLMODE_BACK;
     pipeline_back_cull = sg_make_pipeline(&pdesc);
+
+    // Overdraw variant: count every covering fragment regardless of
+    // occlusion or facing. Depth test/write off (ALWAYS), no cull, and
+    // additive ONE/ONE blend so the FS's constant increment accumulates
+    // into the color target. Reuses the shared layout/format above.
+    pdesc.cull_mode = SG_CULLMODE_NONE;
+    pdesc.depth.write_enabled = false;
+    pdesc.depth.compare = SG_COMPAREFUNC_ALWAYS;
+    pdesc.colors[0].blend.enabled = true;
+    pdesc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.op_rgb = SG_BLENDOP_ADD;
+    pdesc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE;
+    pdesc.colors[0].blend.op_alpha = SG_BLENDOP_ADD;
+    pdesc.label = "scene_overdraw_pipeline";
+    pipeline_overdraw = sg_make_pipeline(&pdesc);
 
     current_color_format = color_fmt;
 }
@@ -359,8 +421,13 @@ void SceneRenderer::Impl::uploadInstanceBuffer() {
     if (total == 0) {
         return;
     }
+    // Sized for every static instance across all groups. A stack in the LOD
+    // cross-fade band draws to both its Detail and Proxy group in the same
+    // frame, but those are separate static instances (addBindings pushed one to
+    // each), so this sum already covers the worst case of the whole scene mid-
+    // fade.
     visible_instances.reserve(total);
-    const size_t bytes = total * sizeof(glm::mat4);
+    const size_t bytes = total * sizeof(InstanceGpu);
 
     sg_buffer_desc bdesc{};
     bdesc.size = bytes;
@@ -402,6 +469,10 @@ void SceneRenderer::release() {
     if (impl_->pipeline_back_cull.id != SG_INVALID_ID) {
         sg_destroy_pipeline(impl_->pipeline_back_cull);
         impl_->pipeline_back_cull = sg_pipeline{};
+    }
+    if (impl_->pipeline_overdraw.id != SG_INVALID_ID) {
+        sg_destroy_pipeline(impl_->pipeline_overdraw);
+        impl_->pipeline_overdraw = sg_pipeline{};
     }
     impl_->current_color_format = SG_PIXELFORMAT_NONE;
     impl_->ibl.release();
@@ -445,6 +516,10 @@ void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const MeshAsset &asset) 
     }
     gm.local_min = lmin;
     gm.local_max = lmax;
+    if (asset.stackAverage.has_value()) {
+        gm.stack_avg_color = asset.stackAverage->avgColorLinear;
+        gm.stack_feature_size = asset.stackAverage->featureSize;
+    }
     meshes.emplace(id, gm);
 }
 
@@ -467,8 +542,9 @@ void SceneRenderer::Impl::finalizeUpload() {
     glm::vec3 bmax{std::numeric_limits<float>::lowest()};
     bool any_bounds = false;
 
-    for (const auto &[id, node] : scene.nodes) {
-        for (const auto &binding : node.meshBindings) {
+    auto addBindings = [&](const RenderNode &node, const std::vector<MeshBinding> &bindings,
+                           LodRole role) {
+        for (const auto &binding : bindings) {
             auto mesh_it = meshes.find(binding.meshId);
             if (mesh_it == meshes.end()) {
                 continue;
@@ -481,8 +557,18 @@ void SceneRenderer::Impl::finalizeUpload() {
                 // RenderMaterial default for closed solids.
                 const bool double_sided =
                     mat_it != scene.materials.end() ? mat_it->second.doubleSided : false;
-                groups.push_back(
-                    {binding.meshId, binding.materialId, double_sided, 0, 0, {}, {}, {}});
+                DrawGroup g;
+                g.mesh = binding.meshId;
+                g.material = binding.materialId;
+                g.double_sided = double_sided;
+                g.lod_role = role;
+                // Mesh-space bounding sphere, computed once from the local AABB.
+                // Rotation-invariant (it lives in the mesh's own frame), so the
+                // per-instance LOD size only picks up the transform's scale.
+                g.local_center = 0.5f * (mesh_it->second.local_min + mesh_it->second.local_max);
+                g.local_radius =
+                    0.5f * glm::length(mesh_it->second.local_max - mesh_it->second.local_min);
+                groups.push_back(std::move(g));
             }
             ++node_count;
             triangle_count += mesh_it->second.triangle_count;
@@ -498,6 +584,15 @@ void SceneRenderer::Impl::finalizeUpload() {
             bmax = glm::max(bmax, wmax);
             any_bounds = true;
         }
+    };
+    for (const auto &[id, node] : scene.nodes) {
+        // A node with an LOD proxy tags its detailed groups as Detail (drawn
+        // only when hull LOD is off); the proxy groups are Proxy (drawn only
+        // when it's on). Nodes without a proxy are Normal (always drawn).
+        const LodRole detailRole =
+            node.lodProxyBindings.empty() ? LodRole::Normal : LodRole::Detail;
+        addBindings(node, node.meshBindings, detailRole);
+        addBindings(node, node.lodProxyBindings, LodRole::Proxy);
     }
     bounds_min = bmin;
     bounds_max = bmax;
@@ -597,8 +692,61 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     impl_->visible_instances.clear();
     const float cut_start = glm::radians(flags.angle_cut_start_deg);
     const float cut_end = glm::radians(flags.angle_cut_end_deg);
+
+    // Per-instance LOD cross-fade factor from projected screen size. `cam_right`
+    // is the camera's world-space right axis (first row of the view rotation);
+    // projecting the instance center and a point offset by its bounding radius
+    // along that axis and measuring the clip-space delta yields a pixel radius
+    // that is correct for both perspective and orthographic cameras (w = 1 for
+    // ortho). Large on screen (close) -> 0 (draw detailed slabs); small (far) ->
+    // 1 (draw hull proxy); the band in between draws both and dithers.
+    //
+    // The size comes from the mesh-space bounding *sphere* (per-group local
+    // center/radius) transformed by the instance matrix -- NOT the world AABB.
+    // A sphere is rotation-invariant, so two identical stacks at different
+    // azimuths get the same projected size and switch together. Deriving the
+    // size from the world AABB instead inflates it by up to ~sqrt(2) for slabs
+    // rotated off the world axes, which splits a ring of calo staves across the
+    // switch band (some hull, some detail at the same distance).
+    const glm::vec3 cam_right{view[0][0], view[1][0], view[2][0]};
+    const float lod_band = std::max(1.f, flags.lod_hull_band_px);
+    const float lod_lo = std::max(0.f, flags.lod_hull_screen_px - lod_band);
+    const float lod_hi = flags.lod_hull_screen_px + lod_band;
+    const float fb_width_f = static_cast<float>(fb_width);
+    auto lodFade = [&](const glm::mat4 &m, const glm::vec3 &local_center,
+                       float local_radius) -> float {
+        const glm::vec3 center = glm::vec3(m * glm::vec4{local_center, 1.f});
+        // Largest axis scale of the instance transform; scales the mesh-space
+        // radius into world space without re-AABB'ing the rotated box.
+        const float scale = std::max({glm::length(glm::vec3(m[0])), glm::length(glm::vec3(m[1])),
+                                      glm::length(glm::vec3(m[2]))});
+        const float radius = local_radius * scale;
+        const glm::vec4 c0 = view_proj * glm::vec4{center, 1.f};
+        const glm::vec4 c1 = view_proj * glm::vec4{center + radius * cam_right, 1.f};
+        const float w0 = std::max(1e-4f, std::abs(c0.w));
+        const float w1 = std::max(1e-4f, std::abs(c1.w));
+        const float screen_px = std::abs(c1.x / w1 - c0.x / w0) * 0.5f * fb_width_f;
+        return 1.f - glm::smoothstep(lod_lo, lod_hi, screen_px);
+    };
+
     for (auto &g : impl_->groups) {
-        g.visible_byte_offset = impl_->visible_instances.size() * sizeof(glm::mat4);
+        g.visible_byte_offset = impl_->visible_instances.size() * sizeof(InstanceGpu);
+
+        const bool is_detail = g.lod_role == Impl::LodRole::Detail;
+        const bool is_proxy = g.lod_role == Impl::LodRole::Proxy;
+        // Whole-group skips: with per-distance LOD off, the Proxy side never
+        // draws (detail everywhere); the force debug pins the opposite (hull
+        // everywhere) and drops the Detail side. In between, both sides draw and
+        // each instance decides per representation below.
+        if (is_proxy && !flags.lod_hull_enable && !flags.lod_hull_force) {
+            g.visible_count = 0;
+            continue;
+        }
+        if (is_detail && flags.lod_hull_force) {
+            g.visible_count = 0;
+            continue;
+        }
+
         const size_t start_count = impl_->visible_instances.size();
         for (size_t i = 0; i < g.instances.size(); ++i) {
             if (aabbOutsideFrustum(g.bounds_min[i], g.bounds_max[i], planes)) {
@@ -608,14 +756,32 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
                 aabbFullyInsideAngleCut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
                 continue;
             }
-            impl_->visible_instances.push_back(g.instances[i]);
+            float fade = 0.f;
+            if (is_detail || is_proxy) {
+                if (flags.lod_hull_force) {
+                    fade = 1.f;
+                } else if (flags.lod_hull_enable) {
+                    fade = lodFade(g.instances[i], g.local_center, g.local_radius);
+                }
+                // Skip instances the other representation fully owns: a fully
+                // faded-in stack contributes nothing to Detail, a fully
+                // faded-out one nothing to Proxy. In the band both keep it.
+                if (is_detail && fade >= 1.f) {
+                    continue;
+                }
+                if (is_proxy && fade <= 0.f) {
+                    continue;
+                }
+            }
+            impl_->visible_instances.push_back(
+                InstanceGpu{g.instances[i], glm::vec4{fade, 0.f, 0.f, 0.f}});
         }
         g.visible_count = static_cast<uint32_t>(impl_->visible_instances.size() - start_count);
     }
     if (impl_->visible_instances.empty()) {
         return;
     }
-    const size_t visible_bytes = impl_->visible_instances.size() * sizeof(glm::mat4);
+    const size_t visible_bytes = impl_->visible_instances.size() * sizeof(InstanceGpu);
     sg_update_buffer(impl_->instance_buf, {impl_->visible_instances.data(), visible_bytes});
 
     scene_vs_params_t vs_params{};
@@ -637,6 +803,14 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
     const glm::vec3 to_sun = glm::normalize(flags.sun_dir);
     const glm::vec4 light_dir{-to_sun, flags.sun_intensity};
 
+    // Overdraw debug emits a constant per-fragment increment (through
+    // mode_flags.z) that additive-blends into the color target. The value is
+    // format-dependent so an 8-bit target doesn't clamp to 1.0 after the
+    // first fragment (see overdrawColorIncrement). 0 outside overdraw mode
+    // leaves the FS on its normal shading path.
+    const float overdraw_increment =
+        flags.overdraw ? overdrawColorIncrement(impl_->current_color_format) : 0.f;
+
     sg_pipeline current_pipeline{};
     for (const auto &g : impl_->groups) {
         auto mesh_it = impl_->meshes.find(g.mesh);
@@ -653,25 +827,33 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const Impl::GpuMaterial gmat =
             (mat_it != impl_->materials.end()) ? mat_it->second : Impl::GpuMaterial{};
 
-        // Per-material doubleSided picks the cull pipeline by default. The
-        // `cull` override is a debug knob that can force one mode globally.
-        // Switch only when the pipeline actually changes; VS uniforms must
-        // be reapplied after each pipeline change.
-        bool use_back_cull = !g.double_sided;
-        // The shader angle-cut discards the near wedge and exposes the interior
-        // back-faces of the far wall; culling them makes the cut-away look
-        // hollow. Render double-sided while it's active so cuts stay solid.
-        // (The baked boolean cut adds watertight caps, so it keeps culling.)
-        if (flags.shader_angle_cut) {
-            use_back_cull = false;
+        // Overdraw debug overrides pipeline selection entirely: every group
+        // draws through the additive / no-depth / no-cull overdraw pipeline
+        // so the count reflects all covering fragments regardless of the
+        // material's cull mode.
+        sg_pipeline pipeline;
+        if (flags.overdraw) {
+            pipeline = impl_->pipeline_overdraw;
+        } else {
+            // Per-material doubleSided picks the cull pipeline by default. The
+            // `cull` override is a debug knob that can force one mode globally.
+            // Switch only when the pipeline actually changes; VS uniforms must
+            // be reapplied after each pipeline change.
+            bool use_back_cull = !g.double_sided;
+            // The shader angle-cut discards the near wedge and exposes the interior
+            // back-faces of the far wall; culling them makes the cut-away look
+            // hollow. Render double-sided while it's active so cuts stay solid.
+            // (The baked boolean cut adds watertight caps, so it keeps culling.)
+            if (flags.shader_angle_cut) {
+                use_back_cull = false;
+            }
+            if (flags.cull == CullOverride::ForceCull) {
+                use_back_cull = true;
+            } else if (flags.cull == CullOverride::ForceNoCull) {
+                use_back_cull = false;
+            }
+            pipeline = use_back_cull ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
         }
-        if (flags.cull == CullOverride::ForceCull) {
-            use_back_cull = true;
-        } else if (flags.cull == CullOverride::ForceNoCull) {
-            use_back_cull = false;
-        }
-        const sg_pipeline pipeline =
-            use_back_cull ? impl_->pipeline_back_cull : impl_->pipeline_no_cull;
         if (pipeline.id != current_pipeline.id) {
             sg_apply_pipeline(pipeline);
             sg_apply_uniforms(UB_scene_vs_params, SG_RANGE(vs_params));
@@ -685,8 +867,15 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const float shader_cut_start = glm::radians(flags.angle_cut_start_deg);
         const float shader_cut_end = glm::radians(flags.angle_cut_end_deg);
         const bool large_cut = angleSpan(shader_cut_start, shader_cut_end) > 0.5f * kTau;
+        // cut_params.z selects the LOD cross-fade dither half for this draw:
+        // 1 = detail slabs, 2 = hull proxy, 0 = neither (Normal groups). The FS
+        // dithers the two halves complementarily against a shared threshold; at
+        // fade 0/1 the discard is a no-op, so this is safe even when LOD is off.
+        const float lod_dither_role = g.lod_role == Impl::LodRole::Detail  ? 1.f
+                                      : g.lod_role == Impl::LodRole::Proxy ? 2.f
+                                                                           : 0.f;
         const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
-                                   large_cut ? 1.f : 0.f, 0.f, 0.f};
+                                   large_cut ? 1.f : 0.f, lod_dither_role, 0.f};
         const glm::vec4 cut_start_vec{std::cos(shader_cut_start), std::sin(shader_cut_start), 0.f,
                                       0.f};
         const glm::vec4 cut_end_vec{std::cos(shader_cut_end), std::sin(shader_cut_end), 0.f, 0.f};
@@ -697,8 +886,16 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         std::memcpy(fs_params.material_mr, glm::value_ptr(gmat.mr), sizeof(fs_params.material_mr));
         const float prefilter_max_lod =
             std::max(0.f, static_cast<float>(impl_->ibl.prefilter_mip_count - 1));
-        const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, prefilter_max_lod, 0.f, 0.f};
+        const glm::vec4 mode_flags{flags.enable_pbr ? 1.f : 0.f, prefilter_max_lod,
+                                   overdraw_increment, flags.material_prefilter ? 1.f : 0.f};
         std::memcpy(fs_params.mode_flags, glm::value_ptr(mode_flags), sizeof(fs_params.mode_flags));
+        // Per-mesh material-stack prefilter: average color + band width. w == 0
+        // (untagged mesh) makes the scene FS skip the blend regardless of the
+        // enable flag above.
+        const glm::vec4 stack_prefilter{mesh.stack_avg_color,
+                                        mesh.stack_feature_size * flags.material_prefilter_scale};
+        std::memcpy(fs_params.stack_prefilter, glm::value_ptr(stack_prefilter),
+                    sizeof(fs_params.stack_prefilter));
         const glm::vec3 eye = camera.eye();
         const glm::vec4 cam_pos{eye.x, eye.y, eye.z, 0.f};
         std::memcpy(fs_params.camera_pos, glm::value_ptr(cam_pos), sizeof(fs_params.camera_pos));

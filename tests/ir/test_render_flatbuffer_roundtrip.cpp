@@ -41,6 +41,9 @@ RenderScene makeScene() {
     const auto meshB = scene.nextMeshId();
     scene.meshAssets[meshA] = makeMesh(meshA, "boxMesh");
     scene.meshAssets[meshB] = makeMesh(meshB, "tubeMesh");
+    // meshB carries a stack-average prefilter hint; meshA leaves it nullopt so
+    // the round-trip covers both the present and absent paths.
+    scene.meshAssets[meshB].stackAverage = StackAverage{glm::vec3{0.12f, 0.34f, 0.56f}, 0.75f};
 
     // Material 1: every optional KHR field set.
     const auto matFull = scene.nextMaterialId();
@@ -99,6 +102,9 @@ RenderScene makeScene() {
             MeshBinding{meshA, matFull},
             MeshBinding{meshB, matBare},
         };
+        // A coarse hull LOD proxy — must survive the round-trip or hull LOD is a
+        // no-op in WASM (proxies cross the worker→viewer boundary as bytes).
+        n.lodProxyBindings = {MeshBinding{meshB, matBare}};
         n.semanticNodeId = SemanticNodeId{43};
         scene.nodes[childId] = n;
         scene.nodes[rootId].children.push_back(childId);
@@ -152,6 +158,19 @@ TEST_CASE("Render FlatBuffer roundtrip: meshes preserve geometry", "[ir][render]
         REQUIRE(res.provenance.degradation.has(DegradationBit::UnknownShape));
         REQUIRE(res.provenance.degradation.has(DegradationBit::TruncatedName));
         REQUIRE_FALSE(res.provenance.degradation.has(DegradationBit::MaterialMissing));
+
+        // Stack-average prefilter hint survives (present on one mesh, nullopt on
+        // the other) -- dropping it made the material prefilter a no-op in WASM.
+        REQUIRE(res.stackAverage.has_value() == orig.stackAverage.has_value());
+        if (orig.stackAverage.has_value()) {
+            REQUIRE(res.stackAverage->avgColorLinear.x ==
+                    Approx(orig.stackAverage->avgColorLinear.x));
+            REQUIRE(res.stackAverage->avgColorLinear.y ==
+                    Approx(orig.stackAverage->avgColorLinear.y));
+            REQUIRE(res.stackAverage->avgColorLinear.z ==
+                    Approx(orig.stackAverage->avgColorLinear.z));
+            REQUIRE(res.stackAverage->featureSize == Approx(orig.stackAverage->featureSize));
+        }
     }
 }
 
@@ -257,6 +276,12 @@ TEST_CASE("Render FlatBuffer roundtrip: hierarchy, transforms, bindings",
     REQUIRE(child->meshBindings.size() == 2);
     REQUIRE(child->meshBindings[0].meshId.value != 0);
     REQUIRE(child->meshBindings[0].materialId.value != 0);
+    // Hull LOD proxy bindings survive the round-trip.
+    REQUIRE(child->lodProxyBindings.size() == 1);
+    REQUIRE(child->lodProxyBindings[0].meshId.value != 0);
+    REQUIRE(child->lodProxyBindings[0].materialId.value != 0);
+    // Nodes without proxies stay empty (default field absent in the buffer).
+    REQUIRE(grand->lodProxyBindings.empty());
     REQUIRE(child->semanticNodeId == SemanticNodeId{43});
 
     // Grandchild: identity transform, parent link, single binding.

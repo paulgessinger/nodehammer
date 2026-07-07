@@ -6,6 +6,12 @@ enum class DebugView : int {
     Off = 0,
     Depth = 1,
     LinearDepth = 2,
+    /// Overdraw heatmap: re-renders the scene with additive blending and no
+    /// depth test so each pixel accumulates the number of fragments that
+    /// cover it, then the composite maps that count through a jet ramp.
+    /// Diagnoses where geometry stacks up in depth (dense calorimeter /
+    /// tracker plane stacks) -- the density that drives moire aliasing.
+    Overdraw = 3,
 };
 
 enum class TonemapMode : int {
@@ -104,6 +110,34 @@ struct RenderQualitySettings {
     bool pause_when_static{true};
     bool enable_hdr{true};
     bool enable_tonemap{true};
+    /// Material-stack prefilter: band-limit the cycling-material pattern on
+    /// merged sampling stacks (calorimeter absorber/scintillator layers) by
+    /// blending each stack mesh's albedo toward its area-weighted average as
+    /// the pixel footprint outgrows the band width -- kills the moire those
+    /// thin high-contrast layers produce at distance. Only affects meshes the
+    /// tessellation pass tagged with a StackAverage; a no-op elsewhere.
+    bool enable_material_prefilter{true};
+    /// Scales the stack-prefilter transition: the blend toward the average
+    /// completes once the pixel footprint reaches `scale * featureSize` band
+    /// widths. >1 keeps the crisp bands to a closer distance (blend later);
+    /// <1 blends earlier/more aggressively. A global dial on top of the
+    /// per-stack feature size baked at tessellation time.
+    float material_prefilter_scale{1.0f};
+    /// Per-distance hull LOD: merged stacks (with an LOD proxy) pick between
+    /// their detailed slabs and the coarse convex-hull proxy per instance by
+    /// projected screen size, screen-door cross-fading through a transition
+    /// band so there is no pop. Kills the geometric coverage moire at zoom-out
+    /// (the hull is gap-free) and buys back geometry-density perf. Off = detail
+    /// everywhere.
+    bool lod_hull_enable{true};
+    /// Debug: force every proxy-tagged stack to its hull regardless of distance
+    /// (the old global preview swap) for eyeballing the proxy look.
+    bool lod_hull_force{false};
+    /// Screen size (px, ~projected bounding diameter) at the middle of the
+    /// detail<->hull cross-fade. Larger on screen -> detailed; smaller -> hull.
+    float lod_hull_screen_px{64.f};
+    /// Half-width (px) of the cross-fade band around lod_hull_screen_px.
+    float lod_hull_band_px{24.f};
     bool enable_fxaa{true};
     /// FXAA (PC-quality variant) tunables. Only consulted when enable_fxaa.
     /// Sub-pixel aliasing removal: blends the pixel toward the local 3×3
@@ -161,6 +195,12 @@ struct RenderQualitySettings {
     /// `enable_advanced_ao` is on.
     float ao_bent_strength{0.5f};
     DebugView debug_view{DebugView::Off};
+    /// Overdraw heatmap (DebugView::Overdraw) scale: the per-pixel fragment
+    /// count that maps to the hot end of the ramp. Pixels covered more than
+    /// this many times clamp to white to flag the worst hotspots. Raise it
+    /// for very dense scenes (calorimeter / tracker stacks) where the
+    /// interesting depth-complexity range runs higher.
+    float overdraw_range{16.0f};
     float exposure_stops{1.6f};
     /// AgX has more contrast than the Narkowicz ACES fit at neutral
     /// exposure, so diffuse-lit interior scenes (typical detector views)

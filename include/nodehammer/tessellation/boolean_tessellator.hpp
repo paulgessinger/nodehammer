@@ -12,6 +12,13 @@ namespace nodehammer {
 [[nodiscard]] std::optional<manifold::Manifold>
 meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::string_view context);
 
+/// Convex hull of a point cloud, as a flat-shaded watertight mesh. Used to
+/// build a gap-free LOD proxy for a merged sampling stack (the hull spans the
+/// air gaps between slabs while following the outer silhouette). Returns an
+/// empty output when the points are degenerate (< 4, or coplanar) or the hull
+/// fails.
+[[nodiscard]] TessellationOutput convexHull(const std::vector<glm::vec3> &points);
+
 /// Recursively tessellate a boolean shape using the Manifold library.
 ///
 /// Resolves operand shapes from the scene. For primitives, prefers Manifold's

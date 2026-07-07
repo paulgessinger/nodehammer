@@ -347,6 +347,25 @@ std::optional<manifold::Manifold> resolveAndTessellate(SemanticShapeId shapeId,
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
+TessellationOutput convexHull(const std::vector<glm::vec3> &points) {
+    // Manifold's convex hull needs at least a tetrahedron of non-coplanar
+    // points; fewer (or a degenerate/coplanar set) yields an empty or error
+    // result, which we surface as an empty mesh for the caller to skip.
+    if (points.size() < 4) {
+        return {};
+    }
+    std::vector<manifold::vec3> pts;
+    pts.reserve(points.size());
+    for (const auto &p : points) {
+        pts.push_back(manifold::vec3{p.x, p.y, p.z});
+    }
+    manifold::Manifold hull = manifold::Manifold::Hull(pts);
+    if (hull.Status() != manifold::Manifold::Error::NoError || hull.IsEmpty()) {
+        return {};
+    }
+    return manifoldToMesh(hull);
+}
+
 TessellationOutput tessellateBooleanShape(const SemanticShapeVariant &shape,
                                           const SemanticScene &scene,
                                           const ITessellator &primitiveTessellator,

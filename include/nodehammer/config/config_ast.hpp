@@ -145,6 +145,12 @@ struct Rule {
         // and Boolean-cut views (the cut re-tessellation adds cap faces) but not
         // for the shader angle-cut preview, which exposes the raw interior.
         std::optional<bool> dropCoincidentFaces;
+        // Opt-in on a merge_descendants group: tag the merged sampling-stack
+        // meshes with a StackAverage (area-weighted average color + band
+        // width) so the viewer can band-limit the cycling-material moire at
+        // distance. Only meaningful together with mergeDescendants (the average
+        // is computed over the merged stack); independent of dropCoincidentFaces.
+        std::optional<bool> averageMaterialStack;
         std::optional<int> maxSegmentsCircle;
         std::optional<BooleanFallback> fallback;
     };

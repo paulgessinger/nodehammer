@@ -9,7 +9,9 @@
 //       normal-Z they are DARKER — the convention is backend-conditional,
 //       see useReversedZ in C++)
 //   2 — linearized depth (uniform near→far gradient regardless of convention)
-// Depth views bypass exposure and tonemap entirely.
+//   3 — overdraw heatmap (scene_color.r carries an additive per-pixel
+//       fragment count; mapped through a jet ramp)
+// Depth and overdraw views bypass exposure and tonemap entirely.
 //
 // VS reads NDC positions for a fullscreen triangle from a tiny static VBO
 // owned by CompositePass. Caller issues sg_draw(0, 3, 1) with that VBO bound
@@ -91,6 +93,13 @@ layout(binding=0) uniform composite_params {
     // x = subpix amount (0..1), y = relative edge threshold,
     // z = absolute edge threshold, w = max edge-search steps.
     vec4 fxaa_quality;
+    // Overdraw heatmap (mode 3) params. Appended last for std140 stability.
+    // x = count scale — multiply the sampled scene_color.r (an additively
+    //     accumulated, increment-scaled fragment count) by this to recover
+    //     the integer draw count. = 1/increment; see overdrawColorIncrement.
+    // y = range — the count that maps to the hot end of the ramp; counts
+    //     above it clamp to white. zw reserved.
+    vec4 overdraw_params;
 };
 
 layout(binding=0) uniform texture2D scene_color;
@@ -133,6 +142,17 @@ vec3 tonemap_aces(vec3 x) {
 }
 
 vec3 tonemap_reinhard(vec3 x) { return x / (1.0 + x); }
+
+// Jet-style ramp (blue -> cyan -> green -> yellow -> red) for the overdraw
+// heatmap. Input is normalized count in [0,1]. Cheap analytic form -- no LUT
+// texture -- which keeps the composite single-binding.
+vec3 overdraw_heat(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return clamp(vec3(1.5 - abs(4.0 * t - 3.0),
+                      1.5 - abs(4.0 * t - 2.0),
+                      1.5 - abs(4.0 * t - 1.0)),
+                 0.0, 1.0);
+}
 
 // Pre-tonemap "look" pass. Operates on linear HDR data after exposure and
 // before the tonemap curve, so the operator's roll-off still does its work
@@ -423,6 +443,21 @@ void main() {
         float zv = linearize_depth(d, n, f, depth_params.x, depth_params.y);
         float t = clamp((zv - n) / (f - n), 0.0, 1.0);
         frag_color = vec4(vec3(t), 1.0);
+    } else if (mode == 3) {
+        // Overdraw heatmap. scene_color.r is the additively-accumulated,
+        // increment-scaled fragment count (see the scene FS overdraw path).
+        // Recover the integer count, normalize by the user range, and map
+        // through the jet ramp. 0 draws -> near-black; counts over the range
+        // clamp to white to flag the densest hotspots.
+        float count = texture(sampler2D(scene_color, smp_color), uv).r * overdraw_params.x;
+        float range = max(overdraw_params.y, 1.0);
+        if (count < 0.5) {
+            frag_color = vec4(vec3(0.02), 1.0);
+        } else if (count > range) {
+            frag_color = vec4(1.0, 1.0, 1.0, 1.0);
+        } else {
+            frag_color = vec4(overdraw_heat(count / range), 1.0);
+        }
     } else if (fxaa_params.x > 0.5) {
         frag_color = vec4(fxaa(uv, fxaa_params.yz), 1.0);
     } else {

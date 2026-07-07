@@ -29,11 +29,17 @@ in vec4 inst0;
 in vec4 inst1;
 in vec4 inst2;
 in vec4 inst3;
+// Per-instance LOD cross-fade factor: x = fade (0 = full detail, 1 = full
+// hull proxy); yzw reserved. Computed per frame on the CPU from the
+// instance's projected screen size and uploaded alongside the world matrix.
+in vec4 inst_lod;
 
 out vec3 v_normal_world;
 out vec3 v_world_pos;
+out float v_lod_fade;
 
 void main() {
+    v_lod_fade = inst_lod.x;
     vec4 world_pos =
           a_position.x * inst0
         + a_position.y * inst1
@@ -67,11 +73,20 @@ void main() {
 layout(binding=1) uniform fs_params {
     vec4 base_color;   // rgb = albedo, a = opacity
     vec4 light_dir;    // xyz = direction TO light, world space; w = intensity (PBR only)
-    vec4 cut_params;   // x = enabled, y = large cut flag, z/w = unused
+    // x = angle-cut enabled, y = large cut flag,
+    // z = LOD cross-fade dither role (0 = off, 1 = detail half, 2 = hull half)
+    //     -- see the screen-door discard in main(); w = unused.
+    vec4 cut_params;
     vec4 cut_start;    // xy = unit vector at start phi
     vec4 cut_end;      // xy = unit vector at end phi
     vec4 material_mr;  // x = metallic, y = roughness, z/w = unused
-    vec4 mode_flags;   // x = pbr_enable, y = prefilter_max_lod, z/w = unused
+    // x = pbr_enable, y = prefilter_max_lod,
+    // z = overdraw_increment (0 = off; >0 = emit this constant per fragment
+    //     for the overdraw debug view, which runs this shader under an
+    //     additive-blend / no-depth pipeline),
+    // w = material_stack_prefilter enable (0/1) -- runtime toggle for the
+    //     sampling-stack AA blend (see stack_prefilter below).
+    vec4 mode_flags;
     vec4 camera_pos;   // xyz = world-space camera position
     vec4 emissive;     // xyz = emissive factor (linear, can be > 1.0), w = unused
     vec4 alpha_params; // x = alpha_mode (0 = OPAQUE, 1 = MASK), y = alpha_cutoff, z/w = unused
@@ -88,6 +103,12 @@ layout(binding=1) uniform fs_params {
     // where the camera is mostly still, and the alternative (in-frame AO
     // before forward shading) would require a depth prepass.
     vec4 ao_history_params;
+    // Material-stack prefilter (viewer AA for sampling stacks). Populated per
+    // merged-stack mesh from MeshAsset::stackAverage.
+    //   xyz = area-weighted average base color (linear)
+    //   w   = characteristic band width (world units); 0 = mesh not tagged,
+    //         prefilter skipped. Enable gate is mode_flags.w.
+    vec4 stack_prefilter;
 };
 
 layout(binding=0) uniform textureCube tex_irradiance;
@@ -102,9 +123,22 @@ layout(binding=2) uniform sampler     smp_ao_history;
 
 in vec3 v_normal_world;
 in vec3 v_world_pos;
+in float v_lod_fade;
 out vec4 frag_color;
 
 const float PI = 3.14159265358979323846;
+
+// Blue-noise-style dither threshold in [0,1) from screen pixel coords, via
+// interleaved gradient noise (IGN, Jimenez). Its energy sits in high spatial
+// frequencies with no repeating structure, so the LOD cross-fade stipple reads
+// as fine even grain that AA erases readily -- unlike a 4x4 ordered (Bayer)
+// matrix, whose regular checkerboard survives into the visible frame at the
+// lower effective resolution web backends settle to. Still a stable, purely
+// spatial pattern for a given pixel (no temporal component), so it holds steady
+// under the viewer's pause_when_static settle.
+float ignDither(vec2 frag) {
+    return fract(52.9829189 * fract(dot(frag, vec2(0.06711056, 0.00583715))));
+}
 
 float D_GGX(float NdotH, float a2) {
     float d = (NdotH * NdotH) * (a2 - 1.0) + 1.0;
@@ -178,13 +212,67 @@ void main() {
         discard;
     }
 
+    // LOD cross-fade (screen-door dither). A stack in the transition band draws
+    // both its detailed slabs and its hull proxy; each keeps a complementary
+    // half of the pixels against a shared ordered-dither threshold, so exactly
+    // one representation survives per pixel and the stack dissolves smoothly
+    // detail<->hull with no pop. v_lod_fade: 0 = full detail, 1 = full hull.
+    // cut_params.z selects the half (1 = detail, 2 = hull); 0 disables (Normal
+    // groups and instances outside the band, which the CPU already emits to a
+    // single group). Kept before the derivative-based prefilter below, matching
+    // the existing cut/alpha discards.
+    if (cut_params.z > 0.5) {
+        float lod_thr = ignDither(gl_FragCoord.xy);
+        if (cut_params.z < 1.5) {
+            // Detail half: drop detail pixels as the hull fades in.
+            if (v_lod_fade > lod_thr) {
+                discard;
+            }
+        } else {
+            // Hull half: the complement of the detail test.
+            if (v_lod_fade <= lod_thr) {
+                discard;
+            }
+        }
+    }
+
+    // Overdraw debug: the pipeline binds additive blending with the depth
+    // test off, so every covered fragment adds `increment` to the color
+    // target and the composite recovers a per-pixel draw count. Emit and
+    // bail before any lighting. Placed after the cut / alpha-mask discards
+    // so cut-away and masked fragments don't inflate the count.
+    if (mode_flags.z > 0.0) {
+        frag_color = vec4(mode_flags.z, 0.0, 0.0, mode_flags.z);
+        return;
+    }
+
     vec3 n = normalize(v_normal_world);
+
+    // Material-stack prefilter: band-limit the cycling slab colors by blending
+    // the albedo toward the stack's area-weighted average (stack_prefilter.xyz)
+    // once the pixel footprint on the surface grows past the band width
+    // (stack_prefilter.w) -- i.e. when the bands can no longer be resolved and
+    // point sampling would alias into moire. The footprint is the world-space
+    // size of the pixel projected onto the surface (from position derivatives),
+    // so it grows with distance and at grazing angles -- exactly where the
+    // moire is worst. Gated by the runtime toggle (mode_flags.w); untagged
+    // meshes carry w = 0 and are skipped. Uniform control flow (both guards are
+    // per-draw uniforms), so the derivatives are well-defined.
+    vec3 albedo = base_color.rgb;
+    float prefilter_t = 0.0;
+    if (mode_flags.w > 0.5 && stack_prefilter.w > 0.0) {
+        vec3 dpdx = dFdx(v_world_pos);
+        vec3 dpdy = dFdy(v_world_pos);
+        float footprint = sqrt(length(cross(dpdx, dpdy)));
+        prefilter_t = smoothstep(stack_prefilter.w, 3.0 * stack_prefilter.w, footprint);
+        albedo = mix(albedo, stack_prefilter.xyz, prefilter_t);
+    }
 
     if (mode_flags.x < 0.5) {
         // Lambert (legacy fast path) — preserved byte-for-byte.
         // Two-sided shading: detector inner/outer faces light regardless of winding.
         float ndl = max(abs(dot(n, -light_dir.xyz)), 0.0);
-        vec3 rgb = base_color.rgb * (0.20 + 0.80 * ndl) + emissive.xyz;
+        vec3 rgb = albedo * (0.20 + 0.80 * ndl) + emissive.xyz;
         frag_color = vec4(rgb, base_color.a);
         return;
     }
@@ -221,10 +309,28 @@ void main() {
 
     float metallic  = clamp(material_mr.x, 0.0, 1.0);
     float roughness = clamp(material_mr.y, 0.04, 1.0);
+
+    // ---- Specular anti-aliasing: raise roughness where sub-pixel detail
+    // makes the specular lobe alias, from two complementary signals ----
+    // (1) Stack prefilter: as the cycling bands blur toward their average
+    //     (prefilter_t -> 1), roughen toward matte so the highlight broadens
+    //     and stops glinting. The footprint-average of a micro-structured
+    //     glossy stack is duller, not just color-averaged.
+    roughness = mix(roughness, 1.0, prefilter_t);
+    // (2) Geometric specular AA (Kaplanyan/Karis): where the surface normal
+    //     varies fast across the pixel (fine facets, edges), widen roughness
+    //     to band-limit the BRDF. Distance-independent, so it also kills
+    //     close-range highlight moire the distance-based prefilter leaves.
+    vec3 dNdx = dFdx(v_normal_world);
+    vec3 dNdy = dFdy(v_normal_world);
+    float normalVar = dot(dNdx, dNdx) + dot(dNdy, dNdy);
+    float kernelRoughness = min(2.0 * normalVar, 0.18);
+    roughness = clamp(sqrt(roughness * roughness + kernelRoughness), 0.04, 1.0);
+
     float a = roughness * roughness;
     float a2 = a * a;
 
-    vec3 F0 = mix(vec3(0.04), base_color.rgb, metallic);
+    vec3 F0 = mix(vec3(0.04), albedo, metallic);
 
     vec3 F  = F_Schlick(VdotH, F0);
     float D = D_GGX(NdotH, a2);
@@ -232,7 +338,7 @@ void main() {
 
     vec3 specular = (D * G) * F / max(4.0 * NdotV * NdotL, 1e-4);
     vec3 kd = (vec3(1.0) - F) * (1.0 - metallic);
-    vec3 diffuse = kd * base_color.rgb / PI;
+    vec3 diffuse = kd * albedo / PI;
 
     vec3 Lo = (diffuse + specular) * NdotL * light_dir.w;
 
@@ -307,10 +413,10 @@ void main() {
         textureLod(samplerCube(tex_prefilter, smp_cube), R, roughness * max_lod).rgb;
     vec2 brdf = textureLod(sampler2D(tex_brdf_lut, smp_lut), vec2(NdotV, roughness), 0.0).rg;
 
-    vec3 ao_mb = gtaoMultiBounce(ao, base_color.rgb);
+    vec3 ao_mb = gtaoMultiBounce(ao, albedo);
     float so = specularOcclusion(NdotV, ao);
 
-    vec3 ambient = irradiance * kd * base_color.rgb * ao_mb +
+    vec3 ambient = irradiance * kd * albedo * ao_mb +
                    prefiltered * (F0 * brdf.x + vec3(brdf.y)) * so;
 
     frag_color = vec4(ambient + Lo + emissive.xyz, base_color.a);

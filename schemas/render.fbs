@@ -41,12 +41,22 @@ table Provenance {
 
 // ── Mesh asset (shared geometry, immutable) ──────────────────────────────────
 
+// Prefilter hint for a merged sampling-stack mesh (calo absorber/scintillator
+// layers). Nullable: absent → std::nullopt. Must be carried across the
+// worker→viewer round-trip or the material-stack prefilter (moire band-limit)
+// is a no-op in WASM — the viewer only prefilters meshes that carry this.
+table StackAverage {
+    avg_color_linear:Vec3f;   // area-weighted average base color, linear
+    feature_size:float;       // characteristic band width, world units
+}
+
 table MeshAsset {
     id:ulong;
     name:string;
     vertices:[Vertex];
     indices:[uint];        // triangles: every 3 indices = one triangle
     provenance:Provenance;
+    stack_average:StackAverage;
 }
 
 // ── Material (per-instance binding) ──────────────────────────────────────────
@@ -89,6 +99,10 @@ table RenderNode {
     children:[ulong];
     mesh_bindings:[MeshBinding];
     semantic_node_id:ulong;
+    // Coarse hull LOD proxies (one per merged stack). Empty for most nodes;
+    // when present the viewer cross-fades to these at distance. Must be carried
+    // across the worker→viewer round-trip or hull LOD is a no-op in WASM.
+    lod_proxy_bindings:[MeshBinding];
     // RenderNode::extras (free-form nlohmann::json) is export-only metadata the
     // GPU path never reads, so it is intentionally omitted from this schema.
 }

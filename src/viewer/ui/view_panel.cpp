@@ -146,11 +146,20 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
 
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Render Quality")) {
-        const char *kDebugViewLabels[] = {"off", "depth (raw)", "depth (linear)"};
+        const char *kDebugViewLabels[] = {"off", "depth (raw)", "depth (linear)", "overdraw"};
         int debug_idx = static_cast<int>(ctx.quality.debug_view);
         if (ImGui::Combo("debug view", &debug_idx, kDebugViewLabels,
                          IM_ARRAYSIZE(kDebugViewLabels))) {
             ctx.quality.debug_view = static_cast<DebugView>(debug_idx);
+        }
+
+        // Overdraw heatmap range: only meaningful in the overdraw view, so
+        // it's shown only when that view is active.
+        if (ctx.quality.debug_view == DebugView::Overdraw) {
+            ImGui::SliderFloat("overdraw range", &ctx.quality.overdraw_range, 2.0f, 128.0f, "%.0f");
+            ImGui::SetItemTooltip("Fragment count mapped to the hot (red) end of the ramp.\n"
+                                  "Blue = few layers deep, red = many; white = above range.\n"
+                                  "Raise for dense calorimeter / tracker plane stacks.");
         }
 
         // FXAA is live; greyed out only while a depth debug view is active
@@ -197,6 +206,51 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
             ImGui::Checkbox("background", &ctx.quality.enable_background);
             ImGui::SetItemTooltip("Show the IBL sky as the visible background "
                                   "(matches the reflected sky on metallics)");
+            ImGui::EndDisabled();
+        }
+
+        // Material-stack prefilter: band-limits the cycling-material moire on
+        // merged sampling stacks (calo layers) by blending toward each stack's
+        // average color as the pixel footprint outgrows the band width. No-op
+        // on meshes the tessellation pass didn't tag with a StackAverage.
+        {
+            const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
+            ImGui::BeginDisabled(depth_debug);
+            ImGui::Checkbox("stack prefilter (AA)", &ctx.quality.enable_material_prefilter);
+            ImGui::SetItemTooltip("Anti-alias sampling-stack moire: blend cycling slab colors "
+                                  "toward the stack average once the pixel can't resolve the "
+                                  "bands. Affects stacks tagged average_material_stack in config.");
+            if (ctx.quality.enable_material_prefilter) {
+                ImGui::SliderFloat("prefilter scale", &ctx.quality.material_prefilter_scale, 0.25f,
+                                   8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+                ImGui::SetItemTooltip("Transition-distance dial. >1 keeps crisp bands closer "
+                                      "(blend later); <1 blends earlier. Tune per view.");
+            }
+            ImGui::Checkbox("hull LOD", &ctx.quality.lod_hull_enable);
+            ImGui::SetItemTooltip("Per-distance LOD: tagged stacks draw detailed slabs up close "
+                                  "and their coarse convex hull (stack average) far away, "
+                                  "screen-door cross-fading between the two -- gap-free, no moire, "
+                                  "no pop. Off = detailed slabs everywhere.");
+            if (ctx.quality.lod_hull_enable) {
+                ImGui::Indent();
+                ImGui::SliderFloat("hull switch (px)", &ctx.quality.lod_hull_screen_px, 8.f, 512.f,
+                                   "%.0f", ImGuiSliderFlags_Logarithmic);
+                ImGui::SetItemTooltip("Projected on-screen size at the middle of the cross-fade. "
+                                      "Larger than this -> detailed; smaller -> hull.");
+                ImGui::SliderFloat("hull fade band (px)", &ctx.quality.lod_hull_band_px, 1.f, 128.f,
+                                   "%.0f");
+                ImGui::SetItemTooltip("Half-width of the detail<->hull cross-fade band around the "
+                                      "switch size. Wider = smoother, longer dither zone.");
+                ImGui::Checkbox("force hull (debug)", &ctx.quality.lod_hull_force);
+                ImGui::SetItemTooltip("Pin every tagged stack to its hull regardless of distance, "
+                                      "to eyeball the proxy look.");
+                ImGui::Unindent();
+            } else {
+                // Force-hull only applies while hull LOD is enabled; clear it here so
+                // it doesn't linger active-but-hidden if the user re-enables hull LOD
+                // later expecting "Off = detailed slabs everywhere" to hold in between.
+                ctx.quality.lod_hull_force = false;
+            }
             ImGui::EndDisabled();
         }
 

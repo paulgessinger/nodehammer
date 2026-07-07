@@ -6,6 +6,19 @@
 
 namespace nodehammer::viewer {
 
+/// Per-fragment increment the overdraw debug pass adds for each covered
+/// fragment, chosen so additive blending into `color_fmt` lets the composite
+/// recover an integer draw count. Float targets (RGBA16F HDR) accumulate 1.0
+/// exactly up to ~2048; an 8-bit unorm target would clamp at 1.0 after the
+/// first fragment, so we step by 1/255 and the composite scales back up
+/// (giving a countable 0..255 range). The composite multiplies the sampled
+/// value by 1/increment (see the overdraw branch in composite.glsl).
+inline float overdrawColorIncrement(sg_pixel_format color_fmt) {
+    return (color_fmt == SG_PIXELFORMAT_RGBA8 || color_fmt == SG_PIXELFORMAT_BGRA8)
+               ? (1.0f / 255.0f)
+               : 1.0f;
+}
+
 /// Offscreen color + depth render target for the scene pass. The composite
 /// pass samples this target into the swapchain. RAII over a small bag of
 /// sokol resources; lazy creation/recreation lives in `App::Impl`.
