@@ -14,7 +14,9 @@ namespace nodehammer::viewer {
 /// (giving a countable 0..255 range). The composite multiplies the sampled
 /// value by 1/increment (see the overdraw branch in composite.glsl).
 inline float overdrawColorIncrement(sg_pixel_format color_fmt) {
-    return color_fmt == SG_PIXELFORMAT_RGBA8 ? (1.0f / 255.0f) : 1.0f;
+    return (color_fmt == SG_PIXELFORMAT_RGBA8 || color_fmt == SG_PIXELFORMAT_BGRA8)
+               ? (1.0f / 255.0f)
+               : 1.0f;
 }
 
 /// Offscreen color + depth render target for the scene pass. The composite

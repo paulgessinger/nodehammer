@@ -245,6 +245,11 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
                 ImGui::SetItemTooltip("Pin every tagged stack to its hull regardless of distance, "
                                       "to eyeball the proxy look.");
                 ImGui::Unindent();
+            } else {
+                // Force-hull only applies while hull LOD is enabled; clear it here so
+                // it doesn't linger active-but-hidden if the user re-enables hull LOD
+                // later expecting "Off = detailed slabs everywhere" to hold in between.
+                ctx.quality.lod_hull_force = false;
             }
             ImGui::EndDisabled();
         }
