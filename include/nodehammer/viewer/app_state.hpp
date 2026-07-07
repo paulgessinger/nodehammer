@@ -2,6 +2,7 @@
 
 #include <nodehammer/viewer/camera.hpp>
 #include <nodehammer/viewer/config.hpp>
+#include <nodehammer/viewer/render_quality.hpp>
 
 #include <optional>
 #include <string>
@@ -34,5 +35,9 @@ void applyViewerStartupOverrides(const ConfigStartupOverrides &overrides, Config
 
 [[nodiscard]] std::string viewerConfigStateToToml(const ViewerConfigState &state);
 [[nodiscard]] std::optional<ViewerConfigState> viewerConfigStateFromToml(std::string_view bytes);
+
+[[nodiscard]] std::string renderQualityStateToToml(const RenderQualitySettings &quality);
+[[nodiscard]] std::optional<RenderQualitySettings>
+renderQualityStateFromToml(std::string_view bytes);
 
 } // namespace nodehammer::viewer

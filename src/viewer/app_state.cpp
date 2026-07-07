@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <sstream>
 
 namespace nodehammer::viewer {
@@ -36,6 +37,16 @@ void readBool(const toml::table &tbl, std::string_view key, bool &out) {
 void readFloat(const toml::table &tbl, std::string_view key, float &out) {
     if (auto value = finiteFloat(tbl, key)) {
         out = *value;
+    }
+}
+
+template <typename Enum>
+void readEnumIndex(const toml::table &tbl, std::string_view key, Enum &out, int min_idx,
+                   int max_idx) {
+    if (auto idx = tbl[key].value<int64_t>()) {
+        if (*idx >= min_idx && *idx <= max_idx) {
+            out = static_cast<Enum>(*idx);
+        }
     }
 }
 
@@ -298,6 +309,113 @@ std::optional<ViewerConfigState> viewerConfigStateFromToml(std::string_view byte
         state.camera = parseCamera(*camera);
     }
     return state;
+}
+
+std::string renderQualityStateToToml(const RenderQualitySettings &quality) {
+    toml::table render{
+        {"render_scale", quality.render_scale},
+        {"dynamic_render_scale", quality.dynamic_render_scale},
+        {"adaptive_render_scale", quality.adaptive_render_scale},
+        {"render_scale_target_fps", quality.render_scale_target_fps},
+        {"render_scale_min", quality.render_scale_min},
+        {"render_scale_max", quality.render_scale_max},
+        {"render_scale_memory_budget_mb", quality.render_scale_memory_budget_mb},
+        {"cap_fps", quality.cap_fps},
+        {"pause_when_static", quality.pause_when_static},
+        {"enable_hdr", quality.enable_hdr},
+        {"enable_tonemap", quality.enable_tonemap},
+        {"enable_material_prefilter", quality.enable_material_prefilter},
+        {"material_prefilter_scale", quality.material_prefilter_scale},
+        {"lod_hull_enable", quality.lod_hull_enable},
+        {"lod_hull_force", quality.lod_hull_force},
+        {"lod_hull_screen_px", quality.lod_hull_screen_px},
+        {"lod_hull_band_px", quality.lod_hull_band_px},
+        {"enable_fxaa", quality.enable_fxaa},
+        {"fxaa_subpix", quality.fxaa_subpix},
+        {"fxaa_edge_threshold", quality.fxaa_edge_threshold},
+        {"fxaa_edge_threshold_min", quality.fxaa_edge_threshold_min},
+        {"fxaa_quality", static_cast<int>(quality.fxaa_quality)},
+        {"enable_ao", quality.enable_ao},
+        {"ao_intensity", quality.ao_intensity},
+        {"ao_radius", quality.ao_radius},
+        {"ao_thickness", quality.ao_thickness},
+        {"ao_quality", static_cast<int>(quality.ao_quality)},
+        {"ao_resolution_scale", quality.ao_resolution_scale},
+        {"enable_ao_denoise", quality.enable_ao_denoise},
+        {"enable_advanced_ao", quality.enable_advanced_ao},
+        {"ao_bent_strength", quality.ao_bent_strength},
+        {"debug_view", static_cast<int>(quality.debug_view)},
+        {"overdraw_range", quality.overdraw_range},
+        {"exposure_stops", quality.exposure_stops},
+        {"tonemap_mode", static_cast<int>(quality.tonemap_mode)},
+        {"contrast", quality.contrast},
+        {"saturation", quality.saturation},
+        {"enable_background", quality.enable_background},
+    };
+    toml::table root{{"version", 1}, {"render", std::move(render)}};
+    std::ostringstream out;
+    out << root;
+    return out.str();
+}
+
+std::optional<RenderQualitySettings> renderQualityStateFromToml(std::string_view bytes) {
+    toml::table root;
+    try {
+        root = toml::parse(bytes);
+    } catch (const toml::parse_error &) {
+        return std::nullopt;
+    }
+
+    RenderQualitySettings quality;
+    const auto *render = root["render"].as_table();
+    if (render == nullptr) {
+        return quality;
+    }
+
+    readFloat(*render, "render_scale", quality.render_scale);
+    readBool(*render, "dynamic_render_scale", quality.dynamic_render_scale);
+    readBool(*render, "adaptive_render_scale", quality.adaptive_render_scale);
+    readFloat(*render, "render_scale_target_fps", quality.render_scale_target_fps);
+    readFloat(*render, "render_scale_min", quality.render_scale_min);
+    readFloat(*render, "render_scale_max", quality.render_scale_max);
+    readFloat(*render, "render_scale_memory_budget_mb", quality.render_scale_memory_budget_mb);
+    readBool(*render, "cap_fps", quality.cap_fps);
+    readBool(*render, "pause_when_static", quality.pause_when_static);
+    readBool(*render, "enable_hdr", quality.enable_hdr);
+    readBool(*render, "enable_tonemap", quality.enable_tonemap);
+    readBool(*render, "enable_material_prefilter", quality.enable_material_prefilter);
+    readFloat(*render, "material_prefilter_scale", quality.material_prefilter_scale);
+    readBool(*render, "lod_hull_enable", quality.lod_hull_enable);
+    readBool(*render, "lod_hull_force", quality.lod_hull_force);
+    readFloat(*render, "lod_hull_screen_px", quality.lod_hull_screen_px);
+    readFloat(*render, "lod_hull_band_px", quality.lod_hull_band_px);
+    readBool(*render, "enable_fxaa", quality.enable_fxaa);
+    readFloat(*render, "fxaa_subpix", quality.fxaa_subpix);
+    readFloat(*render, "fxaa_edge_threshold", quality.fxaa_edge_threshold);
+    readFloat(*render, "fxaa_edge_threshold_min", quality.fxaa_edge_threshold_min);
+    readEnumIndex(*render, "fxaa_quality", quality.fxaa_quality,
+                  static_cast<int>(FxaaQualityPreset::Low),
+                  static_cast<int>(FxaaQualityPreset::Ultra));
+    readBool(*render, "enable_ao", quality.enable_ao);
+    readFloat(*render, "ao_intensity", quality.ao_intensity);
+    readFloat(*render, "ao_radius", quality.ao_radius);
+    readFloat(*render, "ao_thickness", quality.ao_thickness);
+    readEnumIndex(*render, "ao_quality", quality.ao_quality, static_cast<int>(AoQualityPreset::Low),
+                  static_cast<int>(AoQualityPreset::Ultra));
+    readFloat(*render, "ao_resolution_scale", quality.ao_resolution_scale);
+    readBool(*render, "enable_ao_denoise", quality.enable_ao_denoise);
+    readBool(*render, "enable_advanced_ao", quality.enable_advanced_ao);
+    readFloat(*render, "ao_bent_strength", quality.ao_bent_strength);
+    readEnumIndex(*render, "debug_view", quality.debug_view, static_cast<int>(DebugView::Off),
+                  static_cast<int>(DebugView::Overdraw));
+    readFloat(*render, "overdraw_range", quality.overdraw_range);
+    readFloat(*render, "exposure_stops", quality.exposure_stops);
+    readEnumIndex(*render, "tonemap_mode", quality.tonemap_mode,
+                  static_cast<int>(TonemapMode::ACES), static_cast<int>(TonemapMode::AgX));
+    readFloat(*render, "contrast", quality.contrast);
+    readFloat(*render, "saturation", quality.saturation);
+    readBool(*render, "enable_background", quality.enable_background);
+    return quality;
 }
 
 } // namespace nodehammer::viewer
