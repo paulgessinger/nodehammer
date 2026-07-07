@@ -146,6 +146,9 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
 
     ImGui::Separator();
     if (ImGui::CollapsingHeader("Render Quality")) {
+        if (ImGui::Button("Reset render quality defaults") && actions.reset_render_quality) {
+            actions.reset_render_quality();
+        }
         const char *kDebugViewLabels[] = {"off", "depth (raw)", "depth (linear)", "overdraw"};
         int debug_idx = static_cast<int>(ctx.quality.debug_view);
         if (ImGui::Combo("debug view", &debug_idx, kDebugViewLabels,

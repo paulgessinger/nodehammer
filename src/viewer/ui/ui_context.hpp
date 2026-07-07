@@ -50,6 +50,7 @@ struct UiActions {
     /// `ViewerUiContext::export_settings`. Coalesced — ignored while another
     /// export is already in flight.
     std::function<void()> export_png;
+    std::function<void()> reset_render_quality;
     std::function<void(std::string)> select_config_key;
     std::function<void(std::string)> select_geometry_key;
 };

@@ -139,6 +139,7 @@ std::string makeScreenshotFilename() {
 } // namespace
 
 constexpr const char *kViewerConfigStateKey = "viewer-state.toml";
+constexpr const char *kRenderQualityStateKey = "viewer-render-quality.toml";
 constexpr const char *kImGuiStateKey = "imgui.ini";
 constexpr double kPersistenceSaveIntervalSeconds = 1.0;
 
@@ -281,6 +282,7 @@ struct App::Impl {
     ui::UiState ui_state;
     ui::Notifications notifications;
     std::string last_saved_viewer_config_state;
+    std::string last_saved_render_quality_state;
     std::string last_saved_imgui_state;
     uint64_t last_persistence_save_time{0};
     ConfigStartupOverrides startup_overrides;
@@ -383,6 +385,8 @@ struct App::Impl {
     void applyStartupOverrides();
     void loadImGuiState();
     [[nodiscard]] std::string currentViewerConfigStateToml() const;
+    void loadRenderQualityState();
+    [[nodiscard]] std::string currentRenderQualityStateToml() const;
     void savePersistentState(bool force);
 
     void classifyScroll(float scroll_x, float scroll_y);
@@ -485,6 +489,24 @@ std::string App::Impl::currentViewerConfigStateToml() const {
     return viewerConfigStateToToml(state);
 }
 
+void App::Impl::loadRenderQualityState() {
+    auto bytes = platform_->loadPersistentText(kRenderQualityStateKey);
+    if (!bytes || bytes->empty()) {
+        return;
+    }
+    auto state = renderQualityStateFromToml(*bytes);
+    if (!state) {
+        std::println(stderr, "viewer: ignoring invalid persisted render quality state");
+        return;
+    }
+    quality = *state;
+    last_saved_render_quality_state = currentRenderQualityStateToml();
+}
+
+std::string App::Impl::currentRenderQualityStateToml() const {
+    return renderQualityStateToToml(quality);
+}
+
 void App::Impl::savePersistentState(bool force) {
     const uint64_t now = stm_now();
     if (!force && last_persistence_save_time != 0 &&
@@ -496,6 +518,17 @@ void App::Impl::savePersistentState(bool force) {
     if (force || viewer_state != last_saved_viewer_config_state) {
         platform_->savePersistentText(kViewerConfigStateKey, viewer_state);
         last_saved_viewer_config_state = viewer_state;
+    }
+
+    // Bench mode intentionally overrides quality at runtime (fixed scale, no
+    // dynamic scaling/cap). Keep those transient overrides out of persisted
+    // viewer quality so a benchmark run doesn't clobber the user's profile.
+    if (!bench_pending_) {
+        const std::string render_quality_state = currentRenderQualityStateToml();
+        if (force || render_quality_state != last_saved_render_quality_state) {
+            platform_->savePersistentText(kRenderQualityStateKey, render_quality_state);
+            last_saved_render_quality_state = render_quality_state;
+        }
     }
 
     ImGuiIO &io = ImGui::GetIO();
@@ -515,6 +548,7 @@ void App::Impl::savePersistentState(bool force) {
 
 void App::Impl::onInit() {
     loadViewerConfigState();
+    loadRenderQualityState();
     applyStartupOverrides();
 
     sg_desc gfx_desc{};
@@ -2057,6 +2091,7 @@ void App::Impl::onFrame() {
     ui_actions.export_png = [this]() {
         exporter_.request(export_settings, quality, scene != nullptr && scene_uploaded);
     };
+    ui_actions.reset_render_quality = [this]() { quality = RenderQualitySettings{}; };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
     ui_actions.frame_scene = [this]() {

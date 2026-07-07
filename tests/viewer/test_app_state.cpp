@@ -66,6 +66,93 @@ TEST_CASE("invalid viewer config state TOML is rejected") {
     CHECK_FALSE(viewerConfigStateFromToml("[view").has_value());
 }
 
+TEST_CASE("render quality state round-trips through TOML") {
+    RenderQualitySettings quality;
+    quality.render_scale = 1.5f;
+    quality.dynamic_render_scale = true;
+    quality.adaptive_render_scale = false;
+    quality.render_scale_target_fps = 72.f;
+    quality.render_scale_min = 0.4f;
+    quality.render_scale_max = 3.0f;
+    quality.render_scale_memory_budget_mb = 768.f;
+    quality.cap_fps = true;
+    quality.pause_when_static = false;
+    quality.enable_hdr = false;
+    quality.enable_tonemap = false;
+    quality.enable_material_prefilter = false;
+    quality.material_prefilter_scale = 1.7f;
+    quality.lod_hull_enable = true;
+    quality.lod_hull_force = true;
+    quality.lod_hull_screen_px = 96.f;
+    quality.lod_hull_band_px = 12.f;
+    quality.enable_fxaa = false;
+    quality.fxaa_subpix = 0.5f;
+    quality.fxaa_edge_threshold = 0.2f;
+    quality.fxaa_edge_threshold_min = 0.05f;
+    quality.fxaa_quality = FxaaQualityPreset::Medium;
+    quality.enable_ao = false;
+    quality.ao_intensity = 0.6f;
+    quality.ao_radius = 0.2f;
+    quality.ao_thickness = 1.6f;
+    quality.ao_quality = AoQualityPreset::High;
+    quality.ao_resolution_scale = 0.5f;
+    quality.enable_ao_denoise = false;
+    quality.enable_advanced_ao = false;
+    quality.ao_bent_strength = 0.2f;
+    quality.debug_view = DebugView::LinearDepth;
+    quality.overdraw_range = 48.f;
+    quality.exposure_stops = -1.0f;
+    quality.tonemap_mode = TonemapMode::Reinhard;
+    quality.contrast = 1.3f;
+    quality.saturation = 0.8f;
+    quality.enable_background = false;
+
+    auto parsed = renderQualityStateFromToml(renderQualityStateToToml(quality));
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->render_scale == quality.render_scale);
+    CHECK(parsed->dynamic_render_scale == quality.dynamic_render_scale);
+    CHECK(parsed->adaptive_render_scale == quality.adaptive_render_scale);
+    CHECK(parsed->render_scale_target_fps == quality.render_scale_target_fps);
+    CHECK(parsed->render_scale_min == quality.render_scale_min);
+    CHECK(parsed->render_scale_max == quality.render_scale_max);
+    CHECK(parsed->render_scale_memory_budget_mb == quality.render_scale_memory_budget_mb);
+    CHECK(parsed->cap_fps == quality.cap_fps);
+    CHECK(parsed->pause_when_static == quality.pause_when_static);
+    CHECK(parsed->enable_hdr == quality.enable_hdr);
+    CHECK(parsed->enable_tonemap == quality.enable_tonemap);
+    CHECK(parsed->enable_material_prefilter == quality.enable_material_prefilter);
+    CHECK(parsed->material_prefilter_scale == quality.material_prefilter_scale);
+    CHECK(parsed->lod_hull_enable == quality.lod_hull_enable);
+    CHECK(parsed->lod_hull_force == quality.lod_hull_force);
+    CHECK(parsed->lod_hull_screen_px == quality.lod_hull_screen_px);
+    CHECK(parsed->lod_hull_band_px == quality.lod_hull_band_px);
+    CHECK(parsed->enable_fxaa == quality.enable_fxaa);
+    CHECK(parsed->fxaa_subpix == quality.fxaa_subpix);
+    CHECK(parsed->fxaa_edge_threshold == quality.fxaa_edge_threshold);
+    CHECK(parsed->fxaa_edge_threshold_min == quality.fxaa_edge_threshold_min);
+    CHECK(parsed->fxaa_quality == quality.fxaa_quality);
+    CHECK(parsed->enable_ao == quality.enable_ao);
+    CHECK(parsed->ao_intensity == quality.ao_intensity);
+    CHECK(parsed->ao_radius == quality.ao_radius);
+    CHECK(parsed->ao_thickness == quality.ao_thickness);
+    CHECK(parsed->ao_quality == quality.ao_quality);
+    CHECK(parsed->ao_resolution_scale == quality.ao_resolution_scale);
+    CHECK(parsed->enable_ao_denoise == quality.enable_ao_denoise);
+    CHECK(parsed->enable_advanced_ao == quality.enable_advanced_ao);
+    CHECK(parsed->ao_bent_strength == quality.ao_bent_strength);
+    CHECK(parsed->debug_view == quality.debug_view);
+    CHECK(parsed->overdraw_range == quality.overdraw_range);
+    CHECK(parsed->exposure_stops == quality.exposure_stops);
+    CHECK(parsed->tonemap_mode == quality.tonemap_mode);
+    CHECK(parsed->contrast == quality.contrast);
+    CHECK(parsed->saturation == quality.saturation);
+    CHECK(parsed->enable_background == quality.enable_background);
+}
+
+TEST_CASE("invalid render quality state TOML is rejected") {
+    CHECK_FALSE(renderQualityStateFromToml("[render").has_value());
+}
+
 TEST_CASE("startup overrides apply after persisted viewer config fields") {
     ViewerConfigState persisted;
     persisted.cull = CullOverride::ForceNoCull;
