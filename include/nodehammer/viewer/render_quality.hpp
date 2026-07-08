@@ -155,8 +155,8 @@ struct RenderQualitySettings {
     /// Edge-search step budget — see FxaaQualityPreset.
     FxaaQualityPreset fxaa_quality{FxaaQualityPreset::High};
     bool enable_ao{true};
-    float ao_intensity{1.8f};
-    float ao_radius{0.3f};
+    float ao_intensity{1.0f};
+    float ao_radius{0.44f};
     /// Multiplier on `ao_radius` defining the maximum length of a
     /// horizon-sample offset from the center pixel before the sample is
     /// rejected as a different surface (kills silhouette fringe). 1.0 ≈
@@ -166,7 +166,7 @@ struct RenderQualitySettings {
     /// (and less load on the bilateral denoise downstream) at the obvious
     /// linear cost. Defaults to Medium = 4×4 = 16 taps per pixel, which is
     /// where the original implementation was hard-coded.
-    AoQualityPreset ao_quality{AoQualityPreset::Ultra};
+    AoQualityPreset ao_quality{AoQualityPreset::Medium};
     /// Fraction of the scene resolution at which the GTAO + denoise passes
     /// render. AO is low-frequency, so half-res (0.5 → ¼ the pixels) reclaims
     /// most of the fullscreen AO cost for little visible loss; the result is
