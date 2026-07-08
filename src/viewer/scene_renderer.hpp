@@ -125,25 +125,8 @@ class SceneRenderer {
         /// with the reflected sun in the cubemap (per docs §9.1).
         glm::vec3 sun_dir{0.4f, 0.7f, 0.6f};
         float sun_intensity{1.5f};
-
-        /// Frame-late AO history target — previous frame's denoised GTAO
-        /// output (RGBA8: R = AO, GB = octahedral world-space bent normal).
-        /// Bound into binding slot 3 of the scene FS and sampled at
-        /// `gl_FragCoord.xy / screen_size` to apply per-pixel AO, bent
-        /// normal IBL, multi-bounce, and specular occlusion. When invalid
-        /// (first frame, AO disabled), set `ao_history_enable = false` and
-        /// the shader collapses to no-AO defaults; the binding still needs
-        /// to be a valid sg_view so the pipeline contract holds, so the
-        /// App passes a 1×1 dummy in that case.
-        sg_view ao_history_view{};
-        sg_sampler ao_history_sampler{};
-        bool ao_history_enable{false};
-        /// Bent-normal blend strength in [0,1]. 0 = ignore bent normal
-        /// (irradiance lookup uses N); 1 = use the raw bent normal. The
-        /// scene FS lerps per-pixel; multi-bounce and specular occlusion
-        /// always apply when `ao_history_enable` is true regardless of
-        /// this value.
-        float ao_bent_strength{0.5f};
+        // AO is consumed in the composite pass (current-frame), not the scene
+        // shader — see composite_pass / app.cpp.
     };
 
     /// Submit draw calls for the active scene. Caller must have an active

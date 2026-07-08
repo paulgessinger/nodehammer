@@ -2,6 +2,7 @@
 
 #include "../ibl.hpp"
 #include "../scene_renderer.hpp"
+#include <nodehammer/viewer/backend_caps.hpp>
 #include <nodehammer/viewer/camera.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
 
@@ -260,9 +261,9 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
         // GTAO. Sub-controls collapse entirely when the master AO toggle
         // is off — saves panel real estate and makes "is this knob active?"
         // unambiguous (vs the BeginDisabled grey-out pattern, which leaves
-        // sliders visible but un-clickable). Bent-strength has the same
-        // pattern nested under enable_advanced_ao.
-        {
+        // sliders visible but un-clickable). Hidden entirely on GLES3/WebGL2,
+        // where AO is dropped (aoSupported()).
+        if (aoSupported()) {
             const bool depth_debug = (ctx.quality.debug_view != DebugView::Off);
             ImGui::BeginDisabled(depth_debug);
             ImGui::Checkbox("AO", &ctx.quality.enable_ao);
@@ -301,25 +302,7 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
                 // result.
                 ImGui::Checkbox("denoise", &ctx.quality.enable_ao_denoise);
                 ImGui::SetItemTooltip("Bilateral 5×5 depth-aware denoise on the raw GTAO\n"
-                                      "(off = scene/composite sample the raw noisy AO)");
-                // Advanced AO toggle and bent-normal strength. Advanced
-                // wires bent normal + multi-bounce + specular occlusion
-                // into the scene shader's PBR IBL term. Off → composite
-                // does the legacy single-multiply on the AO scalar.
-                ImGui::Checkbox("advanced (PBR)", &ctx.quality.enable_advanced_ao);
-                ImGui::SetItemTooltip("On: scene PBR applies multi-bounce, bent-normal IBL,\n"
-                                      "and specular occlusion. Off: composite single-multiply.\n"
-                                      "Only affects the PBR shading path.");
-                if (ctx.quality.enable_advanced_ao) {
-                    ImGui::Indent();
-                    ImGui::SliderFloat("bent strength", &ctx.quality.ao_bent_strength, 0.f, 1.f,
-                                       "%.2f");
-                    ImGui::SetItemTooltip(
-                        "Blend bent normal toward N. 0 = no bent-normal effect\n"
-                        "(multi-bounce + SO still apply); 1 = full bent normal.\n"
-                        "Pull down if cavities look noisy or IBL drifts with camera.");
-                    ImGui::Unindent();
-                }
+                                      "(off = composite samples the raw noisy AO)");
                 ImGui::Unindent();
             }
             ImGui::EndDisabled();

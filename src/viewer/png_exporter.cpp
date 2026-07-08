@@ -72,7 +72,6 @@ void PngExporter::request(PngExportSettings &settings, const RenderQualitySettin
     quality_.ao_quality = AoQualityPreset::Ultra;
     quality_.ao_resolution_scale = 1.0f;
     quality_.enable_ao_denoise = true;
-    quality_.enable_advanced_ao = true;
     quality_.enable_tonemap = true;
     quality_.debug_view = DebugView::Off;
     if (deps_.hdr_supported && deps_.hdr_supported()) {

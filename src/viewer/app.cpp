@@ -175,21 +175,15 @@ struct App::Impl {
     // depth-texel grid and looks blocky).
     //
     // `ao_rt_raw` is the GTAO output (transient; only allocated when denoise is
-    // on, since denoise reads it and writes a history buffer). The final AO
-    // (denoised, or raw when denoise is off) lands in a ping-pong pair of
-    // history buffers `ao_hist`. The scene pass is frame-late: it samples last
-    // frame's result (`ao_hist[ao_hist_last_written]`) while the GTAO/denoise
-    // passes write the *other* buffer. That double-buffering is what lets a
-    // dynamic-scale step resize only the write buffer — the read buffer the
-    // scene is sampling keeps its previous-resolution contents (sampling is
-    // normalized-UV, so the size mismatch is invisible), so a scale step no
-    // longer drops AO for a frame (the flicker we used to get from reallocating
-    // a single shared history target). `ao_history_valid` gates the sample until
-    // the first AO write exists.
+    // on, since denoise reads it and writes the final target). `ao_rt` holds
+    // this frame's final AO (denoised, or raw when denoise is off) and is
+    // consumed *this same frame* by the composite pass — no ping-pong or
+    // frame-late history, because the composite runs after the AO pass. AO is
+    // recomputed every rendered frame so it tracks the geometry as the camera
+    // moves. `ao_valid` gates the composite sample until the first AO write.
     AoRenderTarget ao_rt_raw;
-    AoRenderTarget ao_hist[2];
-    int ao_hist_last_written{0};
-    bool ao_history_valid{false};
+    AoRenderTarget ao_rt;
+    bool ao_valid{false};
     AoPass ao_pass;
     AoDenoisePass ao_denoise_pass;
     CompositePass composite;
@@ -275,7 +269,7 @@ struct App::Impl {
     // cut scene, which the controller doesn't own.
     BuildController build_controller_;
     bool cut_uploaded{false};   ///< whether cut_scene is GPU-resident
-    bool last_shown_cut{false}; ///< whether last frame drew the cut scene (AO flip reset)
+    bool last_shown_cut{false}; ///< whether last frame drew the cut scene
 
     std::vector<RetainedModal> active_modals;
     std::uint64_t next_modal_id{1};
@@ -323,12 +317,9 @@ struct App::Impl {
     // but the expensive scene + AO passes only re-run when the scene actually
     // changes. last_scene_change timestamps the last scene-affecting change
     // (camera, a held widget, a job, IBL); we keep re-rendering the scene for a
-    // settle window afterward so the AO temporal denoise and the dynamic-scale
-    // settle jump converge. last_scene_consumed_ao caches the scene pass's AO
-    // decision so compositing a *cached* scene still gates the AO multiply
-    // correctly. Both only matter while pause_when_static is on.
+    // settle window afterward so the dynamic-scale settle jump converges. Only
+    // matters while pause_when_static is on.
     uint64_t last_scene_change{0};
-    bool last_scene_consumed_ao{false};
     // Whether the cached scene_rt color holds an overdraw count (vs a shaded
     // beauty frame). The overdraw debug view replaces the scene color content,
     // so toggling it on or off must force one scene re-render even under
@@ -1113,13 +1104,10 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     // horizon march to the depth-texel grid and looks blocky, so the AO must
     // track the scene resolution, not the window.
     //
-    // The flicker that coupling-to-scene used to cause (each scale step
-    // reallocated the shared history target and reset the frame-late history,
-    // dropping AO for a frame) is solved by double-buffering: we resize the
-    // *write* history buffer (1 - ao_hist_last_written) and the raw target here,
-    // but never the *read* buffer the scene pass is about to sample. The read
-    // buffer keeps its previous-resolution contents, which sample fine via the
-    // scene shader's normalized-UV lookup. So a scale step never drops AO.
+    // A resize just reallocates `ao_rt`; since it's written and consumed within
+    // the same frame (AO pass then composite), there's no frame-late read to
+    // protect, so a scale step never drops AO — it simply produces this frame's
+    // AO at the new size.
     float ao_scale = quality.ao_resolution_scale;
     ao_scale = ao_scale < 0.25f ? 0.25f : (ao_scale > 1.0f ? 1.0f : ao_scale);
     const auto ao_dim = [ao_scale](uint32_t d) -> uint32_t {
@@ -1130,9 +1118,10 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
     const uint32_t ao_h = ao_dim(height);
 
     const sg_pixel_format ao_fmt = pickAoColorFormat();
-    if (quality.enable_ao) {
-        const int write_idx = 1 - ao_hist_last_written;
-        // raw is only needed when denoise is on (GTAO → raw → denoise → history).
+    // AO is dropped entirely on GLES3/WebGL2 (see aoSupported) — allocate no AO
+    // targets there, so the AO pass and composite multiply both no-op.
+    if (quality.enable_ao && aoSupported()) {
+        // raw is only needed when denoise is on (GTAO → raw → denoise → ao_rt).
         if (quality.enable_ao_denoise) {
             if (!ao_rt_raw.matches(ao_w, ao_h, ao_fmt)) {
                 ao_rt_raw.create(ao_w, ao_h, ao_fmt);
@@ -1140,24 +1129,18 @@ void App::Impl::ensureSceneTarget(uint32_t width, uint32_t height) {
         } else if (ao_rt_raw.color.id != SG_INVALID_ID) {
             ao_rt_raw.destroy();
         }
-        // Resize only the write buffer; leave the read buffer (which this frame's
-        // scene pass samples) at whatever size it last held.
-        if (!ao_hist[write_idx].matches(ao_w, ao_h, ao_fmt)) {
-            ao_hist[write_idx].create(ao_w, ao_h, ao_fmt);
-        }
-        // No valid history to sample until the read buffer has been written.
-        if (ao_hist[ao_hist_last_written].color.id == SG_INVALID_ID) {
-            ao_history_valid = false;
+        if (!ao_rt.matches(ao_w, ao_h, ao_fmt)) {
+            ao_rt.create(ao_w, ao_h, ao_fmt);
+            ao_valid = false; // reallocated buffer holds no AO until next write
         }
         ao_pass.setTargetColorFormat(ao_fmt);
         ao_denoise_pass.setTargetColorFormat(ao_fmt);
     } else {
-        // AO off — free all AO targets (destroy() is a no-op once freed) and
+        // AO off — free the AO targets (destroy() is a no-op once freed) and
         // invalidate. Re-enabling reallocates on the next frame.
         ao_rt_raw.destroy();
-        ao_hist[0].destroy();
-        ao_hist[1].destroy();
-        ao_history_valid = false;
+        ao_rt.destroy();
+        ao_valid = false;
     }
 }
 
@@ -1191,12 +1174,12 @@ float App::Impl::sceneTargetBytesPerScenePx() const {
     const sg_pixel_format color_fmt =
         (quality.enable_hdr && hdr_fmt != SG_PIXELFORMAT_NONE) ? hdr_fmt : swap_fmt;
     float bytes_per_scene_px = bytes_per_pixel(color_fmt) + bytes_per_pixel(depth_fmt);
-    if (quality.enable_ao) {
+    if (quality.enable_ao && aoSupported()) {
         const float ao_scale = std::clamp(quality.ao_resolution_scale, 0.25f, 1.0f);
-        // AO is coupled to the scaled scene resolution: two ping-pong history
-        // buffers, plus the raw target when denoise is on (three total), each at
-        // ao_scale² of the scene area.
-        const float ao_buffers = quality.enable_ao_denoise ? 3.f : 2.f;
+        // AO is coupled to the scaled scene resolution: the final AO target,
+        // plus the raw target when denoise is on (two total), each at ao_scale²
+        // of the scene area.
+        const float ao_buffers = quality.enable_ao_denoise ? 2.f : 1.f;
         bytes_per_scene_px +=
             ao_buffers * bytes_per_pixel(pickAoColorFormat()) * ao_scale * ao_scale;
     }
@@ -1206,7 +1189,6 @@ float App::Impl::sceneTargetBytesPerScenePx() const {
 void App::Impl::render() {
     const uint64_t render_submit_start = stm_now();
     scene_submit_ms = 0.0;
-    bool scene_consumed_ao_this_frame = false;
 
     // While a screenshot export is rendering, run the whole pipeline at the
     // export resolution with the maxed quality snapshot. We temporarily swap the
@@ -1369,12 +1351,7 @@ void App::Impl::render() {
                 build_controller_.cutBuiltEndDeg() == cfg.angle_cut_end_deg;
             SceneRenderer &renderer = cut_ready ? cut_renderer : scene_renderer;
             active_renderer = &renderer;
-            // Flipping which scene is drawn changes the geometry under the temporal
-            // AO history, so invalidate it for one frame to avoid ghosting.
-            if (cut_ready != last_shown_cut) {
-                ao_history_valid = false;
-                last_shown_cut = cut_ready;
-            }
+            last_shown_cut = cut_ready;
 
             SceneRenderer::RenderFlags flags;
             flags.cull = cfg.cull;
@@ -1410,39 +1387,8 @@ void App::Impl::render() {
             // reflected sun lines up with the analytical highlight (docs §9.1).
             flags.sun_dir = ibl_settings.sun_dir;
             flags.sun_intensity = ibl_settings.sun_intensity;
-            // Feed previous frame's denoised AO+bent-normal map into the scene
-            // shader's PBR IBL path. Gated on:
-            //   * PBR (Lambert ignores AO inside the scene shader)
-            //   * `enable_advanced_ao` — the user-facing A/B toggle. When off,
-            //     the scene shader falls back to no-AO defaults and the
-            //     composite does the legacy single-multiply on the AO scalar.
-            //   * History validity (first frame after enable / resize)
-            //   * Non-debug view
-            // When any gate fails the binding still points at a valid texture
-            // (BRDF LUT as placeholder, see scene_renderer.cpp) but the FS
-            // uniform disables the sample — keeps the binding contract trivial.
-            const bool ao_history_pbr = cfg.enable_pbr && quality.enable_ao &&
-                                        quality.enable_advanced_ao &&
-                                        quality.debug_view == DebugView::Off && ao_history_valid;
-            // Frame-late read: sample the buffer the previous frame wrote (the
-            // GTAO/denoise passes below write the *other* buffer, so this read
-            // isn't clobbered, and a scale step that resized only the write
-            // buffer leaves this one intact). Falls back to a null view when
-            // history isn't usable; scene shader's enable bit gates the sample.
-            const AoRenderTarget &history_src = ao_hist[ao_hist_last_written];
-            const bool history_src_valid = history_src.color.id != SG_INVALID_ID;
-            const bool ao_history_active = ao_history_pbr && history_src_valid;
-            flags.ao_history_view = ao_history_active ? history_src.color_texture_view : sg_view{};
-            flags.ao_history_sampler = ao_history_active ? history_src.sampler : sg_sampler{};
-            flags.ao_history_enable = ao_history_active;
-            flags.ao_bent_strength = quality.ao_bent_strength;
-            // Remember the actual decision the scene path made so the composite
-            // gate matches. Naively re-deriving from `ao_history_valid` later
-            // would mis-fire on the first frame after enable (history flips
-            // valid *between* the scene render and the composite, so a re-
-            // computed gate would tell the composite "scene applied AO" when
-            // it actually did not).
-            scene_consumed_ao_this_frame = ao_history_pbr;
+            // AO is not consumed in the scene shader — it's applied in the
+            // composite pass, current-frame (see the AO pass below + composite).
             const uint64_t scene_submit_start = stm_now();
             renderer.render(camera, scene_rt.width, scene_rt.height, flags);
             scene_submit_ms = stm_sec(stm_diff(stm_now(), scene_submit_start)) * 1000.0;
@@ -1451,33 +1397,24 @@ void App::Impl::render() {
         sg_end_pass();
         gpu_pass_timer_.stamp("scene");
 
-        // Pass 2 (optional) — GTAO, then an optional bilateral denoise, with the
-        // final AO landing in the ping-pong *write* buffer (the one the scene
-        // pass above did NOT just sample). Skipped entirely when AO is disabled
+        // Pass 2 (optional) — GTAO, then an optional bilateral denoise, landing
+        // this frame's final AO in `ao_rt`. Skipped entirely when AO is disabled
         // or a depth-debug view is active.
         //
         // With denoise on: GTAO writes ao_rt_raw, then the denoise reads raw +
-        // scene depth and writes ao_hist[write]. With denoise off: GTAO writes
-        // ao_hist[write] directly (no raw needed). Either way the write buffer
-        // ends up holding this frame's final AO; we then mark it as the latest,
-        // so next frame's scene pass reads it (frame-late) and this frame's
-        // composite reads it (in-frame, for the Lambert path).
+        // scene depth and writes ao_rt. With denoise off: GTAO writes ao_rt
+        // directly (no raw needed). The composite (below, same frame) samples
+        // ao_rt — current-frame, no lag.
         //
         // AO is recomputed every rendered frame so it tracks the geometry as the
-        // camera moves (only one frame late, which is imperceptible). We do NOT
-        // freeze it during motion — a frozen screen-space AO smears across the
-        // moving geometry (ghosting). Dynamic-scale flicker is handled by the
-        // ping-pong (see ensureSceneTarget): the scale step resized the write
-        // buffer, never the read buffer the scene just sampled.
-        const int ao_write_idx = 1 - ao_hist_last_written;
-        AoRenderTarget &ao_write = ao_hist[ao_write_idx];
+        // camera moves. We do NOT freeze it during motion — a frozen
+        // screen-space AO smears across the moving geometry (ghosting).
         const bool ao_active = quality.enable_ao && quality.debug_view == DebugView::Off &&
-                               ao_write.color.id != SG_INVALID_ID && scene_uploaded &&
+                               ao_rt.color.id != SG_INVALID_ID && scene_uploaded &&
                                (!quality.enable_ao_denoise || ao_rt_raw.color.id != SG_INVALID_ID);
         if (ao_active) {
-            // GTAO target: the raw scratch when we'll denoise, else the history
-            // buffer directly.
-            AoRenderTarget &gtao_target = quality.enable_ao_denoise ? ao_rt_raw : ao_write;
+            // GTAO target: the raw scratch when we'll denoise, else ao_rt directly.
+            AoRenderTarget &gtao_target = quality.enable_ao_denoise ? ao_rt_raw : ao_rt;
             sg_pass ao_pass_desc{};
             ao_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
             ao_pass_desc.attachments = gtao_target.passAttachments();
@@ -1490,25 +1427,18 @@ void App::Impl::render() {
             if (quality.enable_ao_denoise) {
                 sg_pass denoise_pass_desc{};
                 denoise_pass_desc.action.colors[0].load_action = SG_LOADACTION_DONTCARE;
-                denoise_pass_desc.attachments = ao_write.passAttachments();
+                denoise_pass_desc.attachments = ao_rt.passAttachments();
                 denoise_pass_desc.label = "ao_denoise_pass";
                 sg_begin_pass(&denoise_pass_desc);
-                ao_denoise_pass.draw(ao_rt_raw, scene_rt, camera, ao_write.width, ao_write.height);
+                ao_denoise_pass.draw(ao_rt_raw, scene_rt, camera, ao_rt.width, ao_rt.height);
                 sg_end_pass();
                 gpu_pass_timer_.stamp("denoise");
             }
 
-            // The write buffer now holds this frame's final AO — promote it to
-            // "latest" so the scene (next frame) and composite (this frame) read
-            // it, and the next frame writes the other buffer.
-            ao_hist_last_written = ao_write_idx;
-            ao_history_valid = true;
+            // ao_rt now holds this frame's final AO; the composite below reads it.
+            ao_valid = true;
         }
 
-        // Cache the scene pass's AO-consumed decision so a later cached-scene
-        // composite (when we skip the scene pass) gates the AO multiply the same
-        // way the cached scene_rt was actually rendered.
-        last_scene_consumed_ao = scene_consumed_ao_this_frame;
         // Remember whether the cached color now holds overdraw counts, so the
         // next frame's pause-when-static gate re-renders on a view transition.
         last_rendered_overdraw = quality.debug_view == DebugView::Overdraw;
@@ -1546,19 +1476,12 @@ void App::Impl::render() {
     const glm::mat4 view_proj =
         camera.proj(aspect, homogeneous_depth, useReversedZ()) * camera.view();
     const glm::mat4 inv_view_proj = glm::inverse(view_proj);
-    // Composite samples the latest final-AO buffer for its Lambert AO multiply —
-    // the same data the next frame's scene-shader PBR path will sample, kept
-    // consistent so toggling PBR on/off doesn't introduce a frame of mismatched
-    // AO. `last_scene_consumed_ao` mirrors the scene decision (captured before
-    // the AO+denoise passes ran) so the first frame after enable still gets a
-    // composite AO multiply. When no history has been written, an empty target
-    // makes composite's `ao_on` check fall back to its 1×1 white dummy. Sourced
-    // from persistent members so this works for a cached scene too.
-    const AoRenderTarget *composite_ao_src =
-        ao_history_valid ? &ao_hist[ao_hist_last_written] : nullptr;
+    // Composite samples this frame's final AO (ao_rt) for its scalar multiply.
+    // When no AO has been written (AO off, first frame, or a resize), an empty
+    // target makes composite's `ao_on` check fall back to its 1×1 white dummy.
+    // Sourced from a persistent member so this works for a cached scene too.
     const AoRenderTarget composite_ao_empty{};
-    const AoRenderTarget &composite_ao_target =
-        composite_ao_src ? *composite_ao_src : composite_ao_empty;
+    const AoRenderTarget &composite_ao_target = ao_valid ? ao_rt : composite_ao_empty;
 
     // Render the composite + ImGui into the persistent present-cache target
     // rather than straight to the swapchain, then blit the cache into the
@@ -1575,8 +1498,8 @@ void App::Impl::render() {
     cache_pass.attachments = present_cache_.passAttachments();
     cache_pass.label = "present_cache_pass";
     sg_begin_pass(&cache_pass);
-    composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
-                   camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
+    composite.draw(scene_rt, composite_ao_target, ao_pass, quality, camera.near_plane,
+                   camera.far_plane, scene_renderer.iblPrefilterView(),
                    scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
     ImGui_ImplSokol_Render();
     sg_end_pass();
@@ -1596,8 +1519,8 @@ void App::Impl::render() {
         export_pass.attachments = exporter_.outTarget().passAttachments();
         export_pass.label = "export_pass";
         sg_begin_pass(&export_pass);
-        composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
-                       camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
+        composite.draw(scene_rt, composite_ao_target, ao_pass, quality, camera.near_plane,
+                       camera.far_plane, scene_renderer.iblPrefilterView(),
                        scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
         sg_end_pass();
         gpu_pass_timer_.stamp("export");
@@ -1626,8 +1549,8 @@ void App::Impl::render() {
         grab_pass.attachments = bench_grab_rt_.passAttachments();
         grab_pass.label = "bench_grab_pass";
         sg_begin_pass(&grab_pass);
-        composite.draw(scene_rt, composite_ao_target, ao_pass, quality, last_scene_consumed_ao,
-                       camera.near_plane, camera.far_plane, scene_renderer.iblPrefilterView(),
+        composite.draw(scene_rt, composite_ao_target, ao_pass, quality, camera.near_plane,
+                       camera.far_plane, scene_renderer.iblPrefilterView(),
                        scene_renderer.iblCubeSampler(), inv_view_proj, camera.eye());
         sg_end_pass();
         bench_capture_issued_ = true;
@@ -2051,8 +1974,8 @@ void App::Impl::onFrame() {
         .fb_height = fb_height,
         .scene_width = scene_rt.width,
         .scene_height = scene_rt.height,
-        .ao_width = ao_hist[ao_hist_last_written].width,
-        .ao_height = ao_hist[ao_hist_last_written].height,
+        .ao_width = ao_rt.width,
+        .ao_height = ao_rt.height,
         .fps = fps,
         .frame_interval_ms = frame_interval_ms,
         .render_submit_ms = render_submit_ms,
@@ -2218,8 +2141,7 @@ void App::Impl::onCleanup() {
     present_cache_.destroy();
     ao_denoise_pass.release();
     ao_pass.release();
-    ao_hist[0].destroy();
-    ao_hist[1].destroy();
+    ao_rt.destroy();
     ao_rt_raw.destroy();
     exporter_.destroyTargets();
     bench_grab_rt_.destroy();
