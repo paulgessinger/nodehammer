@@ -81,6 +81,7 @@ TEST_CASE("render quality state round-trips through TOML") {
     quality.enable_tonemap = false;
     quality.enable_material_prefilter = false;
     quality.material_prefilter_scale = 1.7f;
+    quality.material_prefilter_band = 4.2f;
     quality.lod_hull_enable = true;
     quality.lod_hull_force = true;
     quality.lod_hull_screen_px = 96.f;
@@ -120,6 +121,7 @@ TEST_CASE("render quality state round-trips through TOML") {
     CHECK(parsed->enable_tonemap == quality.enable_tonemap);
     CHECK(parsed->enable_material_prefilter == quality.enable_material_prefilter);
     CHECK(parsed->material_prefilter_scale == quality.material_prefilter_scale);
+    CHECK(parsed->material_prefilter_band == quality.material_prefilter_band);
     CHECK(parsed->lod_hull_enable == quality.lod_hull_enable);
     CHECK(parsed->lod_hull_force == quality.lod_hull_force);
     CHECK(parsed->lod_hull_screen_px == quality.lod_hull_screen_px);

@@ -75,7 +75,9 @@ layout(binding=1) uniform fs_params {
     vec4 light_dir;    // xyz = direction TO light, world space; w = intensity (PBR only)
     // x = angle-cut enabled, y = large cut flag,
     // z = LOD cross-fade dither role (0 = off, 1 = detail half, 2 = hull half)
-    //     -- see the screen-door discard in main(); w = unused.
+    //     -- see the screen-door discard in main(),
+    // w = material-stack prefilter band width, in feature-size widths (see
+    //     stack_prefilter below) -- RenderQualitySettings::material_prefilter_band.
     vec4 cut_params;
     vec4 cut_start;    // xy = unit vector at start phi
     vec4 cut_end;      // xy = unit vector at end phi
@@ -214,7 +216,9 @@ void main() {
         vec3 dpdx = dFdx(v_world_pos);
         vec3 dpdy = dFdy(v_world_pos);
         float footprint = sqrt(length(cross(dpdx, dpdy)));
-        prefilter_t = smoothstep(stack_prefilter.w, 3.0 * stack_prefilter.w, footprint);
+        // >1 guard: smoothstep(lo, hi, x) is undefined for hi <= lo.
+        float band_ratio = max(1.001, cut_params.w);
+        prefilter_t = smoothstep(stack_prefilter.w, band_ratio * stack_prefilter.w, footprint);
         albedo = mix(albedo, stack_prefilter.xyz, prefilter_t);
     }
 

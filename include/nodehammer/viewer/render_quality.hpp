@@ -117,12 +117,22 @@ struct RenderQualitySettings {
     /// thin high-contrast layers produce at distance. Only affects meshes the
     /// tessellation pass tagged with a StackAverage; a no-op elsewhere.
     bool enable_material_prefilter{true};
-    /// Scales the stack-prefilter transition: the blend toward the average
-    /// completes once the pixel footprint reaches `scale * featureSize` band
-    /// widths. >1 keeps the crisp bands to a closer distance (blend later);
-    /// <1 blends earlier/more aggressively. A global dial on top of the
-    /// per-stack feature size baked at tessellation time.
+    /// Start-distance dial: the blend begins once the pixel footprint reaches
+    /// `scale * featureSize` (the stack's baked-in feature size, from its
+    /// thinnest slab). >1 needs a bigger footprint — i.e. farther away or a
+    /// more grazing angle — before blending starts; <1 starts blending
+    /// closer. A global multiplier on top of the per-stack feature size baked
+    /// at tessellation time. On a fine-grained stack (thin slabs, small
+    /// featureSize) this dial's whole range covers only a short physical
+    /// distance, so it can look like a no-op there — see
+    /// material_prefilter_band for the width of the transition itself.
     float material_prefilter_scale{1.0f};
+    /// Band-width dial: how many feature-size widths the blend spans, from 0%
+    /// to 100% average color, starting at `scale * featureSize` above. Lower
+    /// = sharper/faster transition; higher = more gradual. Independent of
+    /// material_prefilter_scale, which only moves *where* the transition
+    /// starts, not how wide it is.
+    float material_prefilter_band{3.0f};
     /// Per-distance hull LOD: merged stacks (with an LOD proxy) pick between
     /// their detailed slabs and the coarse convex-hull proxy per instance by
     /// projected screen size, screen-door cross-fading through a transition

@@ -874,8 +874,13 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         const float lod_dither_role = g.lod_role == Impl::LodRole::Detail  ? 1.f
                                       : g.lod_role == Impl::LodRole::Proxy ? 2.f
                                                                            : 0.f;
+        // cut_params.w carries the material-stack prefilter's band-width dial
+        // (material_prefilter_band) -- global, like the angle-cut fields
+        // above it, so this vec4 is the natural spare slot rather than adding
+        // a whole new uniform for one float.
         const glm::vec4 cut_params{(flags.angle_cut && flags.shader_angle_cut) ? 1.f : 0.f,
-                                   large_cut ? 1.f : 0.f, lod_dither_role, 0.f};
+                                   large_cut ? 1.f : 0.f, lod_dither_role,
+                                   flags.material_prefilter_band};
         const glm::vec4 cut_start_vec{std::cos(shader_cut_start), std::sin(shader_cut_start), 0.f,
                                       0.f};
         const glm::vec4 cut_end_vec{std::cos(shader_cut_end), std::sin(shader_cut_end), 0.f, 0.f};
