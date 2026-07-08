@@ -326,6 +326,7 @@ std::string renderQualityStateToToml(const RenderQualitySettings &quality) {
         {"enable_tonemap", quality.enable_tonemap},
         {"enable_material_prefilter", quality.enable_material_prefilter},
         {"material_prefilter_scale", quality.material_prefilter_scale},
+        {"material_prefilter_band", quality.material_prefilter_band},
         {"lod_hull_enable", quality.lod_hull_enable},
         {"lod_hull_force", quality.lod_hull_force},
         {"lod_hull_screen_px", quality.lod_hull_screen_px},
@@ -383,6 +384,7 @@ std::optional<RenderQualitySettings> renderQualityStateFromToml(std::string_view
     readBool(*render, "enable_tonemap", quality.enable_tonemap);
     readBool(*render, "enable_material_prefilter", quality.enable_material_prefilter);
     readFloat(*render, "material_prefilter_scale", quality.material_prefilter_scale);
+    readFloat(*render, "material_prefilter_band", quality.material_prefilter_band);
     readBool(*render, "lod_hull_enable", quality.lod_hull_enable);
     readBool(*render, "lod_hull_force", quality.lod_hull_force);
     readFloat(*render, "lod_hull_screen_px", quality.lod_hull_screen_px);

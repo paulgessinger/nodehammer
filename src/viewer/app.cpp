@@ -1374,6 +1374,7 @@ void App::Impl::render() {
             flags.enable_pbr = cfg.enable_pbr;
             flags.material_prefilter = quality.enable_material_prefilter;
             flags.material_prefilter_scale = quality.material_prefilter_scale;
+            flags.material_prefilter_band = quality.material_prefilter_band;
             flags.lod_hull_enable = quality.lod_hull_enable;
             flags.lod_hull_force = quality.lod_hull_force;
             flags.lod_hull_screen_px = quality.lod_hull_screen_px;

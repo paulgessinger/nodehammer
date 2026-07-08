@@ -148,6 +148,8 @@ void Notifications::cancelProgress(ProgressHandle handle) {
 void Notifications::diagnostic(const Diagnostic &d) {
     const auto msg = std::format("{}: {}", d.code, d.message);
     switch (d.severity) {
+    case DiagnosticSeverity::Debug:
+        return;
     case DiagnosticSeverity::Info:
         info(msg);
         return;

@@ -91,8 +91,12 @@ class SceneRenderer {
         /// meshes are unaffected. Runtime A/B toggle.
         bool material_prefilter{false};
         /// Global multiplier on the stack-prefilter feature size (transition
-        /// distance dial). See RenderQualitySettings::material_prefilter_scale.
+        /// start-distance dial). See
+        /// RenderQualitySettings::material_prefilter_scale.
         float material_prefilter_scale{1.0f};
+        /// Width of the prefilter transition, in feature-size widths. See
+        /// RenderQualitySettings::material_prefilter_band.
+        float material_prefilter_band{3.0f};
 
         /// Per-distance hull LOD: merged stacks that carry an LOD proxy pick
         /// between their detailed slabs and the coarse convex-hull proxy per

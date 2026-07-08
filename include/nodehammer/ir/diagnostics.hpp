@@ -8,6 +8,7 @@
 namespace nodehammer {
 
 enum class DiagnosticSeverity {
+    Debug,
     Info,
     Warning,
     Error,
@@ -16,6 +17,8 @@ enum class DiagnosticSeverity {
 
 [[nodiscard]] constexpr std::string_view severityName(DiagnosticSeverity s) noexcept {
     switch (s) {
+    case DiagnosticSeverity::Debug:
+        return "debug";
     case DiagnosticSeverity::Info:
         return "info";
     case DiagnosticSeverity::Warning:
@@ -53,6 +56,10 @@ class DiagnosticList {
     void add(Diagnostic d) { items_.push_back(std::move(d)); }
 
     // std::string_view overloads accept literals, constexpr constants, and std::string alike.
+    void debug(std::string_view code, std::string_view message, std::string_view context = {}) {
+        add({DiagnosticSeverity::Debug, std::string{code}, std::string{message},
+             std::string{context}});
+    }
     void info(std::string_view code, std::string_view message, std::string_view context = {}) {
         add({DiagnosticSeverity::Info, std::string{code}, std::string{message},
              std::string{context}});

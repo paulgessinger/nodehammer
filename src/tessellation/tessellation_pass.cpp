@@ -1580,8 +1580,8 @@ TessellationPassResult TessellationJob::take() {
     // former per-node info diags that flooded the viewer.
     if (coincRemoved > 0) {
         const size_t coincNodes = impl_->coincidentNodesAffected.load(std::memory_order_relaxed);
-        impl_->result.diags.info(
-            codes::kInfoTessCoincidentRemoved,
+        impl_->result.diags.debug(
+            codes::kDebugTessCoincidentRemoved,
             std::format("drop_coincident_faces removed {} interior face(s) ({} coincident, "
                         "opposite-wound triangle pair(s)) across {} node(s)",
                         coincRemoved, coincRemoved / 2, coincNodes),

@@ -225,10 +225,26 @@ void renderViewPanel(bool *open, const ViewerUiContext &ctx, const UiActions &ac
                                   "toward the stack average once the pixel can't resolve the "
                                   "bands. Affects stacks tagged average_material_stack in config.");
             if (ctx.quality.enable_material_prefilter) {
-                ImGui::SliderFloat("prefilter scale", &ctx.quality.material_prefilter_scale, 0.25f,
-                                   8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-                ImGui::SetItemTooltip("Transition-distance dial. >1 keeps crisp bands closer "
-                                      "(blend later); <1 blends earlier. Tune per view.");
+                ImGui::SliderFloat("prefilter start distance x",
+                                   &ctx.quality.material_prefilter_scale, 0.25f, 8.0f, "%.2f",
+                                   ImGuiSliderFlags_Logarithmic);
+                ImGui::SetItemTooltip(
+                    "Multiplies each stack's baked-in feature size (from its thinnest "
+                    "slab) before comparing to the on-screen pixel footprint. >1 needs a "
+                    "bigger footprint -- farther away or a more grazing angle -- before "
+                    "blending starts; <1 starts blending closer. On a fine-grained stack "
+                    "(thin slabs -> tiny feature size, e.g. ECal) this dial's whole range "
+                    "covers only a short physical distance, so it can look like a no-op "
+                    "there; see the band-width dial below for the width of the "
+                    "transition itself.");
+                ImGui::SliderFloat("prefilter band width x", &ctx.quality.material_prefilter_band,
+                                   1.1f, 8.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+                ImGui::SetItemTooltip(
+                    "How many feature-size widths the blend spans, from 0%% detail to "
+                    "100%% stack-average color, starting at the distance set above. "
+                    "Lower = sharper/faster transition; higher = more gradual. "
+                    "Independent of the start-distance dial: that one moves where the "
+                    "transition begins, this one changes how long it takes.");
             }
             ImGui::Checkbox("hull LOD", &ctx.quality.lod_hull_enable);
             ImGui::SetItemTooltip("Per-distance LOD: tagged stacks draw detailed slabs up close "
