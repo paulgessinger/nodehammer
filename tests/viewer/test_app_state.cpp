@@ -97,8 +97,6 @@ TEST_CASE("render quality state round-trips through TOML") {
     quality.ao_quality = AoQualityPreset::High;
     quality.ao_resolution_scale = 0.5f;
     quality.enable_ao_denoise = false;
-    quality.enable_advanced_ao = false;
-    quality.ao_bent_strength = 0.2f;
     quality.debug_view = DebugView::LinearDepth;
     quality.overdraw_range = 48.f;
     quality.exposure_stops = -1.0f;
@@ -138,8 +136,6 @@ TEST_CASE("render quality state round-trips through TOML") {
     CHECK(parsed->ao_quality == quality.ao_quality);
     CHECK(parsed->ao_resolution_scale == quality.ao_resolution_scale);
     CHECK(parsed->enable_ao_denoise == quality.enable_ao_denoise);
-    CHECK(parsed->enable_advanced_ao == quality.enable_advanced_ao);
-    CHECK(parsed->ao_bent_strength == quality.ao_bent_strength);
     CHECK(parsed->debug_view == quality.debug_view);
     CHECK(parsed->overdraw_range == quality.overdraw_range);
     CHECK(parsed->exposure_stops == quality.exposure_stops);

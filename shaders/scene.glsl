@@ -90,19 +90,10 @@ layout(binding=1) uniform fs_params {
     vec4 camera_pos;   // xyz = world-space camera position
     vec4 emissive;     // xyz = emissive factor (linear, can be > 1.0), w = unused
     vec4 alpha_params; // x = alpha_mode (0 = OPAQUE, 1 = MASK), y = alpha_cutoff, z/w = unused
-    // AO history (frame-late) for PBR's IBL term.
-    //   x = enable (0/1). 0 makes the shader fall back to no-AO defaults
-    //       (ao=1, bent_n=n, no multi-bounce, no specular occlusion).
-    //   y = 1 / screen_width  — used to convert gl_FragCoord to texture UV
-    //   z = 1 / screen_height
-    //   w = bent_strength in [0,1]. 0 → use N for irradiance (no bent
-    //       normal effect, but multi-bounce + SO still apply). 1 → use
-    //       the raw bent normal as sampled. Lerped per-pixel.
-    // The AO+bent-normal target is *previous frame's* denoised output —
-    // see app.cpp for the lifecycle. 1-frame lag is invisible in a viewer
-    // where the camera is mostly still, and the alternative (in-frame AO
-    // before forward shading) would require a depth prepass.
-    vec4 ao_history_params;
+    // AO is applied current-frame in the composite pass (see composite.glsl),
+    // not inside the scene shader — a forward renderer can't sample this
+    // frame's AO before it shades, and the frame-late variant this shader used
+    // to run dragged occlusion behind the geometry during camera motion.
     // Material-stack prefilter (viewer AA for sampling stacks). Populated per
     // merged-stack mesh from MeshAsset::stackAverage.
     //   xyz = area-weighted average base color (linear)
@@ -114,12 +105,8 @@ layout(binding=1) uniform fs_params {
 layout(binding=0) uniform textureCube tex_irradiance;
 layout(binding=1) uniform textureCube tex_prefilter;
 layout(binding=2) uniform texture2D   tex_brdf_lut;
-// RGBA8 AO+bent-normal map (R = AO, GB = octahedral world-space bent normal).
-// See ao.glsl / ao_denoise.glsl for the channel contract.
-layout(binding=3) uniform texture2D   tex_ao_history;
 layout(binding=0) uniform sampler     smp_cube;
 layout(binding=1) uniform sampler     smp_lut;
-layout(binding=2) uniform sampler     smp_ao_history;
 
 in vec3 v_normal_world;
 in vec3 v_world_pos;
@@ -156,43 +143,6 @@ float G_SmithSchlickGGX(float NdotV, float NdotL, float roughness) {
 vec3 F_Schlick(float VdotH, vec3 F0) {
     float f = pow(1.0 - VdotH, 5.0);
     return F0 + (1.0 - F0) * f;
-}
-
-// Octahedral decode (inverse of the encode in ao.glsl / ao_denoise.glsl).
-// 8-bit-per-axis input from the AO history texture; output is a unit vector
-// in world space (the bent normal).
-vec3 octDecodeBent(vec2 e) {
-    e = e * 2.0 - 1.0;
-    vec3 v = vec3(e.x, e.y, 1.0 - abs(e.x) - abs(e.y));
-    if (v.z < 0.0) {
-        vec2 sn = vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0);
-        v.xy = (1.0 - abs(v.yx)) * sn;
-    }
-    return normalize(v);
-}
-
-// Jiménez 2016 §5.3 multi-bounce approximation. AO baked from depth alone
-// over-darkens saturated diffuse materials in cavities because real bounce
-// light reintroduces color-matched fill. The cubic per-channel polynomial
-// `((v*a + b)*v + c)*v` (parameterized by albedo) gives a closed-form
-// approximation of how much energy comes back from one bounce. `max(v, …)`
-// clamps to single-bounce visibility as a floor so the approximation never
-// darkens *less* than physically motivated.
-vec3 gtaoMultiBounce(float v, vec3 albedo) {
-    vec3 a = 2.0404 * albedo - vec3(0.3324);
-    vec3 b = -4.7951 * albedo + vec3(0.6417);
-    vec3 c = 2.7552 * albedo + vec3(0.6903);
-    return max(vec3(v), ((v * a + b) * v + c) * v);
-}
-
-// Lagarde / "Moving Frostbite to PBR" specular occlusion fit. Approximates
-// the visibility integral for the specular cone using just AO and NdotV.
-// Without it, IBL reflections leak through cavities — bright sky reflected
-// in a corner that's clearly in shadow. The pow exponent of 4 is the
-// commonly-tuned default; values that high concentrate the effect on
-// grazing pixels where the artifact is most visible.
-float specularOcclusion(float NdotV, float ao) {
-    return clamp(pow(NdotV + ao, 4.0) - 1.0 + ao, 0.0, 1.0);
 }
 
 void main() {
@@ -343,53 +293,13 @@ void main() {
     vec3 Lo = (diffuse + specular) * NdotL * light_dir.w;
 
     // Image-based lighting (split-sum approximation) — always on in PBR mode.
-    // Layered AO consumption (frame-late, from the previous frame's denoised
-    // GTAO output):
-    //   * `ao` modulates the *diffuse* IBL term via gtaoMultiBounce, which
-    //     reintroduces color-matched bounce energy in cavities.
-    //   * `bent_n` replaces `n` as the sampling direction for the irradiance
-    //     cubemap — cavities pull their fill light from the direction
-    //     they're open to, not from the wall they face into.
-    //   * `specularOcclusion(NdotV, ao)` attenuates the *specular* IBL term
-    //     so reflections don't leak through cavities.
-    //
-    // First frame (and any frame the History target is invalid) gets
-    // ao_history_params.x == 0 and the shader collapses to no-AO defaults.
-    //
-    // The lookup direction is built in *unflipped* (geometric) space:
-    // `n_geom` is the geometric normal as the surface defines it (may point
-    // away from V on backfacing pixels of two-sided geometry), and
-    // `bent_raw` is the GTAO bent normal in world space. Neither gets a
-    // V-sign flip here — the smooth two-sided IBL blend below absorbs
-    // whatever sign the lookup direction has without introducing a hard
-    // discontinuity at the silhouette.
-    float ao = 1.0;
+    // Ambient occlusion is applied later, in the composite pass, as a
+    // current-frame scalar multiply on the lit color; the scene shader no
+    // longer samples AO (nor the GTAO bent normal), so the irradiance lookup
+    // direction is just the geometric normal. `n_geom` is unflipped (may point
+    // away from V on backfacing pixels of two-sided geometry); the smooth
+    // two-sided IBL blend below absorbs whatever sign it has.
     vec3 ibl_lookup_dir = n_geom;
-    if (ao_history_params.x > 0.5) {
-        vec2 ao_uv = gl_FragCoord.xy * ao_history_params.yz;
-        vec4 ao_sample = texture(sampler2D(tex_ao_history, smp_ao_history), ao_uv);
-        ao = ao_sample.r;
-        vec3 bent_raw = octDecodeBent(ao_sample.gb);
-        // No `if (dot(bent_raw, V) < 0) flip` here — that flip was the
-        // second contributor to the silhouette color snap. GTAO produces a
-        // camera-facing bent normal by construction (per-slice integration
-        // accumulates V*cos(theta_mid) + slice_dir*sin(theta_mid), and the
-        // V component is always positive for theta_mid ∈ (-π/2, π/2)), so
-        // the defensive flip almost never fired in practice anyway. In the
-        // rare degenerate case (fully-occluded backfacing pixel where bent
-        // falls back to N in ao.glsl), the smooth two-sided blend below
-        // handles whatever direction we end up with.
-        //
-        // Blend bent toward `n_geom` by the strength dial. The slice-based
-        // GTAO bent normal estimate has a known bias toward V (per-slice
-        // averaging shares V across slices) and visible direction noise on
-        // uniform surfaces — blending with N at strength < 1 trades some
-        // of the "cavities feel grounded" effect for stability. Done in
-        // unflipped space so the mix is itself continuous across the
-        // silhouette.
-        float bent_t = clamp(ao_history_params.w, 0.0, 1.0);
-        ibl_lookup_dir = normalize(mix(n_geom, bent_raw, bent_t));
-    }
 
     vec3 R = reflect(-V, n_shade);
     float max_lod = mode_flags.y;
@@ -413,11 +323,8 @@ void main() {
         textureLod(samplerCube(tex_prefilter, smp_cube), R, roughness * max_lod).rgb;
     vec2 brdf = textureLod(sampler2D(tex_brdf_lut, smp_lut), vec2(NdotV, roughness), 0.0).rg;
 
-    vec3 ao_mb = gtaoMultiBounce(ao, albedo);
-    float so = specularOcclusion(NdotV, ao);
-
-    vec3 ambient = irradiance * kd * albedo * ao_mb +
-                   prefiltered * (F0 * brdf.x + vec3(brdf.y)) * so;
+    vec3 ambient = irradiance * kd * albedo +
+                   prefiltered * (F0 * brdf.x + vec3(brdf.y));
 
     frag_color = vec4(ambient + Lo + emissive.xyz, base_color.a);
 }

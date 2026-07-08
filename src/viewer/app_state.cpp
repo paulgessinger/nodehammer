@@ -342,8 +342,6 @@ std::string renderQualityStateToToml(const RenderQualitySettings &quality) {
         {"ao_quality", static_cast<int>(quality.ao_quality)},
         {"ao_resolution_scale", quality.ao_resolution_scale},
         {"enable_ao_denoise", quality.enable_ao_denoise},
-        {"enable_advanced_ao", quality.enable_advanced_ao},
-        {"ao_bent_strength", quality.ao_bent_strength},
         {"debug_view", static_cast<int>(quality.debug_view)},
         {"overdraw_range", quality.overdraw_range},
         {"exposure_stops", quality.exposure_stops},
@@ -404,8 +402,6 @@ std::optional<RenderQualitySettings> renderQualityStateFromToml(std::string_view
                   static_cast<int>(AoQualityPreset::Ultra));
     readFloat(*render, "ao_resolution_scale", quality.ao_resolution_scale);
     readBool(*render, "enable_ao_denoise", quality.enable_ao_denoise);
-    readBool(*render, "enable_advanced_ao", quality.enable_advanced_ao);
-    readFloat(*render, "ao_bent_strength", quality.ao_bent_strength);
     readEnumIndex(*render, "debug_view", quality.debug_view, static_cast<int>(DebugView::Off),
                   static_cast<int>(DebugView::Overdraw));
     readFloat(*render, "overdraw_range", quality.overdraw_range);

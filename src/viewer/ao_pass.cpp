@@ -227,15 +227,6 @@ void AoPass::draw(const SceneRenderTarget &scene_rt, const Camera &camera, uint3
     params.frame_params[2] = quality.ao_thickness;
     params.frame_params[3] = 0.0f;
 
-    // World-from-view matrix. The FS accumulates the bent normal in view
-    // space (the natural frame of the GTAO integration) and converts to
-    // world before octahedral-encoding, so downstream consumers can sample
-    // it without a view matrix in hand. glm::affineInverse is safe here
-    // because the view matrix is a rigid transform.
-    const glm::mat4 view = camera.view();
-    const glm::mat4 inv_view = glm::affineInverse(view);
-    std::memcpy(params.inv_view, glm::value_ptr(inv_view), sizeof(params.inv_view));
-
     sg_range u{&params, sizeof(params)};
     sg_apply_uniforms(UB_ao_ao_params_block, &u);
 

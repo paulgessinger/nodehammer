@@ -64,4 +64,15 @@ inline sg_pixel_format pickHdrColorFormat() {
 
 inline bool hdrSupported() { return pickHdrColorFormat() != SG_PIXELFORMAT_NONE; }
 
+/// Whether screen-space AO (GTAO + denoise) runs on the active backend.
+///
+/// Dropped entirely on GLES3/WebGL2: the AO passes were the biggest per-frame
+/// GPU cost on the constrained web-GL path, and with baked AO abandoned (see
+/// docs/live-ao-plan.md) that backend simply renders without AO rather than
+/// pay for it. Every other backend (Metal, D3D11, desktop GL, WebGPU) keeps
+/// live GTAO. This is the single gate: AO target allocation, the AO pass, and
+/// the composite AO multiply all consult it, and the view panel hides the AO
+/// controls when it's false.
+inline bool aoSupported() { return sg_query_backend() != SG_BACKEND_GLES3; }
+
 } // namespace nodehammer::viewer

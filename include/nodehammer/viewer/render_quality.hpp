@@ -178,22 +178,6 @@ struct RenderQualitySettings {
     /// jitter vs the denoised version without rebuilding. Off = scene
     /// shader / composite sample the raw target directly.
     bool enable_ao_denoise{true};
-    /// When on: the scene shader's PBR branch consumes AO with the full
-    /// layered treatment — multi-bounce diffuse, bent-normal-biased
-    /// irradiance lookup, and specular occlusion on the IBL specular
-    /// term. When off: composite does the legacy single-multiply against
-    /// the denoised AO scalar (no bent normals, no multi-bounce, no SO).
-    /// Toggle is the cleanest A/B for evaluating the layered features.
-    bool enable_advanced_ao{true};
-    /// Blend the GTAO bent normal toward the geometric surface normal.
-    ///   0.0 = use N (no bent-normal effect on the irradiance lookup)
-    ///   1.0 = use raw bent normal (full effect; can be noisy on uniform
-    ///         surfaces and biases the IBL toward V somewhat because of
-    ///         the per-slice averaging).
-    /// Default 0.5 is a balance — most of the "cavities feel grounded"
-    /// win without the noisier extremes. Only consulted when
-    /// `enable_advanced_ao` is on.
-    float ao_bent_strength{0.5f};
     DebugView debug_view{DebugView::Off};
     /// Overdraw heatmap (DebugView::Overdraw) scale: the per-pixel fragment
     /// count that maps to the hot end of the ramp. Pixels covered more than
