@@ -569,6 +569,7 @@ std::optional<std::string> Platform::saveExportedImage(const std::string &filena
 
 void Platform::openFilePicker() { impl_->pickers.openFilePicker(); }
 void Platform::openFolderPicker() { impl_->pickers.openFolderPicker(); }
+void Platform::openArchivePicker() { impl_->pickers.openArchivePicker(); }
 void Platform::drainPickers() { impl_->pickers.drainPickers(impl_->app); }
 
 } // namespace nodehammer::viewer::platform

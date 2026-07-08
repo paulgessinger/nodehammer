@@ -418,8 +418,9 @@ std::optional<std::string> Platform::saveExportedImage(const std::string &filena
 }
 
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
-void Platform::openFolderPicker() {} // no folder picker on web today
-void Platform::drainPickers() {}     // web pickers dispatch inline
+void Platform::openFolderPicker() {}  // no folder picker on web today
+void Platform::openArchivePicker() {} // no live archive mode on web
+void Platform::drainPickers() {}      // web pickers dispatch inline
 
 void setWebDragHover(Platform::Impl *impl, bool active, float x, float y, int file_count,
                      bool file_like) {

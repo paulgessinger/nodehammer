@@ -19,6 +19,14 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
             if (ImGui::MenuItem("Open folder...") && actions.open_folder_picker) {
                 actions.open_folder_picker();
             }
+            if (ImGui::MenuItem("Open archive...") && actions.open_archive) {
+                actions.open_archive();
+            }
+            if (ImGui::MenuItem("Save archive", "Cmd+S", false,
+                                ctx.is_archive_mode && ctx.archive_dirty) &&
+                actions.save_archive) {
+                actions.save_archive();
+            }
         }
         if (ctx.has_scene && ImGui::MenuItem("Close project") && actions.close_project) {
             actions.close_project();

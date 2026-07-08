@@ -15,14 +15,17 @@ class NativePickerState {
   public:
     void openFilePicker();
     void openFolderPicker();
+    void openArchivePicker();
     void drainPickers(App &app);
 
   private:
     bool pending_file_picker_{false};
     bool pending_folder_picker_{false};
+    bool pending_archive_picker_{false};
 
     static void runFilePickerModal(App &app);
     static void runFolderPickerModal(App &app);
+    static void runArchivePickerModal(App &app);
 };
 
 void dispatchNativeDroppedFiles(App &app);

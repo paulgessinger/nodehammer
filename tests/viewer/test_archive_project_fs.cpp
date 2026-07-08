@@ -1,0 +1,231 @@
+#include <nodehammer/viewer/archive_project_fs.hpp>
+
+#include <nodehammer/detail/file_io.hpp>
+#include <nodehammer/detail/zstd_io.hpp>
+#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
+#include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/viewer/build_session.hpp>
+#include <nodehammer/viewer/project_fs.hpp>
+
+#include <catch2/catch_test_macros.hpp>
+
+// miniz's zlib-compat aliases (`compress`, `uncompress`, …) would macro-clash
+// with nodehammer::zstd_io::compress used by the build-session harness below.
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
+#include <miniz.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
+#include <filesystem>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+using nodehammer::viewer::ArchiveProjectFs;
+using nodehammer::viewer::DirNode;
+using nodehammer::viewer::ProjectDropDecision;
+using nodehammer::viewer::ProjectFsStatus;
+using nodehammer::viewer::ResolveStatus;
+
+namespace {
+
+std::string asString(std::span<const std::byte> sp) {
+    return std::string{reinterpret_cast<const char *>(sp.data()), sp.size()};
+}
+
+std::vector<std::byte> asBytes(std::string_view s) {
+    std::vector<std::byte> out(s.size());
+    std::memcpy(out.data(), s.data(), s.size());
+    return out;
+}
+
+std::vector<std::byte> makeZip(const std::vector<std::pair<std::string, std::string>> &entries) {
+    mz_zip_archive zip;
+    std::memset(&zip, 0, sizeof(zip));
+    REQUIRE(mz_zip_writer_init_heap(&zip, 0, 0));
+    for (const auto &[name, contents] : entries) {
+        REQUIRE(mz_zip_writer_add_mem(&zip, name.c_str(), contents.data(), contents.size(),
+                                      static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION)));
+    }
+    void *ptr = nullptr;
+    std::size_t size = 0;
+    REQUIRE(mz_zip_writer_finalize_heap_archive(&zip, &ptr, &size));
+    std::vector<std::byte> out(size);
+    std::memcpy(out.data(), ptr, size);
+    mz_zip_writer_end(&zip);
+    return out;
+}
+
+const DirNode *findChild(std::span<const DirNode> children, std::string_view name) {
+    auto it = std::ranges::find_if(children, [&](const DirNode &n) { return n.name == name; });
+    return it == children.end() ? nullptr : &*it;
+}
+
+/// A minimal valid `.nhb.zst` geometry payload for the build-session harness.
+std::vector<std::byte> minimalNhbZstBytes() {
+    using namespace nodehammer;
+    SemanticScene scene;
+    auto shapeId = scene.nextShapeId();
+    scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};
+    auto matId = scene.nextMaterialId();
+    scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
+    auto lvId = scene.nextLogVolId();
+    scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
+    auto nodeId = scene.nextNodeId();
+    SemanticNode node;
+    node.id = nodeId;
+    node.name = "root";
+    node.logVolId = lvId;
+    node.sourceSystem = "test";
+    scene.nodes[nodeId] = node;
+    scene.rootId = nodeId;
+    scene.sourceFile = "/test/input";
+
+    auto raw = semanticSceneToBytes(scene);
+    return zstd_io::compress(std::span<const std::byte>{raw});
+}
+
+/// RAII temp dir holding a seed archive on disk.
+struct TempArchive {
+    std::filesystem::path root;
+    std::filesystem::path zip;
+    explicit TempArchive(std::string_view tag,
+                         const std::vector<std::pair<std::string, std::string>> &entries) {
+        root = std::filesystem::temp_directory_path() /
+               (std::string{"nh_archive_project_fs_"} + std::string{tag});
+        std::filesystem::remove_all(root);
+        std::filesystem::create_directories(root);
+        zip = root / "project.zip";
+        auto blob = makeZip(entries);
+        nodehammer::file_io::writeFile(zip, blob);
+    }
+    ~TempArchive() {
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+    }
+    TempArchive(const TempArchive &) = delete;
+    TempArchive &operator=(const TempArchive &) = delete;
+};
+
+} // namespace
+
+TEST_CASE("ArchiveProjectFs opens a zip and resolves entries", "[viewer][archive_project_fs]") {
+    TempArchive ta{"resolve", {{"scene.toml", "root = 1\n"}, {"det/inner.toml", "inner = 2\n"}}};
+    ArchiveProjectFs fs{ta.zip};
+
+    REQUIRE(fs.status() == ProjectFsStatus::Ready);
+    REQUIRE(fs.name() == "archive");
+
+    auto r = fs.resolve("scene.toml");
+    REQUIRE(r.status == ResolveStatus::Ready);
+    REQUIRE(asString(r.file.bytes.span()) == "root = 1\n");
+    REQUIRE(asString(fs.resolve("det/inner.toml").file.bytes.span()) == "inner = 2\n");
+
+    REQUIRE(fs.resolve("nope.toml").status == ResolveStatus::Missing);
+    REQUIRE(fs.resolve("../escape").status == ResolveStatus::Missing);
+}
+
+TEST_CASE("ArchiveProjectFs synthesizes a directory tree", "[viewer][archive_project_fs]") {
+    TempArchive ta{"list", {{"top.toml", "t\n"}, {"det/a.toml", "a\n"}, {"det/b.toml", "b\n"}}};
+    ArchiveProjectFs fs{ta.zip};
+
+    auto root = fs.list("");
+    REQUIRE(findChild(root, "top.toml") != nullptr);
+    const auto *det = findChild(root, "det");
+    REQUIRE(det != nullptr);
+    REQUIRE(det->is_directory);
+
+    const auto gen_before = fs.generation();
+    auto under = fs.list(det->key);
+    REQUIRE(findChild(under, "a.toml") != nullptr);
+    REQUIRE(findChild(under, "b.toml") != nullptr);
+    // Reads don't bump the generation.
+    REQUIRE(fs.generation() == gen_before);
+}
+
+TEST_CASE("ArchiveProjectFs accepts drops as working-set overrides",
+          "[viewer][archive_project_fs]") {
+    TempArchive ta{"drop", {{"scene.toml", "old\n"}}};
+    ArchiveProjectFs fs{ta.zip};
+
+    using enum ProjectDropDecision::Kind;
+    REQUIRE(fs.planAddBytes("new.toml", {}).kind == Accept);
+    REQUIRE(fs.planAddBytes("scene.toml", {}).kind == Confirm);
+    REQUIRE_FALSE(fs.dirty());
+
+    const auto gen_before = fs.generation();
+    auto bytes = asBytes("added\n");
+    fs.addBytes("added.toml", bytes);
+    REQUIRE(fs.dirty());
+    REQUIRE(fs.generation() > gen_before);
+    REQUIRE(asString(fs.resolve("added.toml").file.bytes.span()) == "added\n");
+}
+
+TEST_CASE("ArchiveProjectFs saves edits back to disk atomically", "[viewer][archive_project_fs]") {
+    TempArchive ta{"save", {{"scene.toml", "v1\n"}}};
+    {
+        ArchiveProjectFs fs{ta.zip};
+        fs.addBytes("scene.toml", asBytes("v2\n")); // replace existing
+        fs.addBytes("extra.toml", asBytes("x\n"));
+        REQUIRE(fs.dirty());
+        REQUIRE(fs.save());
+        REQUIRE_FALSE(fs.dirty()); // reopened from the saved bytes
+    }
+
+    // A fresh backend on the same path sees the persisted edits.
+    ArchiveProjectFs reopened{ta.zip};
+    REQUIRE(reopened.status() == ProjectFsStatus::Ready);
+    REQUIRE(asString(reopened.resolve("scene.toml").file.bytes.span()) == "v2\n");
+    REQUIRE(asString(reopened.resolve("extra.toml").file.bytes.span()) == "x\n");
+}
+
+TEST_CASE("ArchiveProjectFs drives a headless scene build via BuildSession",
+          "[viewer][archive_project_fs]") {
+    // End-to-end without the viewer: an archive holding a config + geometry pair
+    // feeds the same BuildSession the App drives, proving open-archive → scene
+    // build works through the ProjectFs contract alone.
+    auto geom = minimalNhbZstBytes();
+    std::string geom_str{reinterpret_cast<const char *>(geom.data()), geom.size()};
+    TempArchive ta{"build",
+                   {{"scene.toml", "# minimal nodehammer config\n"}, {"scene.nhb.zst", geom_str}}};
+
+    ArchiveProjectFs fs{ta.zip};
+    REQUIRE(fs.status() == ProjectFsStatus::Ready);
+
+    nodehammer::viewer::BuildSession session;
+    session.setRootKeys("scene.toml", "scene.nhb.zst");
+
+    using nodehammer::viewer::BuildPhase;
+    for (int i = 0; i < 100; ++i) {
+        session.poll(&fs);
+        const auto p = session.phase();
+        if (p == BuildPhase::ResolvedReady || p == BuildPhase::Error ||
+            p == BuildPhase::WaitingForUser) {
+            break;
+        }
+    }
+
+    REQUIRE(session.phase() == BuildPhase::ResolvedReady);
+    auto inputs = session.takeInputs();
+    REQUIRE(inputs);
+    REQUIRE_FALSE(inputs->import.diags.hasErrors());
+    REQUIRE(inputs->import.scene.nodes.contains(inputs->import.scene.rootId));
+}
+
+TEST_CASE("ArchiveProjectFs enters an error state on a bad archive",
+          "[viewer][archive_project_fs]") {
+    auto root = std::filesystem::temp_directory_path() / "nh_archive_project_fs_bad";
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directories(root);
+    auto bad = root / "not.zip";
+    nodehammer::file_io::writeFile(bad, asBytes("definitely not a zip"));
+
+    ArchiveProjectFs fs{bad};
+    REQUIRE(fs.status() == ProjectFsStatus::Error);
+    REQUIRE(fs.resolve("anything").status == ResolveStatus::Error);
+
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}

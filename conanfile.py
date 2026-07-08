@@ -57,6 +57,12 @@ class Nodehammer(ConanFile):
             self.requires("sokol/2026.07.02")
             self.requires("imgui/1.92.8")
             self.requires("implot/1.0.0")
+            # ZIP read/write backing ZipWorkingSet (strategy doc step 5) and the
+            # native ArchiveProjectFs (step 6). Unlike watcher/platformfolders
+            # this is viewer-only but *not* native-only: the future web bag
+            # (step 8, ZIP-in-IDB) reuses ZipWorkingSet, so miniz must build for
+            # Emscripten too. miniz is plain C with no OS deps, so it does.
+            self.requires("miniz/3.0.2")
             if self.settings.os != "Emscripten":
                 self.requires("nfd/1.3.0")
 

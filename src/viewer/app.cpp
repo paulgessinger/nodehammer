@@ -22,6 +22,9 @@
 #include "ui/viewer_ui.hpp"
 
 #include <nodehammer/viewer/backend_caps.hpp>
+#ifndef __EMSCRIPTEN__
+#include <nodehammer/viewer/archive_project_fs.hpp>
+#endif
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/png_export.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
@@ -1955,6 +1958,18 @@ void App::Impl::onFrame() {
                      0.f);
     }
 
+    // Archive mode is native-only (ArchiveProjectFs isn't linked on web), so
+    // the RTTI probe is guarded; on web these stay false and the menu items are
+    // hidden behind kIsWeb anyway.
+    bool is_archive_mode = false;
+    bool archive_dirty = false;
+#ifndef __EMSCRIPTEN__
+    if (auto *archive = dynamic_cast<ArchiveProjectFs *>(project_.get())) {
+        is_archive_mode = true;
+        archive_dirty = archive->dirty();
+    }
+#endif
+
     ui::ViewerUiContext ui_ctx{
         .cfg = cfg,
         .quality = quality,
@@ -1998,6 +2013,8 @@ void App::Impl::onFrame() {
             },
         .perf_history = &perf_history,
         .gpu_pass_times = &gpu_pass_timer_.results(),
+        .is_archive_mode = is_archive_mode,
+        .archive_dirty = archive_dirty,
         .has_scene = static_cast<bool>(scene),
         .scene_uploaded = scene_uploaded,
         .build_in_progress = build_controller_.inProgress(),
@@ -2018,6 +2035,16 @@ void App::Impl::onFrame() {
     ui_actions.reset_render_quality = [this]() { quality = RenderQualitySettings{}; };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
+    ui_actions.open_archive = [this]() { platform_->openArchivePicker(); };
+    ui_actions.save_archive = [this]() {
+#ifndef __EMSCRIPTEN__
+        if (auto *archive = dynamic_cast<ArchiveProjectFs *>(project_.get())) {
+            if (archive->save()) {
+                notifications.info("Archive saved");
+            }
+        }
+#endif
+    };
     ui_actions.frame_scene = [this]() {
         if (!scene) {
             return;

@@ -172,8 +172,15 @@ class Platform {
     /// is the gate.
     void openFolderPicker();
 
+    /// Request an "open archive" gesture. Native records a latch drained by
+    /// `drainPickers()` that opens the picked `.zip` as an `ArchiveProjectFs`
+    /// (strategy doc step 6); web is a no-op — there is no live archive mode on
+    /// web, so the "Open archive…" menu item is hidden behind `kIsWeb`.
+    void openArchivePicker();
+
     /// Run any pending picker modal latched by `openFilePicker` /
-    /// `openFolderPicker`. Called once at end of frame after the ImGui
+    /// `openFolderPicker` / `openArchivePicker`. Called once at end of frame
+    /// after the ImGui
     /// pass has been rendered and committed. No-op on web — web
     /// pickers dispatch inline at click time.
     void drainPickers();

@@ -280,9 +280,20 @@ endif()
 # so the Apple CoreServices/CoreFoundation frameworks the recipe propagates
 # reach the final executables.
 if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
-    target_sources(nodehammer_lib PRIVATE src/viewer/watched_filesystem_project_fs.cpp)
+    target_sources(nodehammer_lib PRIVATE
+        src/viewer/watched_filesystem_project_fs.cpp
+        src/viewer/archive_project_fs.cpp)
     find_package(watcher CONFIG REQUIRED)
     target_link_libraries(nodehammer_lib PUBLIC watcher::watcher)
+endif()
+
+# ZipWorkingSet (strategy doc step 5): ZIP-backed read/override/serialize
+# substrate for ArchiveProjectFs (native) and the future web bag (step 8).
+# Viewer-gated but *not* native-only — miniz builds for Emscripten too.
+if(NODEHAMMER_WITH_VIEWER)
+    target_sources(nodehammer_lib PRIVATE src/viewer/zip_working_set.cpp)
+    find_package(miniz CONFIG REQUIRED)
+    target_link_libraries(nodehammer_lib PUBLIC miniz::miniz)
 endif()
 
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
