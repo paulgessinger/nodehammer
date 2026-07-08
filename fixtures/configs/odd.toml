@@ -49,6 +49,25 @@ match = 'name ~= "Solenoid*"'
 [rules.tessellation]
 max_segments_circle = 48
 
+# Enable interior-face removal on every calorimeter stave.
+[[rules]]
+match = [
+  'path ~= "**/ECalBarrel/stave*"',
+  'path ~= "**/ECalEndcap_A/stave*"',
+  'path ~= "**/ECalEndcap_B/stave*"',
+  'path ~= "**/HCalBarrel/stave*"',
+  'path ~= "**/HCalEndcap_A/stave*"',
+  'path ~= "**/HCalEndcap_B/stave*"',
+]
+[rules.tessellation]
+drop_coincident_faces = true
+
+# Enable interior-face removal on long-strip barrel staves.
+[[rules]]
+match = 'path ~= "**/LongStripLayer*/stave*"'
+[rules.tessellation]
+drop_coincident_faces = true
+
 
 # ── Defaults ────────────────────────────────────────────────────────────────
 # Global fallback for tessellation and extras — applies when no rule sets a
