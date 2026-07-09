@@ -264,8 +264,13 @@ target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
 #
 # NativeBagProjectFs (strategy doc step 3) wraps FilesystemProjectFs
 # pointed at a process-owned tmp dir. Native-only for the same reason
-# the underlying FS backend is — and the in-memory BagProjectFs stays
-# as the web bag until WebBagProjectFs lands (step 8).
+# the underlying FS backend is.
+#
+# The in-memory BagProjectFs stays in nodehammer_lib for both platforms:
+# the web empty project is now an ArchiveProjectFs working set (§0 reshape
+# / R1) so the web *runtime* no longer references BagProjectFs (static-lib
+# dead-strip keeps it out of the wasm viewer), but the native CLI
+# (cmd_viewer) and the unit tests on both platforms still use it.
 if(NOT EMSCRIPTEN)
     target_sources(nodehammer_lib PRIVATE
         src/viewer/filesystem_project_fs.cpp

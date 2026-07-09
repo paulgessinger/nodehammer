@@ -26,9 +26,10 @@ inline constexpr bool kIsWeb = false;
 
 /// Construct the App's "empty project" backend. Native returns a
 /// write-through `NativeBagProjectFs` rooted at a process-owned tmp
-/// dir (strategy doc step 3); web returns the in-memory `BagProjectFs`
-/// until `WebBagProjectFs` (step 8) lands. Defined per-platform so the
-/// App TU stays free of bag-backend headers.
+/// dir (strategy doc step 3); web returns an empty `ArchiveProjectFs`
+/// working set (provenance `Empty`, §0 reshape / R1) that loose drops
+/// accumulate into and application mode persists to IDB. Defined
+/// per-platform so the App TU stays free of backend headers.
 std::unique_ptr<ProjectFs> makeEmptyBag();
 
 struct WindowCustomizationRequest {

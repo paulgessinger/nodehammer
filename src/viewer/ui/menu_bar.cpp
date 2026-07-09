@@ -19,11 +19,11 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
             if (ImGui::MenuItem("Open folder...") && actions.open_folder_picker) {
                 actions.open_folder_picker();
             }
-            // Web open-archive lands in step 8 (async per-file drops + IDB); the
-            // picker is native-only for now.
-            if (ImGui::MenuItem("Open archive...") && actions.open_archive) {
-                actions.open_archive();
-            }
+        }
+        // Open archive is cross-platform: native picks a `.nhproj` path; web opens
+        // a `.nhproj`'s bytes into a working set (App::openArchiveFromBytes).
+        if (ImGui::MenuItem("Open archive...") && actions.open_archive) {
+            actions.open_archive();
         }
         // Archive create/save is cross-platform. Only persistence differs: a
         // bound archive writes in place; an unbound one is saved-as (native) or

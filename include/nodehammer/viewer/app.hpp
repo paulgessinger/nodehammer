@@ -89,8 +89,16 @@ class App {
 
     /// Add files to the current project through the App. The ProjectFs decides
     /// whether to accept, reject, or require confirmation; App owns the UI.
+    /// A dropped/picked `.nhproj` is recognised and opened as a whole project
+    /// (see `openArchiveFromBytes`) rather than added as a file.
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+
+    /// Open `.nhproj` bytes as a live project (unbound `ArchiveProjectFs`,
+    /// provenance `Local`). Used by the web open-archive picker / drop and any
+    /// caller that already has the archive bytes in hand. On a bad archive it
+    /// surfaces an error notification and leaves the current project in place.
+    void openArchiveFromBytes(std::span<const std::byte> bytes);
 
     /// Promote the current project into an in-memory archive bundle seeded with
     /// its archivable content (build closure for filesystem mode, whole working

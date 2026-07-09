@@ -100,12 +100,12 @@ void registerCmdViewer(CLI::App &app) {
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
-    // Positional: open a project directly. A .zip path opens as an
+    // Positional: open a project directly. A .nhproj path opens as an
     // ArchiveProjectFs; a directory opens as a live FilesystemProjectFs. When
     // set, --config / --input (if given) name the root keys *inside* the
     // project; otherwise it opens and the user picks roots from the project
     // panel.
-    auto *pathOpt = sub->add_option("path", "Project to open: a .zip archive or a directory")
+    auto *pathOpt = sub->add_option("path", "Project to open: a .nhproj archive or a directory")
                         ->type_name("PATH");
 
     // Headless screenshot mode: render one high-res PNG (all quality maxed) once
@@ -251,7 +251,7 @@ void registerCmdViewer(CLI::App &app) {
 
         // Positional project mode. A directory opens as a live
         // FilesystemProjectFs (watched, so edits under the tree reload); a
-        // .zip opens as a live ArchiveProjectFs. --config / --input, if
+        // .nhproj opens as a live ArchiveProjectFs. --config / --input, if
         // supplied, name the root keys *inside* the project (used verbatim,
         // not resolved against the filesystem); otherwise the user picks roots
         // from the project panel, like a dragged-in folder or archive.

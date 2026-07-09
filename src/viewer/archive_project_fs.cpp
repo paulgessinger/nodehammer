@@ -51,6 +51,7 @@ std::string normaliseDirKey(std::string_view dir) {
 struct ArchiveProjectFs::Impl {
     std::filesystem::path archive_path;
     std::optional<ZipWorkingSet> ws;
+    Provenance provenance{Provenance::Local};
     bool errored{false};
     std::string error_msg;
     std::vector<std::string> warning_msgs;
@@ -84,10 +85,12 @@ ArchiveProjectFs::ArchiveProjectFs(std::filesystem::path path) : impl_(std::make
     ++impl_->generation;
 }
 
-ArchiveProjectFs::ArchiveProjectFs(ZipWorkingSet ws) : impl_(std::make_unique<Impl>()) {
+ArchiveProjectFs::ArchiveProjectFs(ZipWorkingSet ws, Provenance provenance)
+    : impl_(std::make_unique<Impl>()) {
     // Unbound: no backing file. archive_path stays empty; save() fails until a
-    // path is bound via saveTo (native) — web persists by download.
+    // path is bound via saveTo (native) — web persists by download / IDB.
     impl_->ws = std::move(ws);
+    impl_->provenance = provenance;
     ++impl_->generation;
 }
 
@@ -116,18 +119,30 @@ ResolveResult ArchiveProjectFs::resolve(std::string_view key) const {
     if (!norm) {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }
-    if (!impl_->ws->contains(*norm)) {
-        return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
-    }
     auto bytes = impl_->ws->read(*norm);
-    if (!bytes) {
+    if (!bytes && impl_->provenance == Provenance::Empty) {
+        // Scratch project assembled from flat loose drops (no real directory
+        // structure): fall back to the basename so an include like
+        // `sub/common.toml` resolves to a root-dropped `common.toml`. Opened
+        // archives (Local/Remote) carry full paths and keep strict resolution.
+        auto base = std::filesystem::path{*norm}.filename().string();
+        if (!base.empty() && base != *norm) {
+            bytes = impl_->ws->read(base);
+        }
+    }
+    if (bytes) {
+        return ResolveResult{
+            ResolveStatus::Ready, OpenedFile{std::string{key}, std::move(*bytes)}, {}, {}};
+    }
+    // Unresolved: an entry present in the working set that still won't read is
+    // corrupt (Error); one that isn't there at all is genuinely Missing.
+    if (impl_->ws->contains(*norm)) {
         return ResolveResult{ResolveStatus::Error,
                              {},
                              std::string{key},
                              "failed to read archive entry: " + std::string{key}};
     }
-    return ResolveResult{
-        ResolveStatus::Ready, OpenedFile{std::string{key}, std::move(*bytes)}, {}, {}};
+    return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
 }
 
 std::uint64_t ArchiveProjectFs::generation() const { return impl_->generation; }
@@ -222,6 +237,8 @@ void ArchiveProjectFs::addPath(const std::filesystem::path &path) {
     }
     addBytes(path.filename().string(), contents);
 }
+
+ArchiveProjectFs::Provenance ArchiveProjectFs::provenance() const { return impl_->provenance; }
 
 const std::filesystem::path &ArchiveProjectFs::path() const { return impl_->archive_path; }
 

@@ -30,12 +30,12 @@ std::filesystem::path persistentTextPath(const std::string &key) {
     return std::filesystem::path{sago::getConfigHome()} / "nodehammer" / key;
 }
 
-/// Case-insensitive ".zip" extension check for archive-drop detection.
-bool isZipPath(const std::filesystem::path &p) {
+/// Case-insensitive ".nhproj" extension check for archive-drop detection.
+bool isProjectArchivePath(const std::filesystem::path &p) {
     auto ext = p.extension().string();
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return ext == ".zip";
+    return ext == ".nhproj";
 }
 
 } // namespace
@@ -103,7 +103,7 @@ void NativePickerState::runFolderPickerModal(App &app) {
 void NativePickerState::runArchivePickerModal(App &app) {
     NFD::Guard nfd;
     NFD::UniquePath picked;
-    nfdu8filteritem_t filters[] = {{"Zip archive", "zip"}};
+    nfdu8filteritem_t filters[] = {{"Nodehammer project", "nhproj"}};
     if (NFD::OpenDialog(picked, filters, 1) != NFD_OKAY) {
         return;
     }
@@ -113,13 +113,13 @@ void NativePickerState::runArchivePickerModal(App &app) {
 void NativePickerState::runSaveArchivePickerModal(App &app) {
     NFD::Guard nfd;
     NFD::UniquePath picked;
-    nfdu8filteritem_t filters[] = {{"Zip archive", "zip"}};
-    if (NFD::SaveDialog(picked, filters, 1, nullptr, "project.zip") != NFD_OKAY) {
+    nfdu8filteritem_t filters[] = {{"Nodehammer project", "nhproj"}};
+    if (NFD::SaveDialog(picked, filters, 1, nullptr, "project.nhproj") != NFD_OKAY) {
         return;
     }
     std::filesystem::path path{picked.get()};
-    if (!isZipPath(path)) {
-        path += ".zip";
+    if (!isProjectArchivePath(path)) {
+        path += ".nhproj";
     }
     app.saveActiveArchiveTo(path);
 }
@@ -141,7 +141,7 @@ void NativePickerState::runFolderPickerModal(App &) {
 
 void NativePickerState::runArchivePickerModal(App &) {
     std::println(stderr, "viewer: built without a native file dialog; "
-                         "drag a .zip archive onto the window instead.");
+                         "drag a .nhproj archive onto the window instead.");
 }
 
 void NativePickerState::runSaveArchivePickerModal(App &) {
@@ -172,12 +172,12 @@ void dispatchNativeDroppedFiles(App &app) {
             return;
         }
     }
-    // A single dropped .zip replaces the project with a live archive mode. Only
-    // the sole-file case is unambiguous; a .zip mixed with other files falls
+    // A single dropped .nhproj replaces the project with a live archive mode. Only
+    // the sole-file case is unambiguous; a .nhproj mixed with other files falls
     // through to flat ingestion below.
     if (n == 1) {
         std::filesystem::path p{sapp_get_dropped_file_path(0)};
-        if (isZipPath(p)) {
+        if (isProjectArchivePath(p)) {
             app.setProject(std::make_unique<ArchiveProjectFs>(std::move(p)));
             return;
         }

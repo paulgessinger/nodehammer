@@ -1,7 +1,8 @@
 #include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
+#include <nodehammer/viewer/archive_project_fs.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
+#include <nodehammer/viewer/zip_working_set.hpp>
 
 #include <emscripten/emscripten.h>
 #include <sokol_app.h>
@@ -248,7 +249,7 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
     var input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = '.toml,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
+    input.accept = '.nhproj,.toml,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
     input.style.display = 'none';
     input.addEventListener(
         'change', async function(ev) {
@@ -283,9 +284,45 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
 });
 // clang-format on
 
+// Open a single `.nhproj` archive as a whole project. A transient
+// `<input type=file accept=.nhproj>` (dispatched inline off the click gesture),
+// then the archive bytes are pushed to C++ via `nh_viewer_open_archive`, which
+// calls `App::openArchiveFromBytes` → a fresh working set (setProject swap).
+// clang-format off
+EM_JS(void, nh_viewer_open_archive_picker, (), {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.nhproj';
+    input.style.display = 'none';
+    input.addEventListener(
+        'change', async function(ev) {
+            var files = Array.from(ev.target.files);
+            document.body.removeChild(input);
+            if (files.length === 0) {
+                return;
+            }
+            var buffer = await files[0].arrayBuffer();
+            var bytes = new Uint8Array(buffer);
+            var data_ptr = Module['_malloc'](bytes.length);
+            Module.HEAPU8.set(bytes, data_ptr);
+            Module['_nh_viewer_open_archive'](data_ptr, bytes.length);
+            Module['_free'](data_ptr);
+        });
+    document.body.appendChild(input);
+    input.click();
+});
+// clang-format on
+
 namespace nodehammer::viewer::platform {
 
-std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<BagProjectFs>(); }
+std::unique_ptr<ProjectFs> makeEmptyBag() {
+    // The web "empty project" is a scratch working set (provenance Empty): loose
+    // drops accumulate into it with basename-fallback resolve, and application
+    // mode persists it to IDB. Opening a `.nhproj` or entering viewer mode swaps
+    // in a fresh working set with Local/Remote provenance.
+    return std::make_unique<ArchiveProjectFs>(ZipWorkingSet::create(),
+                                              ArchiveProjectFs::Provenance::Empty);
+}
 
 namespace {
 
@@ -427,8 +464,8 @@ void Platform::downloadArchive(const std::string &filename, std::span<const std:
 }
 
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
-void Platform::openFolderPicker() {}  // no folder picker on web today
-void Platform::openArchivePicker() {} // web open-archive lands in step 8
+void Platform::openFolderPicker() {} // no folder picker on web today
+void Platform::openArchivePicker() { nh_viewer_open_archive_picker(); }
 void Platform::saveArchivePicker() {} // web archives persist via downloadArchive
 void Platform::drainPickers() {}      // web pickers dispatch inline
 
@@ -506,6 +543,16 @@ EMSCRIPTEN_KEEPALIVE
 void nh_viewer_end_upload_batch(void * /*handle*/) {
     // No-op: each addBytes already updated the project; the build trigger
     // picks up the new state on the next frame poll.
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_open_archive(const std::uint8_t *data, std::size_t size) {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr || data == nullptr) {
+        std::println(stderr, "[viewer] nh_viewer_open_archive: no app / null data");
+        return;
+    }
+    app->openArchiveFromBytes(std::as_bytes(std::span{data, size}));
 }
 
 EMSCRIPTEN_KEEPALIVE

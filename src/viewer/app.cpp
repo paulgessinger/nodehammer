@@ -49,6 +49,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -422,6 +423,7 @@ struct App::Impl {
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+    void openArchiveFromBytes(std::span<const std::byte> bytes);
     void createArchiveFromScene();
     void saveActiveArchiveTo(const std::filesystem::path &path);
     void enqueueModal(RetainedModal modal);
@@ -1688,9 +1690,35 @@ void App::Impl::addProjectPath(const std::filesystem::path &path) {
     }
 }
 
+namespace {
+/// Case-insensitive check for the `.nhproj` project-archive extension.
+bool isNhprojName(std::string_view name) {
+    constexpr std::string_view ext = ".nhproj";
+    if (name.size() < ext.size()) {
+        return false;
+    }
+    const auto tail = name.substr(name.size() - ext.size());
+    for (std::size_t i = 0; i < ext.size(); ++i) {
+        char c = tail[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        if (c != ext[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
 void App::Impl::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
     using enum ProjectDropDecision::Kind;
     if (filename.empty() || project_ == nullptr) {
+        return;
+    }
+    // A dropped/picked `.nhproj` is a whole project, not a file to add: open it.
+    if (isNhprojName(filename)) {
+        openArchiveFromBytes(bytes);
         return;
     }
     auto decision = project_->planAddBytes(filename, bytes);
@@ -1711,6 +1739,25 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
     } else {
         enqueueProjectDropModal(std::move(decision), {});
     }
+}
+
+void App::Impl::openArchiveFromBytes(std::span<const std::byte> bytes) {
+    std::unique_ptr<ProjectFs> proj;
+    try {
+        proj = std::make_unique<ArchiveProjectFs>(ZipWorkingSet::openFromBytes(bytes),
+                                                  ArchiveProjectFs::Provenance::Local);
+    } catch (const std::exception &e) {
+        notifications.error(std::string{"Failed to open archive: "} + e.what());
+        return;
+    }
+    // Install like setProject: swap the backend, re-point the log sink, clear the
+    // stale root keys (App-side recognition picks up the new scene on the next
+    // generation bump), and drop any pending modals.
+    project_ = std::move(proj);
+    project_->setLogSink(&notifications);
+    build_controller_.setRootKeys({}, {});
+    active_modals.clear();
+    notifications.info("Opened archive");
 }
 
 void App::Impl::createArchiveFromScene() {
@@ -2292,6 +2339,10 @@ void App::addProjectPath(const std::filesystem::path &path) { impl_->addProjectP
 
 void App::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
     impl_->addProjectBytes(filename, bytes);
+}
+
+void App::openArchiveFromBytes(std::span<const std::byte> bytes) {
+    impl_->openArchiveFromBytes(bytes);
 }
 
 void App::createArchiveFromScene() { impl_->createArchiveFromScene(); }

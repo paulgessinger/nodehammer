@@ -6,6 +6,7 @@
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/viewer/build_session.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
+#include <nodehammer/viewer/zip_working_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -30,6 +31,7 @@ using nodehammer::viewer::DirNode;
 using nodehammer::viewer::ProjectDropDecision;
 using nodehammer::viewer::ProjectFsStatus;
 using nodehammer::viewer::ResolveStatus;
+using nodehammer::viewer::ZipWorkingSet;
 
 namespace {
 
@@ -268,4 +270,28 @@ TEST_CASE("ArchiveProjectFs surfaces corrupted archive entries as errors",
     ArchiveProjectFs fs{corrupt_zip};
     REQUIRE(fs.status() == ProjectFsStatus::Ready);
     REQUIRE(fs.resolve("scene.toml").status == ResolveStatus::Error);
+}
+
+TEST_CASE("ArchiveProjectFs Empty provenance falls back to basename for flat loose drops",
+          "[viewer][archive_project_fs]") {
+    // A scratch working set assembled from flat loose drops (the web empty
+    // project): an include referencing a subdir resolves to the root-dropped
+    // basename so the graph still links.
+    ArchiveProjectFs scratch{ZipWorkingSet::create(), ArchiveProjectFs::Provenance::Empty};
+    REQUIRE(scratch.provenance() == ArchiveProjectFs::Provenance::Empty);
+    scratch.addBytes("scene.toml", asBytes("include = [\"materials/common.toml\"]\n"));
+    scratch.addBytes("common.toml", asBytes("shared = 1\n"));
+
+    auto r = scratch.resolve("materials/common.toml");
+    REQUIRE(r.status == ResolveStatus::Ready);
+    REQUIRE(asString(r.file.bytes.span()) == "shared = 1\n");
+
+    // A real archive (Local/Remote provenance) keeps strict full-path resolution:
+    // no basename fallback, because its keys are already full paths.
+    ArchiveProjectFs opened{
+        ZipWorkingSet::openFromBytes(makeZip({{"common.toml", "shared = 1\n"}})),
+        ArchiveProjectFs::Provenance::Local};
+    REQUIRE(opened.provenance() == ArchiveProjectFs::Provenance::Local);
+    REQUIRE(opened.resolve("materials/common.toml").status == ResolveStatus::Missing);
+    REQUIRE(opened.resolve("common.toml").status == ResolveStatus::Ready);
 }
