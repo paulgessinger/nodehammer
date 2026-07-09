@@ -572,6 +572,12 @@ void Platform::downloadArchive(const std::string &, std::span<const std::byte>) 
     // no browser download.
 }
 
+// Web application-mode IDB persistence has no native equivalent, so these are
+// no-ops (native modes persist through their own on-disk backing).
+void Platform::loadProjectBlob() {}
+void Platform::saveProjectBlob(std::span<const std::byte>) {}
+void Platform::clearProjectBlob() {}
+
 void Platform::openFilePicker() { impl_->pickers.openFilePicker(); }
 void Platform::openFolderPicker() { impl_->pickers.openFolderPicker(); }
 void Platform::openArchivePicker() { impl_->pickers.openArchivePicker(); }

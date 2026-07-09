@@ -198,11 +198,13 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
         // UrlProjectFs::resolve, which kicks off emscripten_fetch on
         // first miss. No upfront enqueue needed — the session does it.
         application->setRootKeys(configPath, inputPath);
+    } else {
+        // Application mode (no sidecar-provided scene): the App keeps its
+        // eagerly-allocated empty working set. Kick an async IndexedDB restore so a
+        // previously-persisted project reappears; drops/picks otherwise accumulate
+        // into the working set and App-side recognition picks the root keys.
+        application->restoreWebProjectFromIdb();
     }
-    // Otherwise the App keeps its eagerly-allocated BagProjectFs — the
-    // user's first drop or Open-files gesture pushes into it directly,
-    // and App-side recognition picks the .toml + .nhb/.nhb.zst entries
-    // as the build's root keys.
 
     application->run();
     return 0;

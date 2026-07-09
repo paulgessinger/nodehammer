@@ -168,6 +168,13 @@ struct App::Impl {
     platform::WindowCustomizationRequest window_customization;
     platform::PlatformWindowState platform_window_state;
     std::vector<platform::PlatformGestureEvent> platform_gesture_events;
+
+    // Web application-mode IDB persistence: debounce a working-set flush keyed on
+    // the project generation. `flushed_gen == seen_gen` means IDB is up to date.
+    std::uint64_t persist_seen_gen_{0};
+    std::uint64_t persist_flushed_gen_{0};
+    std::chrono::steady_clock::time_point persist_dirty_at_{};
+    bool persist_pending_{false};
     SceneRenderer scene_renderer;     ///< draws the uncut base scene
     SceneRenderer cut_renderer;       ///< draws the Boolean-cut scene
     SceneRenderer *active_renderer{}; ///< last renderer drawn; for UI stats
@@ -425,6 +432,14 @@ struct App::Impl {
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
     void openArchiveFromBytes(std::span<const std::byte> bytes);
     void createArchiveFromScene();
+
+    // Web application-mode project persistence (IndexedDB). No-ops on native and
+    // in web viewer mode; see the strategy doc §3.2 / R2.
+    [[nodiscard]] bool webAppModeProject() const;
+    void tickWebProjectPersistence();
+    void flushWebProjectPersistence();
+    void onProjectBlobLoaded(std::span<const std::byte> bytes);
+    void restoreWebProjectFromIdb();
     void saveActiveArchiveTo(const std::filesystem::path &path);
     void enqueueModal(RetainedModal modal);
     void enqueueProjectDropModal(ProjectDropDecision decision, std::function<void()> on_confirm);
@@ -1760,6 +1775,85 @@ void App::Impl::openArchiveFromBytes(std::span<const std::byte> bytes) {
     notifications.info("Opened archive");
 }
 
+bool App::Impl::webAppModeProject() const {
+    if (!platform::kIsWeb) {
+        return false;
+    }
+    // The working set persists in application mode (Empty scratch or a Local
+    // opened `.nhproj`); web viewer mode is Remote and must never touch IDB.
+    auto *ar = dynamic_cast<ArchiveProjectFs *>(project_.get());
+    return ar != nullptr && ar->provenance() != ArchiveProjectFs::Provenance::Remote;
+}
+
+void App::Impl::tickWebProjectPersistence() {
+    if (!webAppModeProject()) {
+        return;
+    }
+    const auto gen = project_->generation();
+    if (gen != persist_seen_gen_) {
+        persist_seen_gen_ = gen;
+        persist_dirty_at_ = std::chrono::steady_clock::now();
+        persist_pending_ = gen != persist_flushed_gen_;
+    }
+    if (persist_pending_ &&
+        std::chrono::steady_clock::now() - persist_dirty_at_ > std::chrono::milliseconds(1500)) {
+        flushWebProjectPersistence();
+    }
+}
+
+void App::Impl::flushWebProjectPersistence() {
+    if (!webAppModeProject()) {
+        return;
+    }
+    const auto gen = project_->generation();
+    if (gen == persist_flushed_gen_) {
+        return; // IDB already matches the working set
+    }
+    auto *ar = static_cast<ArchiveProjectFs *>(project_.get());
+    const auto blob = ar->serialize();
+    platform_->saveProjectBlob(blob);
+    persist_flushed_gen_ = gen;
+    persist_pending_ = false;
+}
+
+void App::Impl::onProjectBlobLoaded(std::span<const std::byte> bytes) {
+    if (bytes.empty()) {
+        return; // IDB miss — keep the fresh empty project
+    }
+    // Only restore if the user hasn't already started working while the async load
+    // was in flight: the current project must still be a pristine empty scratch
+    // working set (Empty provenance, nothing dropped yet).
+    auto *ar = dynamic_cast<ArchiveProjectFs *>(project_.get());
+    if (ar == nullptr || ar->provenance() != ArchiveProjectFs::Provenance::Empty ||
+        !project_->list("").empty()) {
+        return;
+    }
+    std::unique_ptr<ProjectFs> proj;
+    try {
+        proj = std::make_unique<ArchiveProjectFs>(ZipWorkingSet::openFromBytes(bytes),
+                                                  ArchiveProjectFs::Provenance::Empty);
+    } catch (const std::exception &e) {
+        notifications.warning(std::string{"Could not restore saved project: "} + e.what());
+        return;
+    }
+    project_ = std::move(proj);
+    project_->setLogSink(&notifications);
+    build_controller_.setRootKeys({}, {});
+    // The restored set already matches IDB, so seed the flushed generation so the
+    // debounce doesn't immediately re-write identical bytes.
+    persist_seen_gen_ = project_->generation();
+    persist_flushed_gen_ = persist_seen_gen_;
+    persist_pending_ = false;
+    notifications.info("Restored your saved project");
+}
+
+void App::Impl::restoreWebProjectFromIdb() {
+    if (!platform::kIsWeb) {
+        return;
+    }
+    platform_->loadProjectBlob();
+}
+
 void App::Impl::createArchiveFromScene() {
     if (!project_) {
         return;
@@ -1907,6 +2001,10 @@ void App::Impl::onFrame() {
         project_.get(),
         BuildController::AngleCut{cfg.boolean_cut, cfg.angle_cut_start_deg, cfg.angle_cut_end_deg},
         cut_uploaded);
+
+    // Web application mode: debounce-flush the working set to IndexedDB so edits
+    // survive a reload. No-op on native and in web viewer mode.
+    tickWebProjectPersistence();
 
     // Benchmark mode takes over the frame entirely: it drives the camera/state
     // sequence and renders at full rate, bypassing the idle/UI/input path below.
@@ -2169,8 +2267,16 @@ void App::Impl::onFrame() {
         cut_renderer.clearScene();
         scene.reset();
         cut_scene.reset();
+        // Web application mode: closing clears the persisted IDB slot so the empty
+        // project doesn't get restored on the next reload.
+        if (webAppModeProject()) {
+            platform_->clearProjectBlob();
+        }
         project_ = platform::makeEmptyBag();
         project_->setLogSink(&notifications);
+        persist_seen_gen_ = 0;
+        persist_flushed_gen_ = 0;
+        persist_pending_ = false;
         // Drops the pristine cache, root keys, session keys, the pending-cut
         // flag, and the persistent error in one shot.
         build_controller_.reset();
@@ -2344,6 +2450,14 @@ void App::addProjectBytes(const std::string &filename, std::span<const std::byte
 void App::openArchiveFromBytes(std::span<const std::byte> bytes) {
     impl_->openArchiveFromBytes(bytes);
 }
+
+void App::onProjectBlobLoaded(std::span<const std::byte> bytes) {
+    impl_->onProjectBlobLoaded(bytes);
+}
+
+void App::flushWebProjectPersistence() { impl_->flushWebProjectPersistence(); }
+
+void App::restoreWebProjectFromIdb() { impl_->restoreWebProjectFromIdb(); }
 
 void App::createArchiveFromScene() { impl_->createArchiveFromScene(); }
 

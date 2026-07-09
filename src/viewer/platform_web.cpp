@@ -90,6 +90,79 @@ EM_JS(void, nh_viewer_download_bytes,
 });
 // clang-format on
 
+// IndexedDB blob store for web application-mode project persistence. One object
+// store ("blobs") in DB "nodehammer" keyed by a short string; values are the raw
+// `.nhproj` bytes as a Uint8Array. Reads are async: on completion the runtime is
+// called back at Module._nh_viewer_project_blob_loaded(ptr,len) (len 0 = miss).
+// clang-format off
+EM_JS(void, nh_viewer_idb_open_helper, (), {
+    // Lazily define a shared open() helper the get/put/delete calls reuse.
+    if (Module.__nhIdbOpen) { return; }
+    Module.__nhIdbOpen = function() {
+        return new Promise(function(resolve, reject) {
+            var req = indexedDB.open('nodehammer', 1);
+            req.onupgradeneeded = function() {
+                var db = req.result;
+                if (!db.objectStoreNames.contains('blobs')) {
+                    db.createObjectStore('blobs');
+                }
+            };
+            req.onsuccess = function() { resolve(req.result); };
+            req.onerror = function() { reject(req.error); };
+        });
+    };
+});
+
+EM_JS(void, nh_viewer_idb_get, (const char *key), {
+    var k = UTF8ToString(key);
+    nh_viewer_idb_open_helper();
+    Module.__nhIdbOpen().then(function(db) {
+        var tx = db.transaction('blobs', 'readonly');
+        var req = tx.objectStore('blobs').get(k);
+        req.onsuccess = function() {
+            var val = req.result;
+            if (!val) {
+                Module['_nh_viewer_project_blob_loaded'](0, 0);
+                return;
+            }
+            var bytes = new Uint8Array(val);
+            var ptr = Module['_malloc'](bytes.length);
+            Module.HEAPU8.set(bytes, ptr);
+            Module['_nh_viewer_project_blob_loaded'](ptr, bytes.length);
+            Module['_free'](ptr);
+        };
+        req.onerror = function() { Module['_nh_viewer_project_blob_loaded'](0, 0); };
+    }).catch(function(e) {
+        console.warn('nodehammer: IDB get failed', e);
+        Module['_nh_viewer_project_blob_loaded'](0, 0);
+    });
+});
+
+EM_JS(void, nh_viewer_idb_put, (const char *key, const uint8_t *data, int size), {
+    var k = UTF8ToString(key);
+    // Copy out of the wasm heap now (it can move before the async write runs).
+    var copy = new Uint8Array(HEAPU8.subarray(data, data + size));
+    nh_viewer_idb_open_helper();
+    Module.__nhIdbOpen().then(function(db) {
+        var tx = db.transaction('blobs', 'readwrite');
+        tx.objectStore('blobs').put(copy, k);
+    }).catch(function(e) { console.warn('nodehammer: IDB put failed', e); });
+});
+
+EM_JS(void, nh_viewer_idb_delete, (const char *key), {
+    var k = UTF8ToString(key);
+    nh_viewer_idb_open_helper();
+    Module.__nhIdbOpen().then(function(db) {
+        var tx = db.transaction('blobs', 'readwrite');
+        tx.objectStore('blobs').delete(k);
+    }).catch(function(e) { console.warn('nodehammer: IDB delete failed', e); });
+});
+// clang-format on
+
+// The single IDB key for the current application-mode project (single-document
+// now; a named multi-document switcher would key per name — §12 R6).
+static constexpr const char *kProjectBlobKey = "project/default";
+
 // clang-format off
 EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
     if (Module.__nhWindowObserversInstalled) {
@@ -463,6 +536,15 @@ void Platform::downloadArchive(const std::string &filename, std::span<const std:
                              static_cast<int>(bytes.size()));
 }
 
+void Platform::loadProjectBlob() { nh_viewer_idb_get(kProjectBlobKey); }
+
+void Platform::saveProjectBlob(std::span<const std::byte> bytes) {
+    nh_viewer_idb_put(kProjectBlobKey, reinterpret_cast<const std::uint8_t *>(bytes.data()),
+                      static_cast<int>(bytes.size()));
+}
+
+void Platform::clearProjectBlob() { nh_viewer_idb_delete(kProjectBlobKey); }
+
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
 void Platform::openFolderPicker() {} // no folder picker on web today
 void Platform::openArchivePicker() { nh_viewer_open_archive_picker(); }
@@ -575,7 +657,19 @@ void nh_viewer_save_persistent_state() {
     auto *app = nodehammer::viewer::App::instance();
     if (app != nullptr) {
         app->savePersistentState();
+        // beforeunload also flushes the application-mode working set to IDB so the
+        // last edits survive a reload even if the debounce hadn't fired yet.
+        app->flushWebProjectPersistence();
     }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_project_blob_loaded(const std::uint8_t *data, std::size_t size) {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr) {
+        return;
+    }
+    app->onProjectBlobLoaded(std::as_bytes(std::span{data, size}));
 }
 
 } // extern "C"

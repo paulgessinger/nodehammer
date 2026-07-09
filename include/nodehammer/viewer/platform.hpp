@@ -158,11 +158,22 @@ class Platform {
     std::optional<std::string> saveExportedImage(const std::string &filename,
                                                  std::span<const std::byte> bytes);
 
-    /// Deliver a `.zip` archive blob to the user. Web triggers a browser download
-    /// under `filename` (how unbound web archives persist). Native is a no-op —
-    /// native archives are written to a path picked via `saveArchivePicker()`.
-    /// `bytes` is consumed during the call.
+    /// Deliver a `.nhproj` archive blob to the user. Web triggers a browser
+    /// download under `filename` (how unbound web archives persist). Native is a
+    /// no-op — native archives are written to a path picked via
+    /// `saveArchivePicker()`. `bytes` is consumed during the call.
     void downloadArchive(const std::string &filename, std::span<const std::byte> bytes);
+
+    /// Web application-mode project persistence to IndexedDB (the working set that
+    /// makes the web app feel native — it survives reload). Native is a no-op:
+    /// native modes persist through their own on-disk backing.
+    ///   - `loadProjectBlob()` kicks an async IDB read; when it resolves the
+    ///     runtime calls `App::onProjectBlobLoaded(bytes)` (empty span on a miss).
+    ///   - `saveProjectBlob(bytes)` writes the blob (fire-and-forget).
+    ///   - `clearProjectBlob()` deletes it (Close project).
+    void loadProjectBlob();
+    void saveProjectBlob(std::span<const std::byte> bytes);
+    void clearProjectBlob();
 
     /// Request a "pick files" gesture. Web dispatches the browser's
     /// transient `<input type=file multiple>` inline (the browser

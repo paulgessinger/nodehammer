@@ -100,6 +100,16 @@ class App {
     /// surfaces an error notification and leaves the current project in place.
     void openArchiveFromBytes(std::span<const std::byte> bytes);
 
+    /// Web application-mode IDB persistence hooks (no-ops on native / viewer mode):
+    ///   - `restoreWebProjectFromIdb()` kicks the async cold-load at startup.
+    ///   - `onProjectBlobLoaded(bytes)` is the runtime callback for that load;
+    ///     it restores the saved working set if the project is still pristine.
+    ///   - `flushWebProjectPersistence()` force-writes the working set to IDB
+    ///     (called on `beforeunload`).
+    void restoreWebProjectFromIdb();
+    void onProjectBlobLoaded(std::span<const std::byte> bytes);
+    void flushWebProjectPersistence();
+
     /// Promote the current project into an in-memory archive bundle seeded with
     /// its archivable content (build closure for filesystem mode, whole working
     /// set for bounded backends), re-seeding the current root keys so the scene
