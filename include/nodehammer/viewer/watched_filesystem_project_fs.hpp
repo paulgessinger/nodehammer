@@ -47,6 +47,7 @@ class WatchedFilesystemProjectFs final : public ProjectFs {
     ProjectFsStatus status() const override;
     std::span<const ProjectProgress> progress() const override;
     std::string_view name() const override;
+    bool listingIsComplete() const override;
     std::span<const std::string> warnings() const override;
 
     // Ingestion — forwarded to inner.

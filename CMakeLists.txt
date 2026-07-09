@@ -281,17 +281,22 @@ endif()
 # reach the final executables.
 if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
     target_sources(nodehammer_lib PRIVATE
-        src/viewer/watched_filesystem_project_fs.cpp
-        src/viewer/archive_project_fs.cpp)
+        src/viewer/watched_filesystem_project_fs.cpp)
     find_package(watcher CONFIG REQUIRED)
     target_link_libraries(nodehammer_lib PUBLIC watcher::watcher)
 endif()
 
-# ZipWorkingSet (strategy doc step 5): ZIP-backed read/override/serialize
-# substrate for ArchiveProjectFs (native) and the future web bag (step 8).
-# Viewer-gated but *not* native-only — miniz builds for Emscripten too.
+# ZipWorkingSet (strategy doc step 5) + ArchiveProjectFs (step 6) + archive
+# export (step 7): ZIP-backed read/override/serialize substrate and the archive
+# backend. Archive mode is cross-platform — only the POSIX save internals are
+# native-only (guarded inside the .cpp) — so these are viewer-gated but *not*
+# native-only; miniz builds for Emscripten too, and the web bag (step 8) reuses
+# the same substrate.
 if(NODEHAMMER_WITH_VIEWER)
-    target_sources(nodehammer_lib PRIVATE src/viewer/zip_working_set.cpp)
+    target_sources(nodehammer_lib PRIVATE
+        src/viewer/zip_working_set.cpp
+        src/viewer/archive_project_fs.cpp
+        src/viewer/archive_export.cpp)
     find_package(miniz CONFIG REQUIRED)
     target_link_libraries(nodehammer_lib PUBLIC miniz::miniz)
 endif()
@@ -365,6 +370,13 @@ if(NODEHAMMER_WITH_VIEWER)
         nh_add_sokol_lib(sokol_native ${_nh_backend})
         nh_add_viewer_lib(nodehammer_viewer sokol_native ${_nh_backend})
         nh_add_viewer_exe(nodehammer nodehammer_viewer)
+
+        # Standalone dev tool: just Dear ImGui's demo window in a bare sokol
+        # window. Links sokol_native + ImGui::ImGui directly — no
+        # nodehammer_lib, no scene/render stack.
+        add_executable(imgui-kitchen-sink src/tools/imgui_kitchen_sink_main.cpp)
+        target_link_libraries(imgui-kitchen-sink PRIVATE sokol_native ImGui::ImGui)
+        nodehammer_set_compiler_options(imgui-kitchen-sink)
     endif()
 else()
     # Headless build: just the CLI dispatcher, no viewer subcommand.

@@ -42,6 +42,12 @@ class ZipWorkingSet {
     ZipWorkingSet(const ZipWorkingSet &) = delete;
     ZipWorkingSet &operator=(const ZipWorkingSet &) = delete;
 
+    /// An empty in-memory working set with no backing archive. All content is
+    /// added via `writeEntry`; `serialize()` produces a fresh ZIP of just those
+    /// entries. Used to build an archive from scratch (e.g. promoting a
+    /// filesystem/bag project into an archive bundle).
+    static ZipWorkingSet create();
+
     /// Parse a ZIP from raw bytes. Throws std::runtime_error if the bytes are
     /// not a readable ZIP central directory.
     static ZipWorkingSet openFromBytes(std::span<const std::byte> bytes);

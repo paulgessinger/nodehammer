@@ -68,13 +68,15 @@ EM_JS(void, nh_viewer_open_url, (const char *url), {
     window.open(u, "_blank", "noopener,noreferrer");
 });
 
-// Trigger a browser download of `size` bytes at `data` under `filename`. Copies
-// the bytes out of the wasm heap (it can move/detach) into a Blob, then clicks a
-// transient <a download>. Used by the PNG screenshot export.
-EM_JS(void, nh_viewer_download_bytes, (const char *filename, const uint8_t *data, int size), {
+// Trigger a browser download of `size` bytes at `data` under `filename` with MIME
+// type `mime`. Copies the bytes out of the wasm heap (it can move/detach) into a
+// Blob, then clicks a transient <a download>. Used by the PNG screenshot export
+// and the archive "Download" persistence path.
+EM_JS(void, nh_viewer_download_bytes,
+      (const char *filename, const char *mime, const uint8_t *data, int size), {
     var name = UTF8ToString(filename);
     var copy = new Uint8Array(HEAPU8.subarray(data, data + size));
-    var blob = new Blob([copy], { type: "image/png" });
+    var blob = new Blob([copy], { type: UTF8ToString(mime) });
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
@@ -412,14 +414,22 @@ void Platform::openUrl(const std::string &url) { nh_viewer_open_url(url.c_str())
 
 std::optional<std::string> Platform::saveExportedImage(const std::string &filename,
                                                        std::span<const std::byte> bytes) {
-    nh_viewer_download_bytes(filename.c_str(), reinterpret_cast<const std::uint8_t *>(bytes.data()),
+    nh_viewer_download_bytes(filename.c_str(), "image/png",
+                             reinterpret_cast<const std::uint8_t *>(bytes.data()),
                              static_cast<int>(bytes.size()));
     return filename;
 }
 
+void Platform::downloadArchive(const std::string &filename, std::span<const std::byte> bytes) {
+    nh_viewer_download_bytes(filename.c_str(), "application/zip",
+                             reinterpret_cast<const std::uint8_t *>(bytes.data()),
+                             static_cast<int>(bytes.size()));
+}
+
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
 void Platform::openFolderPicker() {}  // no folder picker on web today
-void Platform::openArchivePicker() {} // no live archive mode on web
+void Platform::openArchivePicker() {} // web open-archive lands in step 8
+void Platform::saveArchivePicker() {} // web archives persist via downloadArchive
 void Platform::drainPickers() {}      // web pickers dispatch inline
 
 void setWebDragHover(Platform::Impl *impl, bool active, float x, float y, int file_count,

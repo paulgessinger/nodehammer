@@ -45,6 +45,7 @@ std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<NativeBagPro
 void NativePickerState::openFilePicker() { pending_file_picker_ = true; }
 void NativePickerState::openFolderPicker() { pending_folder_picker_ = true; }
 void NativePickerState::openArchivePicker() { pending_archive_picker_ = true; }
+void NativePickerState::saveArchivePicker() { pending_save_archive_picker_ = true; }
 
 void NativePickerState::drainPickers(App &app) {
     if (pending_file_picker_) {
@@ -58,6 +59,10 @@ void NativePickerState::drainPickers(App &app) {
     if (pending_archive_picker_) {
         pending_archive_picker_ = false;
         runArchivePickerModal(app);
+    }
+    if (pending_save_archive_picker_) {
+        pending_save_archive_picker_ = false;
+        runSaveArchivePickerModal(app);
     }
 }
 
@@ -105,6 +110,20 @@ void NativePickerState::runArchivePickerModal(App &app) {
     app.setProject(std::make_unique<ArchiveProjectFs>(std::filesystem::path{picked.get()}));
 }
 
+void NativePickerState::runSaveArchivePickerModal(App &app) {
+    NFD::Guard nfd;
+    NFD::UniquePath picked;
+    nfdu8filteritem_t filters[] = {{"Zip archive", "zip"}};
+    if (NFD::SaveDialog(picked, filters, 1, nullptr, "project.zip") != NFD_OKAY) {
+        return;
+    }
+    std::filesystem::path path{picked.get()};
+    if (!isZipPath(path)) {
+        path += ".zip";
+    }
+    app.saveActiveArchiveTo(path);
+}
+
 #else // NH_VIEWER_NATIVE_DIALOG
 
 // Built without NFD (NODEHAMMER_VIEWER_NATIVE_DIALOG=OFF): no GTK/DBus
@@ -123,6 +142,11 @@ void NativePickerState::runFolderPickerModal(App &) {
 void NativePickerState::runArchivePickerModal(App &) {
     std::println(stderr, "viewer: built without a native file dialog; "
                          "drag a .zip archive onto the window instead.");
+}
+
+void NativePickerState::runSaveArchivePickerModal(App &) {
+    std::println(stderr, "viewer: built without a native file dialog; "
+                         "cannot pick a save path for the archive.");
 }
 
 #endif // NH_VIEWER_NATIVE_DIALOG

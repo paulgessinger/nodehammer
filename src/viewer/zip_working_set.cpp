@@ -74,6 +74,14 @@ ZipWorkingSet::~ZipWorkingSet() = default;
 ZipWorkingSet::ZipWorkingSet(ZipWorkingSet &&) noexcept = default;
 ZipWorkingSet &ZipWorkingSet::operator=(ZipWorkingSet &&) noexcept = default;
 
+ZipWorkingSet ZipWorkingSet::create() {
+    // No backing archive: the reader stays uninitialised (reader_ok=false) and
+    // the originals maps stay empty. read/contains/listAtPrefix/serialize only
+    // touch the reader inside the (empty) original_order loops, so a from-scratch
+    // set works entirely off its overrides.
+    return ZipWorkingSet{std::make_unique<Impl>()};
+}
+
 ZipWorkingSet ZipWorkingSet::openFromBytes(std::span<const std::byte> bytes) {
     auto impl = std::make_unique<Impl>();
     impl->archive_bytes.assign(bytes.begin(), bytes.end());

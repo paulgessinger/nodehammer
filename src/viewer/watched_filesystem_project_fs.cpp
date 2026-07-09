@@ -166,6 +166,10 @@ std::span<const ProjectProgress> WatchedFilesystemProjectFs::progress() const {
 
 std::string_view WatchedFilesystemProjectFs::name() const { return impl_->inner->name(); }
 
+bool WatchedFilesystemProjectFs::listingIsComplete() const {
+    return impl_->inner->listingIsComplete();
+}
+
 std::span<const std::string> WatchedFilesystemProjectFs::warnings() const {
     return impl_->inner->warnings();
 }

@@ -135,6 +135,31 @@ TEST_CASE("ZipWorkingSet synthesizes a directory tree from flat keys",
     REQUIRE(find(under_a2, "b.toml") == nullptr);
 }
 
+TEST_CASE("ZipWorkingSet::create builds a fresh archive from scratch",
+          "[viewer][zip_working_set]") {
+    auto ws = ZipWorkingSet::create();
+    REQUIRE_FALSE(ws.dirty());
+    REQUIRE(ws.listAtPrefix("").empty());
+
+    ws.writeEntry("scene.toml", asBytes("root = 1\n"));
+    ws.writeEntry("det/inner.toml", asBytes("inner = 2\n"));
+    REQUIRE(ws.dirty());
+
+    // The synthesized tree reflects the written keys (no backing originals).
+    auto root = ws.listAtPrefix("");
+    REQUIRE(root.size() == 2);
+    REQUIRE(find(root, "scene.toml") != nullptr);
+    const auto *det = find(root, "det");
+    REQUIRE(det != nullptr);
+    REQUIRE(det->is_directory);
+
+    // Serialize → reopen round-trips every entry, proving a reader-less set
+    // serializes correctly.
+    auto out = ZipWorkingSet::openFromBytes(ws.serialize());
+    REQUIRE(asString(out.read("scene.toml")->span()) == "root = 1\n");
+    REQUIRE(asString(out.read("det/inner.toml")->span()) == "inner = 2\n");
+}
+
 TEST_CASE("ZipWorkingSet rejects a non-ZIP blob", "[viewer][zip_working_set]") {
     auto garbage = asBytes("this is definitely not a zip archive");
     REQUIRE_THROWS_AS(ZipWorkingSet::openFromBytes(garbage), std::runtime_error);

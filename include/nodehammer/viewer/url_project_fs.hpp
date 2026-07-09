@@ -35,6 +35,7 @@ class UrlProjectFs final : public ProjectFs {
     ProjectFsStatus status() const override;
     std::span<const ProjectProgress> progress() const override;
     std::string_view name() const override { return "url"; }
+    bool listingIsComplete() const override { return true; }
     void setLogSink(LogSink *sink) noexcept override;
     ProjectDropDecision planAddPath(const std::filesystem::path &path) const override;
     ProjectDropDecision planAddBytes(std::string_view filename,

@@ -72,9 +72,15 @@ std::optional<std::string> Platform::saveExportedImage(const std::string &filena
     return saveNativeExportedImage(filename, bytes);
 }
 
+void Platform::downloadArchive(const std::string &, std::span<const std::byte>) {
+    // Native archives are written to a picked path (saveArchivePicker); there is
+    // no browser download.
+}
+
 void Platform::openFilePicker() { impl_->pickers.openFilePicker(); }
 void Platform::openFolderPicker() { impl_->pickers.openFolderPicker(); }
 void Platform::openArchivePicker() { impl_->pickers.openArchivePicker(); }
+void Platform::saveArchivePicker() { impl_->pickers.saveArchivePicker(); }
 void Platform::drainPickers() { impl_->pickers.drainPickers(impl_->app); }
 
 } // namespace nodehammer::viewer::platform

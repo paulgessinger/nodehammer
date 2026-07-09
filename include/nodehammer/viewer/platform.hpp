@@ -157,6 +157,12 @@ class Platform {
     std::optional<std::string> saveExportedImage(const std::string &filename,
                                                  std::span<const std::byte> bytes);
 
+    /// Deliver a `.zip` archive blob to the user. Web triggers a browser download
+    /// under `filename` (how unbound web archives persist). Native is a no-op —
+    /// native archives are written to a path picked via `saveArchivePicker()`.
+    /// `bytes` is consumed during the call.
+    void downloadArchive(const std::string &filename, std::span<const std::byte> bytes);
+
     /// Request a "pick files" gesture. Web dispatches the browser's
     /// transient `<input type=file multiple>` inline (the browser
     /// requires `input.click()` to run from the user-gesture stack);
@@ -178,8 +184,15 @@ class Platform {
     /// web, so the "Open archive…" menu item is hidden behind `kIsWeb`.
     void openArchivePicker();
 
+    /// Request a "save archive as…" gesture for the active (unbound) archive.
+    /// Native records a latch drained by `drainPickers()` that runs an NFD save
+    /// dialog and, on confirm, calls `App::saveActiveArchiveTo(path)` (binding the
+    /// archive to the chosen path). Web is a no-op — web archives persist via
+    /// `downloadArchive`.
+    void saveArchivePicker();
+
     /// Run any pending picker modal latched by `openFilePicker` /
-    /// `openFolderPicker` / `openArchivePicker`. Called once at end of frame
+    /// `openFolderPicker` / `openArchivePicker` / `saveArchivePicker`. Called once at end of frame
     /// after the ImGui
     /// pass has been rendered and committed. No-op on web — web
     /// pickers dispatch inline at click time.

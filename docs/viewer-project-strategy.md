@@ -16,7 +16,7 @@ The viewer already has the right shape for this work; what's missing is mostly
 a write path, a unified hierarchical listing model, an editor surface, and a
 few mode-transition rules.
 
-**Status:** Steps 1–6 of §12 have landed.
+**Status:** Steps 1–7 of §12 have landed.
 - Step 1: `DirNode::children` is gone; backends maintain per-directory
   caches keyed by `generation()`; the App's tree panel recurses via
   `project_->list(node.key)`.
@@ -764,11 +764,27 @@ without an editor sitting on top of churning APIs.
    **File → Save archive** (⌘S label) is enabled when the archive is dirty.
    An integration test drives `open-archive → BuildSession → scene` headlessly.
    *Deferred*: `Save as archive…` (that's step 7).
-7. **`App::saveAsArchive` for non-archive modes** — walks the project
-   via `list()`/`resolve()` into a fresh `ZipWorkingSet`, calls
-   `serialize()`, and writes natively or triggers a browser download.
-   "Reopen as archive?" follow-up on native (works from filesystem,
-   bag, and archive — symmetric).
+7. ✅ **"Create archive from scene" — cross-platform archive promotion** —
+   landed
+   ([`archive_export.{hpp,cpp}`](../include/nodehammer/viewer/archive_export.hpp)).
+   Instead of a one-shot save, the project is *promoted* into a live,
+   unbound `ArchiveProjectFs` seeded with `buildArchiveWorkingSet` (the
+   **build closure** — root config + transitive includes + geometry — for
+   filesystem mode via a `ProjectFs::listingIsComplete()==false` walk that
+   reuses `ConfigLoader::peekIncludesFromBytes`/`resolveIncludeKey`; the
+   **whole working set** for bounded backends where `listingIsComplete()`).
+   The current root keys are re-seeded so the same scene rebuilds from the
+   bundle; the user then drags extra files in (archive mode accepts drops on
+   both platforms) and Saves. **Archive mode is now cross-platform** (not
+   native-only): only persistence differs — a **bound** archive writes in
+   place (`save()`), an **unbound** one is **save-as**'d to a path (native,
+   `saveTo` via NFD `SaveDialog`) or **downloaded** (web,
+   `nh_viewer_download_bytes`). `ZipWorkingSet::create()` builds the
+   from-scratch set; `writeBytesAtomic` is shared with step-6 `save()`.
+   Tests: closure-vs-whole-set walk + unbound save/bind round-trip; verified
+   on native (393 tests) and the wasm build compiles + links the whole path.
+   *Deferred to step 8*: opening an **existing** `.zip` into a live web
+   archive (web drops are async/per-file, entangled with bag+IDB).
 8. **`WebBagProjectFs` (ZIP-in-IDB)** — wraps `ZipWorkingSet` opened
    from bytes loaded out of IDB. `add` goes to `writeEntry`; debounced
    `serialize()` writes the blob back to IDB. "Download archive" reuses

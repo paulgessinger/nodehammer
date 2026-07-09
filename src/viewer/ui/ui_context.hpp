@@ -40,8 +40,11 @@ struct UiActions {
     std::function<void()> open_folder_picker;
     /// Open a `.zip` project as a live archive mode (native only).
     std::function<void()> open_archive;
-    /// Serialize the current archive's working set back to its bound path.
-    /// Only meaningful in archive mode; gated in the UI by `is_archive_mode`.
+    /// Promote the current project into a live, unbound archive bundle seeded
+    /// with its archivable content. Gated by `can_create_archive`.
+    std::function<void()> create_archive_from_scene;
+    /// Persist the current archive: write in place if bound, else save-as
+    /// (native) / download (web). Gated by `is_archive_mode`.
     std::function<void()> save_archive;
     std::function<void()> frame_scene;
     std::function<void()> close_project;
@@ -117,11 +120,17 @@ struct ViewerUiContext {
     /// the App; null in contexts that don't render.
     const GpuPassTimings *gpu_pass_times{nullptr};
 
-    /// The active project is a native `ArchiveProjectFs` (enables the archive
-    /// Save action). Derived by the App from the current backend.
+    /// The active project is an `ArchiveProjectFs` (enables the archive Save
+    /// action). Derived by the App from the current backend.
     bool is_archive_mode{false};
     /// The archive has unsaved working-set edits.
     bool archive_dirty{false};
+    /// The archive has no bound filesystem path yet (created from a scene, not
+    /// saved). Save becomes "Save archive as…" (native) / "Download" (web).
+    bool archive_unbound{false};
+    /// The current project can be promoted to an archive bundle (has a scene and
+    /// isn't already in archive mode).
+    bool can_create_archive{false};
 
     bool has_scene{false};
     bool scene_uploaded{false};

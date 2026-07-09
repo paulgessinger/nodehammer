@@ -1,6 +1,7 @@
 #include <nodehammer/viewer/archive_project_fs.hpp>
 
 #include <nodehammer/detail/file_io.hpp>
+#include <nodehammer/viewer/archive_export.hpp>
 #include <nodehammer/viewer/zip_working_set.hpp>
 
 #include <cstring>
@@ -10,11 +11,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#if !defined(_WIN32)
-#include <fcntl.h>
-#include <unistd.h>
-#endif
 
 namespace nodehammer::viewer {
 
@@ -48,53 +44,6 @@ std::string normaliseDirKey(std::string_view dir) {
         s.pop_back();
     }
     return s;
-}
-
-/// Serialize-and-swap: write `bytes` to `target` durably. Writes a sibling
-/// temp file, fsyncs it, renames over the target, and fsyncs the directory so
-/// the rename survives a crash. POSIX-only durability; on Windows we fall back
-/// to a best-effort replace.
-bool atomicWrite(const std::filesystem::path &target, std::span<const std::byte> bytes,
-                 std::string &err) {
-    std::filesystem::path tmp = target;
-    tmp += ".nhtmp";
-
-    try {
-        file_io::writeFile(tmp, bytes);
-    } catch (const std::exception &e) {
-        err = e.what();
-        return false;
-    }
-
-#if !defined(_WIN32)
-    if (int fd = ::open(tmp.c_str(), O_RDONLY); fd >= 0) {
-        ::fsync(fd);
-        ::close(fd);
-    }
-#endif
-
-    std::error_code ec;
-    std::filesystem::rename(tmp, target, ec);
-    if (ec) {
-        // Windows rename fails if the target exists; retry after removing it.
-        std::error_code rm_ec;
-        std::filesystem::remove(target, rm_ec);
-        std::filesystem::rename(tmp, target, ec);
-        if (ec) {
-            std::error_code cleanup_ec;
-            std::filesystem::remove(tmp, cleanup_ec);
-            err = ec.message();
-            return false;
-        }
-    }
-
-#if !defined(_WIN32)
-    if (int dfd = ::open(target.parent_path().c_str(), O_RDONLY); dfd >= 0) {
-        ::fsync(dfd);
-        ::close(dfd);
-    }
-#endif
-    return true;
 }
 
 } // namespace
@@ -132,6 +81,13 @@ ArchiveProjectFs::ArchiveProjectFs(std::filesystem::path path) : impl_(std::make
             "failed to open archive " + impl_->archive_path.string() + ": " + e.what();
         pushError(impl_->error_msg);
     }
+    ++impl_->generation;
+}
+
+ArchiveProjectFs::ArchiveProjectFs(ZipWorkingSet ws) : impl_(std::make_unique<Impl>()) {
+    // Unbound: no backing file. archive_path stays empty; save() fails until a
+    // path is bound via saveTo (native) — web persists by download.
+    impl_->ws = std::move(ws);
     ++impl_->generation;
 }
 
@@ -263,9 +219,38 @@ void ArchiveProjectFs::addPath(const std::filesystem::path &path) {
 
 const std::filesystem::path &ArchiveProjectFs::path() const { return impl_->archive_path; }
 
+bool ArchiveProjectFs::isBound() const { return !impl_->archive_path.empty(); }
+
 bool ArchiveProjectFs::dirty() const { return impl_->ws && impl_->ws->dirty(); }
 
+std::vector<std::byte> ArchiveProjectFs::serialize() const {
+    if (!impl_->ws) {
+        return {};
+    }
+    return impl_->ws->serialize();
+}
+
 bool ArchiveProjectFs::save() {
+#ifdef __EMSCRIPTEN__
+    // No filesystem path to write to on web; the App persists via download.
+    auto msg = std::string{"cannot save: web archives persist by download"};
+    impl_->warning_msgs.push_back(msg);
+    pushWarning(std::move(msg));
+    return false;
+#else
+    if (!isBound()) {
+        auto msg = std::string{"cannot save: archive has no bound path (use save as)"};
+        impl_->warning_msgs.push_back(msg);
+        pushWarning(std::move(msg));
+        return false;
+    }
+    return saveTo(impl_->archive_path);
+#endif
+}
+
+#ifndef __EMSCRIPTEN__
+
+bool ArchiveProjectFs::saveTo(const std::filesystem::path &path) {
     if (!impl_->ws) {
         auto msg = std::string{"cannot save: archive is not open"};
         impl_->warning_msgs.push_back(msg);
@@ -284,15 +269,17 @@ bool ArchiveProjectFs::save() {
     }
 
     std::string err;
-    if (!atomicWrite(impl_->archive_path, blob, err)) {
-        auto msg = "failed to write " + impl_->archive_path.string() + ": " + err;
+    if (!writeBytesAtomic(path, blob, err)) {
+        auto msg = "failed to write " + path.string() + ": " + err;
         impl_->warning_msgs.push_back(msg);
         pushWarning(std::move(msg));
         return false;
     }
 
-    // Reopen from the freshly written file so the working set drops its overrides
-    // and dirty flag, and subsequent reads come from the saved bytes.
+    // Bind to the written path (a no-op when re-saving in place) and reopen from
+    // the freshly written bytes so the working set drops its overrides and dirty
+    // flag, and subsequent reads come from the saved bytes.
+    impl_->archive_path = path;
     try {
         impl_->ws = ZipWorkingSet::openFromBytes(blob);
     } catch (const std::exception &e) {
@@ -304,5 +291,7 @@ bool ArchiveProjectFs::save() {
     impl_->invalidateListing();
     return true;
 }
+
+#endif // __EMSCRIPTEN__
 
 } // namespace nodehammer::viewer
