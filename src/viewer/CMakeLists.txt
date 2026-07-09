@@ -16,9 +16,9 @@
 #   scene_build_job_*   — std::thread (native) or polled state machine (web)
 #   platform_*          — EM_JS / KEEPALIVE shims live in the web variant
 #
-# url_project_fs.cpp is web-only: native already builds synchronously
-# from --input/--config in cmd_viewer.cpp, so the network fetch path has
-# no meaning off the browser.
+# (UrlProjectFs / url_project_fs_web.cpp were retired in the §0 reshape: web
+# viewer mode fetches a single `.nhproj` archive rather than per-key manifest
+# files, so there is no lazy URL-fetch backend anymore.)
 
 # Compose one viewer static lib for the given sokol_<backend> lib. PUBLIC
 # linkage on sokol_lib + nodehammer_lib so consumer executables inherit
@@ -86,7 +86,6 @@ function(nh_add_viewer_lib name sokol_lib backend)
         ${_dir}/scene_build_job_common.cpp
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/scene_build_job_web.cpp,${_dir}/scene_build_job_native.cpp>
         $<$<BOOL:${EMSCRIPTEN}>:${_dir}/scene_build_job_web_worker.cpp>
-        $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/url_project_fs_web.cpp,>
         $<IF:$<BOOL:${EMSCRIPTEN}>,${_dir}/platform_web.cpp,$<IF:$<BOOL:${APPLE}>,${_dir}/platform_macos.mm,${_dir}/platform_native_default.cpp>>
         $<$<NOT:$<BOOL:${EMSCRIPTEN}>>:${_dir}/platform_native_common.cpp>
         # bag_project_fs.cpp + build_session.cpp now live in nodehammer_lib

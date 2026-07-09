@@ -33,21 +33,20 @@
     <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
     <div id="status">loading…</div>
     <script>
-        // Two viewer entry paths share this single shell:
-        //   - URL auto-load: a sibling `nh_manifest.json` names the default
-        //     scene + config + optional defaults. The viewer fetches them
-        //     via emscripten_fetch on startup and shows a progress panel.
-        //   - Upload-only: no manifest is present (404 is treated as
-        //     "deploy didn't pin a default scene"). The viewer comes up
-        //     empty; drag a .toml + a geometry file onto the canvas, or
-        //     use the file picker.
-        // Per-page query params (?input=…&config=…&pbr=1&…) override the
-        // manifest when both are provided.
+        // Two viewer postures share this single shell, branched on the sidecar:
+        //   - Viewer mode: a sibling `nh_manifest.json` names a `.nhproj`
+        //     archive. The viewer fetches its bytes and opens a content-locked,
+        //     reload-from-source presentation.
+        //   - Application mode: no sidecar (404) — the viewer comes up empty and
+        //     restores your last project from IndexedDB; drag a `.nhproj` (or
+        //     loose files) onto the canvas, or use the file picker.
+        // Per-page query params override the sidecar: `?archive=…` picks the
+        // archive URL, `?lock=0` unlocks, and steer params (?pbr=1&…) apply.
         //
-        // Manifest schema (all fields optional):
+        // Sidecar (nh_manifest.json) schema (all fields optional):
         //   {
-        //     "input":   "scene.nhb.zst",
-        //     "config":  "scene.toml",
+        //     "archive": "project.abc123.nhproj",   // relative to this file
+        //     "lock":    true,                        // content-immutable (default)
         //     "title":   "Open Data Detector",
         //     "defaults": { "pbr": true, "autoOrbit": false, ... }
         //   }
@@ -80,8 +79,15 @@
                 });
             }
 
-            var inputUrl = params.get('input') || manifest.input || '';
-            var configUrl = params.get('config') || manifest.config || '';
+            // Viewer mode when an archive is named (query wins over sidecar).
+            // Resolve a relative ref against this document's directory.
+            var archiveRef = params.get('archive') || manifest.archive || '';
+            var archiveUrl = archiveRef ? new URL(archiveRef, window.location.href).href : '';
+            // Content lock defaults to on for a viewer-mode publication.
+            var lockParam = params.get('lock');
+            var lock = lockParam !== null
+                ? !(lockParam === '0' || lockParam === 'false' || lockParam === 'off' || lockParam === 'no')
+                : (manifest.lock !== undefined ? !!manifest.lock : true);
 
             if (manifest.title) {
                 document.title = manifest.title;
@@ -140,27 +146,13 @@
             }
             var bundleBase = useWGPU ? 'nodehammer-wgpu' : 'nodehammer-gles3';
 
-            // Asset paths use the legacy server-absolute form ("/foo.toml")
-            // because they double as MEMFS paths in the C++ side; the
-            // sub-path-aware URL prefix is passed separately as
-            // --asset-base and applied at fetch time only.
-            function memfsPath(ref) {
-                if (!ref) return ref;
-                return ref.charAt(0) === '/' ? ref : '/' + ref;
-            }
-
             // Options object mirroring the native CLI's `viewer` flags,
             // serialised to JSON and handed to the wasm `nh_viewer_start`
             // export below. Keys match src/web/viewer_main.cpp's reader.
             var viewerOpts = {};
-            if (inputUrl) {
-                viewerOpts.input = memfsPath(inputUrl);
-            }
-            if (configUrl) {
-                viewerOpts.config = memfsPath(configUrl);
-            }
-            if (assetBase) {
-                viewerOpts.assetBase = assetBase;
+            if (archiveUrl) {
+                viewerOpts.archive = archiveUrl;
+                viewerOpts.lock = lock;
             }
             setBoolOpt(viewerOpts, 'cullBack', 'cullBack');
             setBoolOpt(viewerOpts, 'pauseWhenUnfocused', 'pauseWhenUnfocused');

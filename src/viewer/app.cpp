@@ -26,6 +26,7 @@
 #include <nodehammer/viewer/backend_caps.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/png_export.hpp>
+#include <nodehammer/viewer/project_manifest.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
 
 #include <nodehammer/ir/render.hpp>
@@ -175,6 +176,10 @@ struct App::Impl {
     std::uint64_t persist_flushed_gen_{0};
     std::chrono::steady_clock::time_point persist_dirty_at_{};
     bool persist_pending_{false};
+
+    // Web viewer mode: a sidecar-driven, content-locked presentation. Ingestion is
+    // ignored while locked (edits go through Save-as-archive → open in app mode).
+    bool viewer_locked_{false};
     SceneRenderer scene_renderer;     ///< draws the uncut base scene
     SceneRenderer cut_renderer;       ///< draws the Boolean-cut scene
     SceneRenderer *active_renderer{}; ///< last renderer drawn; for UI stats
@@ -431,6 +436,9 @@ struct App::Impl {
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
     void openArchiveFromBytes(std::span<const std::byte> bytes);
+    void openArchiveRemote(std::span<const std::byte> bytes, bool locked);
+    void installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked);
+    void applyProjectManifest();
     void createArchiveFromScene();
 
     // Web application-mode project persistence (IndexedDB). No-ops on native and
@@ -1682,8 +1690,8 @@ void App::Impl::syncBrowserUrl() const {
 
 void App::Impl::addProjectPath(const std::filesystem::path &path) {
     using enum ProjectDropDecision::Kind;
-    if (path.empty() || project_ == nullptr) {
-        return;
+    if (path.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no ingestion
     }
     auto decision = project_->planAddPath(path);
     if (decision.kind == Accept) {
@@ -1728,8 +1736,8 @@ bool isNhprojName(std::string_view name) {
 
 void App::Impl::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
     using enum ProjectDropDecision::Kind;
-    if (filename.empty() || project_ == nullptr) {
-        return;
+    if (filename.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no ingestion
     }
     // A dropped/picked `.nhproj` is a whole project, not a file to add: open it.
     if (isNhprojName(filename)) {
@@ -1756,6 +1764,40 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
     }
 }
 
+void App::Impl::installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked) {
+    // Install like setProject: swap the backend, re-point the log sink, clear the
+    // stale root keys, and drop any pending modals. Then honor the archive's
+    // project manifest (which may re-seed the root keys) and set the viewer lock.
+    project_ = std::move(proj);
+    project_->setLogSink(&notifications);
+    build_controller_.setRootKeys({}, {});
+    active_modals.clear();
+    viewer_locked_ = locked;
+    // Reset IDB persistence bookkeeping; the debounce re-evaluates from the new set.
+    persist_seen_gen_ = 0;
+    persist_flushed_gen_ = 0;
+    persist_pending_ = false;
+    applyProjectManifest();
+}
+
+void App::Impl::applyProjectManifest() {
+    // A self-describing archive carries a root `nodehammer.toml` with a [project]
+    // section naming the entry config + geometry; honoring it makes the archive
+    // "just build" on open (native, app mode, viewer mode). Absent or malformed →
+    // fall back to extension-based recognition (leaves root keys empty).
+    if (!project_) {
+        return;
+    }
+    auto r = project_->resolve("nodehammer.toml");
+    if (r.status != ResolveStatus::Ready) {
+        return;
+    }
+    if (auto m = parseProjectManifest(r.file.bytes.span())) {
+        build_controller_.setRootKeys(m->config_key, m->geometry_key);
+        // [view] steer is applied by the steer cascade (R4).
+    }
+}
+
 void App::Impl::openArchiveFromBytes(std::span<const std::byte> bytes) {
     std::unique_ptr<ProjectFs> proj;
     try {
@@ -1765,14 +1807,20 @@ void App::Impl::openArchiveFromBytes(std::span<const std::byte> bytes) {
         notifications.error(std::string{"Failed to open archive: "} + e.what());
         return;
     }
-    // Install like setProject: swap the backend, re-point the log sink, clear the
-    // stale root keys (App-side recognition picks up the new scene on the next
-    // generation bump), and drop any pending modals.
-    project_ = std::move(proj);
-    project_->setLogSink(&notifications);
-    build_controller_.setRootKeys({}, {});
-    active_modals.clear();
+    installArchiveProject(std::move(proj), /*locked=*/false);
     notifications.info("Opened archive");
+}
+
+void App::Impl::openArchiveRemote(std::span<const std::byte> bytes, bool locked) {
+    std::unique_ptr<ProjectFs> proj;
+    try {
+        proj = std::make_unique<ArchiveProjectFs>(ZipWorkingSet::openFromBytes(bytes),
+                                                  ArchiveProjectFs::Provenance::Remote);
+    } catch (const std::exception &e) {
+        notifications.error(std::string{"Failed to load viewer project: "} + e.what());
+        return;
+    }
+    installArchiveProject(std::move(proj), locked);
 }
 
 bool App::Impl::webAppModeProject() const {
@@ -2433,6 +2481,11 @@ void App::setProject(std::unique_ptr<ProjectFs> project) {
     // recognition on the next generation bump (bag mode).
     impl_->build_controller_.setRootKeys({}, {});
     impl_->active_modals.clear();
+    // An explicit setProject is always an editable (app-mode / native) install —
+    // viewer mode installs via openArchiveRemote. Honor a self-describing archive's
+    // project manifest (re-seeds the root keys if present).
+    impl_->viewer_locked_ = false;
+    impl_->applyProjectManifest();
 }
 
 void App::setRootKeys(std::string config_key, std::string geometry_key) {
@@ -2449,6 +2502,10 @@ void App::addProjectBytes(const std::string &filename, std::span<const std::byte
 
 void App::openArchiveFromBytes(std::span<const std::byte> bytes) {
     impl_->openArchiveFromBytes(bytes);
+}
+
+void App::openArchiveRemote(std::span<const std::byte> bytes, bool locked) {
+    impl_->openArchiveRemote(bytes, locked);
 }
 
 void App::onProjectBlobLoaded(std::span<const std::byte> bytes) {

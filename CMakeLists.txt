@@ -154,6 +154,9 @@ add_library(nodehammer_lib STATIC
     # builds through this layer.
     src/viewer/bag_project_fs.cpp
     src/viewer/build_session.cpp
+    # Archive-internal project manifest (nodehammer.toml [project]) parser — pure
+    # toml++, no GUI deps, so it lives in the lib and the unit tests link it.
+    src/viewer/project_manifest.cpp
 )
 
 configure_file(
