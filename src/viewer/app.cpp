@@ -180,6 +180,10 @@ struct App::Impl {
     // Web viewer mode: a sidecar-driven, content-locked presentation. Ingestion is
     // ignored while locked (edits go through Save-as-archive → open in app mode).
     bool viewer_locked_{false};
+
+    // Continuous URL steer sync (Sync-to-URL window): debounce on the last query.
+    std::string last_url_query_;
+    std::chrono::steady_clock::time_point last_url_commit_{};
     SceneRenderer scene_renderer;     ///< draws the uncut base scene
     SceneRenderer cut_renderer;       ///< draws the Boolean-cut scene
     SceneRenderer *active_renderer{}; ///< last renderer drawn; for UI stats
@@ -452,7 +456,8 @@ struct App::Impl {
     void enqueueModal(RetainedModal modal);
     void enqueueProjectDropModal(ProjectDropDecision decision, std::function<void()> on_confirm);
     void renderActiveModal();
-    [[nodiscard]] std::string browserUrlStateQuery() const;
+    [[nodiscard]] std::string browserUrlStateQuery(bool include_view, bool include_camera) const;
+    void tickUrlSync();
 
     static void initCb(void *user) { static_cast<Impl *>(user)->onInit(); }
     static void frameCb(void *user) { static_cast<Impl *>(user)->onFrame(); }
@@ -476,6 +481,10 @@ void App::Impl::loadViewerConfigState() {
     ui_state.show_status = state->show_status;
     ui_state.show_view = state->show_view;
     ui_state.show_debug = state->show_debug;
+    ui_state.show_sync = state->show_sync;
+    ui_state.url_sync_continuous = state->url_sync_continuous;
+    ui_state.url_sync_camera = state->url_sync_camera;
+    ui_state.url_sync_view = state->url_sync_view;
 
     const bool keep_launch_camera = launch_had_initial_camera;
     applyViewerConfigState(*state, cfg, keep_launch_camera ? nullptr : &camera);
@@ -506,6 +515,10 @@ std::string App::Impl::currentViewerConfigStateToml() const {
     state.show_status = ui_state.show_status;
     state.show_view = ui_state.show_view;
     state.show_debug = ui_state.show_debug;
+    state.show_sync = ui_state.show_sync;
+    state.url_sync_continuous = ui_state.url_sync_continuous;
+    state.url_sync_camera = ui_state.url_sync_camera;
+    state.url_sync_view = ui_state.url_sync_view;
     return viewerConfigStateToToml(state);
 }
 
@@ -1648,43 +1661,66 @@ bool App::Impl::presentCachedFrame() {
     return true;
 }
 
-std::string App::Impl::browserUrlStateQuery() const {
+namespace {
+// Every URL query key the steer sync manages; unchecked categories emit no value
+// so their keys are cleared from the address bar on the next commit.
+constexpr const char *kUrlManagedKeys =
+    "cull,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,booleanCut,"
+    "cutStart,cutEnd,pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,"
+    "cameraPitch,cameraProjection";
+} // namespace
+
+std::string App::Impl::browserUrlStateQuery(bool include_view, bool include_camera) const {
     std::string query;
-    if (cfg.cull != CullOverride::Auto) {
-        appendUrlParam(query, "cull",
-                       cfg.cull == CullOverride::ForceCull ? "force-on" : "force-off");
+    if (include_view) {
+        if (cfg.cull != CullOverride::Auto) {
+            appendUrlParam(query, "cull",
+                           cfg.cull == CullOverride::ForceCull ? "force-on" : "force-off");
+        }
+        appendUrlBool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
+        appendUrlBool(query, "autoOrbit", cfg.auto_orbit, false);
+        appendUrlFloat(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
+        appendUrlBool(query, "angleCut", cfg.angle_cut, false);
+        appendUrlBool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
+        appendUrlBool(query, "booleanCut", cfg.boolean_cut, false);
+        appendUrlFloat(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
+        appendUrlFloat(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
+        appendUrlBool(query, "pbr", cfg.enable_pbr, true);
     }
-    appendUrlBool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
-    appendUrlBool(query, "autoOrbit", cfg.auto_orbit, false);
-    appendUrlFloat(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
-    appendUrlBool(query, "angleCut", cfg.angle_cut, false);
-    appendUrlBool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
-    appendUrlBool(query, "booleanCut", cfg.boolean_cut, false);
-    appendUrlFloat(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
-    appendUrlFloat(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
-    appendUrlBool(query, "pbr", cfg.enable_pbr, true);
-    appendUrlParam(query, "cameraTargetX", formatUrlFloat(camera.target.x));
-    appendUrlParam(query, "cameraTargetY", formatUrlFloat(camera.target.y));
-    appendUrlParam(query, "cameraTargetZ", formatUrlFloat(camera.target.z));
-    appendUrlParam(query, "cameraDistance", formatUrlFloat(camera.distance));
-    appendUrlParam(query, "cameraYaw", formatUrlFloat(glm::degrees(camera.yaw)));
-    appendUrlParam(query, "cameraPitch", formatUrlFloat(glm::degrees(camera.pitch)));
-    if (camera.projection == ProjectionMode::Orthographic) {
-        appendUrlParam(query, "cameraProjection", "orthographic");
+    if (include_camera) {
+        appendUrlParam(query, "cameraTargetX", formatUrlFloat(camera.target.x));
+        appendUrlParam(query, "cameraTargetY", formatUrlFloat(camera.target.y));
+        appendUrlParam(query, "cameraTargetZ", formatUrlFloat(camera.target.z));
+        appendUrlParam(query, "cameraDistance", formatUrlFloat(camera.distance));
+        appendUrlParam(query, "cameraYaw", formatUrlFloat(glm::degrees(camera.yaw)));
+        appendUrlParam(query, "cameraPitch", formatUrlFloat(glm::degrees(camera.pitch)));
+        if (camera.projection == ProjectionMode::Orthographic) {
+            appendUrlParam(query, "cameraProjection", "orthographic");
+        }
     }
     return query;
 }
 
 void App::Impl::syncBrowserUrl() const {
     if constexpr (platform::kIsWeb) {
-        const std::string state_query = browserUrlStateQuery();
-        constexpr const char *kManagedKeys =
-            "cull,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,booleanCut,"
-            "cutStart,"
-            "cutEnd,"
-            "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch,"
-            "cameraProjection";
-        platform_->commitUrlState(state_query, kManagedKeys);
+        const std::string state_query =
+            browserUrlStateQuery(ui_state.url_sync_view, ui_state.url_sync_camera);
+        platform_->commitUrlState(state_query, kUrlManagedKeys);
+    }
+}
+
+void App::Impl::tickUrlSync() {
+    if (!platform::kIsWeb || !ui_state.url_sync_continuous) {
+        return;
+    }
+    // Debounce: only re-write the address bar when the steer actually changed and
+    // at most a few times a second, so orbiting doesn't spam history.replaceState.
+    auto query = browserUrlStateQuery(ui_state.url_sync_view, ui_state.url_sync_camera);
+    const auto now = std::chrono::steady_clock::now();
+    if (query != last_url_query_ && now - last_url_commit_ > std::chrono::milliseconds(300)) {
+        platform_->commitUrlState(query, kUrlManagedKeys);
+        last_url_query_ = std::move(query);
+        last_url_commit_ = now;
     }
 }
 
@@ -1792,9 +1828,51 @@ void App::Impl::applyProjectManifest() {
     if (r.status != ResolveStatus::Ready) {
         return;
     }
-    if (auto m = parseProjectManifest(r.file.bytes.span())) {
+    const auto sp = r.file.bytes.span();
+    if (auto m = parseProjectManifest(sp)) {
         build_controller_.setRootKeys(m->config_key, m->geometry_key);
-        // [view] steer is applied by the steer cascade (R4).
+    }
+    // Archive [view] is the archive layer of the steer cascade. URL/sidecar
+    // startup overrides already landed on `cfg` at construction, so apply the
+    // archive's view only for keys the URL didn't pin — a shared posed link (URL)
+    // still wins over the archive's default view.
+    const std::string_view toml_sv{reinterpret_cast<const char *>(sp.data()), sp.size()};
+    if (auto ov = parseManifestViewSteer(toml_sv)) {
+        ConfigStartupOverrides eff;
+        if (!startup_overrides.cull) {
+            eff.cull = ov->cull;
+        }
+        if (!startup_overrides.pause_when_unfocused) {
+            eff.pause_when_unfocused = ov->pause_when_unfocused;
+        }
+        if (!startup_overrides.auto_orbit) {
+            eff.auto_orbit = ov->auto_orbit;
+        }
+        if (!startup_overrides.auto_orbit_speed_deg) {
+            eff.auto_orbit_speed_deg = ov->auto_orbit_speed_deg;
+        }
+        if (!startup_overrides.angle_cut) {
+            eff.angle_cut = ov->angle_cut;
+        }
+        if (!startup_overrides.shader_angle_cut) {
+            eff.shader_angle_cut = ov->shader_angle_cut;
+        }
+        if (!startup_overrides.boolean_cut) {
+            eff.boolean_cut = ov->boolean_cut;
+        }
+        if (!startup_overrides.angle_cut_start_deg) {
+            eff.angle_cut_start_deg = ov->angle_cut_start_deg;
+        }
+        if (!startup_overrides.angle_cut_end_deg) {
+            eff.angle_cut_end_deg = ov->angle_cut_end_deg;
+        }
+        if (!startup_overrides.enable_pbr) {
+            eff.enable_pbr = ov->enable_pbr;
+        }
+        if (!startup_overrides.camera) {
+            eff.camera = ov->camera;
+        }
+        applyViewerStartupOverrides(eff, cfg, &camera);
     }
 }
 
@@ -2053,6 +2131,10 @@ void App::Impl::onFrame() {
     // Web application mode: debounce-flush the working set to IndexedDB so edits
     // survive a reload. No-op on native and in web viewer mode.
     tickWebProjectPersistence();
+
+    // Continuous URL steer sync (Sync-to-URL window): keep the address bar equal to
+    // the current screen when enabled. No-op otherwise.
+    tickUrlSync();
 
     // Benchmark mode takes over the frame entirely: it drives the camera/state
     // sequence and renders at full rate, bypassing the idle/UI/input path below.

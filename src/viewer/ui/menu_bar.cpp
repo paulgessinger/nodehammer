@@ -79,6 +79,7 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
 
     if constexpr (platform::kIsWeb) {
         if (ImGui::BeginMenu("Web")) {
+            ImGui::MenuItem("Sync to URL", nullptr, &state.show_sync);
             if (ImGui::MenuItem("Commit settings to URL") && actions.sync_browser_url) {
                 actions.sync_browser_url();
             }

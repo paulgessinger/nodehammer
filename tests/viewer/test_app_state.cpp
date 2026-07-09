@@ -175,3 +175,30 @@ TEST_CASE("startup overrides apply after persisted viewer config fields") {
     CHECK(cfg.angle_cut == true);
     CHECK(cfg.enable_pbr == true);
 }
+
+TEST_CASE("parseManifestViewSteer reads the archive [view] layer") {
+    auto ov = parseManifestViewSteer(
+        "[project]\nconfig = \"scene.toml\"\ngeometry = \"scene.nhb.zst\"\n\n"
+        "[view]\nangle_cut = true\nangle_cut_start_deg = 15.0\nangle_cut_end_deg = 75.0\n"
+        "enable_pbr = false\n\n"
+        "[view.camera]\ntarget = [1.0, 2.0, 3.0]\ndistance = 20.0\nyaw_deg = 30.0\n"
+        "pitch_deg = 10.0\nprojection = \"perspective\"\n");
+    REQUIRE(ov.has_value());
+    REQUIRE(ov->angle_cut.has_value());
+    CHECK(*ov->angle_cut == true);
+    REQUIRE(ov->angle_cut_start_deg.has_value());
+    CHECK(*ov->angle_cut_start_deg == Catch::Approx(15.0));
+    REQUIRE(ov->enable_pbr.has_value());
+    CHECK(*ov->enable_pbr == false);
+    REQUIRE(ov->camera.has_value());
+    CHECK(ov->camera->distance == Catch::Approx(20.0));
+    // Keys not present are left unset (so the URL/sidecar layers win).
+    CHECK_FALSE(ov->auto_orbit.has_value());
+    CHECK_FALSE(ov->cull.has_value());
+}
+
+TEST_CASE("parseManifestViewSteer returns nullopt without a [view] table") {
+    CHECK_FALSE(
+        parseManifestViewSteer("[project]\nconfig = \"a\"\ngeometry = \"b\"\n").has_value());
+    CHECK_FALSE(parseManifestViewSteer("not valid toml [[[").has_value());
+}

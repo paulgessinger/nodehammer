@@ -6,6 +6,8 @@
 #include "status_ui.hpp"
 #include "view_panel.hpp"
 
+#include <nodehammer/viewer/platform.hpp>
+
 #include <imgui.h>
 #include <imgui_internal.h>
 
@@ -105,6 +107,32 @@ void renderDragOverlay(const ViewerUiContext &ctx) {
     draw_list->AddText(font, font_size, center, IM_COL32(230, 240, 255, 255), message);
 }
 
+// Sync-to-URL window (web only): choose what steer to write into the address bar
+// so a shared link reproduces the current screen, and whether to keep it live.
+// [[maybe_unused]] — the call site is behind `if constexpr (kIsWeb)`, so on native
+// this is compiled out and would otherwise warn as an unneeded internal decl.
+[[maybe_unused]] void renderSyncPanel(UiState &state, const UiActions &actions) {
+    if (!ImGui::Begin("Sync to URL", &state.show_sync)) {
+        ImGui::End();
+        return;
+    }
+    ImGui::TextWrapped("Write the current view into the address bar so a shared link opens on the "
+                       "exact same screen. Content must be published (a viewer-mode archive) for a "
+                       "recipient to see it.");
+    ImGui::Separator();
+    ImGui::Checkbox("Keep the URL live (continuous)", &state.url_sync_continuous);
+    ImGui::TextDisabled("What to include:");
+    ImGui::Checkbox("Camera", &state.url_sync_camera);
+    ImGui::Checkbox("View toggles & cut", &state.url_sync_view);
+    ImGui::Separator();
+    if (ImGui::Button("Copy link now") && actions.sync_browser_url) {
+        actions.sync_browser_url();
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("writes the URL");
+    ImGui::End();
+}
+
 } // namespace
 
 void renderViewerUi(UiState &state, const ViewerUiContext &ctx, const UiActions &actions) {
@@ -121,6 +149,11 @@ void renderViewerUi(UiState &state, const ViewerUiContext &ctx, const UiActions 
     }
     if (state.show_debug) {
         renderDebugPanel(&state.show_debug, ctx, actions);
+    }
+    if constexpr (platform::kIsWeb) {
+        if (state.show_sync) {
+            renderSyncPanel(state, actions);
+        }
     }
 
     renderMenuBar(state, ctx, actions);

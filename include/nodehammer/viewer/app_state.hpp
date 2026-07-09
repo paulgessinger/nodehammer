@@ -15,6 +15,10 @@ struct ViewerConfigState {
     bool show_status{true};
     bool show_view{true};
     bool show_debug{true};
+    bool show_sync{false};
+    bool url_sync_continuous{false};
+    bool url_sync_camera{true};
+    bool url_sync_view{true};
     CullOverride cull{CullOverride::Auto};
     bool pause_when_unfocused{true};
     bool auto_orbit{false};
@@ -32,6 +36,13 @@ struct ViewerConfigState {
 void applyViewerConfigState(const ViewerConfigState &state, Config &cfg, Camera *camera);
 void applyViewerStartupOverrides(const ConfigStartupOverrides &overrides, Config &cfg,
                                  Camera *camera);
+
+/// Parse a project manifest's `[view]` table (and its `[view.camera]` sub-table)
+/// into startup overrides — the *archive* layer of the steer cascade
+/// (app default < archive [view] < sidecar < URL). Only keys present are set;
+/// returns nullopt when there is no `[view]` table or the TOML is malformed.
+[[nodiscard]] std::optional<ConfigStartupOverrides>
+parseManifestViewSteer(std::string_view toml_bytes);
 
 [[nodiscard]] std::string viewerConfigStateToToml(const ViewerConfigState &state);
 [[nodiscard]] std::optional<ViewerConfigState> viewerConfigStateFromToml(std::string_view bytes);

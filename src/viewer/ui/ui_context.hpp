@@ -31,6 +31,13 @@ struct UiState {
     bool show_view{true};
     bool show_debug{true};
     bool dockspace_built{false};
+
+    // Sync-to-URL window (web): which steer to write to the address bar and
+    // whether to do it continuously. Persisted with the viewer config state.
+    bool show_sync{false};
+    bool url_sync_continuous{false};
+    bool url_sync_camera{true};
+    bool url_sync_view{true};
 };
 
 struct UiActions {
