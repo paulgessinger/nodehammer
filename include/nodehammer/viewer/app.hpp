@@ -105,6 +105,15 @@ class App {
     /// re-fetched from source on reload. Called by the startup archive fetch.
     void openArchiveRemote(std::span<const std::byte> bytes, bool locked);
 
+    /// Publish the current project as a self-contained web package (§6.6). Web
+    /// only: seeds a package with the sidecar + `.nhproj`, then the platform fetches
+    /// the app's own runtime siblings — `addPackageFile` collects each and
+    /// `finalizePackage` serializes + downloads `nodehammer-package.zip`. The two
+    /// callbacks are invoked by the runtime; `publishPackage` is the entry point.
+    void publishPackage();
+    void addPackageFile(const std::string &name, std::span<const std::byte> bytes);
+    void finalizePackage();
+
     /// Web application-mode IDB persistence hooks (no-ops on native / viewer mode):
     ///   - `restoreWebProjectFromIdb()` kicks the async cold-load at startup.
     ///   - `onProjectBlobLoaded(bytes)` is the runtime callback for that load;

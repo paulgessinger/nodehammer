@@ -163,6 +163,42 @@ EM_JS(void, nh_viewer_idb_delete, (const char *key), {
 // now; a named multi-document switcher would key per name — §12 R6).
 static constexpr const char *kProjectBlobKey = "project/default";
 
+// "Publish package": fetch the app's own same-origin runtime siblings and push each
+// back to C++ (App::addPackageFile), then finalize. The archive + sidecar were
+// already written into the pending package working set by App::publishPackage.
+// clang-format off
+EM_JS(void, nh_viewer_publish_fetch_runtime, (), {
+    var base = window.location.pathname.replace(/[^/]*$/, '');
+    var names = ['viewer.html',
+                 'nodehammer-gles3.js', 'nodehammer-gles3.wasm',
+                 'nodehammer-wgpu.js',  'nodehammer-wgpu.wasm',
+                 'nodehammer-compute.js', 'nodehammer-compute.wasm'];
+    var enc = new TextEncoder();
+    Promise.all(names.map(function(n) {
+        return fetch(base + n, { cache: 'no-store' }).then(function(r) {
+            return r.ok ? r.arrayBuffer().then(function(buf) { return { name: n, buf: buf }; })
+                        : null;
+        }).catch(function() { return null; });
+    })).then(function(results) {
+        for (var i = 0; i < results.length; ++i) {
+            var e = results[i];
+            if (!e) { continue; } // a missing backend variant is tolerated
+            var bytes = new Uint8Array(e.buf);
+            var data_ptr = Module['_malloc'](bytes.length);
+            Module.HEAPU8.set(bytes, data_ptr);
+            var name_utf8 = enc.encode(e.name);
+            var name_ptr = Module['_malloc'](name_utf8.length + 1);
+            Module.HEAPU8.set(name_utf8, name_ptr);
+            Module.HEAPU8[name_ptr + name_utf8.length] = 0;
+            Module['_nh_viewer_publish_add_file'](name_ptr, data_ptr, bytes.length);
+            Module['_free'](name_ptr);
+            Module['_free'](data_ptr);
+        }
+        Module['_nh_viewer_publish_finalize']();
+    });
+});
+// clang-format on
+
 // clang-format off
 EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
     if (Module.__nhWindowObserversInstalled) {
@@ -545,6 +581,8 @@ void Platform::saveProjectBlob(std::span<const std::byte> bytes) {
 
 void Platform::clearProjectBlob() { nh_viewer_idb_delete(kProjectBlobKey); }
 
+void Platform::fetchRuntimeForPublish() { nh_viewer_publish_fetch_runtime(); }
+
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
 void Platform::openFolderPicker() {} // no folder picker on web today
 void Platform::openArchivePicker() { nh_viewer_open_archive_picker(); }
@@ -635,6 +673,23 @@ void nh_viewer_open_archive(const std::uint8_t *data, std::size_t size) {
         return;
     }
     app->openArchiveFromBytes(std::as_bytes(std::span{data, size}));
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_publish_add_file(const char *name, const std::uint8_t *data, std::size_t size) {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr || name == nullptr) {
+        return;
+    }
+    app->addPackageFile(name, std::as_bytes(std::span{data, size}));
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_publish_finalize() {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app != nullptr) {
+        app->finalizePackage();
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE

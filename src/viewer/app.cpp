@@ -49,6 +49,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <exception>
 #include <filesystem>
@@ -184,6 +185,11 @@ struct App::Impl {
     // Continuous URL steer sync (Sync-to-URL window): debounce on the last query.
     std::string last_url_query_;
     std::chrono::steady_clock::time_point last_url_commit_{};
+
+    // In-flight "Publish package" working set: seeded with the sidecar + archive,
+    // then the async runtime fetch adds the viewer.html + wasm files before
+    // finalize serializes + downloads it.
+    std::optional<ZipWorkingSet> package_ws_;
     SceneRenderer scene_renderer;     ///< draws the uncut base scene
     SceneRenderer cut_renderer;       ///< draws the Boolean-cut scene
     SceneRenderer *active_renderer{}; ///< last renderer drawn; for UI stats
@@ -444,6 +450,12 @@ struct App::Impl {
     void installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked);
     void applyProjectManifest();
     void createArchiveFromScene();
+
+    // Publish package (web): seed the package with sidecar + archive, then the
+    // async runtime fetch fills in the rest before finalize downloads it.
+    void publishPackage();
+    void addPackageFile(const std::string &name, std::span<const std::byte> bytes);
+    void finalizePackage();
 
     // Web application-mode project persistence (IndexedDB). No-ops on native and
     // in web viewer mode; see the strategy doc §3.2 / R2.
@@ -1750,6 +1762,23 @@ void App::Impl::addProjectPath(const std::filesystem::path &path) {
 }
 
 namespace {
+/// FNV-1a 64-bit content hash as 16 hex chars, for the published archive filename
+/// (`project.<hash>.nhproj`) so republishing yields a new name → free cache-bust.
+std::string contentHashHex(std::span<const std::byte> bytes) {
+    std::uint64_t h = 0xcbf29ce484222325ULL;
+    for (const std::byte b : bytes) {
+        h ^= static_cast<std::uint64_t>(std::to_integer<unsigned char>(b));
+        h *= 0x00000100000001B3ULL;
+    }
+    return std::format("{:016x}", h);
+}
+
+std::vector<std::byte> stringToBytes(std::string_view s) {
+    std::vector<std::byte> out(s.size());
+    std::memcpy(out.data(), s.data(), s.size());
+    return out;
+}
+
 /// Case-insensitive check for the `.nhproj` project-archive extension.
 bool isNhprojName(std::string_view name) {
     constexpr std::string_view ext = ".nhproj";
@@ -1978,6 +2007,43 @@ void App::Impl::restoreWebProjectFromIdb() {
         return;
     }
     platform_->loadProjectBlob();
+}
+
+void App::Impl::publishPackage() {
+    if (!platform::kIsWeb) {
+        notifications.info("Publish package is currently web-only");
+        return;
+    }
+    auto *ar = dynamic_cast<ArchiveProjectFs *>(project_.get());
+    if (ar == nullptr) {
+        notifications.warning("No project to publish");
+        return;
+    }
+    auto archive_bytes = ar->serialize();
+    const std::string name = "project." + contentHashHex(archive_bytes) + ".nhproj";
+    // A minimal sidecar: viewer.html fetches nh_manifest.json → viewer mode.
+    const std::string sidecar = "{\n  \"archive\": \"" + name + "\",\n  \"lock\": true\n}\n";
+    package_ws_ = ZipWorkingSet::create();
+    package_ws_->writeEntry("nh_manifest.json", stringToBytes(sidecar));
+    package_ws_->writeEntry(name, std::move(archive_bytes));
+    // Async: the runtime fetch adds viewer.html + the js/wasm, then finalize().
+    platform_->fetchRuntimeForPublish();
+}
+
+void App::Impl::addPackageFile(const std::string &name, std::span<const std::byte> bytes) {
+    if (package_ws_) {
+        package_ws_->writeEntry(name, std::vector<std::byte>(bytes.begin(), bytes.end()));
+    }
+}
+
+void App::Impl::finalizePackage() {
+    if (!package_ws_) {
+        return;
+    }
+    auto zip = package_ws_->serialize();
+    package_ws_.reset();
+    platform_->downloadArchive("nodehammer-package.zip", zip);
+    notifications.info("Published package downloaded — unzip onto any static host");
 }
 
 void App::Impl::createArchiveFromScene() {
@@ -2376,13 +2442,14 @@ void App::Impl::onFrame() {
 #endif
         } else {
 #ifdef __EMSCRIPTEN__
-            platform_->downloadArchive("project.zip", archive->serialize());
+            platform_->downloadArchive("project.nhproj", archive->serialize());
 #else
             // Unbound: pick a path, then saveActiveArchiveTo binds + writes.
             platform_->saveArchivePicker();
 #endif
         }
     };
+    ui_actions.publish_package = [this]() { publishPackage(); };
     ui_actions.frame_scene = [this]() {
         if (!scene) {
             return;
@@ -2589,6 +2656,14 @@ void App::openArchiveFromBytes(std::span<const std::byte> bytes) {
 void App::openArchiveRemote(std::span<const std::byte> bytes, bool locked) {
     impl_->openArchiveRemote(bytes, locked);
 }
+
+void App::publishPackage() { impl_->publishPackage(); }
+
+void App::addPackageFile(const std::string &name, std::span<const std::byte> bytes) {
+    impl_->addPackageFile(name, bytes);
+}
+
+void App::finalizePackage() { impl_->finalizePackage(); }
 
 void App::onProjectBlobLoaded(std::span<const std::byte> bytes) {
     impl_->onProjectBlobLoaded(bytes);

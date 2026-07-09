@@ -175,6 +175,13 @@ class Platform {
     void saveProjectBlob(std::span<const std::byte> bytes);
     void clearProjectBlob();
 
+    /// Web "Publish package": fetch the running app's own same-origin runtime
+    /// siblings (viewer.html + the gles3/wgpu/compute js+wasm) and hand each back
+    /// to `App::addPackageFile`, then call `App::finalizePackage` to serialize the
+    /// self-contained deployable and download it. Native is a no-op for now — a
+    /// native publish would copy a staged web runtime (§6.6, feasibility TBD).
+    void fetchRuntimeForPublish();
+
     /// Request a "pick files" gesture. Web dispatches the browser's
     /// transient `<input type=file multiple>` inline (the browser
     /// requires `input.click()` to run from the user-gesture stack);
