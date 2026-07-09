@@ -11,6 +11,7 @@
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -103,6 +104,15 @@ class BuildController {
     std::shared_ptr<const SemanticScene> pristine_scene_;
     std::string pristine_config_label_;
     std::string pristine_geometry_label_;
+    /// Input hash of the last base scene we successfully tessellated. When a
+    /// fresh walk resolves byte-identical inputs (e.g. after promoting a project
+    /// to an archive, which re-seeds the same keys against a new backend), the
+    /// build is skipped and the live scene + cut bake are kept. 0 until the first
+    /// successful build. `in_flight_input_hash_` holds the hash of the build
+    /// currently tessellating; it is promoted to `last_built_` only once that
+    /// base build lands, so a failed tessellation doesn't suppress a retry.
+    std::uint64_t last_built_input_hash_{0};
+    std::uint64_t in_flight_input_hash_{0};
 
     bool building_cut_{false};        ///< the in-flight build is a cut (vs base) build
     bool pending_cut_rebuild_{false}; ///< a cut (re)build was requested

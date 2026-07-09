@@ -3,9 +3,12 @@
 #include <nodehammer/ir/fb/semantic/importer.hpp>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <set>
+#include <span>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -32,6 +35,36 @@ bool endsWithCi(std::string_view s, std::string_view suffix) {
 }
 
 bool isTomlKey(std::string_view key) { return endsWithCi(key, ".toml"); }
+
+/// FNV-1a 64-bit over an arbitrary byte range.
+void fnv1a(std::uint64_t &h, std::span<const std::byte> bytes) {
+    for (const std::byte b : bytes) {
+        h ^= static_cast<std::uint64_t>(std::to_integer<unsigned char>(b));
+        h *= 0x00000100000001B3ULL;
+    }
+}
+
+/// Order-independent, content-addressed hash of the resolved input byte set.
+/// Sorting the keys makes it stable regardless of resolve order, and folding the
+/// key in (with its length) keeps two files from aliasing across a boundary.
+std::uint64_t hashInputs(const std::unordered_map<std::string, ByteBuffer> &bytes_by_key) {
+    std::vector<const std::string *> keys;
+    keys.reserve(bytes_by_key.size());
+    for (const auto &[k, _] : bytes_by_key) {
+        keys.push_back(&k);
+    }
+    std::sort(keys.begin(), keys.end(),
+              [](const std::string *a, const std::string *b) { return *a < *b; });
+
+    std::uint64_t h = 0xcbf29ce484222325ULL; // FNV offset basis
+    for (const std::string *k : keys) {
+        const auto klen = static_cast<std::uint64_t>(k->size());
+        fnv1a(h, std::as_bytes(std::span{&klen, 1}));
+        fnv1a(h, std::as_bytes(std::span{k->data(), k->size()}));
+        fnv1a(h, bytes_by_key.at(*k).span());
+    }
+    return h;
+}
 
 } // namespace
 
@@ -263,6 +296,7 @@ void BuildSession::poll(ProjectFs *project) {
     inputs->import = std::move(imp);
     inputs->config_key = impl_->config_key;
     inputs->geometry_key = impl_->geometry_key;
+    inputs->input_hash = hashInputs(impl_->bytes_by_key);
     impl_->inputs = std::move(inputs);
     impl_->phase = BuildPhase::ResolvedReady;
 }

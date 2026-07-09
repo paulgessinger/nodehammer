@@ -276,19 +276,14 @@ bool ArchiveProjectFs::saveTo(const std::filesystem::path &path) {
         return false;
     }
 
-    // Bind to the written path (a no-op when re-saving in place) and reopen from
-    // the freshly written bytes so the working set drops its overrides and dirty
-    // flag, and subsequent reads come from the saved bytes.
+    // Bind to the written path (a no-op when re-saving in place). The on-disk
+    // file now matches the in-memory working set verbatim, so just drop the dirty
+    // flag — do NOT reopen or bump generation. Saving changes neither the
+    // resolvable content nor the listing, so a bump would only force the
+    // BuildSession to re-walk → re-import → re-tessellate an identical scene. The
+    // menu reads isBound()/dirty() directly each frame, so binding needs no bump.
     impl_->archive_path = path;
-    try {
-        impl_->ws = ZipWorkingSet::openFromBytes(blob);
-    } catch (const std::exception &e) {
-        // The file on disk is fine; only the in-memory view failed to refresh.
-        auto msg = std::string{"archive saved, but reopen failed: "} + e.what();
-        impl_->warning_msgs.push_back(msg);
-        pushWarning(std::move(msg));
-    }
-    impl_->invalidateListing();
+    impl_->ws->clearDirty();
     return true;
 }
 

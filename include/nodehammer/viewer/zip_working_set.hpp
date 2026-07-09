@@ -84,6 +84,12 @@ class ZipWorkingSet {
     /// True if any writeEntry/removeEntry has been applied since open.
     bool dirty() const;
 
+    /// Reset the dirty flag without touching content. Called after the current
+    /// state has been persisted verbatim (e.g. `serialize()`d and written to
+    /// disk), so the in-memory overlay now matches the saved bytes and no longer
+    /// counts as unsaved. Reads and the effective key set are unchanged.
+    void clearDirty();
+
   private:
     struct Impl;
     explicit ZipWorkingSet(std::unique_ptr<Impl> impl);

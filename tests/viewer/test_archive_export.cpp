@@ -136,3 +136,29 @@ TEST_CASE("ArchiveProjectFs unbound bundle saves and binds to a path", "[viewer]
     REQUIRE(asString(reopened.resolve("scene.toml").file.bytes.span()) == "root = 1\n");
     REQUIRE(asString(reopened.resolve("det/inner.toml").file.bytes.span()) == "inner = 2\n");
 }
+
+TEST_CASE("ArchiveProjectFs save does not bump generation", "[viewer][archive_export]") {
+    // Saving persists the working set verbatim, so it changes neither the
+    // resolvable content nor the listing. It must NOT bump generation() — a bump
+    // would make the BuildSession re-walk and re-tessellate an identical scene.
+    TempDir dir{"save_gen"};
+    const auto target = dir.root / "bundle.zip";
+    {
+        auto seed = ZipWorkingSet::create();
+        seed.writeEntry("scene.toml", asBytes("root = 1\n"));
+        ArchiveProjectFs fresh{std::move(seed)};
+        REQUIRE(fresh.saveTo(target));
+    }
+
+    ArchiveProjectFs fs{target};
+    const auto gen_open = fs.generation();
+
+    fs.addBytes("extra.toml", asBytes("x\n")); // an edit bumps generation
+    const auto gen_edit = fs.generation();
+    REQUIRE(gen_edit > gen_open);
+    REQUIRE(fs.dirty());
+
+    REQUIRE(fs.save()); // in-place save
+    REQUIRE_FALSE(fs.dirty());
+    REQUIRE(fs.generation() == gen_edit); // the save itself did not bump
+}

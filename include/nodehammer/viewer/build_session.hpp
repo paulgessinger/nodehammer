@@ -36,6 +36,13 @@ struct BuildSessionInputs {
     ImportResult import;
     std::string config_key;
     std::string geometry_key;
+    /// Hash over the full set of resolved input bytes (root config + every
+    /// transitive include + geometry). The parse → import → tessellate pipeline
+    /// is a deterministic function of these bytes, so a consumer can skip the
+    /// expensive rebuild when this matches the last one it built (e.g. after a
+    /// backend swap that resolves byte-identical content, like promoting a
+    /// project to an archive). Zero only for an empty input set.
+    std::uint64_t input_hash{0};
 };
 
 /// Drives the include-graph walk against a `ProjectFs`. On each

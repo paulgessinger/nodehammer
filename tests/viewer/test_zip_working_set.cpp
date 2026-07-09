@@ -160,6 +160,21 @@ TEST_CASE("ZipWorkingSet::create builds a fresh archive from scratch",
     REQUIRE(asString(out.read("det/inner.toml")->span()) == "inner = 2\n");
 }
 
+TEST_CASE("ZipWorkingSet::clearDirty resets the flag without changing content",
+          "[viewer][zip_working_set]") {
+    auto ws = ZipWorkingSet::openFromBytes(makeZip({{"a.toml", "1\n"}}));
+    ws.writeEntry("b.toml", asBytes("2\n"));
+    ws.removeEntry("a.toml");
+    REQUIRE(ws.dirty());
+
+    ws.clearDirty();
+    REQUIRE_FALSE(ws.dirty());
+    // The effective view is untouched: the override still reads, the tombstone
+    // still hides the original.
+    REQUIRE(asString(ws.read("b.toml")->span()) == "2\n");
+    REQUIRE_FALSE(ws.contains("a.toml"));
+}
+
 TEST_CASE("ZipWorkingSet rejects a non-ZIP blob", "[viewer][zip_working_set]") {
     auto garbage = asBytes("this is definitely not a zip archive");
     REQUIRE_THROWS_AS(ZipWorkingSet::openFromBytes(garbage), std::runtime_error);

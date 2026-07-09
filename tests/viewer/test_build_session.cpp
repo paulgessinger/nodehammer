@@ -103,6 +103,45 @@ TEST_CASE("BuildSession resolves a flat config + geometry from a bag", "[viewer]
     REQUIRE(inputs->import.scene.nodes.contains(inputs->import.scene.rootId));
 }
 
+TEST_CASE("BuildSession input_hash is content-addressed and backend-independent",
+          "[viewer][build_session]") {
+    auto geom = minimalNhbZstBytes();
+
+    auto build = [&](viewer::ProjectFs &project) {
+        BuildSession session;
+        session.setRootKeys("scene.toml", "scene.nhb.zst");
+        for (int i = 0; i < kPollBudget; ++i) {
+            session.poll(&project);
+            if (session.phase() == BuildPhase::ResolvedReady) {
+                break;
+            }
+        }
+        REQUIRE(session.phase() == BuildPhase::ResolvedReady);
+        auto inputs = session.takeInputs();
+        REQUIRE(inputs);
+        return inputs->input_hash;
+    };
+
+    // Same bytes in two independent bags → identical hash (so a backend swap that
+    // resolves the same content memoizes instead of re-tessellating).
+    auto bagA = std::make_unique<BagProjectFs>();
+    bagA->addBytes("scene.toml", stringBytes("# minimal nodehammer config\n"));
+    bagA->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+    const auto hashA = build(*bagA);
+
+    auto bagB = std::make_unique<BagProjectFs>();
+    bagB->addBytes("scene.toml", stringBytes("# minimal nodehammer config\n"));
+    bagB->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+    REQUIRE(build(*bagB) == hashA);
+    REQUIRE(hashA != 0);
+
+    // A one-byte config change flips the hash.
+    auto bagC = std::make_unique<BagProjectFs>();
+    bagC->addBytes("scene.toml", stringBytes("# minimal nodehammer config!\n"));
+    bagC->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+    REQUIRE(build(*bagC) != hashA);
+}
+
 TEST_CASE("BuildSession surfaces missing geometry as WaitingForUser", "[viewer][build_session]") {
     auto bag = std::make_unique<BagProjectFs>();
     bag->addBytes("scene.toml", stringBytes("# minimal\n"));

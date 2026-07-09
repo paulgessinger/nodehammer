@@ -283,4 +283,6 @@ std::vector<std::byte> ZipWorkingSet::serialize() const {
 
 bool ZipWorkingSet::dirty() const { return impl_->dirty; }
 
+void ZipWorkingSet::clearDirty() { impl_->dirty = false; }
+
 } // namespace nodehammer::viewer
