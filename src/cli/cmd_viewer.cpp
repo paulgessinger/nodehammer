@@ -91,11 +91,13 @@ void registerCmdViewer(CLI::App &app) {
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
-    // Positional: open a .zip archive project directly. When set, --config /
-    // --input (if given) name the root keys *inside* the archive; otherwise the
-    // archive opens and the user picks roots from the project panel.
-    auto *archiveOpt =
-        sub->add_option("archive", "Archive (.zip) project to open")->type_name("ARCHIVE");
+    // Positional: open a project directly. A .zip path opens as an
+    // ArchiveProjectFs; a directory opens as a live FilesystemProjectFs. When
+    // set, --config / --input (if given) name the root keys *inside* the
+    // project; otherwise it opens and the user picks roots from the project
+    // panel.
+    auto *pathOpt = sub->add_option("path", "Project to open: a .zip archive or a directory")
+                        ->type_name("PATH");
 
     // Headless screenshot mode: render one high-res PNG (all quality maxed) once
     // the scene settles, then quit. Useful for CI thumbnails / automated renders.
@@ -126,7 +128,7 @@ void registerCmdViewer(CLI::App &app) {
                    screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt,
                    angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, inputOpt, configOpt, archiveOpt, benchOpt, benchScale]() {
+                   cameraPitchOpt, inputOpt, configOpt, pathOpt, benchOpt, benchScale]() {
         if (*cullModeOpt) {
             using nodehammer::viewer::CullOverride;
             CullOverride mode = CullOverride::Auto;
@@ -187,15 +189,15 @@ void registerCmdViewer(CLI::App &app) {
             cfg->startup_overrides.camera = *initialCamera;
         }
 
-        std::string inputPath, configPath, archivePath;
+        std::string inputPath, configPath, projectPath;
         if (*inputOpt) {
             inputOpt->results(inputPath);
         }
         if (*configOpt) {
             configOpt->results(configPath);
         }
-        if (*archiveOpt) {
-            archiveOpt->results(archivePath);
+        if (*pathOpt) {
+            pathOpt->results(projectPath);
         }
 
         std::string screenshotPath;
@@ -216,6 +218,20 @@ void registerCmdViewer(CLI::App &app) {
             }
         }
 
+        // With no positional path and no --input, open the current working
+        // directory as a live filesystem project. Routes through the directory
+        // branch below.
+        if (projectPath.empty() && inputPath.empty()) {
+            std::error_code cwd_ec;
+            const auto cwd = std::filesystem::current_path(cwd_ec);
+            if (cwd_ec) {
+                std::println(stderr, "viewer: cannot read current working directory: {}",
+                             cwd_ec.message());
+                std::exit(1);
+            }
+            projectPath = cwd.string();
+        }
+
         nodehammer::viewer::App::Handle application(*cfg);
         if (!screenshotPath.empty()) {
             application->requestScreenshot(screenshotPath, *screenshot);
@@ -224,23 +240,26 @@ void registerCmdViewer(CLI::App &app) {
             application->requestBench(benchPath, inputPath, *benchScale);
         }
 
-        // Archive mode: open the .zip as a live ArchiveProjectFs. --config /
-        // --input, if supplied, name the root keys *inside* the archive (used
-        // verbatim, not resolved against the filesystem); otherwise the user
-        // picks roots from the project panel, like a dragged-in archive.
-        if (!archivePath.empty()) {
-            const std::filesystem::path archive_abs{archivePath};
-            if (!std::filesystem::exists(archive_abs)) {
-                std::println(stderr, "viewer: archive not found: {}", archivePath);
+        // Positional project mode. A directory opens as a live
+        // FilesystemProjectFs (watched, so edits under the tree reload); a
+        // .zip opens as a live ArchiveProjectFs. --config / --input, if
+        // supplied, name the root keys *inside* the project (used verbatim,
+        // not resolved against the filesystem); otherwise the user picks roots
+        // from the project panel, like a dragged-in folder or archive.
+        if (!projectPath.empty()) {
+            const std::filesystem::path path_abs{projectPath};
+            if (!std::filesystem::exists(path_abs)) {
+                std::println(stderr, "viewer: path not found: {}", projectPath);
                 std::exit(1);
             }
-            if (std::filesystem::is_directory(archive_abs)) {
-                std::println(stderr, "viewer: archive path is a directory, not a .zip: {}",
-                             archivePath);
-                std::exit(1);
+            if (std::filesystem::is_directory(path_abs)) {
+                application->setProject(
+                    std::make_unique<nodehammer::viewer::WatchedFilesystemProjectFs>(
+                        std::make_unique<nodehammer::viewer::FilesystemProjectFs>(path_abs)));
+            } else {
+                application->setProject(
+                    std::make_unique<nodehammer::viewer::ArchiveProjectFs>(path_abs));
             }
-            application->setProject(
-                std::make_unique<nodehammer::viewer::ArchiveProjectFs>(archive_abs));
             if (!configPath.empty() && !inputPath.empty()) {
                 application->setRootKeys(configPath, inputPath);
             }
