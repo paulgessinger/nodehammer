@@ -1,6 +1,7 @@
 #include <CLI/CLI.hpp>
 #include <nodehammer/detail/file_io.hpp>
 #include <nodehammer/viewer/app.hpp>
+#include <nodehammer/viewer/archive_project_fs.hpp>
 #include <nodehammer/viewer/bag_project_fs.hpp>
 #include <nodehammer/viewer/config.hpp>
 #include <nodehammer/viewer/filesystem_project_fs.hpp>
@@ -90,6 +91,12 @@ void registerCmdViewer(CLI::App &app) {
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
     auto *configOpt = sub->add_option("-c,--config", "TOML config file");
 
+    // Positional: open a .zip archive project directly. When set, --config /
+    // --input (if given) name the root keys *inside* the archive; otherwise the
+    // archive opens and the user picks roots from the project panel.
+    auto *archiveOpt =
+        sub->add_option("archive", "Archive (.zip) project to open")->type_name("ARCHIVE");
+
     // Headless screenshot mode: render one high-res PNG (all quality maxed) once
     // the scene settles, then quit. Useful for CI thumbnails / automated renders.
     auto screenshot = std::make_shared<nodehammer::viewer::PngExportSettings>();
@@ -119,7 +126,7 @@ void registerCmdViewer(CLI::App &app) {
                    screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt,
                    angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, inputOpt, configOpt, benchOpt, benchScale]() {
+                   cameraPitchOpt, inputOpt, configOpt, archiveOpt, benchOpt, benchScale]() {
         if (*cullModeOpt) {
             using nodehammer::viewer::CullOverride;
             CullOverride mode = CullOverride::Auto;
@@ -180,12 +187,15 @@ void registerCmdViewer(CLI::App &app) {
             cfg->startup_overrides.camera = *initialCamera;
         }
 
-        std::string inputPath, configPath;
+        std::string inputPath, configPath, archivePath;
         if (*inputOpt) {
             inputOpt->results(inputPath);
         }
         if (*configOpt) {
             configOpt->results(configPath);
+        }
+        if (*archiveOpt) {
+            archiveOpt->results(archivePath);
         }
 
         std::string screenshotPath;
@@ -212,6 +222,33 @@ void registerCmdViewer(CLI::App &app) {
         }
         if (!benchPath.empty()) {
             application->requestBench(benchPath, inputPath, *benchScale);
+        }
+
+        // Archive mode: open the .zip as a live ArchiveProjectFs. --config /
+        // --input, if supplied, name the root keys *inside* the archive (used
+        // verbatim, not resolved against the filesystem); otherwise the user
+        // picks roots from the project panel, like a dragged-in archive.
+        if (!archivePath.empty()) {
+            const std::filesystem::path archive_abs{archivePath};
+            if (!std::filesystem::exists(archive_abs)) {
+                std::println(stderr, "viewer: archive not found: {}", archivePath);
+                std::exit(1);
+            }
+            if (std::filesystem::is_directory(archive_abs)) {
+                std::println(stderr, "viewer: archive path is a directory, not a .zip: {}",
+                             archivePath);
+                std::exit(1);
+            }
+            application->setProject(
+                std::make_unique<nodehammer::viewer::ArchiveProjectFs>(archive_abs));
+            if (!configPath.empty() && !inputPath.empty()) {
+                application->setRootKeys(configPath, inputPath);
+            }
+            const int rc = application->run();
+            if (rc != 0) {
+                std::println(stderr, "viewer exited with code {}", rc);
+            }
+            return;
         }
 
         // Native CLI flow: if both roots live under the launch CWD, mount that
