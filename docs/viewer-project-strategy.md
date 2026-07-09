@@ -1,12 +1,57 @@
 # Viewer project + edit + save strategy
 
 This document describes the target interaction model for the viewer's project
-system across its current and planned modes (URL, bag, filesystem, archive),
-and connects that model to the existing
+system, and connects that model to the existing
 [`ProjectFs`](../include/nodehammer/viewer/project_fs.hpp) abstraction —
 including which capabilities exist today, which need additions to (or
 simplifications of) the base interface, and which are best expressed as new
 concrete backends or decorators.
+
+---
+
+## 0. The model: the archive is the project
+
+Steps 1–7 (§12) established the pieces; step 7 made `ArchiveProjectFs`
+cross-platform. That changed the ground truth and the model was **reshaped**
+around a single thesis:
+
+> **The archive is the universal project unit.** One `ZipWorkingSet` is the thing
+> you *author* (edit / curate / drop files into) and the thing you *publish*
+> (serialize → host → share). Authoring and publishing are the same object flowing
+> two directions.
+
+This collapses the old separate **URL / bag / archive** web modes into one
+working-set substrate. **Filesystem** stays a distinct mode (a native live folder,
+its own source of truth). The old per-key URL "manifest" collapses into a thin
+**sidecar** that points at an archive.
+
+### Vocabulary (used throughout the rest of this doc)
+
+| Term | Meaning |
+|---|---|
+| **Working set** | the live editable `ZipWorkingSet` that *is* the project (web always; native archive mode). |
+| **Archive** | a serialized **`.nhproj`** (ZIP container; PK magic intact) of a working set — the portable, publishable content unit. No `.zip` projects, no legacy formats. |
+| **Project manifest** | root `nodehammer.toml` *inside* the archive: `[project]` (entry config/geometry keys) + `[view]` (initial steer). Makes an archive self-describing on every platform. |
+| **Sidecar** | the `nh_manifest.json` next to `viewer.html` (already fetched by convention on load; 404 → app mode). Points at archive(s) + carries deployment presentation (lock, steer overrides). |
+| **Steer** (view-state) | camera / angle-cut / rotation / toggles / selected-archive — the ephemeral per-link layer that lives in the URL query. |
+| **Provenance** | `Empty \| Local(name) \| Remote(url)` — where the working set came from; drives persistence + posture. |
+| **Package** | the self-contained deployable folder emitted by "Publish". |
+
+### Two web postures (same wasm binary, branch on sidecar presence)
+
+- **Application mode** (no sidecar): empty start, editable, native-like; the working
+  set **auto-persists to IndexedDB** and restores on reload.
+- **Viewer mode** (sidecar present): fetch the archive, present it, **content
+  locked**, **re-fetched from source on reload** (IDB is *not* restored over it).
+  Steer stays live and is committed to the URL so a link reproduces the exact screen.
+
+App mode is *your document* (persists); viewer mode is *a publication* (reloads from
+source). Content-lock is a sidecar (deployment) property; **view/steer is never
+frozen**. The only viewer→app bridge is explicit: Save-as-archive downloads the
+`.nhproj`, which you open in app mode — there is **no in-place fork-to-edit**.
+
+The detailed, staged implementation plan (R0–R6) lives in the approved plan file;
+§3–§13 below are the design of record it builds against.
 
 ---
 
@@ -16,7 +61,9 @@ The viewer already has the right shape for this work; what's missing is mostly
 a write path, a unified hierarchical listing model, an editor surface, and a
 few mode-transition rules.
 
-**Status:** Steps 1–7 of §12 have landed.
+**Status:** Steps 1–7 of §12 have landed. The old steps 8–9 (`WebBagProjectFs`,
+URL reload semantics) are **superseded** by the §0 reshape and re-scoped into the
+R1–R6 roadmap (§12).
 - Step 1: `DirNode::children` is gone; backends maintain per-directory
   caches keyed by `generation()`; the App's tree panel recurses via
   `project_->list(node.key)`.
@@ -102,10 +149,10 @@ consumed via the same interface — no API churn at the App boundary.
    into the build job; editor copies into its text buffer). The project
    itself does not need to keep bytes "live" for outside consumers across
    frames.
-2. **Storage is platform-native.** Bag mode is not "in-memory" any more —
-   on native it persists into the app data folder, on web into IndexedDB.
-   `resolve` reads from that storage. Persistence is a property of the
-   storage backend, not a separate concern bolted on top.
+2. **Storage is platform-native.** The project persists — the native bag into the
+   app data folder, the web working set (application mode) into IndexedDB.
+   `resolve` reads from that storage. Persistence is a property of the storage
+   backend, not a separate concern bolted on top.
 3. **The storage layer is the cache.** Backends backed by a real storage
    tier (filesystem, native bag's storage dir) do **not** keep an
    in-memory byte cache on top — the OS page cache already does that
@@ -159,160 +206,106 @@ consumed via the same interface — no API churn at the App boundary.
   editor window with a *clean* buffer, reload silently. With a *dirty*
   buffer, show a conflict banner inside that window: `Reload (lose edits)
   / Keep my version / Show diff`.
-- **Save target for export**: only **archive export** (`Save as archive…`).
-  Saving a folder-as-folder makes no sense for filesystem mode — the
-  folder *is* the source. After exporting an archive, offer
-  "Reopen as archive?" the same way bag mode does (§3.2).
+- **Export**: **Save as archive** (writes a `.nhproj`) and **Publish package**
+  (§3.4). Saving a folder-as-folder makes no sense — the folder *is* the source.
 - **Close**: warn iff any editor buffer is dirty.
 
-### 3.2 Bag mode
+### 3.2 Working set (the project) — application mode
 
-Bag mode is **split per platform** because its storage is platform-specific.
-Both implementations share the `ProjectFs` interface and the same App-side
-behavior; only the backing store differs.
+The working set is a `ZipWorkingSet` (§6.5). It backs **native archive mode** and
+the **web application mode**, and it is the object every non-filesystem project
+resolves to. Provenance (`Empty | Local(name) | Remote(url)`) records where it came
+from and drives persistence + posture.
 
-#### `NativeBagProjectFs` (native)
+- **Ingestion**: dropping/picking loose files calls `add`, which `writeEntry`s them
+  into the working set (bumps `generation()`). Dropping/opening a single **`.nhproj`**
+  swaps the whole project to a working set opened from those bytes (`openFromBytes`).
+- **Resolve**: served from the in-memory working set; entries decompress lazily on
+  first `read(key)` and stay hot. A **basename-fallback** resolve policy (ported from
+  the retired bag) is enabled for loose-drop provenance so flat-dropped include trees
+  (`materials/common.toml` referenced, `common.toml` dropped) still link; archives
+  with real paths keep strict resolution.
+- **Native archive mode** (`ArchiveProjectFs`, bound to a path): `save()` serializes
+  a fresh `.nhproj` and writes it atomically (temp + fsync + rename); unchanged
+  entries pass through compressed via `mz_zip_writer_add_from_zip_reader`, overrides
+  deflate fresh (cost ∝ archive size, not edit size). `Save as archive…` writes to a
+  new path and rebinds.
+- **Web application mode** (no sidecar): the working set **auto-persists to
+  IndexedDB** (debounced `serialize()` → one blob under `project/<id>`), restored on
+  reload — this is what makes the web app feel native (your work survives refresh).
+  A single blob = one IDB transaction per save and is exactly the bytes
+  `Save as archive` / `Publish` hand out — no separate serialization. The debounce
+  (quiet interval or `visibilitychange`/`beforeunload`) keeps the rewrite off the
+  keystroke path.
+- **Editing**: per-window editor commits via `add` into the working set (native
+  archive waits for a user `save()`; web app-mode auto-persists).
+- **Export**: **Save as archive** (`.nhproj` download/write) and **Publish package**
+  (§3.4).
+- **Close / New**: clears the current IDB slot (with a confirm if dirty relative to
+  the last export) and returns to an empty working set.
 
-- **Storage**: a per-app data directory (e.g.
-  `~/Library/Application Support/nodehammer/bag/<session-id>/` on macOS,
-  XDG-equivalent elsewhere).
-- **Drops / picks**: `addPath` copies the source file into the storage
-  dir (atomic temp + rename); `addBytes` writes a new file into the
-  storage dir. Both bump `generation()`.
-- **Resolve**: opens the file from the storage dir on every call. Same
-  shape as `FilesystemProjectFs` — no in-memory byte cache; the OS page
-  cache handles repeats, and the BuildSession / editor copy bytes into
-  their own buffers anyway. They share most of their resolve/list
-  implementation.
-- **Persistence**: by virtue of writing through, the bag survives across
-  app launches. A small session-id slot in `~/.../nodehammer/state.json`
-  remembers which storage dir is the "current bag" so relaunch can
-  restore it.
-- **Editing**: per-window editor, no save icon. On window close (or
-  focus loss with a dirty buffer), the editor calls `writeBytes` and the
-  bag overwrites the underlying file. Edits are persisted by the same
-  write-through.
+### 3.3 Viewer mode (web, sidecar-driven presentation)
 
-#### `WebBagProjectFs` (web)
+When a **sidecar** (`nh_manifest.json`) is present, the deployment is a *publication*,
+not a scratchpad:
 
-- **Storage**: a single ZIP blob held in memory as the live working set,
-  persisted to IndexedDB as one (or a small number of chunked) blob
-  records. See §6.5 for the shared `ZipWorkingSet` helper that backs
-  this — the web bag is structurally the same as native archive mode,
-  just persisted to IDB instead of to a file path.
-- **Drops / picks**: `add(FileInput)` decompresses the bytes (if a path)
-  or takes the bytes directly, writes them into the in-memory working
-  set, and schedules a debounced flush of the ZIP blob to IDB. While
-  the IDB flush is in flight, `progress()` reports it; reads remain
-  served from the in-memory working set, so `resolve` stays synchronous
-  Ready (the Pending shape is only needed during the initial IDB load
-  on session startup).
-- **Resolve**: serves from the in-memory working set after startup. On
-  cold load, the backend reads the ZIP blob from IDB and parses its
-  central directory; entries are decompressed lazily on first
-  `resolve(key)` and kept hot.
-- **Persistence**: IDB keeps the ZIP blob across reloads, **except**
-  when reloading from a manifest URL (see §3.4 — manifest origin
-  overrides IDB restore).
-- **Editing**: same per-window editor; commit writes into the working
-  set via `add` and triggers the debounced IDB flush.
-- **Why ZIP, not per-key records?** A single blob means one IDB
-  transaction per save instead of N (lower per-record overhead, simpler
-  atomicity), and the same blob is what `Save → Download archive`
-  hands to the browser — no separate serialization step. The trade-off
-  is that every persisted save rewrites the whole blob; a debounce
-  (commit + N seconds quiet, or on `visibilitychange`) keeps that off
-  the keystroke path.
+- **Source of truth**: the sidecar names a `.nhproj` archive (URL); the viewer fetches
+  those bytes once and opens a working set with provenance `Remote(url)`. The
+  archive's **project manifest** (`nodehammer.toml` → `[project]`) seeds the root keys
+  so the scene "just builds"; `[view]` seeds the initial steer.
+- **Content locked** (a sidecar/deployment property): drops/edits are disabled, and
+  the working set **never touches IDB**.
+- **Reload = re-fetch from source.** Revisiting the URL always reloads the published
+  archive; there is no IDB restore to override it. A published presentation reflecting
+  its published source is correct.
+- **Steer stays live** and is committed to the URL (§3.4) — locking content does *not*
+  freeze the view; that's the whole point of a shareable posed link.
+- **Editing a viewer-mode project is a deliberate, explicit step**: **Save as archive**
+  downloads the `.nhproj`, which the user opens in **application mode** to edit. There
+  is **no in-place fork-to-edit** (an implicit fork with a silent IDB write and unclear
+  identity was rejected as confusing).
 
-#### Save semantics (both)
+### 3.4 Steer, publishing & sharing
 
-- **No "save individual file" action** — there's nothing to save to
-  externally. Saving in-app already happens (it's just write-through).
-- **Save = archive export.**
-  - Native: writes a `.zip` to a chosen path. Optional follow-up modal
-    "Reopen from archive?" — accepting swaps to archive mode pointed at
-    the new file.
-  - Web: triggers a browser download of the archive blob. No graduation
-    is possible (no path to bind to).
-- **Close project**: clears the storage dir / IDB entries (or prompts if
-  bag has any contents).
-
-### 3.3 Archive mode
-
-#### Native (`ArchiveProjectFs`)
-
-- **Source of truth**: the archive file on disk. The backend uses miniz
-  to open the file (`mz_zip_reader_init_file`, or load to memory and use
-  `mz_zip_reader_init_mem` for small archives), parse the central
-  directory once, and decompress entries lazily on first `resolve(key)`.
-  Decompressed bytes are cached. **No upfront unpack to a temp dir** —
-  reads come straight out of the ZIP.
-- **Working set**: see §6.5. Edits are tracked as overrides over the
-  read-only archive view; `add(key, bytes)` puts the new bytes into the
-  in-memory override map. Subsequent reads prefer the override.
-- **`Save` is a full rewrite, not an in-place edit.** ZIP can't update
-  an entry in place except in the degenerate "exact-same compressed
-  size" case — any size change shifts every subsequent entry's offset.
-  The save path is therefore: open a writer, stream every entry from
-  the reader (passing through the original compressed bytes for
-  unchanged entries via miniz's reader-to-writer path; deflating fresh
-  for overrides), finalize, atomic temp + fsync + rename. Cost is
-  proportional to total archive size, not edit size — fine for typical
-  config-sized projects.
-- **`Save as archive…`**: same write path, different destination;
-  optional rebind via "Reopen from archive?".
-- **External archive changes**: out of scope (archives are app-owned
-  while open).
-
-#### Web
-
-- Opening / dropping a `.zip` extracts entries into the **WebBagProjectFs**
-  (no live archive mode on web). From there, bag rules apply: edit,
-  export download. The graduation is automatic and shown as a toast.
-
-### 3.4 URL session (web only)
-
-- **Source of truth**: the URL manifest, every time the page loads.
-- **Editing**: allowed. First edit (or first drop) graduates the project
-  to a `WebBagProjectFs` populated from the URL session's already-fetched
-  bytes. The graduation is an `App::setProject(...)` swap. The original
-  manifest URL is **remembered** as session metadata (`ManifestOrigin`).
-- **Reload semantics** (key constraint):
-  - Reload (or revisit the manifest URL) **always** reloads the manifest
-    from scratch. The IndexedDB-persisted bag is **not** restored over a
-    manifest load — the manifest wins.
-  - On tab close / `beforeunload` after first edit / graduation, show a
-    browser confirm: "Edits in this session won't survive reload —
-    export as archive first?"
-  - The IDB bag-persistence slot is **scoped to "no manifest" sessions**;
-    manifest-launched sessions never read from it on load. (Optionally:
-    write to a separate slot keyed by manifest URL with a clear
-    "not auto-restored" semantic, accessible only via an explicit user
-    action.)
-- **Save**: same as web bag once graduated — archive download.
-- **Close**: clears manifest-scoped persisted state.
+- **Steer** (camera / angle-cut / rotation / toggles / selected-archive) is resolved
+  as a layered cascade, most-specific-wins per key:
+  `app default < archive [view] < sidecar overrides < URL query`. The live steer is
+  written back to the URL (debounced, continuous — extends today's `commitUrlState`),
+  so the address bar always reproduces the current screen. A **sync panel** toggles
+  which keys sync, continuous vs. manual ("Copy view link"), and whether URL steer is
+  applied on load; its own settings persist to `localStorage`. Sharing a link fully
+  reproduces the **content** only when it is URL-reachable (a sidecar/remote archive) —
+  so "share my screen" is intrinsically a viewer-mode capability and closes the
+  authoring→publishing loop.
+- **Publish package** emits a self-contained static folder (`viewer.html` + the three
+  runtime pairs + `nh_manifest.json` + `project.<hash>.nhproj`), droppable on any
+  static host with zero server code (§6.6). Web app-mode publish fetches its own
+  same-origin runtime siblings and zips them with the generated sidecar + archive into
+  a download; native publish writes the same folder *if* the distribution ships the web
+  runtime (§6.6, feasibility TBD). Content-hashed archive filename = free cache-bust.
 
 ---
 
 ## 4. State the App tracks
 
 ```
-ProjectMode    { Empty, Url, Bag, Filesystem, Archive }
-SaveTarget     { None, ArchivePath(path) }    // path-like target for native Save
-ManifestOrigin { absent, present(url) }       // sticky for the session lifetime
-EditorWindow[] open_editors;                  // each owns: key, buffer, dirty bit
+Substrate      { Filesystem, WorkingSet }     // the two backends
+Provenance     { Empty, Local(name), Remote(url) }  // where the working set came from
+Posture (web)  { Application, Viewer }         // derived from sidecar presence
+SaveTarget     { None, ArchivePath(path) }     // native archive bound path
+EditorWindow[] open_editors;                   // each owns: key, buffer, dirty bit
 ```
 
-- `ProjectMode` is derived from the current `project_->name()` plus a small
-  graduated-from sidecar.
-- `SaveTarget` lives on the App, not on `ProjectFs`. Filesystem and bag
-  modes have no path target (FS writes through individual files; bag
-  writes through to its storage). Archive mode has the bound archive
-  path. Everything else has no target.
-- `ManifestOrigin` is read-only context that survives graduation; it
-  gates reload semantics on web only.
-- Editor windows live entirely above `ProjectFs`; they call
-  `writeBytes` to commit (see §5).
+- `Substrate` is `Filesystem` (native live folder) or `WorkingSet` (everything else).
+- `Provenance` replaces the old `ManifestOrigin`: it records origin and gates
+  persistence — `Local` app-mode working sets auto-persist to IDB; `Remote` viewer-mode
+  sets never do.
+- `Posture` (web) is derived from whether a sidecar (`nh_manifest.json`) was present at
+  load: it governs content-lock + IDB persistence, not the backend. Native has no
+  posture (always editable, path-bound `SaveTarget`).
+- `SaveTarget` lives on the App: only native archive mode has a bound path. Filesystem
+  writes through individual files; the web working set persists to IDB.
+- Editor windows live entirely above `ProjectFs`; they commit via `add` (see §5).
 
 ---
 
@@ -437,8 +430,7 @@ Backend behavior:
 | `FilesystemProjectFs`         | one `directory_iterator` over root          | one `directory_iterator` over `root / dir`                           |
 | `WatchedFilesystemProjectFs`  | wraps the above, invalidates on watcher     | same, plus watcher-driven invalidation                               |
 | `NativeBagProjectFs`          | iterates the storage dir's root             | iterates the storage dir's subdirectory                              |
-| `WebBagProjectFs`             | synthesized from key prefixes in IDB        | synthesized from key prefixes (subdirectories are virtual)           |
-| `UrlProjectFs`                | synthesized from manifest keys              | synthesized — most manifests are flat (root only)                    |
+| `ArchiveProjectFs` (web working set) | synthesized from working-set key prefixes | synthesized from key prefixes (subdirectories are virtual)     |
 | `ArchiveProjectFs`            | synthesized from archive entries            | synthesized — archives carry full paths, entries grouped by prefix   |
 
 "Flat is a special case" falls out: bag-with-flat-keys, URL-with-flat-manifest,
@@ -449,66 +441,55 @@ re-expands." Bumps `generation()`.
 
 ### 5.3 Save / export hooks (App-level)
 
-These are App-level operations because they target the user's filesystem
-or the browser download path, not the project's internal storage:
+These are App-level operations because they target the user's filesystem, the
+browser download path, or a deployable package — not the project's internal storage:
 
-- `App::saveAsArchive(path | downloadName)` — walks the project via
-  `list()` + `resolve()`, zips into the chosen path (native) or
-  triggers a download (web). Available in all modes that have content
-  to export.
-- `App::saveActiveArchive()` — archive (native) only — rewrites the
-  bound archive path in place.
+- **Create archive from scene** (landed, step 7) — promote the current project into a
+  live, unbound working set (`ArchiveProjectFs`) seeded with the build closure
+  (filesystem) or the whole working set (bounded backends).
+- **Save as archive** — serialize the working set to a `.nhproj`: native writes to a
+  picked path (and binds it); web downloads the blob.
+- **Save** — native archive (bound) only — rewrites the bound `.nhproj` in place.
+- **Publish package** (§3.4, §6.6) — emit the self-contained deployable folder.
 
-After `saveAsArchive` finishes:
-
-- **Native, in any mode**: offer a "Reopen as archive?" modal. Accepting
-  swaps to `ArchiveProjectFs` pointed at the new file. This makes the
-  promotion symmetric for filesystem, bag, and archive (re-export).
-- **Web**: no follow-up — there's no path to bind to.
-
-There is **no** `saveAsFolder`. Filesystem mode already *is* a folder;
-bag-as-folder is what bag native already does internally; for export
-we use archive only.
+There is **no** `saveAsFolder` (filesystem already *is* a folder) and **no
+fork-to-edit**; editing a viewer-mode publication is Save-as-archive → open in app
+mode.
 
 ---
 
 ## 6. Mapping each mode to backends
 
-| Mode                  | Backend                                                                  |
-| --------------------- | ------------------------------------------------------------------------ |
-| Empty                 | `NativeBagProjectFs` (native) or `WebBagProjectFs` (web), with empty store |
-| URL session           | `UrlProjectFs`                                                           |
-| URL → graduated (web) | `WebBagProjectFs` populated from URL bytes, carries `ManifestOrigin`     |
-| Bag (native)          | `NativeBagProjectFs`                                                     |
-| Bag (web)             | `WebBagProjectFs`                                                        |
-| Filesystem            | `FilesystemProjectFs`, later wrapped by `WatchedFilesystemProjectFs`     |
-| Archive (native)      | `ArchiveProjectFs`                                                       |
-| Archive (web) on open | `WebBagProjectFs` populated from archive entries (no live archive mode)  |
+| Situation                          | Backend                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| Empty (native)                     | `NativeBagProjectFs`, empty store                                       |
+| Empty (web, app mode)              | `ArchiveProjectFs` (unbound working set), provenance `Empty`            |
+| Filesystem (native)                | `FilesystemProjectFs`, wrapped by `WatchedFilesystemProjectFs`          |
+| Open/drop a `.nhproj` (any)        | `ArchiveProjectFs` — native bound to the path; web unbound `Local`      |
+| Web viewer mode (sidecar)          | `ArchiveProjectFs` from fetched archive bytes, provenance `Remote`, locked |
 
 Notable sharing:
 
-- `NativeBagProjectFs` and `FilesystemProjectFs` both walk a directory
-  and resolve from disk. The bag is essentially "filesystem mode pointed
-  at an app-owned directory that accepts ingestion." Share an internal
-  helper or implement bag in terms of filesystem with an ingestion hook.
-- `ArchiveProjectFs` and `WebBagProjectFs` both have a live in-memory
-  ZIP working set and persist that ZIP somewhere (file path vs. IDB
-  blob). They share the helper described in §6.5; the only thing each
-  one specializes is **persistence**.
+- `NativeBagProjectFs` and `FilesystemProjectFs` both walk a directory and resolve
+  from disk (the native bag is "filesystem pointed at an app-owned dir that accepts
+  ingestion").
+- **The web app-mode project, web viewer-mode project, and native archive mode are all
+  the same `ArchiveProjectFs` over a `ZipWorkingSet`** — they differ only in
+  *provenance*, *persistence* (file path vs. IDB vs. none), and *posture* (lock). The
+  old `WebBagProjectFs`, per-key `UrlProjectFs`, and standalone bag are retired.
 
 ### 6.5 The shared `ZipWorkingSet` helper
 
-Both archive (native) and the web bag are wrappers around the same
-in-memory abstraction: a ZIP-backed read-on-demand store with an
-overlay of edits. Pulling that out as a helper avoids duplicating the
-miniz integration twice.
+Native archive mode and the web working set (app + viewer) are all wrappers around
+the same in-memory abstraction: a ZIP-backed read-on-demand store with an overlay
+of edits. Pulling that out as a helper keeps the miniz integration in one place.
 
 ```cpp
 class ZipWorkingSet {
 public:
-    // Open a ZIP from raw bytes (web bag: bytes from IDB; archive:
-    // bytes from a memory-mapped file or full read). Parses the
-    // central directory immediately.
+    // Open a ZIP from raw bytes (web: bytes from IDB or a fetched/dropped
+    // archive; native: a full file read). Parses the central directory
+    // immediately.
     static ZipWorkingSet openFromBytes(std::span<const std::byte>);
 
     // Open a ZIP from a file path (native archive). Holds the file
@@ -533,9 +514,9 @@ public:
     // Serialize current state (originals + overrides + removals) to a
     // fresh ZIP blob. Used by:
     //   - native archive Save: write blob to temp file, fsync, rename.
-    //   - web bag persistence: write blob to IDB.
-    //   - web bag download: hand blob to the browser.
-    //   - native bag/FS "Save as archive": same path.
+    //   - web app-mode persistence: write blob to IDB.
+    //   - Save as archive: download (.nhproj) / write to a path.
+    //   - Publish package: the project.<hash>.nhproj entry.
     std::vector<std::byte> serialize() const;
 
     bool dirty() const;
@@ -554,16 +535,47 @@ Properties relevant to the rest of the doc:
   cost is dominated by re-compressing the (typically small) edited
   entries plus copying the (potentially large) unchanged compressed
   bytes through. Linear in archive size, not in edit size.
-- **One abstraction, two persistence policies.** `ArchiveProjectFs`
-  calls `serialize()` on user-initiated Save and atomically writes the
-  result to its bound path. `WebBagProjectFs` calls `serialize()` on a
-  debounce timer and writes the result into IDB. Both also use
-  `serialize()` for the "Save as archive / Download archive" export —
-  it's literally the same byte stream.
+- **One abstraction, three persistence policies over the same bytes.** A bound
+  native `ArchiveProjectFs` calls `serialize()` on user-initiated Save → atomic
+  write to its path. Web **app mode** calls `serialize()` on a debounce timer →
+  IDB blob (`project/<id>`). Web **viewer mode** never persists (re-fetched from
+  source). All of them, plus **Save as archive** and **Publish**, use the same
+  `serialize()` byte stream — the `.nhproj`.
 
-This means **archive (native) and bag (web) share ~all of their
-implementation**, and the build order in §12 collapses two of its steps
-(see updated §12).
+This means **native archive mode, web app mode, and web viewer mode share ~all of
+their implementation** — one `ArchiveProjectFs` over a `ZipWorkingSet`, specialized
+only by provenance/persistence/posture.
+
+### 6.6 The publish package
+
+**Publish package** emits a self-contained static folder — the deployable form of an
+archive:
+
+```
+viewer.html                              # shell; fetches nh_manifest.json → viewer mode
+nodehammer-gles3.js  / .wasm             # WebGL2 runtime
+nodehammer-wgpu.js   / .wasm             # WebGPU runtime
+nodehammer-compute.js/ .wasm             # compute worker
+nh_manifest.json                         # sidecar: { archive: "project.<hash>.nhproj", lock, view }
+project.<hash>.nhproj                    # serialized working set
+```
+
+Drop the folder on any static host and open `viewer.html` → it fetches
+`nh_manifest.json` → **viewer mode** loads the archive. Zero server code. The web
+build already produces the three runtime pairs (`viewer.html` picks gles3/wgpu at
+runtime via `navigator.gpu`), so the payload is a known, enumerable set of files.
+
+**Runtime source:**
+- **Web (app mode):** the running app is served from `basePath`; it `fetch()`es its
+  own same-origin siblings (`viewer.html` + the three `*.js`/`*.wasm` pairs), adds the
+  generated sidecar + archive, and zips → download. Always version-matched.
+- **Native:** the CLI writes the same folder *only if* the native distribution ships
+  the web runtime (staged e.g. under `share/nodehammer/web/`). Coupling native
+  packaging to a prior wasm build (build wasm → stage → include) is a **feasibility to
+  establish**; until wired, native publish emits only the archive + sidecar.
+- **Thin (later):** `viewer.html` gains an overridable runtime base URL so a package
+  can reference a hosted, versioned, CORS-enabled runtime instead of bundling it —
+  additive, needs a runtime host, out of scope now.
 
 ---
 
@@ -579,9 +591,10 @@ Editor windows are an App-level component, not part of `ProjectFs`. They:
    gate (the user already gave consent by pressing save):
    - Filesystem mode: per-window `Save` (icon, ⌘S) writes through to
      disk via `add`.
-   - Bag / archive mode: on window close (or focus loss with a dirty
-     buffer) calls `commitEdit` to overwrite the entry in the bag /
-     archive working set.
+   - Working-set mode: on window close (or focus loss with a dirty
+     buffer) calls `commitEdit` to overwrite the entry in the working
+     set (web app-mode then auto-persists to IDB; native archive waits
+     for `save()`). Viewer mode is read-only — no editor commits.
 4. Subscribe to `generation()` bumps to detect external changes and
    apply the conflict policy in §3.1.
 
@@ -594,39 +607,37 @@ existing window.
 
 Every transition is a `setProject` swap. The transitions and their triggers:
 
-| Transition                       | Trigger                                                                                  | New backend                                                             |
-| -------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Empty → Bag                      | first drop / pick                                                                        | (already happens — same `*BagProjectFs` instance, contents just appear) |
-| Empty → Filesystem               | `Open folder…`                                                                           | `FilesystemProjectFs(path)`                                             |
-| Empty → URL                      | manifest URL on page load                                                                | `UrlProjectFs` (web entry point)                                        |
-| Empty → Archive (native)         | `Open archive…`                                                                          | `ArchiveProjectFs(path)`                                                |
-| URL → Bag (graduation)           | first edit, drop, or `add` after URL load                                                | `WebBagProjectFs` populated with URL-fetched bytes; `ManifestOrigin` preserved |
-| Bag (native) → Archive           | `Save as archive…` + user accepts "Reopen as archive?"                                   | `ArchiveProjectFs(new path)`                                            |
-| Filesystem → Archive             | `Save as archive…` + user accepts "Reopen as archive?"                                   | `ArchiveProjectFs(new path)`                                            |
-| Archive → Archive                | `Save as archive…` to a different path + user accepts "Reopen as archive?"               | `ArchiveProjectFs(new path)`                                            |
-| Archive (web) on open            | dropping or opening a `.zip`                                                             | `WebBagProjectFs` populated from archive entries                        |
-| Anything → Empty                 | `Close project` (with dirty confirm)                                                     | fresh empty `*BagProjectFs`                                             |
+| Transition                       | Trigger                                                    | New backend                                                     |
+| -------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------- |
+| Empty → working set              | first drop / pick                                          | same working set, contents just appear (`add`)                 |
+| Empty → Filesystem               | `Open folder…`                                             | `FilesystemProjectFs(path)`                                    |
+| Open a `.nhproj` (native)        | `Open archive…` / drop                                     | `ArchiveProjectFs(path)` (bound)                               |
+| Open a `.nhproj` (web app mode)  | `Open archive…` / drop                                     | `ArchiveProjectFs(openFromBytes)` (unbound, `Local`)          |
+| Create archive from scene        | menu action (step 7)                                       | unbound `ArchiveProjectFs` seeded from the closure/whole set   |
+| Filesystem/native → Archive      | `Save as archive…` (native) + optional rebind             | `ArchiveProjectFs(new path)`                                   |
+| Web viewer mode (on load)        | sidecar names an archive                                   | `ArchiveProjectFs(openFromBytes(fetched))` (`Remote`, locked)  |
+| Anything → Empty                 | `Close project` (with dirty confirm)                       | fresh empty working set / `makeEmptyBag()`                     |
 
-Note the symmetry: every native mode can promote to archive via the same
-"Save as archive → Reopen?" pattern. There is no folder-promotion path —
-filesystem already is a folder, bag native is a folder by virtue of its
-storage dir.
+There is **no** URL→bag graduation and **no** viewer→app fork transition anymore:
+web viewer mode is a locked publication; to edit, Save-as-archive downloads the
+`.nhproj` and the user opens it in app mode (a fresh `setProject` from those bytes).
+There is no folder-promotion path — filesystem already is a folder.
 
 ---
 
 ## 9. UI per mode (panel + chrome)
 
-| Mode                | Status line                            | Toolbar actions                                | Editor save behavior                                                |
-| ------------------- | -------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
-| Empty               | "no project"                           | Open files / folder / archive                  | n/a                                                                 |
-| Filesystem          | `folder: /path/to/odd`                 | Rescan, Save as archive                        | per-window save (⌘S) writes through to disk                         |
-| Bag (native)        | `bag · N files · persisted`            | Add files, Save as archive                     | per-window edit, no save icon (commit on close)                     |
-| Bag (web)           | `bag · N files`                        | Add files, Download archive                    | per-window edit, no save icon (commit on close)                     |
-| Archive (native)    | `archive: bundle.zip *`                | Save (in-place), Save as archive               | per-window edit; archive `Save` flushes the working set             |
-| URL                 | `url session · manifest: …`            | Download archive, Disconnect from manifest     | per-window edit; first edit silently graduates to bag-with-manifest |
+| Mode                     | Status line                       | Toolbar actions                            | Editor save behavior                                       |
+| ------------------------ | --------------------------------- | ------------------------------------------ | ---------------------------------------------------------- |
+| Empty                    | "no project"                      | Open files / folder / archive              | n/a                                                        |
+| Filesystem (native)      | `folder: /path/to/odd`            | Rescan, Save as archive, Publish           | per-window save (⌘S) writes through to disk                |
+| Native bag               | `bag · N files · persisted`       | Add files, Create archive, Publish         | per-window edit, commit on close                           |
+| Web app mode             | `project · N files` (IDB `*`)     | Add files, Save as archive, Publish        | per-window edit, auto-persists to IDB                      |
+| Archive (native, bound)  | `project.nhproj *`                | Save (in-place), Save as archive, Publish  | per-window edit; `Save` flushes the working set            |
+| Web viewer mode          | `viewer · <title>` (locked)       | Save as archive, Publish; **no edits**     | read-only (edit = download + open in app mode)             |
 
-A trailing `*` denotes overall project dirty state. Per-leaf dirty markers
-(rendered while walking visible `list(dir)` results) help locate edits.
+A trailing `*` denotes unsaved/uncommitted state. Per-leaf dirty markers (rendered
+while walking visible `list(dir)` results) help locate edits.
 
 ---
 
@@ -656,11 +667,10 @@ directory's cached entries. The UI re-fetches lazily on next render.
 | Mode                       | Warn on…                                                                            |
 | -------------------------- | ----------------------------------------------------------------------------------- |
 | Filesystem                 | any open editor with a dirty buffer                                                 |
-| Bag (native)               | nothing on quit (state persists in the storage dir); on `Close project`, warn if any contents and offer export |
-| Bag (web)                  | `beforeunload` if any edits since session start (storage persists across reloads, but explicit close clears it) |
+| Native bag                 | nothing on quit (persists in the storage dir); on `Close project`, warn if any contents and offer export |
+| Web app mode               | nothing on `beforeunload` — the working set is already auto-persisted to IDB and restores on reload; on `Close project` (clears the IDB slot), warn if unsaved vs. last export |
 | Archive (native)           | any unsaved working-set changes (project-level dirty)                               |
-| URL (un-edited)            | nothing                                                                             |
-| URL (post-edit / graduated)| `beforeunload` warning that reload restores the manifest                            |
+| Web viewer mode            | nothing — it's a locked publication that reloads from source (no edits to lose)     |
 
 ---
 
@@ -783,15 +793,33 @@ without an editor sitting on top of churning APIs.
    from-scratch set; `writeBytesAtomic` is shared with step-6 `save()`.
    Tests: closure-vs-whole-set walk + unbound save/bind round-trip; verified
    on native (393 tests) and the wasm build compiles + links the whole path.
-   *Deferred to step 8*: opening an **existing** `.zip` into a live web
-   archive (web drops are async/per-file, entangled with bag+IDB).
-8. **`WebBagProjectFs` (ZIP-in-IDB)** — wraps `ZipWorkingSet` opened
-   from bytes loaded out of IDB. `add` goes to `writeEntry`; debounced
-   `serialize()` writes the blob back to IDB. "Download archive" reuses
-   the same blob — no separate path. Replaces today's web bag flow
-   entirely.
-9. **URL manifest reload semantics + `beforeunload` warning** — lands
-    alongside web bag persistence (they share IDB scoping logic).
+   *Deferred to R1*: opening an **existing** archive into a live web project.
+
+### The §0 reshape (supersedes old steps 8–9)
+
+The old steps 8 (`WebBagProjectFs`) and 9 (URL reload semantics) are replaced by the
+archive-as-project reshape (§0), staged R1–R6. The detailed plan lives in the approved
+plan file; the shape is:
+
+- **R0** — this doc rewrite + locked terminology (no code).
+- **R1** — Unify the web project onto the working set: generalize `ArchiveProjectFs`
+  (provenance + basename-fallback resolve policy), make the web empty project a
+  working set, route `.nhproj` open/drop → `ArchiveProjectFs`, enable the web
+  "Open archive…" picker, switch native drop/CLI/NFD surfaces to `.nhproj`, retire the
+  web `BagProjectFs`. Delivers the deferred-from-7 "open a project on web".
+- **R2** — IDB persistence + application mode: an IDB EM_JS bridge + `Platform`
+  `*PersistentBlob`; app-mode debounced `serialize()` → IDB, cold-load restore,
+  `beforeunload` flush; restore suppressed under a sidecar.
+- **R3** — Sidecar → archive + project manifest (viewer mode): repurpose
+  `nh_manifest.json` to name a `.nhproj`; fetch → `ArchiveProjectFs` `Remote`, locked,
+  reload-from-source; parse the archive's `nodehammer.toml` (`[project]`/`[view]`);
+  retire per-key `UrlProjectFs`; no legacy compat.
+- **R4** — Layered steer + URL + sync panel (§3.4).
+- **R5** — Publish package (§6.6).
+- **R6** *(deferred)* — named multi-document switcher; thin package runtime.
+
+### Editor (unchanged, still last)
+
 10. **Editor windows + per-key dirty buffers** (no save yet) —
     establishes the edit UX shape across all modes that now exist.
     Reads via `resolve()` (copying immediately, per the tightened
@@ -802,9 +830,9 @@ without an editor sitting on top of churning APIs.
     gate, the user gave consent by pressing save). Filesystem's
     `planAdd` returns Accept only for keys that already exist on disk
     (so editor saves work, raw drops onto FS mode stay rejected). Bag
-    and archive backends commit via the same `add` surface; the bag
-    overwrites in its storage dir, archive writes to its working set
-    and waits for the user-initiated `Save`.
+    and working-set backends commit via the same `add` surface; the bag
+    overwrites in its storage dir, the working set writes its override
+    and (native archive) waits for the user-initiated `Save`.
 
 ---
 
@@ -834,8 +862,15 @@ are the ones we're going with.
 - **Filesystem editor saves are manual only**, no auto-save toggle.
   Matches "explicit save = explicit rebuild" and avoids rebuild storms
   during typing.
-- **URL post-graduation breadcrumb stays visible** in the status line
-  ("graduated from: …") so reload semantics are understandable.
+- **The archive is the project (`.nhproj`); no back-compat.** One `ZipWorkingSet`
+  substrate for authoring + publishing; a custom extension (ZIP internally). No
+  `.zip` projects, no legacy per-key sidecar, `UrlProjectFs` retired.
+- **Two web postures on sidecar presence; no fork-to-edit.** App mode persists to
+  IDB; viewer mode is a locked publication that reloads from source. Editing a
+  publication is the explicit Save-as-archive → open-in-app-mode path.
+- **Content-lock is a sidecar (deployment) property; steer is never frozen.** A
+  posed shareable link needs a live, URL-committed view even over locked content.
+- **Single current IDB document now** (`project/<id>`), multi-document switcher later.
 
 ### Things deliberately not solved
 
@@ -851,19 +886,13 @@ are the ones we're going with.
   revisit by introducing an explicit document layer (`NSDocument` +
   `NSWindowController` is the macOS-native shape) rather than
   retrofitting one.
-- **Multiple browser tabs on the same web project.** The same manifest
-  URL (or no-manifest bag) opened in two tabs cannot be neatly keyed
-  apart — IDB is origin-scoped and shared across tabs. This means a
-  per-URL IDB slot wouldn't actually disambiguate two tabs on the same
-  URL, and the "default no-manifest bag" slot likewise races between
-  tabs. Decision:
-  - Manifest-launched sessions **don't persist to IDB at all.** The
-    manifest is the source of truth on reload. If the user wants to
-    keep edits across reload, the answer is "Download archive, then
-    reopen the archive" — that gives them a regular bag on next visit.
-  - No-manifest bag sessions persist to a single global IDB slot. Last
-    writer wins; a console warning fires if a `storage` event from
-    another tab indicates a concurrent writer. We accept multi-tab as
-    a degenerate case for now. A future improvement could use the Web
-    Locks API to single-thread persistence to the active tab, but it's
-    not on the critical path.
+- **Multiple browser tabs on the same web project.** IDB is origin-scoped and shared
+  across tabs, so tabs can't be neatly keyed apart. Decision:
+  - **Viewer mode (sidecar) never persists to IDB at all** — the published archive is
+    the source of truth on reload. To keep edits, Save-as-archive and open the
+    `.nhproj` in application mode.
+  - **Application mode** persists to a single current IDB slot (`project/<id>`). Last
+    writer wins; a console warning fires if a `storage` event from another tab
+    indicates a concurrent writer. Multi-tab is a degenerate case for now; a future
+    Web Locks API single-threading is possible but off the critical path. The named
+    multi-document switcher (R6) would give explicit per-document slots.
