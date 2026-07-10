@@ -66,6 +66,25 @@ TEST_CASE("invalid viewer config state TOML is rejected") {
     CHECK_FALSE(viewerConfigStateFromToml("[view").has_value());
 }
 
+TEST_CASE("active build-root keys round-trip through TOML") {
+    ViewerConfigState state;
+    state.root_config_key = "detector/full.toml";
+    state.root_geometry_key = "geo/odd.nhb.zst";
+
+    auto parsed = viewerConfigStateFromToml(viewerConfigStateToToml(state));
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->root_config_key == "detector/full.toml");
+    CHECK(parsed->root_geometry_key == "geo/odd.nhb.zst");
+}
+
+TEST_CASE("unset build-root keys stay empty (fall back to archive manifest)") {
+    ViewerConfigState state;
+    auto parsed = viewerConfigStateFromToml(viewerConfigStateToToml(state));
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->root_config_key.empty());
+    CHECK(parsed->root_geometry_key.empty());
+}
+
 TEST_CASE("render quality state round-trips through TOML") {
     RenderQualitySettings quality;
     quality.render_scale = 1.5f;

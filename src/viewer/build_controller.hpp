@@ -75,7 +75,9 @@ class BuildController {
     [[nodiscard]] BuildSession &session() { return session_; }
     [[nodiscard]] const BuildSession &session() const { return session_; }
     [[nodiscard]] std::string &rootConfigKey() { return root_config_key_; }
+    [[nodiscard]] const std::string &rootConfigKey() const { return root_config_key_; }
     [[nodiscard]] std::string &rootGeometryKey() { return root_geometry_key_; }
+    [[nodiscard]] const std::string &rootGeometryKey() const { return root_geometry_key_; }
     [[nodiscard]] std::string &error() { return error_; }
     [[nodiscard]] bool inProgress() const { return in_progress_; }
     [[nodiscard]] bool pendingCutRebuild() const { return pending_cut_rebuild_; }

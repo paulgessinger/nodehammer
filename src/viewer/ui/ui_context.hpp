@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_set>
 
 namespace nodehammer::viewer {
 
@@ -102,6 +103,12 @@ struct ViewerUiContext {
     std::string &root_config_key;
     std::string &root_geometry_key;
     std::string &build_error;
+
+    /// Set of project-tree directory keys the user has expanded. The Project
+    /// panel drives each directory's open state from this set and writes toggles
+    /// back into it; the App persists it across sessions via a custom ImGui .ini
+    /// settings handler (ImGui itself does not serialize tree-node open state).
+    std::unordered_set<std::string> *project_tree_open{nullptr};
 
     std::uint32_t fb_width{0};
     std::uint32_t fb_height{0};

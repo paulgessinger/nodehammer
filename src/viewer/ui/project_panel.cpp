@@ -3,6 +3,7 @@
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <filesystem>
 #include <span>
@@ -94,8 +95,23 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
         for (const auto &node : nodes) {
             ImGui::PushID(node.key.c_str());
             if (node.is_directory) {
+                // Drive the open/closed state from the persisted set so it
+                // survives restarts (ImGui's .ini never stores tree state).
+                // ImGuiCond_Always makes the set the single source of truth;
+                // user toggles are written back below.
+                const bool want_open =
+                    ctx.project_tree_open != nullptr && ctx.project_tree_open->contains(node.key);
+                ImGui::SetNextItemOpen(want_open, ImGuiCond_Always);
                 const bool open_node =
                     ImGui::TreeNodeEx("##dir", ImGuiTreeNodeFlags_None, "%s", node.name.c_str());
+                if (ImGui::IsItemToggledOpen() && ctx.project_tree_open != nullptr) {
+                    if (open_node) {
+                        ctx.project_tree_open->insert(node.key);
+                    } else {
+                        ctx.project_tree_open->erase(node.key);
+                    }
+                    ImGui::MarkIniSettingsDirty();
+                }
                 if (open_node) {
                     self(ctx.project->list(node.key));
                     ImGui::TreePop();
