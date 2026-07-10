@@ -472,6 +472,7 @@ struct App::Impl {
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
     void removeProjectKey(const std::string &key);
+    void moveProjectKey(const std::string &from_key, const std::string &dest_dir_key);
     void openArchiveFromBytes(std::span<const std::byte> bytes);
     void openArchiveRemote(std::span<const std::byte> bytes, bool locked);
     void installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked);
@@ -1962,6 +1963,49 @@ void App::Impl::removeProjectKey(const std::string &key) {
     }
 }
 
+void App::Impl::moveProjectKey(const std::string &from_key, const std::string &dest_dir_key) {
+    using enum ProjectDropDecision::Kind;
+    if (from_key.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no edits
+    }
+    const std::string basename = std::filesystem::path{from_key}.filename().string();
+    if (basename.empty()) {
+        return;
+    }
+    const std::string to_key = dest_dir_key.empty() ? basename : dest_dir_key + "/" + basename;
+    if (to_key == from_key) {
+        return; // dropped onto its own folder — nothing to do
+    }
+    auto decision = project_->planMove(from_key, to_key);
+    if (decision.kind == Reject) {
+        // Silent no-op decisions carry no title; only surface real rejections.
+        if (!decision.title.empty()) {
+            enqueueProjectDropModal(std::move(decision), {});
+        }
+        return;
+    }
+    auto commit = [this, from_key, to_key]() {
+        if (project_ == nullptr) {
+            return;
+        }
+        project_->moveKey(from_key, to_key);
+        // A moved file keeps its identity: re-point any build-root selection so
+        // the same file stays selected at its new key.
+        if (build_controller_.rootConfigKey() == from_key) {
+            build_controller_.setRootConfigKey(to_key);
+        }
+        if (build_controller_.rootGeometryKey() == from_key) {
+            build_controller_.setRootGeometryKey(to_key);
+        }
+        build_controller_.clearError();
+    };
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), std::move(commit));
+    } else { // Accept — destination is free, move immediately.
+        commit();
+    }
+}
+
 void App::Impl::installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked) {
     // Install like setProject: swap the backend, re-point the log sink, clear the
     // stale root keys, and drop any pending modals. Then honor the archive's
@@ -2695,6 +2739,9 @@ void App::Impl::onFrame() {
         persistViewerConfigStateNow();
     };
     ui_actions.remove_key = [this](std::string key) { removeProjectKey(key); };
+    ui_actions.move_key = [this](std::string from_key, std::string dest_dir_key) {
+        moveProjectKey(from_key, dest_dir_key);
+    };
 
     ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
     renderActiveModal();

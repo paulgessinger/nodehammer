@@ -176,6 +176,26 @@ class ProjectFs : public LogSinkHolder {
     /// planRemove first. Bumps generation() on a real removal.
     virtual void removeKey(std::string_view /*key*/) {}
 
+    /// Relocation policy for an in-app move (e.g. dragging a file onto a folder
+    /// in the tree). Mirrors planAdd*/planRemove: `to_key` is the full target
+    /// key. Editable backends confirm when `to_key` already exists and accept
+    /// otherwise; read-only backends keep the default Reject.
+    virtual ProjectDropDecision planMove(std::string_view /*from_key*/,
+                                         std::string_view /*to_key*/) const {
+        return ProjectDropDecision{
+            ProjectDropDecision::Kind::Reject,
+            "Cannot move file",
+            "The current project backend does not support moving files.",
+            "OK",
+            {},
+        };
+    }
+
+    /// Commit a user-approved move (re-key `from_key` to `to_key`, preserving
+    /// bytes). Default no-op; App code should use planMove first. Bumps
+    /// generation() on a real move.
+    virtual void moveKey(std::string_view /*from_key*/, std::string_view /*to_key*/) {}
+
     /// Look up the bytes for a logical key. Backends that have everything
     /// in memory (the bag, an archive) return Ready or Missing
     /// synchronously; backends that fetch lazily (the URL backend) return

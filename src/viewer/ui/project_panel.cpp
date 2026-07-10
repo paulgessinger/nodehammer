@@ -14,6 +14,9 @@
 namespace nodehammer::viewer::ui {
 namespace {
 
+/// ImGui drag-drop payload type for a Project-tree file (payload = full key).
+constexpr const char *kFileDragType = "NH_PROJECT_FILE";
+
 std::string normalizedSelectionKey(std::string_view key) {
     auto out = std::filesystem::path{key}.lexically_normal().generic_string();
     if (!out.empty() && out.front() == '/') {
@@ -112,6 +115,16 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
                     }
                     ImGui::MarkIniSettingsDirty();
                 }
+                // Drop a dragged file here to move it into this folder. Must be
+                // registered against the directory's tree node before any child
+                // items are submitted below.
+                if (actions.move_key && ImGui::BeginDragDropTarget()) {
+                    if (const ImGuiPayload *pl = ImGui::AcceptDragDropPayload(kFileDragType)) {
+                        actions.move_key(std::string{static_cast<const char *>(pl->Data)},
+                                         node.key);
+                    }
+                    ImGui::EndDragDropTarget();
+                }
                 if (open_node) {
                     self(ctx.project->list(node.key));
                     ImGui::TreePop();
@@ -151,6 +164,14 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
 
             const char *tag = is_config ? " [config]" : is_geometry ? " [geometry]" : "";
             ImGui::TreeNodeEx("##leaf", flags, "%s%s", node.name.c_str(), tag);
+
+            // Drag a file onto a directory node to move it into that folder. The
+            // payload is the file's full key (null-terminated).
+            if (actions.move_key && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                ImGui::SetDragDropPayload(kFileDragType, node.key.c_str(), node.key.size() + 1);
+                ImGui::Text("Move %s", node.name.c_str());
+                ImGui::EndDragDropSource();
+            }
 
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                 if (lowerExtension(std::filesystem::path{node.key}) == ".toml") {

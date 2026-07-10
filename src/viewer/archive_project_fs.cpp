@@ -265,6 +265,50 @@ void ArchiveProjectFs::removeKey(std::string_view key) {
     impl_->invalidateListing();
 }
 
+ProjectDropDecision ArchiveProjectFs::planMove(std::string_view from_key,
+                                               std::string_view to_key) const {
+    using enum ProjectDropDecision::Kind;
+    if (!impl_->ws || from_key.empty() || to_key.empty()) {
+        return ProjectDropDecision{
+            Reject, "Cannot move file", "Missing source or destination.", "OK", {}};
+    }
+    if (from_key == to_key) {
+        // Already where it would land (dropped onto its own folder) — no-op.
+        return ProjectDropDecision{Reject, {}, {}, {}, {}};
+    }
+    if (!impl_->ws->contains(std::string{from_key})) {
+        return ProjectDropDecision{
+            Reject, "Cannot move file", "That file is not part of this archive.", "OK", {}};
+    }
+    if (impl_->ws->contains(std::string{to_key})) {
+        return ProjectDropDecision{
+            Confirm,
+            "Replace existing file?",
+            "A file named \"" + std::string{to_key} +
+                "\" already exists here.\n\nReplace it with the moved file?",
+            "Replace",
+            "Cancel",
+        };
+    }
+    return ProjectDropDecision{Accept, {}, {}, {}, {}};
+}
+
+void ArchiveProjectFs::moveKey(std::string_view from_key, std::string_view to_key) {
+    if (!impl_->ws || from_key.empty() || to_key.empty() || from_key == to_key) {
+        return;
+    }
+    const std::string fromK{from_key};
+    const std::string toK{to_key};
+    auto bytes = impl_->ws->read(fromK);
+    if (!bytes) {
+        return; // source vanished between plan and commit
+    }
+    const auto sp = bytes->span();
+    impl_->ws->writeEntry(toK, std::vector<std::byte>(sp.begin(), sp.end()));
+    impl_->ws->removeEntry(fromK);
+    impl_->invalidateListing();
+}
+
 ArchiveProjectFs::Provenance ArchiveProjectFs::provenance() const { return impl_->provenance; }
 
 const std::filesystem::path &ArchiveProjectFs::path() const { return impl_->archive_path; }

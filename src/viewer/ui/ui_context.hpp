@@ -74,6 +74,10 @@ struct UiActions {
     /// Request removal of a project file by key. The App consults the backend's
     /// planRemove and, on Confirm, shows a confirmation modal before committing.
     std::function<void(std::string)> remove_key;
+    /// Request moving a project file (first arg: source key) into a directory
+    /// (second arg: destination directory key, "" for the root). The App
+    /// computes the target key, consults planMove, and confirms on collision.
+    std::function<void(std::string, std::string)> move_key;
 };
 
 /// Per-frame sokol draw-submission counters for the Debug panel. Plain ints so
