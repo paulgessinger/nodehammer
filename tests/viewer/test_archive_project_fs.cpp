@@ -190,6 +190,29 @@ TEST_CASE("ArchiveProjectFs accepts drops as working-set overrides",
     REQUIRE(asString(fs.resolve("added.toml").file.bytes.span()) == "added\n");
 }
 
+TEST_CASE("ArchiveProjectFs removes entries with a confirming plan",
+          "[viewer][archive_project_fs]") {
+    TempArchive ta{"remove", {{"scene.toml", "keep\n"}, {"drop.toml", "bye\n"}}};
+    ArchiveProjectFs fs{ta.zip};
+
+    using enum ProjectDropDecision::Kind;
+    // A present key confirms; a missing key rejects.
+    REQUIRE(fs.planRemove("drop.toml").kind == Confirm);
+    REQUIRE(fs.planRemove("nope.toml").kind == Reject);
+
+    const auto gen_before = fs.generation();
+    fs.removeKey("drop.toml");
+    REQUIRE(fs.resolve("drop.toml").status == ResolveStatus::Missing);
+    REQUIRE(fs.resolve("scene.toml").status == ResolveStatus::Ready);
+    REQUIRE(fs.generation() > gen_before);
+    REQUIRE(fs.dirty());
+
+    // Removing a now-absent key is a no-op that neither throws nor re-bumps.
+    const auto gen_after = fs.generation();
+    fs.removeKey("drop.toml");
+    REQUIRE(fs.generation() == gen_after);
+}
+
 TEST_CASE("ArchiveProjectFs saves edits back to disk atomically", "[viewer][archive_project_fs]") {
     TempArchive ta{"save", {{"scene.toml", "v1\n"}}};
     {

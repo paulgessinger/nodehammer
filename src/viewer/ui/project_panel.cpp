@@ -164,6 +164,16 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
                 }
             }
 
+            // Right-click a file for its actions. Removal routes through the
+            // App, which asks the backend (planRemove) and shows a confirmation
+            // modal before committing — read-only backends will surface a reject.
+            if (actions.remove_key && ImGui::BeginPopupContextItem("##file_ctx")) {
+                if (ImGui::MenuItem("Remove…")) {
+                    actions.remove_key(node.key);
+                }
+                ImGui::EndPopup();
+            }
+
             ImGui::PopID();
         }
     };

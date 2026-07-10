@@ -158,6 +158,24 @@ class ProjectFs : public LogSinkHolder {
     virtual void addPath(const std::filesystem::path & /*path*/) {}
     virtual void addBytes(std::string_view /*filename*/, std::span<const std::byte> /*bytes*/) {}
 
+    /// File-removal policy, mirroring planAdd*: the App asks first so the
+    /// backend owns whether (and how) a key may be removed, while the App owns
+    /// the confirmation modal. Editable in-memory backends (the archive) return
+    /// Confirm; read-only / filesystem-mounted backends keep the default Reject.
+    virtual ProjectDropDecision planRemove(std::string_view /*key*/) const {
+        return ProjectDropDecision{
+            ProjectDropDecision::Kind::Reject,
+            "Cannot remove file",
+            "The current project backend does not support removing files.",
+            "OK",
+            {},
+        };
+    }
+
+    /// Commit a user-approved removal. Default no-op; App code should use
+    /// planRemove first. Bumps generation() on a real removal.
+    virtual void removeKey(std::string_view /*key*/) {}
+
     /// Look up the bytes for a logical key. Backends that have everything
     /// in memory (the bag, an archive) return Ready or Missing
     /// synchronously; backends that fetch lazily (the URL backend) return

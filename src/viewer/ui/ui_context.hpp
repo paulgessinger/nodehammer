@@ -71,6 +71,9 @@ struct UiActions {
     std::function<void()> reset_render_quality;
     std::function<void(std::string)> select_config_key;
     std::function<void(std::string)> select_geometry_key;
+    /// Request removal of a project file by key. The App consults the backend's
+    /// planRemove and, on Confirm, shows a confirmation modal before committing.
+    std::function<void(std::string)> remove_key;
 };
 
 /// Per-frame sokol draw-submission counters for the Debug panel. Plain ints so

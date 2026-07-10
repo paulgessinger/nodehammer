@@ -471,6 +471,7 @@ struct App::Impl {
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+    void removeProjectKey(const std::string &key);
     void openArchiveFromBytes(std::span<const std::byte> bytes);
     void openArchiveRemote(std::span<const std::byte> bytes, bool locked);
     void installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked);
@@ -1928,6 +1929,39 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
     }
 }
 
+void App::Impl::removeProjectKey(const std::string &key) {
+    using enum ProjectDropDecision::Kind;
+    if (key.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no edits
+    }
+    auto decision = project_->planRemove(key);
+    if (decision.kind == Reject) {
+        enqueueProjectDropModal(std::move(decision), {});
+        return;
+    }
+    auto commit = [this, key]() {
+        if (project_ == nullptr) {
+            return;
+        }
+        project_->removeKey(key);
+        // A removed build root can't build; clear the selection so we fall back
+        // to manifest/extension recognition rather than erroring on a missing
+        // file. (Persisted web root keys re-derive from these on the next save.)
+        if (build_controller_.rootConfigKey() == key) {
+            build_controller_.setRootConfigKey({});
+        }
+        if (build_controller_.rootGeometryKey() == key) {
+            build_controller_.setRootGeometryKey({});
+        }
+        build_controller_.clearError();
+    };
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), std::move(commit));
+    } else { // Accept — no backend removes without confirming today, but honor it.
+        commit();
+    }
+}
+
 void App::Impl::installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked) {
     // Install like setProject: swap the backend, re-point the log sink, clear the
     // stale root keys, and drop any pending modals. Then honor the archive's
@@ -2660,6 +2694,7 @@ void App::Impl::onFrame() {
         build_controller_.setRootGeometryKey(std::move(key));
         persistViewerConfigStateNow();
     };
+    ui_actions.remove_key = [this](std::string key) { removeProjectKey(key); };
 
     ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
     renderActiveModal();

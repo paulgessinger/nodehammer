@@ -82,6 +82,8 @@ class ArchiveProjectFs final : public ProjectFs {
                                      std::span<const std::byte> bytes) const override;
     void addPath(const std::filesystem::path &path) override;
     void addBytes(std::string_view filename, std::span<const std::byte> bytes) override;
+    ProjectDropDecision planRemove(std::string_view key) const override;
+    void removeKey(std::string_view key) override;
 
     /// Where the working set came from (persistence/posture + resolve policy).
     Provenance provenance() const;

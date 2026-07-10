@@ -238,6 +238,33 @@ void ArchiveProjectFs::addPath(const std::filesystem::path &path) {
     addBytes(path.filename().string(), contents);
 }
 
+ProjectDropDecision ArchiveProjectFs::planRemove(std::string_view key) const {
+    using enum ProjectDropDecision::Kind;
+    if (!impl_->ws || key.empty() || !impl_->ws->contains(std::string{key})) {
+        return ProjectDropDecision{
+            Reject, "Cannot remove file", "That file is not part of this archive.", "OK", {}};
+    }
+    return ProjectDropDecision{
+        Confirm,
+        "Remove file?",
+        "Remove \"" + std::string{key} + "\" from this archive?\n\nThis cannot be undone.",
+        "Remove",
+        "Cancel",
+    };
+}
+
+void ArchiveProjectFs::removeKey(std::string_view key) {
+    if (!impl_->ws || key.empty()) {
+        return;
+    }
+    const std::string k{key};
+    if (!impl_->ws->contains(k)) {
+        return;
+    }
+    impl_->ws->removeEntry(k);
+    impl_->invalidateListing();
+}
+
 ArchiveProjectFs::Provenance ArchiveProjectFs::provenance() const { return impl_->provenance; }
 
 const std::filesystem::path &ArchiveProjectFs::path() const { return impl_->archive_path; }
