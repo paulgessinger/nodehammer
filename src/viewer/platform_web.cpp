@@ -168,7 +168,8 @@ static constexpr const char *kProjectBlobKey = "project/default";
 // already written into the pending package working set by App::publishPackage.
 // clang-format off
 EM_JS(void, nh_viewer_publish_fetch_runtime, (), {
-    var base = window.location.pathname.replace(/[^/]*$/, '');
+    var path = window.location.pathname;
+    var base = path.slice(0, path.lastIndexOf('/') + 1);
     var names = ['viewer.html',
                  'nodehammer-gles3.js', 'nodehammer-gles3.wasm',
                  'nodehammer-wgpu.js',  'nodehammer-wgpu.wasm',
