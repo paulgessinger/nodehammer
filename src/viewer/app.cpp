@@ -21,6 +21,8 @@
 #include "ui/perf_history.hpp"
 #include "ui/viewer_ui.hpp"
 
+#include <nodehammer/viewer/archive_export.hpp>
+#include <nodehammer/viewer/archive_project_fs.hpp>
 #include <nodehammer/viewer/backend_caps.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/png_export.hpp>
@@ -420,6 +422,8 @@ struct App::Impl {
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+    void createArchiveFromScene();
+    void saveActiveArchiveTo(const std::filesystem::path &path);
     void enqueueModal(RetainedModal modal);
     void enqueueProjectDropModal(ProjectDropDecision decision, std::function<void()> on_confirm);
     void renderActiveModal();
@@ -1709,6 +1713,53 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
     }
 }
 
+void App::Impl::createArchiveFromScene() {
+    if (!project_) {
+        return;
+    }
+    // Snapshot the root keys before we walk/replace the project: rootConfigKey()
+    // hands back a reference into the controller we are about to re-seed.
+    const std::string config_key = build_controller_.rootConfigKey();
+    const std::string geometry_key = build_controller_.rootGeometryKey();
+
+    std::vector<std::string> skipped;
+    auto ws = buildArchiveWorkingSet(*project_, config_key, geometry_key, &skipped);
+
+    // The scene can be non-null while the build roots are empty (e.g. after
+    // setProject()/setScene() before roots are re-established): the closure walk
+    // then collects nothing. Bail before replacing the live project so we never
+    // strand the user on an empty archive that Save would write out blank.
+    if (ws.listAtPrefix("").empty()) {
+        notifications.warning("Nothing to archive — no build roots for the current scene");
+        return;
+    }
+
+    // Swap in a live, unbound archive seeded with the collected content, then
+    // re-seed the same root keys so the identical scene rebuilds from the bundle.
+    project_ = std::make_unique<ArchiveProjectFs>(std::move(ws));
+    project_->setLogSink(&notifications);
+    active_modals.clear();
+    build_controller_.setRootKeys(config_key, geometry_key);
+
+    if (!skipped.empty()) {
+        notifications.warning("Archive bundle: " + std::to_string(skipped.size()) +
+                              " file(s) could not be read and were omitted");
+    }
+    notifications.info("Archive bundle created — drop files to add, then Save");
+}
+
+void App::Impl::saveActiveArchiveTo(const std::filesystem::path &path) {
+#ifndef __EMSCRIPTEN__
+    if (auto *archive = dynamic_cast<ArchiveProjectFs *>(project_.get())) {
+        if (archive->saveTo(path)) {
+            notifications.info("Saved archive to " + path.filename().string());
+        }
+    }
+#else
+    (void)path;
+#endif
+}
+
 void App::Impl::enqueueProjectDropModal(ProjectDropDecision decision,
                                         std::function<void()> on_confirm) {
     RetainedModal modal;
@@ -1955,6 +2006,19 @@ void App::Impl::onFrame() {
                      0.f);
     }
 
+    // Archive mode is cross-platform. An unbound archive (created from a scene,
+    // not yet written) reports archive_unbound so the menu can offer "Save
+    // archive as…" / "Download archive" instead of an in-place "Save archive".
+    bool is_archive_mode = false;
+    bool archive_dirty = false;
+    bool archive_unbound = false;
+    if (auto *archive = dynamic_cast<ArchiveProjectFs *>(project_.get())) {
+        is_archive_mode = true;
+        archive_dirty = archive->dirty();
+        archive_unbound = !archive->isBound();
+    }
+    const bool can_create_archive = static_cast<bool>(scene) && !is_archive_mode;
+
     ui::ViewerUiContext ui_ctx{
         .cfg = cfg,
         .quality = quality,
@@ -1998,6 +2062,10 @@ void App::Impl::onFrame() {
             },
         .perf_history = &perf_history,
         .gpu_pass_times = &gpu_pass_timer_.results(),
+        .is_archive_mode = is_archive_mode,
+        .archive_dirty = archive_dirty,
+        .archive_unbound = archive_unbound,
+        .can_create_archive = can_create_archive,
         .has_scene = static_cast<bool>(scene),
         .scene_uploaded = scene_uploaded,
         .build_in_progress = build_controller_.inProgress(),
@@ -2018,6 +2086,28 @@ void App::Impl::onFrame() {
     ui_actions.reset_render_quality = [this]() { quality = RenderQualitySettings{}; };
     ui_actions.open_file_picker = [this]() { platform_->openFilePicker(); };
     ui_actions.open_folder_picker = [this]() { platform_->openFolderPicker(); };
+    ui_actions.open_archive = [this]() { platform_->openArchivePicker(); };
+    ui_actions.create_archive_from_scene = [this]() { createArchiveFromScene(); };
+    ui_actions.save_archive = [this]() {
+        auto *archive = dynamic_cast<ArchiveProjectFs *>(project_.get());
+        if (archive == nullptr) {
+            return;
+        }
+        if (archive->isBound()) {
+#ifndef __EMSCRIPTEN__
+            if (archive->save()) {
+                notifications.info("Archive saved");
+            }
+#endif
+        } else {
+#ifdef __EMSCRIPTEN__
+            platform_->downloadArchive("project.zip", archive->serialize());
+#else
+            // Unbound: pick a path, then saveActiveArchiveTo binds + writes.
+            platform_->saveArchivePicker();
+#endif
+        }
+    };
     ui_actions.frame_scene = [this]() {
         if (!scene) {
             return;
@@ -2203,6 +2293,14 @@ void App::addProjectPath(const std::filesystem::path &path) { impl_->addProjectP
 void App::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
     impl_->addProjectBytes(filename, bytes);
 }
+
+void App::createArchiveFromScene() { impl_->createArchiveFromScene(); }
+
+#ifndef __EMSCRIPTEN__
+void App::saveActiveArchiveTo(const std::filesystem::path &path) {
+    impl_->saveActiveArchiveTo(path);
+}
+#endif
 
 void App::savePersistentState() { impl_->savePersistentState(true); }
 

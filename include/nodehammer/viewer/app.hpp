@@ -92,6 +92,19 @@ class App {
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
 
+    /// Promote the current project into an in-memory archive bundle seeded with
+    /// its archivable content (build closure for filesystem mode, whole working
+    /// set for bounded backends), re-seeding the current root keys so the scene
+    /// stays live. Switches into a live, unbound archive mode the user can curate
+    /// (drop files) and then Save. Cross-platform (strategy doc step 7).
+    void createArchiveFromScene();
+
+#ifndef __EMSCRIPTEN__
+    /// Serialize the active archive to `path`, binding it there (native save-as).
+    /// Called by the save-archive picker once the user has chosen a path.
+    void saveActiveArchiveTo(const std::filesystem::path &path);
+#endif
+
     /// Flush viewer state immediately. Normal frame/end-of-app saves call this
     /// internally; platform code uses it for quit/page-unload paths where the
     /// next frame or regular cleanup may not run.

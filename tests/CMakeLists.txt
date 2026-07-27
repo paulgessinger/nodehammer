@@ -47,11 +47,23 @@ if(NOT EMSCRIPTEN)
     target_link_libraries(nodehammer_tests PRIVATE nodehammer_lua)
 endif()
 
-# WatchedFilesystemProjectFs (and its wtr.watcher dep) is compiled into
-# nodehammer_lib only when the viewer is on; gate its test the same way.
+# ZipWorkingSet is compiled into nodehammer_lib whenever the viewer is on
+# (native and web), so gate its test on the viewer only.
+if(NODEHAMMER_WITH_VIEWER)
+    target_sources(nodehammer_tests PRIVATE
+        viewer/test_zip_working_set.cpp
+    )
+endif()
+
+# WatchedFilesystemProjectFs (and its wtr.watcher dep) is native-only. The
+# archive tests exercise the native save-to-path internals (saveTo /
+# writeBytesAtomic), so they are gated native too even though ArchiveProjectFs
+# itself is cross-platform.
 if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
     target_sources(nodehammer_tests PRIVATE
         viewer/test_watched_filesystem_project_fs.cpp
+        viewer/test_archive_project_fs.cpp
+        viewer/test_archive_export.cpp
     )
 endif()
 

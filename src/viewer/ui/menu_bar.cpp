@@ -19,6 +19,32 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
             if (ImGui::MenuItem("Open folder...") && actions.open_folder_picker) {
                 actions.open_folder_picker();
             }
+            // Web open-archive lands in step 8 (async per-file drops + IDB); the
+            // picker is native-only for now.
+            if (ImGui::MenuItem("Open archive...") && actions.open_archive) {
+                actions.open_archive();
+            }
+        }
+        // Archive create/save is cross-platform. Only persistence differs: a
+        // bound archive writes in place; an unbound one is saved-as (native) or
+        // downloaded (web).
+        if (ImGui::MenuItem("Create archive from scene", nullptr, false, ctx.can_create_archive) &&
+            actions.create_archive_from_scene) {
+            actions.create_archive_from_scene();
+        }
+        {
+            const char *save_label = "Save archive";
+            const char *save_shortcut = "Cmd+S";
+            bool save_enabled = ctx.is_archive_mode && ctx.archive_dirty;
+            if (ctx.archive_unbound) {
+                save_label = platform::kIsWeb ? "Download archive..." : "Save archive as...";
+                save_shortcut = nullptr;
+                save_enabled = ctx.is_archive_mode; // always persistable once created
+            }
+            if (ImGui::MenuItem(save_label, save_shortcut, false, save_enabled) &&
+                actions.save_archive) {
+                actions.save_archive();
+            }
         }
         if (ctx.has_scene && ImGui::MenuItem("Close project") && actions.close_project) {
             actions.close_project();

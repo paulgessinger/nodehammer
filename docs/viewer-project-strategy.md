@@ -16,7 +16,7 @@ The viewer already has the right shape for this work; what's missing is mostly
 a write path, a unified hierarchical listing model, an editor surface, and a
 few mode-transition rules.
 
-**Status:** Steps 1, 2, 3, and 4 of §12 have landed.
+**Status:** Steps 1–7 of §12 have landed.
 - Step 1: `DirNode::children` is gone; backends maintain per-directory
   caches keyed by `generation()`; the App's tree panel recurses via
   `project_->list(node.key)`.
@@ -740,21 +740,51 @@ without an editor sitting on top of churning APIs.
    background thread). A `notifyChanged()` seam makes the
    debounce/coalesce logic deterministically testable without threads;
    one `[.]`-tagged integration test exercises the real FSEvents path.
-5. **`ZipWorkingSet` helper (§6.5)** — miniz integration: open from
-   bytes / open from file path, lazy `read(key)`, in-memory overrides
-   via `writeEntry`, `serialize()` for save/export. Keeps decompressed
-   entries hot (decompression cost, not IO cost, is what justifies the
-   cache here — consistent with the §2 principle). No `ProjectFs`
-   bindings yet — this is just the substrate. Tested directly.
-6. **`ArchiveProjectFs` (native)** — thin wrapper around `ZipWorkingSet`
-   opened from a file path. `Save` calls `serialize()` and writes
-   atomically (temp + fsync + rename). `Save as archive…` is the same
-   path with a different destination.
-7. **`App::saveAsArchive` for non-archive modes** — walks the project
-   via `list()`/`resolve()` into a fresh `ZipWorkingSet`, calls
-   `serialize()`, and writes natively or triggers a browser download.
-   "Reopen as archive?" follow-up on native (works from filesystem,
-   bag, and archive — symmetric).
+5. ✅ **`ZipWorkingSet` helper (§6.5)** — landed. miniz-backed
+   ([`zip_working_set.{hpp,cpp}`](../include/nodehammer/viewer/zip_working_set.hpp)):
+   `openFromBytes`/`openFromFile` parse the central directory into memory,
+   `read(key)` decompresses lazily and caches as a `ByteBuffer`,
+   `writeEntry`/`removeEntry` maintain an override+tombstone overlay,
+   `listAtPrefix` synthesizes a `ZipDirEntry` tree from flat keys, and
+   `serialize()` streams a fresh ZIP (unchanged entries passed through
+   compressed via `mz_zip_writer_add_from_zip_reader`, overrides deflated).
+   No `ProjectFs` bindings — pure substrate. miniz is Conan
+   `miniz/3.0.2`, viewer-gated on **both** native and web (step 8's web
+   bag reuses it), unlike the native-only watcher. Tested directly.
+6. ✅ **`ArchiveProjectFs` (native)** — landed
+   ([`archive_project_fs.{hpp,cpp}`](../include/nodehammer/viewer/archive_project_fs.hpp)).
+   Wraps a `ZipWorkingSet` bound to a path; `resolve` reads from the
+   working set (no basename fallback — archive keys are full paths),
+   `list(dir)` synthesizes a `DirNode` tree with a per-dir cache keyed to
+   `generation()` (mirrors `FilesystemProjectFs`), and drops are accepted
+   as working-set overrides (Accept new / Confirm replace). `save()`
+   serializes and writes atomically (temp + fsync + rename), then reopens
+   from the saved bytes to drop the dirty flag. Wired into the App via
+   **File → Open archive…** (native picker) and a single-`.zip` drag-drop;
+   **File → Save archive** (⌘S label) is enabled when the archive is dirty.
+   An integration test drives `open-archive → BuildSession → scene` headlessly.
+   *Deferred*: `Save as archive…` (that's step 7).
+7. ✅ **"Create archive from scene" — cross-platform archive promotion** —
+   landed
+   ([`archive_export.{hpp,cpp}`](../include/nodehammer/viewer/archive_export.hpp)).
+   Instead of a one-shot save, the project is *promoted* into a live,
+   unbound `ArchiveProjectFs` seeded with `buildArchiveWorkingSet` (the
+   **build closure** — root config + transitive includes + geometry — for
+   filesystem mode via a `ProjectFs::listingIsComplete()==false` walk that
+   reuses `ConfigLoader::peekIncludesFromBytes`/`resolveIncludeKey`; the
+   **whole working set** for bounded backends where `listingIsComplete()`).
+   The current root keys are re-seeded so the same scene rebuilds from the
+   bundle; the user then drags extra files in (archive mode accepts drops on
+   both platforms) and Saves. **Archive mode is now cross-platform** (not
+   native-only): only persistence differs — a **bound** archive writes in
+   place (`save()`), an **unbound** one is **save-as**'d to a path (native,
+   `saveTo` via NFD `SaveDialog`) or **downloaded** (web,
+   `nh_viewer_download_bytes`). `ZipWorkingSet::create()` builds the
+   from-scratch set; `writeBytesAtomic` is shared with step-6 `save()`.
+   Tests: closure-vs-whole-set walk + unbound save/bind round-trip; verified
+   on native (393 tests) and the wasm build compiles + links the whole path.
+   *Deferred to step 8*: opening an **existing** `.zip` into a live web
+   archive (web drops are async/per-file, entangled with bag+IDB).
 8. **`WebBagProjectFs` (ZIP-in-IDB)** — wraps `ZipWorkingSet` opened
    from bytes loaded out of IDB. `add` goes to `writeEntry`; debounced
    `serialize()` writes the blob back to IDB. "Download archive" reuses

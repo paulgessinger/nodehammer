@@ -1,6 +1,7 @@
 #include "platform_native_common.hpp"
 
 #include <nodehammer/viewer/app.hpp>
+#include <nodehammer/viewer/archive_project_fs.hpp>
 #include <nodehammer/viewer/filesystem_project_fs.hpp>
 #include <nodehammer/viewer/native_bag_project_fs.hpp>
 #include <nodehammer/viewer/platform.hpp>
@@ -13,6 +14,8 @@
 #include <sago/platform_folders.h>
 #include <sokol_app.h>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -27,12 +30,22 @@ std::filesystem::path persistentTextPath(const std::string &key) {
     return std::filesystem::path{sago::getConfigHome()} / "nodehammer" / key;
 }
 
+/// Case-insensitive ".zip" extension check for archive-drop detection.
+bool isZipPath(const std::filesystem::path &p) {
+    auto ext = p.extension().string();
+    std::ranges::transform(ext, ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == ".zip";
+}
+
 } // namespace
 
 std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<NativeBagProjectFs>(); }
 
 void NativePickerState::openFilePicker() { pending_file_picker_ = true; }
 void NativePickerState::openFolderPicker() { pending_folder_picker_ = true; }
+void NativePickerState::openArchivePicker() { pending_archive_picker_ = true; }
+void NativePickerState::saveArchivePicker() { pending_save_archive_picker_ = true; }
 
 void NativePickerState::drainPickers(App &app) {
     if (pending_file_picker_) {
@@ -42,6 +55,14 @@ void NativePickerState::drainPickers(App &app) {
     if (pending_folder_picker_) {
         pending_folder_picker_ = false;
         runFolderPickerModal(app);
+    }
+    if (pending_archive_picker_) {
+        pending_archive_picker_ = false;
+        runArchivePickerModal(app);
+    }
+    if (pending_save_archive_picker_) {
+        pending_save_archive_picker_ = false;
+        runSaveArchivePickerModal(app);
     }
 }
 
@@ -79,6 +100,30 @@ void NativePickerState::runFolderPickerModal(App &app) {
         std::make_unique<FilesystemProjectFs>(std::filesystem::path{picked.get()})));
 }
 
+void NativePickerState::runArchivePickerModal(App &app) {
+    NFD::Guard nfd;
+    NFD::UniquePath picked;
+    nfdu8filteritem_t filters[] = {{"Zip archive", "zip"}};
+    if (NFD::OpenDialog(picked, filters, 1) != NFD_OKAY) {
+        return;
+    }
+    app.setProject(std::make_unique<ArchiveProjectFs>(std::filesystem::path{picked.get()}));
+}
+
+void NativePickerState::runSaveArchivePickerModal(App &app) {
+    NFD::Guard nfd;
+    NFD::UniquePath picked;
+    nfdu8filteritem_t filters[] = {{"Zip archive", "zip"}};
+    if (NFD::SaveDialog(picked, filters, 1, nullptr, "project.zip") != NFD_OKAY) {
+        return;
+    }
+    std::filesystem::path path{picked.get()};
+    if (!isZipPath(path)) {
+        path += ".zip";
+    }
+    app.saveActiveArchiveTo(path);
+}
+
 #else // NH_VIEWER_NATIVE_DIALOG
 
 // Built without NFD (NODEHAMMER_VIEWER_NATIVE_DIALOG=OFF): no GTK/DBus
@@ -92,6 +137,16 @@ void NativePickerState::runFilePickerModal(App &) {
 void NativePickerState::runFolderPickerModal(App &) {
     std::println(stderr, "viewer: built without a native folder dialog; "
                          "drag a folder onto the window instead.");
+}
+
+void NativePickerState::runArchivePickerModal(App &) {
+    std::println(stderr, "viewer: built without a native file dialog; "
+                         "drag a .zip archive onto the window instead.");
+}
+
+void NativePickerState::runSaveArchivePickerModal(App &) {
+    std::println(stderr, "viewer: built without a native file dialog; "
+                         "cannot pick a save path for the archive.");
 }
 
 #endif // NH_VIEWER_NATIVE_DIALOG
@@ -114,6 +169,16 @@ void dispatchNativeDroppedFiles(App &app) {
         if (std::filesystem::is_directory(p, ec)) {
             app.setProject(std::make_unique<WatchedFilesystemProjectFs>(
                 std::make_unique<FilesystemProjectFs>(std::move(p))));
+            return;
+        }
+    }
+    // A single dropped .zip replaces the project with a live archive mode. Only
+    // the sole-file case is unambiguous; a .zip mixed with other files falls
+    // through to flat ingestion below.
+    if (n == 1) {
+        std::filesystem::path p{sapp_get_dropped_file_path(0)};
+        if (isZipPath(p)) {
+            app.setProject(std::make_unique<ArchiveProjectFs>(std::move(p)));
             return;
         }
     }

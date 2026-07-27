@@ -41,6 +41,7 @@ void BuildController::reset() {
     pristine_config_.reset();
     pristine_config_label_.clear();
     pristine_geometry_label_.clear();
+    last_built_input_hash_ = 0;
     root_config_key_.clear();
     root_geometry_key_.clear();
     session_.setRootKeys({}, {});
@@ -131,6 +132,10 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
                 if (cb_.on_base_scene_ready) {
                     cb_.on_base_scene_ready(std::move(built.scene));
                 }
+                // This base scene is now resident; record the inputs it was built
+                // from so a later walk resolving identical bytes can skip the
+                // rebuild.
+                last_built_input_hash_ = in_flight_input_hash_;
                 // The freshly loaded base scene needs a cut bake if the Boolean
                 // cut is already enabled (e.g. from persisted state / URL).
                 if (cut.enabled) {
@@ -166,23 +171,37 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
 
         if (!in_progress_ && session_.phase() == BuildPhase::ResolvedReady) {
             if (auto inputs = session_.takeInputs()) {
-                // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
-                pristine_config_ =
-                    std::make_shared<const NHConfig>(std::move(inputs->config.config));
-                pristine_scene_ =
-                    std::make_shared<const SemanticScene>(std::move(inputs->import.scene));
-                pristine_config_label_ = std::move(inputs->config_key);
-                pristine_geometry_label_ = std::move(inputs->geometry_key);
-                // A new base build invalidates any resident cut bake (App drops
-                // the GPU-side cut scene + clears the cut renderer).
-                if (cb_.on_project_build_starting) {
-                    cb_.on_project_build_starting();
+                // Byte-identical inputs to the resident scene (e.g. a backend
+                // swap that resolves the same content, like promoting a project
+                // to an archive): the parse → import → tessellate pipeline is
+                // deterministic, so keep the live scene and cut bake untouched
+                // instead of re-tessellating an identical result. Refresh only
+                // the pristine labels the cut path uses.
+                if (pristine_scene_ && inputs->input_hash == last_built_input_hash_) {
+                    pristine_config_label_ = std::move(inputs->config_key);
+                    pristine_geometry_label_ = std::move(inputs->geometry_key);
+                } else {
+                    // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
+                    pristine_config_ =
+                        std::make_shared<const NHConfig>(std::move(inputs->config.config));
+                    pristine_scene_ =
+                        std::make_shared<const SemanticScene>(std::move(inputs->import.scene));
+                    pristine_config_label_ = std::move(inputs->config_key);
+                    pristine_geometry_label_ = std::move(inputs->geometry_key);
+                    // Promoted to last_built_input_hash_ once this base build
+                    // lands successfully (see the completion handler).
+                    in_flight_input_hash_ = inputs->input_hash;
+                    // A new base build invalidates any resident cut bake (App drops
+                    // the GPU-side cut scene + clears the cut renderer).
+                    if (cb_.on_project_build_starting) {
+                        cb_.on_project_build_starting();
+                    }
+                    pending_cut_rebuild_ = false;
+                    // The base scene is always uncut (wedge = nullopt); the cut bake
+                    // follows once the base lands (see the completion handler).
+                    startBuild(pristine_config_, pristine_scene_, pristine_config_label_,
+                               pristine_geometry_label_, std::nullopt, cut);
                 }
-                pending_cut_rebuild_ = false;
-                // The base scene is always uncut (wedge = nullopt); the cut bake
-                // follows once the base lands (see the completion handler).
-                startBuild(pristine_config_, pristine_scene_, pristine_config_label_,
-                           pristine_geometry_label_, std::nullopt, cut);
             }
         }
     }

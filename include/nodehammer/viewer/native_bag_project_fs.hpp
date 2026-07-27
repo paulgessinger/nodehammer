@@ -42,6 +42,7 @@ class NativeBagProjectFs final : public ProjectFs {
     ProjectFsStatus status() const override;
     std::span<const ProjectProgress> progress() const override;
     std::string_view name() const override { return "bag"; }
+    bool listingIsComplete() const override { return true; }
     std::span<const std::string> warnings() const override;
     ResolveResult resolve(std::string_view key) const override;
     std::uint64_t generation() const override;

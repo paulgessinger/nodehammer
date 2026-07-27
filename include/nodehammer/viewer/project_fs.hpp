@@ -114,6 +114,15 @@ class ProjectFs : public LogSinkHolder {
     /// the UI capitalises on render if it cares.
     virtual std::string_view name() const = 0;
 
+    /// True when `list()` enumerates the entire backing store — i.e. walking
+    /// `list("")` recursively yields every file the backend holds. In-memory /
+    /// app-owned backends (bag, archive, URL manifest) are complete; the
+    /// filesystem backend is not (its root is an unbounded real directory tree
+    /// the user did not curate). Consumers that need the full content set (e.g.
+    /// "export as archive") walk the listing for complete backends and fall back
+    /// to the build closure otherwise.
+    virtual bool listingIsComplete() const { return false; }
+
     /// Soft warnings that don't fail the build (e.g. bag's "replaced
     /// foo.toml" note when a same-basename drop overwrites an existing
     /// entry). Empty by default; backends that emit warnings override.
