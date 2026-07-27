@@ -7,6 +7,8 @@
 #include <nodehammer/viewer/filesystem_project_fs.hpp>
 #include <nodehammer/viewer/watched_filesystem_project_fs.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -31,6 +33,13 @@ std::optional<std::string> relativeKeyUnder(std::filesystem::path root,
         }
     }
     return rel.generic_string();
+}
+
+bool isZipPath(const std::filesystem::path &path) {
+    auto ext = path.extension().string();
+    std::ranges::transform(ext, ext.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == ".zip";
 }
 
 } // namespace
@@ -256,9 +265,14 @@ void registerCmdViewer(CLI::App &app) {
                 application->setProject(
                     std::make_unique<nodehammer::viewer::WatchedFilesystemProjectFs>(
                         std::make_unique<nodehammer::viewer::FilesystemProjectFs>(path_abs)));
-            } else {
+            } else if (isZipPath(path_abs)) {
                 application->setProject(
                     std::make_unique<nodehammer::viewer::ArchiveProjectFs>(path_abs));
+            } else {
+                std::println(stderr,
+                             "viewer: positional path must be a .zip archive or directory: {}",
+                             projectPath);
+                std::exit(1);
             }
             if (!configPath.empty() && !inputPath.empty()) {
                 application->setRootKeys(configPath, inputPath);
