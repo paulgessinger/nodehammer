@@ -15,7 +15,9 @@
 #include <miniz.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <span>
@@ -56,6 +58,29 @@ std::vector<std::byte> makeZip(const std::vector<std::pair<std::string, std::str
     std::memcpy(out.data(), ptr, size);
     mz_zip_writer_end(&zip);
     return out;
+}
+
+void writeLe32(std::vector<std::byte> &bytes, std::size_t off, std::uint32_t value) {
+    bytes[off] = static_cast<std::byte>(value & 0xffU);
+    bytes[off + 1] = static_cast<std::byte>((value >> 8U) & 0xffU);
+    bytes[off + 2] = static_cast<std::byte>((value >> 16U) & 0xffU);
+    bytes[off + 3] = static_cast<std::byte>((value >> 24U) & 0xffU);
+}
+
+void corruptZipCrc(std::vector<std::byte> &bytes) {
+    constexpr std::array<std::byte, 4> kLocalSig{std::byte{0x50}, std::byte{0x4b}, std::byte{0x03},
+                                                 std::byte{0x04}};
+    constexpr std::array<std::byte, 4> kCentralSig{std::byte{0x50}, std::byte{0x4b},
+                                                   std::byte{0x01}, std::byte{0x02}};
+    auto local = std::search(bytes.begin(), bytes.end(), kLocalSig.begin(), kLocalSig.end());
+    REQUIRE(local != bytes.end());
+    const std::size_t local_off = static_cast<std::size_t>(std::distance(bytes.begin(), local));
+    writeLe32(bytes, local_off + 14, 0x12345678U);
+
+    auto central = std::search(bytes.begin(), bytes.end(), kCentralSig.begin(), kCentralSig.end());
+    REQUIRE(central != bytes.end());
+    const std::size_t central_off = static_cast<std::size_t>(std::distance(bytes.begin(), central));
+    writeLe32(bytes, central_off + 16, 0x12345678U);
 }
 
 const DirNode *findChild(std::span<const DirNode> children, std::string_view name) {
@@ -228,4 +253,19 @@ TEST_CASE("ArchiveProjectFs enters an error state on a bad archive",
 
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
+}
+
+TEST_CASE("ArchiveProjectFs surfaces corrupted archive entries as errors",
+          "[viewer][archive_project_fs]") {
+    TempArchive ta{"corrupt", {{"scene.toml", "root = 1\n"}}};
+
+    auto bytes = nodehammer::file_io::readFile(ta.zip);
+    corruptZipCrc(bytes);
+
+    const auto corrupt_zip = ta.root / "corrupt.zip";
+    nodehammer::file_io::writeFile(corrupt_zip, bytes);
+
+    ArchiveProjectFs fs{corrupt_zip};
+    REQUIRE(fs.status() == ProjectFsStatus::Ready);
+    REQUIRE(fs.resolve("scene.toml").status == ResolveStatus::Error);
 }

@@ -116,9 +116,15 @@ ResolveResult ArchiveProjectFs::resolve(std::string_view key) const {
     if (!norm) {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }
+    if (!impl_->ws->contains(*norm)) {
+        return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
+    }
     auto bytes = impl_->ws->read(*norm);
     if (!bytes) {
-        return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
+        return ResolveResult{ResolveStatus::Error,
+                             {},
+                             std::string{key},
+                             "failed to read archive entry: " + std::string{key}};
     }
     return ResolveResult{
         ResolveStatus::Ready, OpenedFile{std::string{key}, std::move(*bytes)}, {}, {}};
