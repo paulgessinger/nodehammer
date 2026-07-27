@@ -1725,6 +1725,15 @@ void App::Impl::createArchiveFromScene() {
     std::vector<std::string> skipped;
     auto ws = buildArchiveWorkingSet(*project_, config_key, geometry_key, &skipped);
 
+    // The scene can be non-null while the build roots are empty (e.g. after
+    // setProject()/setScene() before roots are re-established): the closure walk
+    // then collects nothing. Bail before replacing the live project so we never
+    // strand the user on an empty archive that Save would write out blank.
+    if (ws.listAtPrefix("").empty()) {
+        notifications.warning("Nothing to archive — no build roots for the current scene");
+        return;
+    }
+
     // Swap in a live, unbound archive seeded with the collected content, then
     // re-seed the same root keys so the identical scene rebuilds from the bundle.
     project_ = std::make_unique<ArchiveProjectFs>(std::move(ws));
