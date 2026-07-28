@@ -12,6 +12,7 @@
 #include <queue>
 #include <string>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -279,15 +280,25 @@ class SemanticScene {
     std::size_t deduplicateMaterials();
 
     /// BFS traversal from root; calls fn(const SemanticNode &) for every reachable node.
+    /// Guards on both a missing id and a repeat visit, so a dangling child id is
+    /// skipped rather than throwing and a cycle terminates rather than looping
+    /// forever. Matches the guards in `reachableNodes` (src/selection/selector.cpp).
     template <typename Fn> void visitBFS(Fn &&fn) const {
-        if (nodes.empty()) {
+        if (nodes.empty() || !nodes.contains(rootId)) {
             return;
         }
+        std::unordered_set<SemanticNodeId> seen;
+        seen.reserve(nodes.size());
         std::queue<SemanticNodeId> q;
         q.push(rootId);
         while (!q.empty()) {
-            const auto &node = nodes.at(q.front());
+            const auto id = q.front();
             q.pop();
+            const auto it = nodes.find(id);
+            if (it == nodes.end() || !seen.insert(id).second) {
+                continue;
+            }
+            const auto &node = it->second;
             fn(node);
             for (const auto childId : node.children) {
                 q.push(childId);
