@@ -327,6 +327,12 @@ std::string viewerConfigStateToToml(const ViewerConfigState &state) {
     if (state.camera.has_value()) {
         root.insert_or_assign("camera", cameraToTable(*state.camera));
     }
+    if (!state.root_config_key.empty() || !state.root_geometry_key.empty()) {
+        root.insert_or_assign("roots", toml::table{
+                                           {"config", state.root_config_key},
+                                           {"geometry", state.root_geometry_key},
+                                       });
+    }
     std::ostringstream out;
     out << root;
     return out.str();
@@ -365,6 +371,10 @@ std::optional<ViewerConfigState> viewerConfigStateFromToml(std::string_view byte
     }
     if (const auto *camera = root["camera"].as_table()) {
         state.camera = parseCamera(*camera);
+    }
+    if (const auto *roots = root["roots"].as_table()) {
+        state.root_config_key = (*roots)["config"].value_or(std::string{});
+        state.root_geometry_key = (*roots)["geometry"].value_or(std::string{});
     }
     return state;
 }

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_set>
 
 namespace nodehammer::viewer {
 
@@ -70,6 +71,13 @@ struct UiActions {
     std::function<void()> reset_render_quality;
     std::function<void(std::string)> select_config_key;
     std::function<void(std::string)> select_geometry_key;
+    /// Request removal of a project file by key. The App consults the backend's
+    /// planRemove and, on Confirm, shows a confirmation modal before committing.
+    std::function<void(std::string)> remove_key;
+    /// Request moving a project file (first arg: source key) into a directory
+    /// (second arg: destination directory key, "" for the root). The App
+    /// computes the target key, consults planMove, and confirms on collision.
+    std::function<void(std::string, std::string)> move_key;
 };
 
 /// Per-frame sokol draw-submission counters for the Debug panel. Plain ints so
@@ -102,6 +110,12 @@ struct ViewerUiContext {
     std::string &root_config_key;
     std::string &root_geometry_key;
     std::string &build_error;
+
+    /// Set of project-tree directory keys the user has expanded. The Project
+    /// panel drives each directory's open state from this set and writes toggles
+    /// back into it; the App persists it across sessions via a custom ImGui .ini
+    /// settings handler (ImGui itself does not serialize tree-node open state).
+    std::unordered_set<std::string> *project_tree_open{nullptr};
 
     std::uint32_t fb_width{0};
     std::uint32_t fb_height{0};

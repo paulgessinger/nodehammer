@@ -190,6 +190,50 @@ TEST_CASE("ArchiveProjectFs accepts drops as working-set overrides",
     REQUIRE(asString(fs.resolve("added.toml").file.bytes.span()) == "added\n");
 }
 
+TEST_CASE("ArchiveProjectFs removes entries with a confirming plan",
+          "[viewer][archive_project_fs]") {
+    TempArchive ta{"remove", {{"scene.toml", "keep\n"}, {"drop.toml", "bye\n"}}};
+    ArchiveProjectFs fs{ta.zip};
+
+    using enum ProjectDropDecision::Kind;
+    // A present key confirms; a missing key rejects.
+    REQUIRE(fs.planRemove("drop.toml").kind == Confirm);
+    REQUIRE(fs.planRemove("nope.toml").kind == Reject);
+
+    const auto gen_before = fs.generation();
+    fs.removeKey("drop.toml");
+    REQUIRE(fs.resolve("drop.toml").status == ResolveStatus::Missing);
+    REQUIRE(fs.resolve("scene.toml").status == ResolveStatus::Ready);
+    REQUIRE(fs.generation() > gen_before);
+    REQUIRE(fs.dirty());
+
+    // Removing a now-absent key is a no-op that neither throws nor re-bumps.
+    const auto gen_after = fs.generation();
+    fs.removeKey("drop.toml");
+    REQUIRE(fs.generation() == gen_after);
+}
+
+TEST_CASE("ArchiveProjectFs moves an entry to a new key", "[viewer][archive_project_fs]") {
+    TempArchive ta{"move", {{"scene.toml", "body\n"}, {"detectors/keep.toml", "k\n"}}};
+    ArchiveProjectFs fs{ta.zip};
+
+    using enum ProjectDropDecision::Kind;
+    // Free destination accepts; a landing collision confirms; missing source and
+    // a same-key move reject.
+    REQUIRE(fs.planMove("scene.toml", "detectors/scene.toml").kind == Accept);
+    REQUIRE(fs.planMove("scene.toml", "detectors/keep.toml").kind == Confirm);
+    REQUIRE(fs.planMove("nope.toml", "detectors/nope.toml").kind == Reject);
+    REQUIRE(fs.planMove("scene.toml", "scene.toml").kind == Reject);
+
+    const auto gen_before = fs.generation();
+    fs.moveKey("scene.toml", "detectors/scene.toml");
+    CHECK(fs.resolve("scene.toml").status == ResolveStatus::Missing);
+    REQUIRE(fs.resolve("detectors/scene.toml").status == ResolveStatus::Ready);
+    CHECK(asString(fs.resolve("detectors/scene.toml").file.bytes.span()) == "body\n");
+    CHECK(fs.generation() > gen_before);
+    CHECK(fs.dirty());
+}
+
 TEST_CASE("ArchiveProjectFs saves edits back to disk atomically", "[viewer][archive_project_fs]") {
     TempArchive ta{"save", {{"scene.toml", "v1\n"}}};
     {

@@ -30,6 +30,12 @@ struct ViewerConfigState {
     float angle_cut_end_deg{90.f};
     bool enable_pbr{true};
     std::optional<Camera> camera;
+
+    /// Active build roots the user selected by double-clicking in the Project
+    /// panel. Persisted (web app mode) so a reload reproduces the selection;
+    /// empty means "no explicit choice — fall back to the archive manifest".
+    std::string root_config_key;
+    std::string root_geometry_key;
 };
 
 [[nodiscard]] ViewerConfigState viewerConfigStateFrom(const Config &cfg, const Camera &camera);

@@ -38,6 +38,7 @@
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <sokol_app.h>
 #include <sokol_gfx.h>
 #include <sokol_glue.h>
@@ -63,6 +64,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -299,6 +301,21 @@ struct App::Impl {
     std::vector<RetainedModal> active_modals;
     std::uint64_t next_modal_id{1};
     ui::UiState ui_state;
+    /// Project-tree directory keys the user has expanded, persisted across
+    /// sessions through a custom ImGui .ini settings handler (registered in
+    /// onInit). The Project panel reads/writes this via ViewerUiContext.
+    std::unordered_set<std::string> project_tree_open_;
+    /// Root config/geometry keys the user selected by double-clicking, loaded
+    /// from persisted viewer state at startup and re-applied once the web
+    /// app-mode project is restored (see applyRestoredRootKeys). Empty when the
+    /// user has never made an explicit choice — the archive manifest wins then.
+    std::string persisted_root_config_key_;
+    std::string persisted_root_geometry_key_;
+    /// One-shot latch: the persisted root selection has been applied to the
+    /// current web app-mode project session. Keeps the frame-tick safety net
+    /// (applyPersistedRootKeyOverride) from re-imposing the selection after the
+    /// user changes it. Reset when a fresh project session begins.
+    bool web_root_keys_applied_{false};
     ui::Notifications notifications;
     std::string last_saved_viewer_config_state;
     std::string last_saved_render_quality_state;
@@ -398,9 +415,18 @@ struct App::Impl {
     void onEvent(const sapp_event *ev);
     void onCleanup();
     void loadViewerConfigState();
+    /// Read just the persisted build-root selection from storage into the stash.
+    /// Synchronous (localStorage), so it can run before the async IDB project
+    /// restore is kicked — otherwise onProjectBlobLoaded can apply an empty stash
+    /// and latch out the real keys (a startup race).
+    void stashPersistedRootKeys();
     void applyStartupOverrides();
     void loadImGuiState();
     [[nodiscard]] std::string currentViewerConfigStateToml() const;
+    /// Write the viewer config state (incl. the active root selection) to
+    /// persistent storage immediately, bypassing the throttled/exit save. Called
+    /// on selection change so a reload reproduces it even if no later frame saves.
+    void persistViewerConfigStateNow();
     void loadRenderQualityState();
     [[nodiscard]] std::string currentRenderQualityStateToml() const;
     void savePersistentState(bool force);
@@ -445,10 +471,21 @@ struct App::Impl {
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+    void removeProjectKey(const std::string &key);
+    void moveProjectKey(const std::string &from_key, const std::string &dest_dir_key);
     void openArchiveFromBytes(std::span<const std::byte> bytes);
     void openArchiveRemote(std::span<const std::byte> bytes, bool locked);
     void installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked);
     void applyProjectManifest();
+    /// Apply the archive manifest's preconfig, then (web app mode) override with
+    /// the user's persisted double-click root selection for keys that still
+    /// resolve. Used on async project restore so a reload reproduces the choice.
+    void applyRestoredRootKeys();
+    /// Apply just the persisted root selection (web app mode) to any root whose
+    /// key resolves, and latch web_root_keys_applied_. Idempotent; the safety net
+    /// in tickWebProjectPersistence calls this once the project has content, so
+    /// the selection is restored independent of the async IDB working-set load.
+    void applyPersistedRootKeyOverride();
     void createArchiveFromScene();
 
     // Publish package (web): seed the package with sidecar + archive, then the
@@ -497,6 +534,11 @@ void App::Impl::loadViewerConfigState() {
     ui_state.url_sync_continuous = state->url_sync_continuous;
     ui_state.url_sync_camera = state->url_sync_camera;
     ui_state.url_sync_view = state->url_sync_view;
+    // Stash the persisted build-root selection; it can't be applied yet because
+    // the (web) project is restored asynchronously — applyRestoredRootKeys does
+    // it once the working set is in hand.
+    persisted_root_config_key_ = state->root_config_key;
+    persisted_root_geometry_key_ = state->root_geometry_key;
 
     const bool keep_launch_camera = launch_had_initial_camera;
     applyViewerConfigState(*state, cfg, keep_launch_camera ? nullptr : &camera);
@@ -531,7 +573,20 @@ std::string App::Impl::currentViewerConfigStateToml() const {
     state.url_sync_continuous = ui_state.url_sync_continuous;
     state.url_sync_camera = ui_state.url_sync_camera;
     state.url_sync_view = ui_state.url_sync_view;
+    // Persist the active build-root selection only in web app mode: it is a
+    // property of the persisted IDB project, not of a native/filesystem session
+    // whose keys are re-derived per launch.
+    if (webAppModeProject()) {
+        state.root_config_key = build_controller_.rootConfigKey();
+        state.root_geometry_key = build_controller_.rootGeometryKey();
+    }
     return viewerConfigStateToToml(state);
+}
+
+void App::Impl::persistViewerConfigStateNow() {
+    const std::string s = currentViewerConfigStateToml();
+    platform_->savePersistentText(kViewerConfigStateKey, s);
+    last_saved_viewer_config_state = s;
 }
 
 void App::Impl::loadRenderQualityState() {
@@ -695,6 +750,52 @@ void App::Impl::onInit() {
     // simgui_shutdown.
     ImGui_ImplSokol_Init();
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+
+    // Ride the existing imgui.ini persistence to remember which Project-tree
+    // directories are expanded. ImGui serializes window/dock layout but never
+    // tree-node open state, so we store the expanded directory keys ourselves.
+    // Registered before loadImGuiState() so ReadLine restores the set on load.
+    {
+        ImGuiSettingsHandler h;
+        h.TypeName = "ProjectTree";
+        h.TypeHash = ImHashStr("ProjectTree");
+        h.UserData = this;
+        h.ClearAllFn = [](ImGuiContext *, ImGuiSettingsHandler *handler) {
+            static_cast<Impl *>(handler->UserData)->project_tree_open_.clear();
+        };
+        h.ReadOpenFn = [](ImGuiContext *, ImGuiSettingsHandler *handler, const char *) -> void * {
+            // Non-null tells ImGui to feed subsequent lines to ReadLineFn; the
+            // pointer value itself is unused (single "[State]" entry).
+            return handler;
+        };
+        h.ReadLineFn = [](ImGuiContext *, ImGuiSettingsHandler *handler, void *, const char *line) {
+            constexpr std::string_view kPrefix = "Path=";
+            std::string_view sv{line};
+            if (sv.substr(0, kPrefix.size()) == kPrefix) {
+                static_cast<Impl *>(handler->UserData)
+                    ->project_tree_open_.emplace(sv.substr(kPrefix.size()));
+            }
+        };
+        h.WriteAllFn = [](ImGuiContext *, ImGuiSettingsHandler *handler, ImGuiTextBuffer *buf) {
+            const auto &open = static_cast<Impl *>(handler->UserData)->project_tree_open_;
+            // Emit in a stable (sorted) order so the persisted blob only changes
+            // when the set changes, not on unordered-set rehash.
+            std::vector<const std::string *> keys;
+            keys.reserve(open.size());
+            for (const auto &k : open) {
+                keys.push_back(&k);
+            }
+            std::sort(keys.begin(), keys.end(),
+                      [](const std::string *a, const std::string *b) { return *a < *b; });
+            buf->append("[ProjectTree][State]\n");
+            for (const auto *k : keys) {
+                buf->appendf("Path=%s\n", k->c_str());
+            }
+            buf->append("\n");
+        };
+        ImGui::AddSettingsHandler(&h);
+    }
+
     loadImGuiState();
     ui::icon_font::initialize();
     project_->setLogSink(&notifications);
@@ -1829,6 +1930,82 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
     }
 }
 
+void App::Impl::removeProjectKey(const std::string &key) {
+    using enum ProjectDropDecision::Kind;
+    if (key.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no edits
+    }
+    auto decision = project_->planRemove(key);
+    if (decision.kind == Reject) {
+        enqueueProjectDropModal(std::move(decision), {});
+        return;
+    }
+    auto commit = [this, key]() {
+        if (project_ == nullptr) {
+            return;
+        }
+        project_->removeKey(key);
+        // A removed build root can't build; clear the selection so we fall back
+        // to manifest/extension recognition rather than erroring on a missing
+        // file. (Persisted web root keys re-derive from these on the next save.)
+        if (build_controller_.rootConfigKey() == key) {
+            build_controller_.setRootConfigKey({});
+        }
+        if (build_controller_.rootGeometryKey() == key) {
+            build_controller_.setRootGeometryKey({});
+        }
+        build_controller_.clearError();
+    };
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), std::move(commit));
+    } else { // Accept — no backend removes without confirming today, but honor it.
+        commit();
+    }
+}
+
+void App::Impl::moveProjectKey(const std::string &from_key, const std::string &dest_dir_key) {
+    using enum ProjectDropDecision::Kind;
+    if (from_key.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no edits
+    }
+    const std::string basename = std::filesystem::path{from_key}.filename().string();
+    if (basename.empty()) {
+        return;
+    }
+    const std::string to_key = dest_dir_key.empty() ? basename : dest_dir_key + "/" + basename;
+    if (to_key == from_key) {
+        return; // dropped onto its own folder — nothing to do
+    }
+    auto decision = project_->planMove(from_key, to_key);
+    if (decision.kind == Reject) {
+        // Silent no-op decisions carry no title; only surface real rejections.
+        if (!decision.title.empty()) {
+            enqueueProjectDropModal(std::move(decision), {});
+        }
+        return;
+    }
+    auto commit = [this, from_key, to_key]() {
+        if (project_ == nullptr) {
+            return;
+        }
+        project_->moveKey(from_key, to_key);
+        // A moved file keeps its identity: re-point any build-root selection so
+        // the same file stays selected at its new key.
+        if (build_controller_.rootConfigKey() == from_key) {
+            build_controller_.setRootConfigKey(to_key);
+        }
+        if (build_controller_.rootGeometryKey() == from_key) {
+            build_controller_.setRootGeometryKey(to_key);
+        }
+        build_controller_.clearError();
+    };
+    if (decision.kind == Confirm) {
+        enqueueProjectDropModal(std::move(decision), std::move(commit));
+    } else { // Accept — destination is free, move immediately.
+        commit();
+    }
+}
+
 void App::Impl::installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked) {
     // Install like setProject: swap the backend, re-point the log sink, clear the
     // stale root keys, and drop any pending modals. Then honor the archive's
@@ -1842,6 +2019,10 @@ void App::Impl::installArchiveProject(std::unique_ptr<ProjectFs> proj, bool lock
     persist_seen_gen_ = 0;
     persist_flushed_gen_ = 0;
     persist_pending_ = false;
+    // An explicit open (or viewer-mode install) is a distinct project: honor its
+    // own manifest and suppress the persisted-selection safety net so a previous
+    // session's choice isn't imposed on it.
+    web_root_keys_applied_ = true;
     applyProjectManifest();
 }
 
@@ -1930,6 +2111,37 @@ void App::Impl::openArchiveRemote(std::span<const std::byte> bytes, bool locked)
     installArchiveProject(std::move(proj), locked);
 }
 
+void App::Impl::applyRestoredRootKeys() {
+    if (!project_) {
+        return;
+    }
+    // Archive manifest preconfig is the fallback; apply it first so any root the
+    // user never explicitly picked keeps the archive's default, then let the
+    // persisted selection win over it.
+    applyProjectManifest();
+    applyPersistedRootKeyOverride();
+}
+
+void App::Impl::applyPersistedRootKeyOverride() {
+    // Latch even when we don't apply anything: the selection is a property of
+    // this project session and shouldn't be re-imposed after the user changes
+    // it. The stash comes from localStorage (reliable), so this restores the
+    // choice whether or not the async IDB working-set load ran.
+    web_root_keys_applied_ = true;
+    if (!project_ || !webAppModeProject()) {
+        return;
+    }
+    const auto keyResolves = [this](const std::string &key) {
+        return !key.empty() && project_->resolve(key).status == ResolveStatus::Ready;
+    };
+    if (keyResolves(persisted_root_config_key_)) {
+        build_controller_.setRootConfigKey(persisted_root_config_key_);
+    }
+    if (keyResolves(persisted_root_geometry_key_)) {
+        build_controller_.setRootGeometryKey(persisted_root_geometry_key_);
+    }
+}
+
 bool App::Impl::webAppModeProject() const {
     if (!platform::kIsWeb) {
         return false;
@@ -1943,6 +2155,13 @@ bool App::Impl::webAppModeProject() const {
 void App::Impl::tickWebProjectPersistence() {
     if (!webAppModeProject()) {
         return;
+    }
+    // Restore the persisted root selection once the project has content, whether
+    // it arrived via the IDB blob restore or any other path. Decoupled from
+    // onProjectBlobLoaded so a stale/missed IDB write can't strand the choice
+    // (the keys themselves live in localStorage, which is reliable).
+    if (!web_root_keys_applied_ && project_ != nullptr && !project_->list("").empty()) {
+        applyPersistedRootKeyOverride();
     }
     const auto gen = project_->generation();
     if (gen != persist_seen_gen_) {
@@ -1994,6 +2213,9 @@ void App::Impl::onProjectBlobLoaded(std::span<const std::byte> bytes) {
     project_ = std::move(proj);
     project_->setLogSink(&notifications);
     build_controller_.setRootKeys({}, {});
+    // Reproduce the user's persisted root selection (double-clicked config +
+    // geometry), falling back to the archive manifest for anything unset.
+    applyRestoredRootKeys();
     // The restored set already matches IDB, so seed the flushed generation so the
     // debounce doesn't immediately re-write identical bytes.
     persist_seen_gen_ = project_->generation();
@@ -2002,10 +2224,26 @@ void App::Impl::onProjectBlobLoaded(std::span<const std::byte> bytes) {
     notifications.info("Restored your saved project");
 }
 
+void App::Impl::stashPersistedRootKeys() {
+    auto bytes = platform_->loadPersistentText(kViewerConfigStateKey);
+    if (!bytes || bytes->empty()) {
+        return;
+    }
+    if (auto state = viewerConfigStateFromToml(*bytes)) {
+        persisted_root_config_key_ = state->root_config_key;
+        persisted_root_geometry_key_ = state->root_geometry_key;
+    }
+}
+
 void App::Impl::restoreWebProjectFromIdb() {
     if (!platform::kIsWeb) {
         return;
     }
+    // Load the persisted root selection synchronously *before* the async blob
+    // load: onProjectBlobLoaded applies it, and it can fire before onInit runs
+    // loadViewerConfigState. Without this the override would see an empty stash,
+    // apply nothing, and latch out the real keys (blank scene on reload).
+    stashPersistedRootKeys();
     platform_->loadProjectBlob();
 }
 
@@ -2376,6 +2614,7 @@ void App::Impl::onFrame() {
         .root_config_key = build_controller_.rootConfigKey(),
         .root_geometry_key = build_controller_.rootGeometryKey(),
         .build_error = build_controller_.error(),
+        .project_tree_open = &project_tree_open_,
         .fb_width = fb_width,
         .fb_height = fb_height,
         .scene_width = scene_rt.width,
@@ -2493,9 +2732,15 @@ void App::Impl::onFrame() {
     };
     ui_actions.select_config_key = [this](std::string key) {
         build_controller_.setRootConfigKey(std::move(key));
+        persistViewerConfigStateNow(); // eager localStorage write; survives reload
     };
     ui_actions.select_geometry_key = [this](std::string key) {
         build_controller_.setRootGeometryKey(std::move(key));
+        persistViewerConfigStateNow();
+    };
+    ui_actions.remove_key = [this](std::string key) { removeProjectKey(key); };
+    ui_actions.move_key = [this](std::string from_key, std::string dest_dir_key) {
+        moveProjectKey(from_key, dest_dir_key);
     };
 
     ui::renderViewerUi(ui_state, ui_ctx, ui_actions);

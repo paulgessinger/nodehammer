@@ -3,6 +3,7 @@
 #include <nodehammer/viewer/project_fs.hpp>
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <filesystem>
 #include <span>
@@ -12,6 +13,9 @@
 
 namespace nodehammer::viewer::ui {
 namespace {
+
+/// ImGui drag-drop payload type for a Project-tree file (payload = full key).
+constexpr const char *kFileDragType = "NH_PROJECT_FILE";
 
 std::string normalizedSelectionKey(std::string_view key) {
     auto out = std::filesystem::path{key}.lexically_normal().generic_string();
@@ -94,8 +98,33 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
         for (const auto &node : nodes) {
             ImGui::PushID(node.key.c_str());
             if (node.is_directory) {
+                // Drive the open/closed state from the persisted set so it
+                // survives restarts (ImGui's .ini never stores tree state).
+                // ImGuiCond_Always makes the set the single source of truth;
+                // user toggles are written back below.
+                const bool want_open =
+                    ctx.project_tree_open != nullptr && ctx.project_tree_open->contains(node.key);
+                ImGui::SetNextItemOpen(want_open, ImGuiCond_Always);
                 const bool open_node =
                     ImGui::TreeNodeEx("##dir", ImGuiTreeNodeFlags_None, "%s", node.name.c_str());
+                if (ImGui::IsItemToggledOpen() && ctx.project_tree_open != nullptr) {
+                    if (open_node) {
+                        ctx.project_tree_open->insert(node.key);
+                    } else {
+                        ctx.project_tree_open->erase(node.key);
+                    }
+                    ImGui::MarkIniSettingsDirty();
+                }
+                // Drop a dragged file here to move it into this folder. Must be
+                // registered against the directory's tree node before any child
+                // items are submitted below.
+                if (actions.move_key && ImGui::BeginDragDropTarget()) {
+                    if (const ImGuiPayload *pl = ImGui::AcceptDragDropPayload(kFileDragType)) {
+                        actions.move_key(std::string{static_cast<const char *>(pl->Data)},
+                                         node.key);
+                    }
+                    ImGui::EndDragDropTarget();
+                }
                 if (open_node) {
                     self(ctx.project->list(node.key));
                     ImGui::TreePop();
@@ -136,6 +165,14 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
             const char *tag = is_config ? " [config]" : is_geometry ? " [geometry]" : "";
             ImGui::TreeNodeEx("##leaf", flags, "%s%s", node.name.c_str(), tag);
 
+            // Drag a file onto a directory node to move it into that folder. The
+            // payload is the file's full key (null-terminated).
+            if (actions.move_key && ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+                ImGui::SetDragDropPayload(kFileDragType, node.key.c_str(), node.key.size() + 1);
+                ImGui::Text("Move %s", node.name.c_str());
+                ImGui::EndDragDropSource();
+            }
+
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                 if (lowerExtension(std::filesystem::path{node.key}) == ".toml") {
                     if (actions.select_config_key) {
@@ -146,6 +183,16 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
                         actions.select_geometry_key(node.key);
                     }
                 }
+            }
+
+            // Right-click a file for its actions. Removal routes through the
+            // App, which asks the backend (planRemove) and shows a confirmation
+            // modal before committing — read-only backends will surface a reject.
+            if (actions.remove_key && ImGui::BeginPopupContextItem("##file_ctx")) {
+                if (ImGui::MenuItem("Remove…")) {
+                    actions.remove_key(node.key);
+                }
+                ImGui::EndPopup();
             }
 
             ImGui::PopID();

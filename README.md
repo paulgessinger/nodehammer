@@ -96,11 +96,49 @@ versus what's on the roadmap.
   build-time `#error` stub for now.
 - **Bloom** and **IBL-quality levels** — UI controls exist and are wired
   through `RenderQualitySettings`, but both are no-ops for now.
-- **Project save/export system** (bag / filesystem / archive / URL modes,
-  in-viewer editor windows) — partially landed; see
+- **Project save/export system** — the archive-as-project model below is
+  landing now (working set, IndexedDB persistence, sidecar viewer mode,
+  layered steer, Publish package); in-viewer editor windows and a named
+  multi-document switcher are still to come. See
   [docs/viewer-project-strategy.md](docs/viewer-project-strategy.md).
 - **Single-instance enforcement + a real macOS `.app` bundle** — designed,
   not implemented; see [docs/viewer-single-instance.md](docs/viewer-single-instance.md).
+
+## Project model: the archive is the project
+
+> One `ZipWorkingSet` is both the thing you **author** (edit / curate / drop
+> files into) and the thing you **publish** (serialize → host → share).
+> Authoring and publishing are the same object flowing in two directions.
+
+A nodehammer project is a **`.nhproj`** archive: a ZIP container holding the
+config, geometry, and materials for a scene, plus an optional root
+`nodehammer.toml` that makes it self-describing. The same archive opens
+natively, in the browser, and behind a published link.
+
+| Term | Meaning |
+|---|---|
+| **Working set** | the live, editable in-memory project (`ZipWorkingSet`) — what the viewer edits |
+| **Archive** | a serialized `.nhproj` of a working set — the portable, publishable unit |
+| **Project manifest** | root `nodehammer.toml` *inside* the archive: `[project]` entry keys + `[view]` initial steer |
+| **Sidecar** | `nh_manifest.json` next to `viewer.html` — points at archive(s), carries deployment presentation (lock, steer overrides) |
+| **Steer** | view-state (camera, angle cut, rotation, toggles) — the ephemeral per-link layer, committed to the URL query |
+| **Provenance** | `Empty \| Local(name) \| Remote(url)` — where the working set came from; drives persistence and posture |
+| **Package** | the self-contained static folder emitted by **Publish** — drop it on any static host, zero server code |
+
+The web build has **two postures from one wasm binary**, branched on whether a
+sidecar is present:
+
+- **Application mode** (no sidecar) — empty start, editable, native-like; the
+  working set auto-persists to IndexedDB and restores on reload. *Your document.*
+- **Viewer mode** (sidecar present) — fetches the archive, content **locked**,
+  re-fetched from source on reload. *A publication.*
+
+Content-lock is a deployment property of the sidecar; **steer is never frozen**,
+so a shared link keeps camera and cuts live. The only viewer→app bridge is
+explicit: save the `.nhproj` and open it in application mode.
+
+Full design of record, including backend mapping and mode transitions:
+[docs/viewer-project-strategy.md](docs/viewer-project-strategy.md).
 
 ## CLI
 

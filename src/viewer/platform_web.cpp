@@ -262,8 +262,20 @@ EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
         dragDepth = 0;
         setDrag(false, ev);
     });
-    window.addEventListener('beforeunload', function() {
+    // Persist on the way out. beforeunload is not fired reliably (bfcache, mobile
+    // Safari/Chrome), so also flush on pagehide and on visibilitychange→hidden —
+    // the latter is the most dependable "app is going away" signal. The viewer
+    // state (root selection, UI) is written to localStorage synchronously, so it
+    // survives even when the async IDB working-set flush doesn't complete.
+    function nhPersistOnExit() {
         Module['_nh_viewer_save_persistent_state']();
+    }
+    window.addEventListener('beforeunload', nhPersistOnExit);
+    window.addEventListener('pagehide', nhPersistOnExit);
+    document.addEventListener('visibilitychange', function() {
+        if (document.visibilityState === 'hidden') {
+            nhPersistOnExit();
+        }
     });
 
     var gestureScale = 1.0;
