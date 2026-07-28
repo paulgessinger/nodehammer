@@ -47,7 +47,7 @@ struct DispatchResult {
 
 static DispatchResult dispatchAndTessellate(const TGeoShape *shape, const std::string &objName,
                                             const TessellationParams &params = {}) {
-    SemanticScene scene;
+    detail::SemanticScene scene;
     DiagnosticList diags;
     const SemanticShapeId shapeId = dispatchTGeoShape(shape, scene, diags);
 

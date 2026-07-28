@@ -93,7 +93,7 @@ const DirNode *findChild(std::span<const DirNode> children, std::string_view nam
 /// A minimal valid `.nhb.zst` geometry payload for the build-session harness.
 std::vector<std::byte> minimalNhbZstBytes() {
     using namespace nodehammer;
-    SemanticScene scene;
+    detail::SemanticScene scene;
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};
     auto matId = scene.nextMaterialId();

@@ -34,7 +34,7 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 
 } // namespace
 
-SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, SemanticScene &scene,
+SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, detail::SemanticScene &scene,
                                   DiagnosticList &diags) {
     SemanticShapeVariant variant;
 

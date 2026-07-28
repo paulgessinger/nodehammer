@@ -70,7 +70,11 @@ void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv);
 void to_json(nlohmann::json &j, const SemanticNode &n);
 void from_json(const nlohmann::json &j, SemanticNode &n);
 
+// In `detail` alongside SemanticScene itself: nlohmann resolves both by ADL,
+// so an overload in the parent namespace is never considered.
+namespace detail {
 void to_json(nlohmann::json &j, const SemanticScene &sc);
 void from_json(const nlohmann::json &j, SemanticScene &sc);
+} // namespace detail
 
 } // namespace nodehammer

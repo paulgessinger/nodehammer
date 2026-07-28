@@ -17,13 +17,17 @@ using namespace nodehammer;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-static SemanticScene makeSingleBoxScene() { return SyntheticSceneBuilder::buildSingleBox(); }
+static detail::SemanticScene makeSingleBoxScene() {
+    return SyntheticSceneBuilder::buildSingleBox();
+}
 
-static SemanticScene makeNestedBoxScene() { return SyntheticSceneBuilder::buildNestedBoxes(); }
+static detail::SemanticScene makeNestedBoxScene() {
+    return SyntheticSceneBuilder::buildNestedBoxes();
+}
 
 // Build a scene with a single BooleanUnion node.
-static SemanticScene makeBooleanScene() {
-    SemanticScene scene;
+static detail::SemanticScene makeBooleanScene() {
+    detail::SemanticScene scene;
 
     SemanticMaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
@@ -55,8 +59,8 @@ static SemanticScene makeBooleanScene() {
 }
 
 // Build a scene with an UnknownShape node.
-static SemanticScene makeUnknownShapeScene() {
-    SemanticScene scene;
+static detail::SemanticScene makeUnknownShapeScene() {
+    detail::SemanticScene scene;
 
     SemanticMaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
@@ -157,7 +161,7 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
 
 TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendant layout",
           "[tessellation][pass]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -277,7 +281,7 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
 
 TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identity",
           "[tessellation][pass]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -366,7 +370,7 @@ TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identi
 
 TEST_CASE("TessellationPass: merge_descendants cache can use source daughter prototypes",
           "[tessellation][pass]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -467,7 +471,7 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
           "[tessellation][boolean]") {
     // Reproduces the ODD CarbonFiber support shape: a solid partial-phi tube
     // used as a boolean operand.
-    SemanticScene scene;
+    detail::SemanticScene scene;
     auto shapeId = scene.nextShapeId();
     TubeShape tube;
     tube.rMin = 0.0;
@@ -510,7 +514,7 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
 
 TEST_CASE("BooleanTessellator: full-phi tube subtraction produces geometry",
           "[tessellation][boolean]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     auto outerId = scene.nextShapeId();
     scene.shapes[outerId] = {outerId, TubeShape{3.9, 4.0, 94.16, 0.0, 2.0 * std::numbers::pi}};
@@ -587,7 +591,7 @@ TEST_CASE("BooleanTessellator: ODD CarbonFoam Trd minus tube union reproducer",
     })";
 
     auto j = nlohmann::json::parse(kSceneJson);
-    SemanticScene scene = j.get<SemanticScene>();
+    detail::SemanticScene scene = j.get<detail::SemanticScene>();
 
     // Verify shapes loaded correctly.
     REQUIRE(scene.shapes.contains(SemanticShapeId{80}));
@@ -657,7 +661,7 @@ TEST_CASE("TessellationPass: UnknownShape emits error diagnostic", "[tessellatio
 TEST_CASE("TessellationPass: empty scene produces empty result", "[tessellation][pass]") {
     NHConfig cfg;
     TessellationPass pass{cfg};
-    SemanticScene empty;
+    detail::SemanticScene empty;
     auto result = pass.lower(empty);
 
     REQUIRE(result.scene.nodes.empty());

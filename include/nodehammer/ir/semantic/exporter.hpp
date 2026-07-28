@@ -29,7 +29,7 @@ class ISemanticExporter {
     [[nodiscard]] virtual std::vector<std::string> supportedExtensions() const = 0;
 
     /// Write semantic scene to path.
-    [[nodiscard]] virtual SemanticExportResult write(const SemanticScene &scene,
+    [[nodiscard]] virtual SemanticExportResult write(const detail::SemanticScene &scene,
                                                      const std::filesystem::path &path,
                                                      const SemanticExportConfig &config) const = 0;
 };

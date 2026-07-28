@@ -60,8 +60,8 @@ std::string formatTranslation(const glm::dmat4 &m) {
     return std::format("{:.1f}, {:.1f}, {:.1f}", x, y, z);
 }
 
-void printRichTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
-                   const nodehammer::detail::Console &con) {
+void printRichTree(const nodehammer::detail::SemanticScene &scene, int maxDepth,
+                   const std::string &filter, const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }

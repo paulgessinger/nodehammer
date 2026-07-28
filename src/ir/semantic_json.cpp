@@ -368,6 +368,8 @@ void from_json(const nlohmann::json &j, SemanticNode &n) {
 
 // ── Scene ───────────────────────────────────────────────────────────────────────
 
+namespace detail {
+
 void from_json(const nlohmann::json &j, SemanticScene &sc) {
     const auto &c = j.at("content");
     c.at("rootId").get_to(sc.rootId);
@@ -428,5 +430,7 @@ void to_json(nlohmann::json &j, const SemanticScene &sc) {
         j["content"]["sourceFile"] = sc.sourceFile;
     }
 }
+
+} // namespace detail
 
 } // namespace nodehammer

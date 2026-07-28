@@ -390,7 +390,8 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
 // ── Layer 1: Type conversion ────────────────────────────────────────────────
 
 flatbuffers::Offset<fbs::SemanticScene>
-semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const SemanticScene &scene) {
+semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder,
+                          const detail::SemanticScene &scene) {
     TransformPoolBuild transformPool;
 
     // Collect nodes into a stable order (sorted by ID for reproducibility).
@@ -846,8 +847,8 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                                     nodeColumns, logVolsVec, shapesVec, matsVec);
 }
 
-SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
-    SemanticScene scene;
+detail::SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
+    detail::SemanticScene scene;
     scene.rootId = SemanticNodeId{fb.root_id()};
     if (fb.source_file()) {
         scene.sourceFile = fb.source_file()->str();
@@ -1067,7 +1068,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
     return scene;
 }
 
-SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &scene) {
+SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const detail::SemanticScene &scene) {
     SemanticFlatbufferSizeReport report;
     report.nodeCount = scene.nodes.size();
     report.logicalVolumeCount = scene.logVols.size();
@@ -1222,7 +1223,7 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
-std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene) {
+std::vector<std::byte> semanticSceneToBytes(const detail::SemanticScene &scene) {
     flatbuffers::FlatBufferBuilder builder{1024};
     auto root = semanticSceneToFlatBuffer(builder, scene);
     fbs::FinishSemanticSceneBuffer(builder, root);
@@ -1232,7 +1233,7 @@ std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene) {
     return std::vector<std::byte>(span.begin(), span.end());
 }
 
-SemanticScene semanticSceneFromBytes(std::span<const std::byte> buf) {
+detail::SemanticScene semanticSceneFromBytes(std::span<const std::byte> buf) {
     const auto *ptr = reinterpret_cast<const uint8_t *>(buf.data());
     flatbuffers::Verifier verifier{ptr, buf.size()};
     if (!fbs::VerifySemanticSceneBuffer(verifier)) {

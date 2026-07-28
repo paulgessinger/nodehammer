@@ -90,8 +90,8 @@ void printSummary(const nodehammer::ImportResult &result, std::string_view forma
 
 // ── Tree ───────────────────────────���───────────────────────────���─────────────
 
-void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
-               const nodehammer::detail::Console &con) {
+void printTree(const nodehammer::detail::SemanticScene &scene, int maxDepth,
+               const std::string &filter, const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
@@ -192,7 +192,8 @@ void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::
 
 // ── Tags ──────────��───────────────────────────────���──────────────────────────
 
-void printTags(const nodehammer::SemanticScene &scene, const nodehammer::detail::Console &con) {
+void printTags(const nodehammer::detail::SemanticScene &scene,
+               const nodehammer::detail::Console &con) {
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
     int nodesWithTags = 0;

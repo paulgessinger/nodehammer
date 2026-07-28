@@ -25,8 +25,8 @@ namespace {
 
 constexpr int kPollBudget = 100;
 
-SemanticScene makeMinimalScene() {
-    SemanticScene scene;
+detail::SemanticScene makeMinimalScene() {
+    detail::SemanticScene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};

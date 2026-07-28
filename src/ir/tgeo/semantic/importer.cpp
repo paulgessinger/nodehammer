@@ -31,7 +31,7 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 }
 
 struct ImportState {
-    SemanticScene &scene;
+    detail::SemanticScene &scene;
     DiagnosticList &diags;
     std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
     std::unordered_map<const TGeoShape *, SemanticShapeId> shapeCache;

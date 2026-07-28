@@ -15,7 +15,8 @@ std::vector<std::string> SemanticFlatbufferExporter::supportedExtensions() const
 }
 
 SemanticExportResult
-SemanticFlatbufferExporter::write(const SemanticScene &scene, const std::filesystem::path &path,
+SemanticFlatbufferExporter::write(const detail::SemanticScene &scene,
+                                  const std::filesystem::path &path,
                                   [[maybe_unused]] const SemanticExportConfig &config) const {
     SemanticExportResult result;
 

@@ -39,21 +39,21 @@ class SelectionEngine {
     explicit SelectionEngine(std::vector<SelectionRule> rules, bool hoistOrphans = false);
 
     /// Compute which nodes would be kept or dropped without modifying the scene.
-    [[nodiscard]] SelectionResult dryRun(const SemanticScene &scene) const;
+    [[nodiscard]] SelectionResult dryRun(const detail::SemanticScene &scene) const;
 
     /// Remove dropped nodes from the scene in-place and garbage-collect
     /// unreferenced logVols, shapes, and materials.
     ///
     /// If the root node is in the dropped set the scene is left unchanged and
     /// an NH0401 error is emitted.  Returns accumulated diagnostics.
-    DiagnosticList prune(SemanticScene &scene) const;
+    DiagnosticList prune(detail::SemanticScene &scene) const;
 
   private:
     std::vector<SelectionRule> rules_;
     bool hoistOrphans_{false};
 
     /// Core evaluation logic shared by dryRun() and prune().
-    [[nodiscard]] SelectionResult evaluate(const SemanticScene &scene) const;
+    [[nodiscard]] SelectionResult evaluate(const detail::SemanticScene &scene) const;
 };
 
 } // namespace nodehammer

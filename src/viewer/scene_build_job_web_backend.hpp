@@ -28,7 +28,7 @@ class IWebBackend {
     virtual ~IWebBackend() = default;
 
     virtual void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-                       std::shared_ptr<const ::nodehammer::SemanticScene> scene,
+                       std::shared_ptr<const ::nodehammer::detail::SemanticScene> scene,
                        std::string config_label, std::string geometry_label,
                        std::optional<::nodehammer::WedgeCutParams> wedge_cut) = 0;
     virtual bool poll(std::uint64_t budget_ns) = 0;

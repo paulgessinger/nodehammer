@@ -28,7 +28,7 @@ meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::strin
 ///
 /// Returns an empty TessellationOutput (with diagnostics) on failure.
 [[nodiscard]] TessellationOutput tessellateBooleanShape(const SemanticShapeVariant &shape,
-                                                        const SemanticScene &scene,
+                                                        const detail::SemanticScene &scene,
                                                         const ITessellator &primitiveTessellator,
                                                         const TessellationParams &params);
 

@@ -30,7 +30,7 @@ struct SceneBuildResult {
 /// stage.
 struct ScenePrepResult {
     NHConfig config;
-    SemanticScene scene;
+    detail::SemanticScene scene;
     DiagnosticList diags;
     bool ok{false};
 };
@@ -56,7 +56,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 /// (matching the `convert --angle-cut` pipeline ordering), so the scene
 /// handed to tessellation already carries the Boolean-cut shapes.
 ScenePrepResult
-prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene,
+prepareSceneForTessellationFromInputs(NHConfig config, detail::SemanticScene scene,
                                       std::optional<WedgeCutParams> wedgeCut = std::nullopt);
 
 } // namespace nodehammer

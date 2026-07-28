@@ -12,17 +12,17 @@ namespace nodehammer {
 class SyntheticSceneBuilder {
   public:
     /// A single box (10×10×10 mm half-lengths) with aluminum material.
-    [[nodiscard]] static SemanticScene buildSingleBox();
+    [[nodiscard]] static detail::SemanticScene buildSingleBox();
 
     /// World box containing one child box translated 100 mm along Z.
     /// Useful for testing parent-child transform accumulation.
-    [[nodiscard]] static SemanticScene buildNestedBoxes();
+    [[nodiscard]] static detail::SemanticScene buildNestedBoxes();
 
     /// World box with an inner tube (rMin=0, rMax=5, dz=10).
-    [[nodiscard]] static SemanticScene buildTubeInBox();
+    [[nodiscard]] static detail::SemanticScene buildTubeInBox();
 
     /// World box with a BooleanSubtraction child shape.
-    [[nodiscard]] static SemanticScene buildBooleanSubtraction();
+    [[nodiscard]] static detail::SemanticScene buildBooleanSubtraction();
 
     /// Scene with one node whose shape is UnknownShape.
     /// Sets DegradationBit::UnknownShape on the node's provenance and emits

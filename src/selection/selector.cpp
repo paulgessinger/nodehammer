@@ -36,7 +36,7 @@ std::vector<CompiledRule> compileRules(const std::vector<SelectionRule> &rules) 
 }
 
 // BFS reachability: collect all node IDs reachable from root, in visitation order.
-std::vector<SemanticNodeId> reachableNodes(const SemanticScene &scene) {
+std::vector<SemanticNodeId> reachableNodes(const detail::SemanticScene &scene) {
     std::vector<SemanticNodeId> reachable;
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return reachable;
@@ -63,7 +63,7 @@ std::vector<SemanticNodeId> reachableNodes(const SemanticScene &scene) {
 // Transitively collect all SemanticShapeIds referenced by the given root shapes,
 // following left/right operands of boolean shapes.
 std::unordered_set<SemanticShapeId>
-collectReferencedShapes(const SemanticScene &scene,
+collectReferencedShapes(const detail::SemanticScene &scene,
                         const std::unordered_set<SemanticShapeId> &roots) {
     std::unordered_set<SemanticShapeId> visited = roots;
     std::queue<SemanticShapeId> q;
@@ -102,7 +102,7 @@ collectReferencedShapes(const SemanticScene &scene,
 SelectionEngine::SelectionEngine(std::vector<SelectionRule> rules, bool hoistOrphans)
     : rules_(std::move(rules)), hoistOrphans_(hoistOrphans) {}
 
-SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
+SelectionResult SelectionEngine::evaluate(const detail::SemanticScene &scene) const {
     SelectionResult result;
 
     if (scene.nodes.empty()) {
@@ -225,11 +225,11 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     return result;
 }
 
-SelectionResult SelectionEngine::dryRun(const SemanticScene &scene) const {
+SelectionResult SelectionEngine::dryRun(const detail::SemanticScene &scene) const {
     return evaluate(scene);
 }
 
-DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
+DiagnosticList SelectionEngine::prune(detail::SemanticScene &scene) const {
     auto selResult = evaluate(scene);
 
     // ── Hoist orphans: re-parent KeepIf nodes whose parent is DropIf ─────────────

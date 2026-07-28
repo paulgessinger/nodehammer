@@ -27,7 +27,7 @@ class TessellationJob {
 
     /// Initialise the job. Compiles rule predicates and seeds the BFS
     /// queue with the scene root.
-    void start(const NHConfig &config, const SemanticScene &scene);
+    void start(const NHConfig &config, const detail::SemanticScene &scene);
 
     /// Process pending semantic nodes for up to `budget_ns` of wall-clock
     /// time. The atomic unit is one outer-BFS iteration (one semantic

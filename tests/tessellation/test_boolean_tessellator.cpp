@@ -66,7 +66,7 @@ TEST_CASE("boolean tessellator: large full hollow pgon is manifold",
 // the wedge construction would instead clear the -x/-y quadrant.
 TEST_CASE("boolean tessellator: partial tube subtraction clears the named sector",
           "[tessellation][boolean][manifold]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
     const SemanticShapeId boxId = scene.nextShapeId();
     scene.shapes[boxId] = {boxId, BoxShape{4.0, 4.0, 1.0}};
     const SemanticShapeId wedgeId = scene.nextShapeId();

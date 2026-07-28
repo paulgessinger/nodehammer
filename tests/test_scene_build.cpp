@@ -12,8 +12,8 @@ namespace {
 
 // A minimal scene: a root box at the origin plus one wide box straddling the
 // +x axis, so a [0°,90°] wedge cut turns it into a Boolean subtraction.
-SemanticScene makeStraddlingScene() {
-    SemanticScene scene;
+detail::SemanticScene makeStraddlingScene() {
+    detail::SemanticScene scene;
     const SemanticMaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
 
@@ -49,7 +49,7 @@ SemanticScene makeStraddlingScene() {
     return scene;
 }
 
-bool hasBooleanSubtraction(const SemanticScene &scene) {
+bool hasBooleanSubtraction(const detail::SemanticScene &scene) {
     for (const auto &[id, shape] : scene.shapes) {
         (void)id;
         if (std::holds_alternative<BooleanSubtraction>(shape.data)) {

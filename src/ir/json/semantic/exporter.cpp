@@ -17,7 +17,7 @@ std::vector<std::string> SemanticJsonExporter::supportedExtensions() const {
 }
 
 SemanticExportResult
-SemanticJsonExporter::write(const SemanticScene &scene, const std::filesystem::path &path,
+SemanticJsonExporter::write(const detail::SemanticScene &scene, const std::filesystem::path &path,
                             [[maybe_unused]] const SemanticExportConfig &config) const {
     SemanticExportResult result;
 

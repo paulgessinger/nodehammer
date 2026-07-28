@@ -37,7 +37,7 @@ void registerCmdDumpRender(CLI::App &app) {
         }
 
         // ── Import scene ───────────────────────────────────────────────────────
-        nodehammer::SemanticScene semScene;
+        nodehammer::detail::SemanticScene semScene;
         if (syntheticBoxOpt->count()) {
             semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
         } else if (*inputOpt) {

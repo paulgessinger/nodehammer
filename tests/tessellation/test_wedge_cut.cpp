@@ -24,13 +24,13 @@ namespace {
 //   C  @ ( 10, 10)  → emptied  (inside removed quadrant)
 //   D  @ ( 10,  0)  → straddle (crosses the +x / 0° boundary)
 struct TestScene {
-    SemanticScene scene;
+    detail::SemanticScene scene;
     SemanticNodeId a, b, c, d, root;
 };
 
 TestScene makeScene() {
     TestScene ts;
-    SemanticScene &scene = ts.scene;
+    detail::SemanticScene &scene = ts.scene;
 
     const SemanticMaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
@@ -186,7 +186,7 @@ TEST_CASE("wedge cut: a narrow sector inside a wide AABB still cuts", "[tessella
     // no corner inside the removed sector and wrongly classified the box as
     // fully kept (so it was never cut); the angular-arc test classifies it as
     // straddling, as it must.
-    SemanticScene scene;
+    detail::SemanticScene scene;
     const SemanticMaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     // World AABB x∈[9,11], y∈[-8,8] → angular span ≈ ±42°, corners near ±36/±42°,
@@ -251,7 +251,7 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     // Mimics a stave (envelope) with child modules, the whole assembly sitting
     // inside the removed sector. The envelope + all children must be pruned so a
     // merge_descendants parent is never asked to merge an empty child set.
-    SemanticScene scene;
+    detail::SemanticScene scene;
     const SemanticMaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     const SemanticShapeId box = scene.nextShapeId();
@@ -305,7 +305,7 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
     // differ only by a translation along the cut (z) axis → identical local-frame
     // wedge → must share one cut mesh. The third sits on the +y axis (different
     // phi) → distinct cut. So: 3 cut placements, 2 unique cut meshes.
-    SemanticScene scene;
+    detail::SemanticScene scene;
     const SemanticMaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     const SemanticShapeId shape = scene.nextShapeId();
@@ -368,7 +368,7 @@ TEST_CASE("wedge cut: allocates fresh IDs without overwriting existing shapes",
           "[tessellation][wedgecut]") {
     // Simulate a deserialized scene whose ID counters are stale (start at 1)
     // while existing entries use large IDs.
-    SemanticScene scene;
+    detail::SemanticScene scene;
     const SemanticMaterialId mat{500};
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     const SemanticShapeId shape{1000};
@@ -401,7 +401,7 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     // below Manifold's tolerance). That yields an empty *but succeeded* mesh. The
     // merge path used to treat empty-vertices as a tessellation failure and emit
     // NH0503; it must instead skip the emptied descendant and still merge the rest.
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     const auto mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};

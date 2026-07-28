@@ -19,7 +19,8 @@ namespace {
 
 // Build a RenderScene from a synthetic single-box scene with a default config.
 nodehammer::detail::RenderScene buildBoxRenderScene() {
-    nodehammer::SemanticScene semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
+    nodehammer::detail::SemanticScene semScene =
+        nodehammer::SyntheticSceneBuilder::buildSingleBox();
     nodehammer::NHConfig cfg;
     nodehammer::TessellationPass pass{cfg};
     return pass.lower(semScene).scene;
@@ -102,7 +103,8 @@ TEST_CASE("GltfExporter: PBR material round-trip", "[export][gltf]") {
     const auto out = tmpPath("box_mat.glb");
 
     // Build scene with a specific material colour
-    nodehammer::SemanticScene semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
+    nodehammer::detail::SemanticScene semScene =
+        nodehammer::SyntheticSceneBuilder::buildSingleBox();
     nodehammer::NHConfig cfg;
     nodehammer::MaterialDef md;
     md.name = "red";

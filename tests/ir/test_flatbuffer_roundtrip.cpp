@@ -19,8 +19,8 @@ using Catch::Approx;
 namespace {
 
 /// Build a minimal scene with one root node, one logVol, one box shape, one material.
-SemanticScene makeMinimalScene() {
-    SemanticScene scene;
+detail::SemanticScene makeMinimalScene() {
+    detail::SemanticScene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};
@@ -88,7 +88,7 @@ TEST_CASE("FlatBuffer roundtrip: minimal scene", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "air", std::nullopt, 0.001};
 
@@ -209,7 +209,7 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, BoxShape{1.0, 1.0, 1.0}};
@@ -340,7 +340,7 @@ TEST_CASE("FlatBuffer: file identifier check", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffer]") {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, TubeShape{0.0, 5.0, 10.0, 0.0, 2.0 * std::numbers::pi}};

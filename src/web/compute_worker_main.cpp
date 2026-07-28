@@ -111,7 +111,7 @@ void reportError(const DiagnosticList &diags, const char *fallback) {
 struct ComputeCache {
     bool valid{false};
     std::uint32_t epoch{0};
-    SemanticScene scene;
+    detail::SemanticScene scene;
     NHConfig config;
 };
 
@@ -178,7 +178,7 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
     // *non-owning* aliasing shared_ptrs over the cache — the pipeline never takes
     // ownership of the cached scene/config (invariant #5).
     auto cfg = std::shared_ptr<const NHConfig>(std::shared_ptr<void>{}, &c.config);
-    auto scn = std::shared_ptr<const SemanticScene>(std::shared_ptr<void>{}, &c.scene);
+    auto scn = std::shared_ptr<const detail::SemanticScene>(std::shared_ptr<void>{}, &c.scene);
 
     nh_compute_emit_progress(kPreparing, 0, 0);
     BuildPipeline pipe;

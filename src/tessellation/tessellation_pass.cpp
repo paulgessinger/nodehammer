@@ -175,7 +175,7 @@ struct PrototypeDescendantSignature {
     glm::dmat4 toMergeLocal{1.0};
 };
 
-bool collectPrototypeLeafDescendants(const SemanticScene &scene, SemanticLogVolId rootLv,
+bool collectPrototypeLeafDescendants(const detail::SemanticScene &scene, SemanticLogVolId rootLv,
                                      std::vector<PrototypeDescendantSignature> &out) {
     if (!scene.logVols.contains(rootLv)) {
         return false;
@@ -242,7 +242,7 @@ void sortMergeDescendants(std::vector<MergeDescendantSignature> &descendants) {
 
 using ShapeMaterialKey = std::pair<uint64_t, uint64_t>;
 
-bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv,
+bool tryUsePrototypeMergeKey(const detail::SemanticScene &scene, SemanticLogVolId rootLv,
                              MergeCacheKey &mergeKey) {
     std::vector<PrototypeDescendantSignature> prototypeDescendants;
     if (!collectPrototypeLeafDescendants(scene, rootLv, prototypeDescendants) ||
@@ -618,8 +618,9 @@ RenderMaterial makeDefaultMaterial(detail::RenderScene &rs, const SourceMaterial
 // Axis-aligned bounding box proxy for boolean fallback=BBox.
 /// Collect all primitive leaf vertices from a (possibly nested) boolean shape,
 /// compute their AABB, and return a tessellated box of that size.
-TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData, const SemanticScene &scene,
-                                 PrimitiveTessellator &tess, const TessellationParams &params) {
+TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData,
+                                 const detail::SemanticScene &scene, PrimitiveTessellator &tess,
+                                 const TessellationParams &params) {
     glm::dvec3 bboxMin{std::numeric_limits<double>::max()};
     glm::dvec3 bboxMax{-std::numeric_limits<double>::max()};
 
@@ -686,7 +687,7 @@ TessellationPass::TessellationPass(const NHConfig &config) : config_(config) {}
 
 struct TessellationJob::Impl {
     const NHConfig *config{nullptr};
-    const SemanticScene *scene{nullptr};
+    const detail::SemanticScene *scene{nullptr};
     /// True when the scene carries the wedge-cut marker logVol, i.e. an
     /// azimuthal cut was applied upstream. An empty merge_descendants result is
     /// then an expected consequence of the cut, not a selection/config error.
@@ -1500,7 +1501,7 @@ TessellationJob::~TessellationJob() = default;
 TessellationJob::TessellationJob(TessellationJob &&) noexcept = default;
 TessellationJob &TessellationJob::operator=(TessellationJob &&) noexcept = default;
 
-void TessellationJob::start(const NHConfig &config, const SemanticScene &scene) {
+void TessellationJob::start(const NHConfig &config, const detail::SemanticScene &scene) {
     // std::atomic members make Impl non-copyable; replace the unique_ptr
     // wholesale to reset the job between runs.
     impl_ = std::make_unique<Impl>();
@@ -1648,7 +1649,7 @@ size_t TessellationJob::processedNodes() const {
 
 // ── TessellationPass::lower (run-to-completion shim) ─────────────────────────
 
-TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const {
+TessellationPassResult TessellationPass::lower(const detail::SemanticScene &scene) const {
     TessellationJob job;
     job.start(config_, scene);
     while (!job.advance(std::numeric_limits<uint64_t>::max())) {

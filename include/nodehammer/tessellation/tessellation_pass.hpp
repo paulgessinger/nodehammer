@@ -31,7 +31,7 @@ class TessellationPass {
   public:
     explicit TessellationPass(const NHConfig &config);
 
-    [[nodiscard]] TessellationPassResult lower(const SemanticScene &scene) const;
+    [[nodiscard]] TessellationPassResult lower(const detail::SemanticScene &scene) const;
 
   private:
     const NHConfig &config_;

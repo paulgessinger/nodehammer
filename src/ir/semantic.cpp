@@ -224,7 +224,7 @@ bool ShapeEqual::operator()(const SemanticShapeVariant &a, const SemanticShapeVa
 
 } // namespace
 
-void SemanticScene::reseedIdCounters() {
+void detail::SemanticScene::reseedIdCounters() {
     auto maxKey = [](const auto &map, uint64_t seed) {
         for (const auto &[id, _] : map) {
             seed = std::max(seed, id.value);
@@ -237,7 +237,7 @@ void SemanticScene::reseedIdCounters() {
     nextMaterialId_ = maxKey(materials, nextMaterialId_ - 1) + 1;
 }
 
-void SemanticScene::computeWorldTransforms() {
+void detail::SemanticScene::computeWorldTransforms() {
     if (nodes.empty() || !nodes.contains(rootId)) {
         return;
     }
@@ -250,7 +250,7 @@ void SemanticScene::computeWorldTransforms() {
     });
 }
 
-void SemanticScene::computeOriginalPaths() {
+void detail::SemanticScene::computeOriginalPaths() {
     if (nodes.empty() || !nodes.contains(rootId)) {
         return;
     }
@@ -263,7 +263,7 @@ void SemanticScene::computeOriginalPaths() {
     });
 }
 
-std::size_t SemanticScene::deduplicateShapes() {
+std::size_t detail::SemanticScene::deduplicateShapes() {
     const std::size_t before = shapes.size();
     if (before <= 1) {
         return 0;
@@ -331,7 +331,7 @@ std::size_t SemanticScene::deduplicateShapes() {
     return before - shapes.size();
 }
 
-std::size_t SemanticScene::deduplicateLogVols() {
+std::size_t detail::SemanticScene::deduplicateLogVols() {
     const std::size_t before = logVols.size();
     if (before <= 1) {
         return 0;
@@ -447,7 +447,7 @@ std::size_t SemanticScene::deduplicateLogVols() {
     return before - logVols.size();
 }
 
-std::size_t SemanticScene::deduplicateMaterials() {
+std::size_t detail::SemanticScene::deduplicateMaterials() {
     const std::size_t before = materials.size();
     if (before <= 1) {
         return 0;

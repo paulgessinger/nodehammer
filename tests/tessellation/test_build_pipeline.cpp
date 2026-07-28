@@ -71,7 +71,7 @@ std::shared_ptr<const NHConfig> emptyConfig() { return std::make_shared<const NH
 
 // The pre-refactor synchronous reference: prep (with an inline wedge, matching
 // the old buildSceneFromPaths / convert ordering) then a one-shot lower().
-detail::RenderScene referenceBuild(const SemanticScene &scene,
+detail::RenderScene referenceBuild(const detail::SemanticScene &scene,
                                    std::optional<WedgeCutParams> wedge) {
     ScenePrepResult prep = prepareSceneForTessellationFromInputs(NHConfig{}, scene, wedge);
     REQUIRE(prep.ok);
@@ -82,10 +82,10 @@ detail::RenderScene referenceBuild(const SemanticScene &scene,
 }
 
 // Drive a fresh pipeline to completion with the given per-slice budget.
-SceneBuildResult drivePipeline(const SemanticScene &scene, std::optional<WedgeCutParams> wedge,
-                               std::uint64_t budget) {
+SceneBuildResult drivePipeline(const detail::SemanticScene &scene,
+                               std::optional<WedgeCutParams> wedge, std::uint64_t budget) {
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const SemanticScene>(scene), wedge);
+    pipe.start(emptyConfig(), std::make_shared<const detail::SemanticScene>(scene), wedge);
     while (!pipe.advance(budget)) {
     }
     return pipe.take();
@@ -94,7 +94,7 @@ SceneBuildResult drivePipeline(const SemanticScene &scene, std::optional<WedgeCu
 } // namespace
 
 TEST_CASE("BuildPipeline: drive-to-completion parity with one-shot lower", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const detail::SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
 
     SceneBuildResult built = drivePipeline(scene, std::nullopt, kSpin);
     REQUIRE_FALSE(built.diags.hasErrors());
@@ -106,7 +106,7 @@ TEST_CASE("BuildPipeline: drive-to-completion parity with one-shot lower", "[bui
 
 TEST_CASE("BuildPipeline: wedge parity with the pre-refactor synchronous path",
           "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const detail::SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const WedgeCutParams wedge{.startDeg = 0.0, .endDeg = 90.0, .margin = 2.0};
 
     SceneBuildResult built = drivePipeline(scene, wedge, kSpin);
@@ -121,11 +121,11 @@ TEST_CASE("BuildPipeline: wedge parity with the pre-refactor synchronous path",
 }
 
 TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const detail::SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
 
     // A tiny budget forces many advance() iterations.
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const SemanticScene>(scene), std::nullopt);
+    pipe.start(emptyConfig(), std::make_shared<const detail::SemanticScene>(scene), std::nullopt);
     int falses = 0;
     while (!pipe.advance(1 /* ns */)) {
         ++falses;
@@ -144,12 +144,12 @@ TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pip
 }
 
 TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const detail::SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const WedgeCutParams wedge{.startDeg = 0.0, .endDeg = 90.0, .margin = 2.0};
 
     BuildPipeline pipe;
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Idle);
-    pipe.start(emptyConfig(), std::make_shared<const SemanticScene>(scene), wedge);
+    pipe.start(emptyConfig(), std::make_shared<const detail::SemanticScene>(scene), wedge);
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Queued);
 
     // Counters are 0 before their phases run.
@@ -205,7 +205,7 @@ TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
 TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pipeline]") {
     // A rule referencing an undefined material fails ConfigValidator, so prep
     // returns !ok and the pipeline lands on the failure branch.
-    SemanticScene scene = SyntheticSceneBuilder::buildSingleBox();
+    detail::SemanticScene scene = SyntheticSceneBuilder::buildSingleBox();
     NHConfig cfg;
     Rule rule;
     rule.material = "does_not_exist";
@@ -213,7 +213,7 @@ TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pip
 
     BuildPipeline pipe;
     pipe.start(std::make_shared<const NHConfig>(std::move(cfg)),
-               std::make_shared<const SemanticScene>(std::move(scene)), std::nullopt);
+               std::make_shared<const detail::SemanticScene>(std::move(scene)), std::nullopt);
     while (!pipe.advance(kSpin)) {
     }
     SceneBuildResult r = pipe.take();
@@ -222,7 +222,7 @@ TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pip
 }
 
 TEST_CASE("BuildPipeline: degenerate and absent wedge skip Cutting", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const detail::SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const detail::RenderScene reference = referenceBuild(scene, std::nullopt);
 
     SECTION("absent wedge") {

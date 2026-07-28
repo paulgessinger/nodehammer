@@ -50,7 +50,7 @@ void BuildController::reset() {
 }
 
 void BuildController::startBuild(std::shared_ptr<const NHConfig> config,
-                                 std::shared_ptr<const SemanticScene> scene,
+                                 std::shared_ptr<const detail::SemanticScene> scene,
                                  std::string config_label, std::string geometry_label,
                                  std::optional<WedgeCutParams> wedge, const AngleCut &cut) {
     start_time_ = std::chrono::steady_clock::now();
@@ -184,8 +184,8 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
                     // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
                     pristine_config_ =
                         std::make_shared<const NHConfig>(std::move(inputs->config.config));
-                    pristine_scene_ =
-                        std::make_shared<const SemanticScene>(std::move(inputs->import.scene));
+                    pristine_scene_ = std::make_shared<const detail::SemanticScene>(
+                        std::move(inputs->import.scene));
                     pristine_config_label_ = std::move(inputs->config_key);
                     pristine_geometry_label_ = std::move(inputs->geometry_key);
                     // Promoted to last_built_input_hash_ once this base build

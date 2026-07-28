@@ -240,6 +240,16 @@ struct SemanticNode {
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
+// The scene sits in `detail` because the public handle in
+// <nodehammer/scene.hpp> claims the name — `nodehammer::` is reserved for the
+// API, and internals move here as the API displaces them.
+//
+// Only the scene moved. The types above it (nodes, logical volumes, shapes,
+// materials) collide with nothing the surface names — the handle exposes them
+// through *View types — so requalifying ~750 call sites would buy tidiness and
+// nothing else. They migrate if and when the surface claims their names too.
+namespace detail {
+
 class SemanticScene {
   public:
     SemanticNodeId rootId;
@@ -318,5 +328,7 @@ class SemanticScene {
     uint64_t nextShapeId_{1};
     uint64_t nextMaterialId_{1};
 };
+
+} // namespace detail
 
 } // namespace nodehammer

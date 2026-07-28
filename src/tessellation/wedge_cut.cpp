@@ -146,9 +146,9 @@ Aabb transformAabb(const Aabb &a, const glm::dmat4 &m) {
     return out;
 }
 
-Aabb localAabb(const SemanticShapeVariant &shape, const SemanticScene &scene, int depth);
+Aabb localAabb(const SemanticShapeVariant &shape, const detail::SemanticScene &scene, int depth);
 
-Aabb localAabbById(SemanticShapeId id, const SemanticScene &scene, int depth) {
+Aabb localAabbById(SemanticShapeId id, const detail::SemanticScene &scene, int depth) {
     auto it = scene.shapes.find(id);
     if (it == scene.shapes.end()) {
         return Aabb{};
@@ -156,7 +156,7 @@ Aabb localAabbById(SemanticShapeId id, const SemanticScene &scene, int depth) {
     return localAabb(it->second.data, scene, depth);
 }
 
-Aabb localAabb(const SemanticShapeVariant &shape, const SemanticScene &scene, int depth) {
+Aabb localAabb(const SemanticShapeVariant &shape, const detail::SemanticScene &scene, int depth) {
     if (depth > kMaxBoolDepth) {
         return Aabb{};
     }
@@ -301,7 +301,7 @@ struct CutKeyHash {
 struct WedgeCutJob::Impl {
     enum class Phase : std::uint8_t { Idle, Bounds, Classify, Prune };
 
-    SemanticScene *scene{nullptr};
+    detail::SemanticScene *scene{nullptr};
 
     double startRad{0.0};
     double endRad{0.0};
@@ -544,7 +544,7 @@ WedgeCutJob::~WedgeCutJob() = default;
 WedgeCutJob::WedgeCutJob(WedgeCutJob &&) noexcept = default;
 WedgeCutJob &WedgeCutJob::operator=(WedgeCutJob &&) noexcept = default;
 
-void WedgeCutJob::start(SemanticScene &scene, const WedgeCutParams &params) {
+void WedgeCutJob::start(detail::SemanticScene &scene, const WedgeCutParams &params) {
     // std::atomic members make Impl non-assignable; replace the unique_ptr
     // wholesale to reset the job between runs.
     impl_ = std::make_unique<Impl>();
@@ -647,7 +647,7 @@ std::size_t WedgeCutJob::processedPlacements() const {
 
 // ── applyWedgeCut (run-to-completion shim) ────────────────────────────────────
 
-WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params) {
+WedgeCutStats applyWedgeCut(detail::SemanticScene &scene, const WedgeCutParams &params) {
     WedgeCutJob job;
     job.start(scene, params);
     while (!job.advance(std::numeric_limits<std::uint64_t>::max())) {

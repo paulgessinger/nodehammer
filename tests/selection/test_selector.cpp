@@ -14,7 +14,7 @@ using namespace nodehammer;
 
 // Build a 3-level scene: root("world") → mid("tracker") → leaf("sensor")
 static auto makeThreeLevelScene() {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     SemanticShapeId shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, BoxShape{10, 10, 10}};
@@ -63,7 +63,7 @@ static auto makeThreeLevelScene() {
     scene.computeOriginalPaths();
 
     struct Result {
-        SemanticScene scene;
+        detail::SemanticScene scene;
         SemanticNodeId rootId, trackerId, sensorId;
     };
     return Result{std::move(scene), rootId, trackerId, sensorId};
@@ -420,11 +420,11 @@ TEST_CASE("SelectionEngine: scope restricts which nodes a rule evaluates",
 // Build a minimal SemanticScene with given names and double-precision
 // translation-only local transforms. Returns node IDs in insertion order.
 // Parent chain: nodes[0] is root, nodes[i] is parent of nodes[i+1].
-static SemanticScene
+static detail::SemanticScene
 makeLinearScene(const std::vector<std::string> &names,
                 const std::vector<glm::dvec3> &translations) // local translation per node
 {
-    SemanticScene scene;
+    detail::SemanticScene scene;
 
     SemanticShapeId shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, BoxShape{1, 1, 1}};

@@ -3,7 +3,7 @@
 #include <nodehammer/ir/semantic_json.hpp>
 
 TEST_CASE("SemanticScene: construction and node lookup by ID", "[ir][semantic]") {
-    nodehammer::SemanticScene scene;
+    nodehammer::detail::SemanticScene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, nodehammer::BoxShape{5.0, 5.0, 5.0}};
@@ -48,7 +48,7 @@ TEST_CASE("StrongId: different Tag types are incompatible at compile time", "[ir
 }
 
 TEST_CASE("SemanticScene: computeWorldTransforms BFS", "[ir][semantic]") {
-    nodehammer::SemanticScene scene;
+    nodehammer::detail::SemanticScene scene;
 
     auto makeNode = [&](std::string name, glm::dmat4 local,
                         std::optional<nodehammer::SemanticNodeId> parent) {
@@ -94,7 +94,7 @@ TEST_CASE("SemanticScene: computeWorldTransforms BFS", "[ir][semantic]") {
 
 TEST_CASE("SemanticScene: logical-volume dedup respects source daughter placements",
           "[ir][semantic]") {
-    nodehammer::SemanticScene scene;
+    nodehammer::detail::SemanticScene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, nodehammer::BoxShape{1, 1, 1}};
@@ -120,7 +120,7 @@ TEST_CASE("SemanticScene: logical-volume dedup respects source daughter placemen
 
 TEST_CASE("SemanticScene: logical-volume dedup canonicalizes daughter references",
           "[ir][semantic]") {
-    nodehammer::SemanticScene scene;
+    nodehammer::detail::SemanticScene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, nodehammer::BoxShape{1, 1, 1}};
@@ -174,7 +174,7 @@ TEST_CASE("SemanticScene JSON: logical volumes omit empty daughters", "[ir][sema
 }
 
 TEST_CASE("SemanticScene: visitBFS terminates on a cycle", "[ir][semantic]") {
-    nodehammer::SemanticScene scene;
+    nodehammer::detail::SemanticScene scene;
 
     auto makeNode = [&](std::string name) {
         auto id = scene.nextNodeId();
@@ -202,7 +202,7 @@ TEST_CASE("SemanticScene: visitBFS terminates on a cycle", "[ir][semantic]") {
 }
 
 TEST_CASE("SemanticScene: visitBFS skips a dangling child id", "[ir][semantic]") {
-    nodehammer::SemanticScene scene;
+    nodehammer::detail::SemanticScene scene;
 
     auto rootId = scene.nextNodeId();
     nodehammer::SemanticNode root;
@@ -222,7 +222,7 @@ TEST_CASE("SemanticScene: visitBFS skips a dangling child id", "[ir][semantic]")
 }
 
 TEST_CASE("SemanticScene: visitBFS on a scene whose root is absent", "[ir][semantic]") {
-    nodehammer::SemanticScene scene;
+    nodehammer::detail::SemanticScene scene;
 
     auto orphanId = scene.nextNodeId();
     nodehammer::SemanticNode orphan;

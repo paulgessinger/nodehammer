@@ -151,8 +151,8 @@ namespace {
 class WorkerBackend final : public IWebBackend {
   public:
     void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-               std::shared_ptr<const ::nodehammer::SemanticScene> scene, std::string config_label,
-               std::string geometry_label,
+               std::shared_ptr<const ::nodehammer::detail::SemanticScene> scene,
+               std::string config_label, std::string geometry_label,
                std::optional<::nodehammer::WedgeCutParams> wedge_cut) override {
         logPreBuild(config_label, geometry_label);
         result_ = {};
@@ -305,7 +305,7 @@ class WorkerBackend final : public IWebBackend {
 
     // Pristine-scene cache (main-thread side): identity + serialized bytes so a
     // re-aim reuses them instead of re-serializing.
-    const ::nodehammer::SemanticScene *last_scene_{nullptr};
+    const ::nodehammer::detail::SemanticScene *last_scene_{nullptr};
     std::uint32_t epoch_{0};
     std::vector<std::byte> scene_bytes_;
     std::string config_toml_;

@@ -25,7 +25,8 @@ namespace {
 
 // Walk the DD4hep DetElement tree and annotate the SemanticNodes
 // that were already created by the TGeo pass.
-void annotateDetElement(const dd4hep::DetElement &elem, SemanticScene &scene, DiagnosticList &diags,
+void annotateDetElement(const dd4hep::DetElement &elem, detail::SemanticScene &scene,
+                        DiagnosticList &diags,
                         const std::unordered_map<const TGeoNode *, SemanticNodeId> &nodeMap) {
     const TGeoNode *geoNode = elem.placement().ptr();
     auto it = nodeMap.find(geoNode);
@@ -65,7 +66,7 @@ void annotateDetElement(const dd4hep::DetElement &elem, SemanticScene &scene, Di
 // The nodeMap only stores the last such mapping, so iterating it would miss
 // most placements.  The lvMap is 1:1 and lets us tag every node whose
 // logical volume is sensitive.
-void tagSensitiveVolumes(SemanticScene &scene,
+void tagSensitiveVolumes(detail::SemanticScene &scene,
                          const std::unordered_map<const TGeoVolume *, SemanticLogVolId> &lvMap) {
     // Step 1: collect the set of sensitive logVolIds.
     std::unordered_set<SemanticLogVolId> sensitiveLogVols;
