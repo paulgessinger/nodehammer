@@ -17,8 +17,8 @@ namespace fbr = fbs::render;
 // the exact byte layout of fbr::Vertex (pos+normal, 6 contiguous floats). GLM's
 // default vec3 is 12 bytes; if a build ever forces aligned gentypes this assert
 // fires and the codec must switch to element-wise copies.
-static_assert(sizeof(Vertex) == sizeof(fbr::Vertex),
-              "Vertex layout must match fbs::render::Vertex for the memcpy fast path");
+static_assert(sizeof(detail::Vertex) == sizeof(fbr::Vertex),
+              "detail::Vertex layout must match fbs::render::Vertex for the memcpy fast path");
 static_assert(sizeof(fbr::Vertex) == 24, "unexpected fbs::render::Vertex size");
 
 // ── glm <-> fbs struct helpers ───────────────────────────────────────────────
@@ -237,7 +237,7 @@ detail::RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
             if (const auto *vs = m->vertices(); vs != nullptr) {
                 asset.vertices.resize(vs->size());
                 std::memcpy(asset.vertices.data(), vs->Data(),
-                            static_cast<size_t>(vs->size()) * sizeof(Vertex));
+                            static_cast<size_t>(vs->size()) * sizeof(detail::Vertex));
             }
             if (const auto *is = m->indices(); is != nullptr) {
                 asset.indices.resize(is->size());

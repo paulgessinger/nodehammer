@@ -18,10 +18,10 @@ detail::MeshAsset makeMesh(MeshAssetId id, const char *name) {
     m.id = id;
     m.name = name;
     m.vertices = {
-        Vertex{glm::vec3{0.f, 0.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}},
-        Vertex{glm::vec3{1.f, 0.f, 0.f}, glm::vec3{0.f, 1.f, 0.f}},
-        Vertex{glm::vec3{0.f, 1.f, 0.f}, glm::vec3{1.f, 0.f, 0.f}},
-        Vertex{glm::vec3{1.f, 1.f, 2.f}, glm::vec3{0.577f, 0.577f, 0.577f}},
+        detail::Vertex{glm::vec3{0.f, 0.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}},
+        detail::Vertex{glm::vec3{1.f, 0.f, 0.f}, glm::vec3{0.f, 1.f, 0.f}},
+        detail::Vertex{glm::vec3{0.f, 1.f, 0.f}, glm::vec3{1.f, 0.f, 0.f}},
+        detail::Vertex{glm::vec3{1.f, 1.f, 2.f}, glm::vec3{0.577f, 0.577f, 0.577f}},
     };
     m.indices = {0, 1, 2, 1, 3, 2};
     m.provenance.sourceSystem = "tessellator";

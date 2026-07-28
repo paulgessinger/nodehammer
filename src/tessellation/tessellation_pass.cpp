@@ -1062,7 +1062,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
 
     // Per-material accumulation buffers.
     struct MatGroup {
-        std::vector<Vertex> verts;
+        std::vector<detail::Vertex> verts;
         std::vector<uint32_t> indices;
     };
     std::map<RenderMaterialId, MatGroup> groups;
@@ -1177,7 +1177,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         glm::vec3 slabMin{std::numeric_limits<float>::max()};
         glm::vec3 slabMax{std::numeric_limits<float>::lowest()};
         for (const auto &v : srcMesh.vertices) {
-            Vertex tv;
+            detail::Vertex tv;
             tv.position = glm::vec3(toLocal * glm::vec4(v.position, 1.0f));
             tv.normal = glm::normalize(normalMat * v.normal);
             slabMin = glm::min(slabMin, tv.position);

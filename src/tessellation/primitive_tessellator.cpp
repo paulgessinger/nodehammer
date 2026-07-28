@@ -122,8 +122,8 @@ bool pickAcDiagonal(const glm::vec3 &a, const glm::vec3 &b, const glm::vec3 &c,
 // Both splits preserve the cyclic corner order a→b→c→d and CCW winding by
 // construction; only the reader's choice of which diagonal to cut along
 // changes. Per-vertex normals (carried on a/b/c/d) are untouched either way.
-void appendQuad(TessellationOutput &out, const Vertex &a, const Vertex &b, const Vertex &c,
-                const Vertex &d) {
+void appendQuad(TessellationOutput &out, const detail::Vertex &a, const detail::Vertex &b,
+                const detail::Vertex &c, const detail::Vertex &d) {
     const auto base = static_cast<uint32_t>(out.vertices.size());
     out.vertices.push_back(a);
     out.vertices.push_back(b);
@@ -147,7 +147,8 @@ void appendQuad(TessellationOutput &out, const Vertex &a, const Vertex &b, const
 }
 
 // Append a single triangle a → b → c (CCW when viewed from outside).
-void appendTriangle(TessellationOutput &out, const Vertex &a, const Vertex &b, const Vertex &c) {
+void appendTriangle(TessellationOutput &out, const detail::Vertex &a, const detail::Vertex &b,
+                    const detail::Vertex &c) {
     const auto base = static_cast<uint32_t>(out.vertices.size());
     out.vertices.push_back(a);
     out.vertices.push_back(b);
@@ -669,7 +670,7 @@ TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams
     // Compute a surface vertex at toroidal index i, poloidal index j, on the
     // surface at tube radius r. normalSign: +1 for outward (outer surface),
     // -1 for inward (inner surface).
-    auto vert = [&](int i, int j, float r, float normalSign) -> Vertex {
+    auto vert = [&](int i, int j, float r, float normalSign) -> detail::Vertex {
         const float phi = sweepAngle(phi0, dphi, i, segs);
         const float theta = loopAngle(j, nTube);
         const float ct = std::cos(theta), st = std::sin(theta);

@@ -13,7 +13,7 @@ struct TessellationParams {
 };
 
 struct TessellationOutput {
-    std::vector<Vertex> vertices;
+    std::vector<detail::Vertex> vertices;
     std::vector<uint32_t> indices;
     DiagnosticList diags;
     /// Whether the producing operation completed. False marks a genuine failure

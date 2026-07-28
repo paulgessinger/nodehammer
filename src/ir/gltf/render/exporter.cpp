@@ -223,8 +223,8 @@ ExportResult GltfExporter::write(const detail::RenderScene &scene,
         }
 
         // When baking, scale vertex positions into the target unit system.
-        std::vector<Vertex> scaledVerts;
-        const std::vector<Vertex> &verts = bake ? scaledVerts : ma.vertices;
+        std::vector<detail::Vertex> scaledVerts;
+        const std::vector<detail::Vertex> &verts = bake ? scaledVerts : ma.vertices;
         if (bake) {
             scaledVerts.reserve(ma.vertices.size());
             for (const auto &v : ma.vertices) {
@@ -234,13 +234,13 @@ ExportResult GltfExporter::write(const detail::RenderScene &scene,
 
         // Vertex buffer view (interleaved POSITION + NORMAL)
         alignTo4();
-        const std::size_t vtxOff = appendRaw(verts.data(), verts.size() * sizeof(Vertex));
+        const std::size_t vtxOff = appendRaw(verts.data(), verts.size() * sizeof(detail::Vertex));
 
         tinygltf::BufferView vtxBV;
         vtxBV.buffer = 0;
         vtxBV.byteOffset = vtxOff;
-        vtxBV.byteLength = verts.size() * sizeof(Vertex);
-        vtxBV.byteStride = sizeof(Vertex);
+        vtxBV.byteLength = verts.size() * sizeof(detail::Vertex);
+        vtxBV.byteStride = sizeof(detail::Vertex);
         vtxBV.target = TINYGLTF_TARGET_ARRAY_BUFFER;
         const int vtxBVIdx = static_cast<int>(model.bufferViews.size());
         model.bufferViews.push_back(vtxBV);
@@ -269,7 +269,7 @@ ExportResult GltfExporter::write(const detail::RenderScene &scene,
         // POSITION accessor
         tinygltf::Accessor posAcc;
         posAcc.bufferView = vtxBVIdx;
-        posAcc.byteOffset = offsetof(Vertex, position);
+        posAcc.byteOffset = offsetof(detail::Vertex, position);
         posAcc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
         posAcc.type = TINYGLTF_TYPE_VEC3;
         posAcc.count = ma.vertices.size();
@@ -283,7 +283,7 @@ ExportResult GltfExporter::write(const detail::RenderScene &scene,
         // NORMAL accessor
         tinygltf::Accessor normAcc;
         normAcc.bufferView = vtxBVIdx;
-        normAcc.byteOffset = offsetof(Vertex, normal);
+        normAcc.byteOffset = offsetof(detail::Vertex, normal);
         normAcc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
         normAcc.type = TINYGLTF_TYPE_VEC3;
         normAcc.count = ma.vertices.size();

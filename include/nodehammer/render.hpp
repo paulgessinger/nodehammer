@@ -109,7 +109,6 @@ class RenderScene {
 
     /// Nullopt when no mesh carries that id.
     [[nodiscard]] std::optional<MeshView> mesh(MeshAssetId id) const;
-    [[nodiscard]] std::optional<RenderMaterial> material(RenderMaterialId id) const;
 
     /// Mesh ids in ascending id order — deliberately *not* map order, which
     /// varies with the container, the standard library and the amalgamated

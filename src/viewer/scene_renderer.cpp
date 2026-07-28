@@ -305,7 +305,7 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
 
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader;
-    pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(Vertex));
+    pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(detail::Vertex));
     pdesc.layout.buffers[1].stride = static_cast<int>(sizeof(InstanceGpu));
     pdesc.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
 
@@ -315,11 +315,11 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     // and shader sources independently editable).
     pdesc.layout.attrs[ATTR_scene_scene_a_position].buffer_index = 0;
     pdesc.layout.attrs[ATTR_scene_scene_a_position].format = SG_VERTEXFORMAT_FLOAT3;
-    pdesc.layout.attrs[ATTR_scene_scene_a_position].offset = offsetof(Vertex, position);
+    pdesc.layout.attrs[ATTR_scene_scene_a_position].offset = offsetof(detail::Vertex, position);
 
     pdesc.layout.attrs[ATTR_scene_scene_a_normal].buffer_index = 0;
     pdesc.layout.attrs[ATTR_scene_scene_a_normal].format = SG_VERTEXFORMAT_FLOAT3;
-    pdesc.layout.attrs[ATTR_scene_scene_a_normal].offset = offsetof(Vertex, normal);
+    pdesc.layout.attrs[ATTR_scene_scene_a_normal].offset = offsetof(detail::Vertex, normal);
 
     // Per-instance world matrix as 4 vec4 attributes packed into the second
     // vertex buffer.
@@ -490,7 +490,7 @@ void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const detail::MeshAsset 
     GpuMesh gm;
 
     sg_buffer_desc vdesc{};
-    vdesc.size = asset.vertices.size() * sizeof(Vertex);
+    vdesc.size = asset.vertices.size() * sizeof(detail::Vertex);
     vdesc.usage.vertex_buffer = true;
     vdesc.usage.immutable = true;
     vdesc.data.ptr = asset.vertices.data();
@@ -614,7 +614,8 @@ void SceneRenderer::Impl::finalizeUpload() {
 }
 
 void SceneRenderer::beginUpload(std::shared_ptr<const detail::RenderScene> scene) {
-    static_assert(sizeof(Vertex) == 24, "Vertex layout must match shader: 3f position + 3f normal");
+    static_assert(sizeof(detail::Vertex) == 24,
+                  "detail::Vertex layout must match shader: 3f position + 3f normal");
     impl_->ensureInit();
     impl_->destroyGpu();
 

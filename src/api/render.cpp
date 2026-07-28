@@ -24,7 +24,12 @@ std::size_t MeshView::indexCount() const noexcept { return mesh_->indices.size()
 
 std::size_t MeshView::triangleCount() const noexcept { return mesh_->indices.size() / 3; }
 
-std::span<const Vertex> MeshView::vertices() const noexcept { return mesh_->vertices; }
+std::span<const Vertex> MeshView::vertices() const noexcept {
+    // The storage form keeps glm; the public form is plain floats. They are
+    // layout-identical by static_assert (ir/render.hpp), so this hands back the
+    // scene's own bytes rather than a conversion — which is the whole point.
+    return {reinterpret_cast<const Vertex *>(mesh_->vertices.data()), mesh_->vertices.size()};
+}
 
 std::span<const std::uint32_t> MeshView::indices() const noexcept { return mesh_->indices; }
 
@@ -32,7 +37,7 @@ std::shared_ptr<const Vertex[]> MeshView::ownedVertices() const {
     // Aliasing constructor: shares the state's control block while pointing at
     // the vertex array. No copy, no allocation, and the scene stays alive for
     // as long as the returned pointer does.
-    return {scene_, mesh_->vertices.data()};
+    return {scene_, reinterpret_cast<const Vertex *>(mesh_->vertices.data())};
 }
 
 std::shared_ptr<const std::uint32_t[]> MeshView::ownedIndices() const {
@@ -89,17 +94,6 @@ std::optional<MeshView> RenderScene::mesh(MeshAssetId id) const {
         return std::nullopt;
     }
     return MeshView{scene_, &it->second};
-}
-
-std::optional<RenderMaterial> RenderScene::material(RenderMaterialId id) const {
-    if (!valid()) {
-        return std::nullopt;
-    }
-    const auto it = scene_->materials.find(id);
-    if (it == scene_->materials.end()) {
-        return std::nullopt;
-    }
-    return it->second;
 }
 
 std::vector<MeshAssetId> RenderScene::meshIds() const {

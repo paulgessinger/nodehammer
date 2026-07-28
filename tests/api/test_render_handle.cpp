@@ -17,9 +17,9 @@ detail::MeshAsset makeMesh(MeshAssetId id, const char *name, std::size_t triangl
     m.name = name;
     for (std::size_t t = 0; t < triangles; ++t) {
         const auto f = static_cast<float>(t);
-        m.vertices.push_back(Vertex{glm::vec3{f, 0.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}});
-        m.vertices.push_back(Vertex{glm::vec3{f, 1.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}});
-        m.vertices.push_back(Vertex{glm::vec3{f, 0.f, 1.f}, glm::vec3{0.f, 0.f, 1.f}});
+        m.vertices.push_back(detail::Vertex{glm::vec3{f, 0.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}});
+        m.vertices.push_back(detail::Vertex{glm::vec3{f, 1.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}});
+        m.vertices.push_back(detail::Vertex{glm::vec3{f, 0.f, 1.f}, glm::vec3{0.f, 0.f, 1.f}});
         const auto base = static_cast<std::uint32_t>(t * 3);
         m.indices.insert(m.indices.end(), {base, base + 1, base + 2});
     }
@@ -90,7 +90,6 @@ TEST_CASE("RenderScene handle: lookup of an absent id returns nullopt", "[api][r
     const auto handle = detail::wrapRenderScene(makeScene());
 
     REQUIRE_FALSE(handle.mesh(MeshAssetId{999999}).has_value());
-    REQUIRE_FALSE(handle.material(RenderMaterialId{999999}).has_value());
 }
 
 TEST_CASE("RenderScene handle: meshIds are ascending, not container order", "[api][render]") {
@@ -115,7 +114,10 @@ TEST_CASE("MeshView: vertex and index spans are the scene's own bytes", "[api][r
 
         const auto &stored = raw->meshAssets.at(id);
         // The whole argument for bindings over a subprocess: no copy at all.
-        REQUIRE(view->vertices().data() == stored.vertices.data());
+        // The two Vertex types differ (public plain-float vs storage glm) but
+        // are layout-identical, so address equality is the real assertion.
+        REQUIRE(static_cast<const void *>(view->vertices().data()) ==
+                static_cast<const void *>(stored.vertices.data()));
         REQUIRE(view->indices().data() == stored.indices.data());
         REQUIRE(view->vertexCount() == stored.vertices.size());
         REQUIRE(view->indexCount() == stored.indices.size());
@@ -127,7 +129,7 @@ TEST_CASE("MeshView: vertex and index spans are the scene's own bytes", "[api][r
 
 TEST_CASE("MeshView: outlives the scene handle it came from", "[api][render]") {
     std::optional<MeshView> view;
-    const Vertex *expected = nullptr;
+    const detail::Vertex *expected = nullptr;
     {
         auto raw = makeScene();
         expected = raw->meshAssets.begin()->second.vertices.data();
@@ -155,7 +157,8 @@ TEST_CASE("MeshView: ownedVertices keeps the scene alive by itself", "[api][rend
         vertices = view->ownedVertices();
         indices = view->ownedIndices();
         // Aliasing, not copying: same address as the borrowed span.
-        REQUIRE(vertices.get() == view->vertices().data());
+        REQUIRE(static_cast<const void *>(vertices.get()) ==
+                static_cast<const void *>(view->vertices().data()));
     }
 
     // Every handle and view is destroyed; the aliasing shared_ptr is all that

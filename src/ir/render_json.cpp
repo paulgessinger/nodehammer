@@ -8,13 +8,6 @@
 
 namespace nodehammer {
 
-void to_json(nlohmann::json &j, const Vertex &v) {
-    j = {
-        {"position", {v.position.x, v.position.y, v.position.z}},
-        {"normal", {v.normal.x, v.normal.y, v.normal.z}},
-    };
-}
-
 void to_json(nlohmann::json &j, const RenderMaterial &m) {
     j = {
         {"id", m.id},
@@ -35,6 +28,13 @@ void to_json(nlohmann::json &j, const MeshBinding &b) {
 // and nlohmann finds to_json by ADL — an overload in the parent namespace is
 // simply not looked at.
 namespace detail {
+
+void to_json(nlohmann::json &j, const Vertex &v) {
+    j = {
+        {"position", {v.position.x, v.position.y, v.position.z}},
+        {"normal", {v.normal.x, v.normal.y, v.normal.z}},
+    };
+}
 
 void to_json(nlohmann::json &j, const MeshAsset &a) {
     j = {

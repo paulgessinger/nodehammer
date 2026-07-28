@@ -90,7 +90,7 @@ NB_MODULE(_nodehammer, m) {
     // The strides encode Vertex's layout (24 bytes, normal at offset 12), which
     // schemas/render.fbs already pins as a public contract.
     using Mesh = nodehammer::MeshView;
-    constexpr std::size_t kVertexStride = sizeof(nodehammer::Vertex) / sizeof(float);
+    constexpr std::size_t kVertexStride = sizeof(nodehammer::detail::Vertex) / sizeof(float);
 
     auto vertexAttr = [](nb::object self, std::size_t offset) {
         const auto &mesh = nb::cast<const Mesh &>(self);
