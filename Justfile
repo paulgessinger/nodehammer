@@ -147,20 +147,21 @@ wasm-release: wasm-deps-release wasm-configure-release wasm-build-release
 # navigator.gpu and dynamically loads either nodehammer-gles3.{js,wasm}
 # (WebGL2) or nodehammer-wgpu.{js,wasm} (WebGPU).
 #
-# The shell decides between URL-auto-load and upload-only mode by fetching
-# a sibling `nh_manifest.json` at startup:
-#   - If present, its `input` / `config` fields name the scene to load.
-#   - If 404, the viewer comes up empty and accepts drag-and-drop /
-#     file-picker uploads.
+# The shell picks its posture by fetching a sibling `nh_manifest.json` at
+# startup:
+#   - If present, its `archive` field names the `.nhproj` to load — viewer
+#     mode, content-locked.
+#   - If 404, the viewer comes up as the application: empty, restoring the
+#     last project from IndexedDB, accepting drag-and-drop / file-picker.
 #
 # `scene` names any fixtures/configs/<scene>.toml; its full include chain is
-# resolved and staged automatically. Pass `none` for upload-only (no manifest).
+# packed into the archive automatically. Pass `none` for application mode.
 #
 # Usage:
-#   just wasm-serve                                    # ODD scene, autoload (default)
-#   just wasm-serve odd_simple                         # simplified ODD scene, autoload
+#   just wasm-serve                                    # ODD scene, viewer mode (default)
+#   just wasm-serve odd_simple                         # simplified ODD scene, viewer mode
 #   just wasm-serve odd_drop_coincident_faces           # ODD with calorimeter/long-strip interior faces dropped
-#   just wasm-serve none                                # no manifest; upload-only deployment
+#   just wasm-serve none                                # no sidecar; application mode
 #   just wasm-serve odd 9000                            # ODD scene on a custom port
 wasm-serve scene='odd' port='8000':
     #!/usr/bin/env bash
@@ -188,14 +189,14 @@ wasm-serve scene='odd' port='8000':
 # RelWithDebInfo).
 #
 # `scene` names any fixtures/configs/<scene>.toml; its full include chain is
-# resolved and staged automatically. Pass `none` for upload-only (no manifest).
+# packed into the archive automatically. Pass `none` for application mode.
 #
 # Usage:
-#   just wasm-copy                                              # ODD autoload bundle (Release) to build/wasm-viewer
-#   just wasm-copy odd public/viewer                            # ODD autoload bundle (Release) to a custom directory
-#   just wasm-copy odd_simple public/viewer                     # simplified ODD autoload bundle (Release)
+#   just wasm-copy                                              # ODD viewer-mode bundle (Release) to build/wasm-viewer
+#   just wasm-copy odd public/viewer                            # ODD viewer-mode bundle (Release) to a custom directory
+#   just wasm-copy odd_simple public/viewer                     # simplified ODD viewer-mode bundle (Release)
 #   just wasm-copy odd_drop_coincident_faces public/viewer      # ODD with calorimeter/long-strip interior faces dropped
-#   just wasm-copy none public/viewer                           # upload-only bundle (Release)
+#   just wasm-copy none public/viewer                           # application-mode bundle (Release)
 #   just wasm-copy odd public/viewer RelWithDebInfo             # deploy the RelWithDebInfo build instead
 wasm-copy scene='odd' target='build/wasm-viewer' build='Release':
     #!/usr/bin/env bash
@@ -207,6 +208,18 @@ wasm-copy scene='odd' target='build/wasm-viewer' build='Release':
     mode="${staged[1]}"
 
     echo "copied wasm viewer payload to $out in $mode"
+
+# Assemble the full GitHub Pages site locally — the landing page plus all three
+# posture directories (application, ODD full, ODD simplified). Same script CI
+# publishes with, so a local run previews exactly what gets deployed. Build the
+# wasm first (`just wasm-release`), then serve the result:
+#
+#   just pages-site && python3 scripts/serve_nocache.py 8000 --directory build/pages
+pages-site target='build/pages' build='Release':
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    "$root/scripts/build_pages_site.sh" "$root/build/emscripten/{{build}}" "{{target}}"
 
 # Headless smoke for the compute-worker module: generates a small synthetic
 # semantic scene with the native build, then drives nh_compute_build in node via
