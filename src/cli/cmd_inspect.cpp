@@ -25,7 +25,7 @@ nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
 
 // ── Summary ─��─────────────────────────────────���──────────────────────────────
 
-void printSummary(const nodehammer::ImportResult &result, std::string_view formatName) {
+void printSummary(const nodehammer::detail::ImportResult &result, std::string_view formatName) {
     std::map<std::string, int> shapeCounts;
     for (const auto &[id, shape] : result.scene.shapes) {
         std::string typeName = std::visit(

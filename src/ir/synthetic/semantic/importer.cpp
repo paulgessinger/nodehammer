@@ -135,7 +135,7 @@ detail::SemanticScene SyntheticSceneBuilder::buildBooleanSubtraction() {
     return scene;
 }
 
-ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
+detail::ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     detail::SemanticScene scene;
     DiagnosticList diags;
 
@@ -167,7 +167,7 @@ ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
 
     diags.warn(codes::kWarnImportUnknownShape, "Unknown shape type: SyntheticUnknown", "world");
 
-    return ImportResult{std::move(scene), std::move(diags)};
+    return detail::ImportResult{std::move(scene), std::move(diags)};
 }
 
 // ── SyntheticImporter ─────────────────────────────────────────────────────────
@@ -176,8 +176,9 @@ std::string_view SyntheticImporter::formatName() const noexcept { return "synthe
 
 std::vector<std::string> SyntheticImporter::supportedExtensions() const { return {}; }
 
-ImportResult SyntheticImporter::import([[maybe_unused]] const std::filesystem::path &path) const {
-    return ImportResult{SyntheticSceneBuilder::buildSingleBox(), {}};
+detail::ImportResult
+SyntheticImporter::import([[maybe_unused]] const std::filesystem::path &path) const {
+    return detail::ImportResult{SyntheticSceneBuilder::buildSingleBox(), {}};
 }
 
 } // namespace nodehammer

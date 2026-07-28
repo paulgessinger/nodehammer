@@ -13,8 +13,8 @@ std::string_view JsonImporter::formatName() const noexcept { return "json"; }
 
 std::vector<std::string> JsonImporter::supportedExtensions() const { return {"json", "json.zst"}; }
 
-ImportResult JsonImporter::import(const std::filesystem::path &path) const {
-    ImportResult result;
+detail::ImportResult JsonImporter::import(const std::filesystem::path &path) const {
+    detail::ImportResult result;
 
     try {
         auto jsonStr = zstd_io::readJsonFromFile(path);

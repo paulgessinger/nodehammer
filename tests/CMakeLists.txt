@@ -1,6 +1,7 @@
 add_executable(nodehammer_tests
     test_main.cpp
     api/test_render_handle.cpp
+    api/test_semantic_handle.cpp
     ir/test_semantic_ir.cpp
     ir/test_json_roundtrip.cpp
     ir/test_shape_variant.cpp

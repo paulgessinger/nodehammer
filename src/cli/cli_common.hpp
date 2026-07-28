@@ -34,7 +34,7 @@ inline void printDiags(const DiagnosticList &diags) {
 
 /// Result of importOrExit: the import result plus the format name.
 struct ImportWithFormat {
-    ImportResult result;
+    detail::ImportResult result;
     std::string formatName;
 };
 

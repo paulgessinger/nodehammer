@@ -94,7 +94,7 @@ std::string_view DD4hepImporter::formatName() const noexcept { return "dd4hep"; 
 
 std::vector<std::string> DD4hepImporter::supportedExtensions() const { return {}; }
 
-ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
+detail::ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     // Suppress ROOT and DD4hep noise so stdout stays clean for JSON piping.
     const int savedRootLevel = gErrorIgnoreLevel;
     const dd4hep::PrintLevel savedDd4hepLevel = dd4hep::printLevel();
@@ -106,7 +106,7 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
         detOwner = dd4hep::Detector::make_unique("");
         detOwner->fromCompact(path.string());
     } catch (const std::exception &ex) {
-        ImportResult result;
+        detail::ImportResult result;
         result.diags.error(codes::kErrTgeoOpenFailed,
                            std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()));
         gErrorIgnoreLevel = savedRootLevel;

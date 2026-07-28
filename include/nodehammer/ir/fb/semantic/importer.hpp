@@ -15,15 +15,15 @@ class FlatBufferImporter final : public ISemanticImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
-    [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
+    [[nodiscard]] detail::ImportResult import(const std::filesystem::path &path) const override;
 
     /// Bytes-only entry point. `filename` is used purely for diagnostics
     /// (and to detect the `.zst` suffix that signals zstd compression);
     /// the actual data comes from `bytes`. Used by the viewer build
     /// pipeline so geometry can flow straight from a project's resolved
     /// bytes into a SemanticScene without a filesystem round-trip.
-    [[nodiscard]] static ImportResult importFromBytes(std::string_view filename,
-                                                      std::span<const std::byte> bytes);
+    [[nodiscard]] static detail::ImportResult importFromBytes(std::string_view filename,
+                                                              std::span<const std::byte> bytes);
 };
 
 } // namespace nodehammer

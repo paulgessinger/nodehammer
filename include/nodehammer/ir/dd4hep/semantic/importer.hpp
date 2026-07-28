@@ -13,7 +13,7 @@ class DD4hepImporter final : public ISemanticImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
-    [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
+    [[nodiscard]] detail::ImportResult import(const std::filesystem::path &path) const override;
 };
 
 } // namespace nodehammer

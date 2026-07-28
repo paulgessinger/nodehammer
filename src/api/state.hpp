@@ -14,12 +14,30 @@
 // answering it.
 
 #include <nodehammer/ir/render.hpp>
+#include <nodehammer/scene.hpp>
 
 #include <cstddef>
 #include <memory>
 #include <vector>
 
 namespace nodehammer::detail {
+
+struct SemanticSceneState {
+    std::shared_ptr<const SemanticScene> scene;
+
+    /// Depth-first preorder from the root. Unreachable nodes are absent, which
+    /// is why SemanticStats reports `nodeCount` and `reachableNodeCount`
+    /// separately — a prune can leave detached nodes in the map.
+    std::vector<SemanticNodeId> nodeIds;
+    /// Ascending by id.
+    std::vector<SemanticLogVolId> logVolIds;
+    std::vector<SemanticShapeId> shapeIds;
+    std::vector<SemanticMaterialId> materialIds;
+
+    SemanticStats stats;
+
+    explicit SemanticSceneState(std::shared_ptr<const SemanticScene> s);
+};
 
 struct RenderSceneState {
     std::shared_ptr<const RenderScene> scene;

@@ -33,8 +33,14 @@ build:
 build-nodehammer:
     {{build_nodehammer_cmd}}
 
-test:
+test: check-floor
     ctest --preset conan-relwithdebinfo --output-on-failure -j14
+
+# Recompile the public API at C++20. The repo builds at C++23, so this is the
+# only thing stopping a C++23 feature reaching code the amalgamated header has
+# to carry. Never linked or shipped — it exists to fail.
+check-floor:
+    cmake --build --preset conan-relwithdebinfo --target nodehammer_cxx20_floor
 
 lint:
     prek run --all-files

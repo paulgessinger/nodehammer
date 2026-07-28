@@ -122,6 +122,7 @@ add_library(nodehammer_lib STATIC
     src/ir/semantic.cpp
     src/ir/semantic_json.cpp
     src/api/render.cpp
+    src/api/semantic.cpp
     src/api/pipeline.cpp
     src/ir/render_json.cpp
     src/config/config_loader.cpp
@@ -193,6 +194,29 @@ add_dependencies(nodehammer_lib flatbuffers_generate)
 target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_FBS_GENERATED_DIR})
 
 nodehammer_set_compiler_options(nodehammer_lib)
+
+# ── C++20 floor for the public API + amalgamation slice ──────────────────────
+# The repo compiles at C++23 everywhere, and CI asserts <print> exists, so
+# nothing otherwise stops a C++23 feature landing in code the amalgamated
+# header has to carry — the exact trap docs/event-display-design.md §7.5
+# records for the DD4hep importer.
+#
+# This target recompiles the API sources (and, transitively, the public headers
+# and the semantic IR they include) at C++20. It is never linked or shipped; it
+# exists to fail the build when the floor is broken. Excluded from ALL so a
+# plain `cmake --build` does not pay for it twice — CI and `just test` build it
+# explicitly.
+add_library(nodehammer_cxx20_floor OBJECT EXCLUDE_FROM_ALL
+    src/api/render.cpp
+    src/api/semantic.cpp
+    src/api/pipeline.cpp
+)
+set_target_properties(nodehammer_cxx20_floor PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+target_link_libraries(nodehammer_cxx20_floor PRIVATE nodehammer_lib)
 
 # ── CLI library ────────────────────────────────────────────────────────────────
 # Subcommand dispatchers + CLI11 glue. Native-only: the wasm viewer ships

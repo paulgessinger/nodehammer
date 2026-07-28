@@ -13,10 +13,15 @@ namespace nodehammer {
 
 /// Result of a single import call. Partial success is allowed:
 /// scene may be populated even when diags.hasErrors() is true.
+///
+/// In `detail` because the public import verb returns a handle under this
+/// name; this is the importer plumbing behind it.
+namespace detail {
 struct ImportResult {
-    detail::SemanticScene scene;
+    SemanticScene scene;
     DiagnosticList diags;
 };
+} // namespace detail
 
 /// Pure interface for all geometry importers.
 class ISemanticImporter {
@@ -32,7 +37,7 @@ class ISemanticImporter {
 
     /// Perform the import. For importers that do not use a file path (e.g. synthetic),
     /// the path argument is ignored.
-    [[nodiscard]] virtual ImportResult import(const std::filesystem::path &path) const = 0;
+    [[nodiscard]] virtual detail::ImportResult import(const std::filesystem::path &path) const = 0;
 };
 
 /// Owns a collection of ISemanticImporter instances. Lookup is by format name or

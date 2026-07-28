@@ -154,14 +154,14 @@ std::string_view TGeoImporter::formatName() const noexcept { return "tgeo"; }
 
 std::vector<std::string> TGeoImporter::supportedExtensions() const { return {".root"}; }
 
-ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
+detail::ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
     const int savedLevel = gErrorIgnoreLevel;
     gErrorIgnoreLevel = kError;
     TGeoManager *mgr = TGeoManager::Import(path.c_str());
     gErrorIgnoreLevel = savedLevel;
 
     if (mgr == nullptr) {
-        ImportResult result;
+        detail::ImportResult result;
         result.diags.error(codes::kErrTgeoOpenFailed,
                            std::format("failed to open ROOT file '{}'", path.string()));
         return result;
@@ -170,9 +170,9 @@ ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
     return traverseTGeoManager(mgr, path.string()).result;
 }
 
-ImportResult TGeoImporter::import(TGeoManager *mgr) const {
+detail::ImportResult TGeoImporter::import(TGeoManager *mgr) const {
     if (mgr == nullptr) {
-        ImportResult result;
+        detail::ImportResult result;
         result.diags.error(codes::kErrTgeoOpenFailed, "null TGeoManager pointer");
         return result;
     }

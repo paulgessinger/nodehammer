@@ -14,8 +14,8 @@ std::vector<std::string> FlatBufferImporter::supportedExtensions() const {
     return {"nhb", "nhb.zst"};
 }
 
-ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const {
-    ImportResult result;
+detail::ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const {
+    detail::ImportResult result;
 
     try {
         auto raw = zstd_io::readBytesFromFile(path);
@@ -32,9 +32,9 @@ ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const
     return result;
 }
 
-ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
-                                                 std::span<const std::byte> bytes) {
-    ImportResult result;
+detail::ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
+                                                         std::span<const std::byte> bytes) {
+    detail::ImportResult result;
 
     try {
         // `.zst` suffix on the filename signals zstd-compressed input —

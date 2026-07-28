@@ -33,7 +33,7 @@ enum class BuildPhase {
 /// parse + import. Moves out of the session via `takeInputs()`.
 struct BuildSessionInputs {
     ConfigResult config;
-    ImportResult import;
+    detail::ImportResult import;
     std::string config_key;
     std::string geometry_key;
     /// Hash over the full set of resolved input bytes (root config + every

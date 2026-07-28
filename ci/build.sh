@@ -61,6 +61,9 @@ case "$cmd" in
     ;;
   build)
     cmake --build --preset "$preset"
+    # Public API recompiled at the C++20 amalgamation floor. EXCLUDE_FROM_ALL,
+    # so it needs asking for by name.
+    cmake --build --preset "$preset" --target nodehammer_cxx20_floor
     ;;
   test)
     ctest --preset "$preset" --output-on-failure "$@"

@@ -27,7 +27,7 @@ class SyntheticSceneBuilder {
     /// Scene with one node whose shape is UnknownShape.
     /// Sets DegradationBit::UnknownShape on the node's provenance and emits
     /// a NH0102 warning into the returned DiagnosticList.
-    [[nodiscard]] static ImportResult buildWithDiagnostics();
+    [[nodiscard]] static detail::ImportResult buildWithDiagnostics();
 };
 
 /// ISemanticImporter implementation for the "synthetic" format.
@@ -36,7 +36,7 @@ class SyntheticImporter final : public ISemanticImporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
-    [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
+    [[nodiscard]] detail::ImportResult import(const std::filesystem::path &path) const override;
 };
 
 } // namespace nodehammer
