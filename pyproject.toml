@@ -1,5 +1,8 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.4"]
+# nanobind comes from Conan (`-o '&:python=True'`), not from here — CMake falls
+# back to a pip-installed copy only if no Conan-provided one is on the prefix
+# path. scikit-build-core has to come from PyPI: it *is* the PEP 517 backend.
+requires = ["scikit-build-core>=0.10"]
 build-backend = "scikit_build_core.build"
 
 [project]

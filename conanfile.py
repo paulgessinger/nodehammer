@@ -11,8 +11,8 @@ class Nodehammer(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     generators = "CMakeDeps", "CMakeToolchain"
 
-    options = {"viewer": [True, False]}
-    default_options = {"viewer": False}
+    options = {"viewer": [True, False], "python": [True, False]}
+    default_options = {"viewer": False, "python": False}
 
     tool_requires = ("flatbuffers/25.12.19",)
 
@@ -65,6 +65,14 @@ class Nodehammer(ConanFile):
             self.requires("miniz/3.0.2")
             if self.settings.os != "Emscripten":
                 self.requires("nfd/1.3.0")
+        # Python extension module (`-o '&:python=True'`). nanobind ships sources
+        # + its own CMake config rather than a prebuilt library, so the recipe
+        # gives us exactly what `pip install nanobind` would — but resolved
+        # through the same dependency graph as everything else, which keeps a
+        # plain `cmake -DNODEHAMMER_BUILD_PYTHON=ON` working outside a PEP 517
+        # build environment. Never needed under Emscripten.
+        if self.options.python and self.settings.os != "Emscripten":
+            self.requires("nanobind/2.13.0")
 
     def build_requirements(self):
         # sokol-shdc is the shader compiler: a prebuilt static binary wrapped

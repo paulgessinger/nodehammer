@@ -418,14 +418,25 @@ if(NODEHAMMER_BUILD_PYTHON)
     find_package(Python 3.10 REQUIRED
         COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
 
-    # nanobind ships its CMake config inside the installed Python package rather
-    # than on CMAKE_PREFIX_PATH, so ask the interpreter where it lives.
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        OUTPUT_VARIABLE nanobind_ROOT
-        COMMAND_ERROR_IS_FATAL ANY)
-    find_package(nanobind CONFIG REQUIRED)
+    # Conan (`-o '&:python=True'`) is the expected source, like every other
+    # dependency. Fall back to the copy inside an installed `nanobind` Python
+    # package — which lives in site-packages rather than on CMAKE_PREFIX_PATH,
+    # hence the interpreter probe — so a PEP 517 build with nanobind in
+    # build-system.requires also works without a Conan profile.
+    find_package(nanobind CONFIG QUIET)
+    if(NOT nanobind_FOUND)
+        execute_process(
+            COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            OUTPUT_VARIABLE nanobind_ROOT
+            RESULT_VARIABLE _nb_probe)
+        if(NOT _nb_probe EQUAL 0)
+            message(FATAL_ERROR
+                "nanobind not found. Either configure with Conan "
+                "(`conan install . -o '&:python=True'`) or `pip install nanobind`.")
+        endif()
+        find_package(nanobind CONFIG REQUIRED)
+    endif()
 
     # STABLE_ABI builds a cp312-abi3 module on Python >= 3.12 (silently ignored
     # below that), so one wheel per platform covers every later interpreter
