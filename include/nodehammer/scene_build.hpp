@@ -16,7 +16,11 @@ namespace nodehammer {
 /// null and diags carries the reason. Warnings can accompany a successful
 /// build, so callers should always render diags regardless of success.
 struct SceneBuildResult {
-    std::shared_ptr<detail::RenderScene> scene;
+    /// Const so that wrapping this into a public handle cannot leave a mutable
+    /// alias to the same scene behind: mutating through one would not merely
+    /// change values, it would dangle the string_views and spans the handle's
+    /// accessors hand out.
+    std::shared_ptr<const detail::RenderScene> scene;
     DiagnosticList diags;
 };
 

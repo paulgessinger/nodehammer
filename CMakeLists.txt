@@ -121,6 +121,8 @@ endif()
 add_library(nodehammer_lib STATIC
     src/ir/semantic.cpp
     src/ir/semantic_json.cpp
+    src/api/render.cpp
+    src/api/pipeline.cpp
     src/ir/render_json.cpp
     src/config/config_loader.cpp
     src/config/config_writer.cpp
