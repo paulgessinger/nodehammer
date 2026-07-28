@@ -31,6 +31,13 @@ struct UiState {
     bool show_view{true};
     bool show_debug{true};
     bool dockspace_built{false};
+
+    // Sync-to-URL window (web): which steer to write to the address bar and
+    // whether to do it continuously. Persisted with the viewer config state.
+    bool show_sync{false};
+    bool url_sync_continuous{false};
+    bool url_sync_camera{true};
+    bool url_sync_view{true};
 };
 
 struct UiActions {
@@ -38,7 +45,7 @@ struct UiActions {
     std::function<void(const std::string &)> open_url;
     std::function<void()> open_file_picker;
     std::function<void()> open_folder_picker;
-    /// Open a `.zip` project as a live archive mode (native only).
+    /// Open a `.nhproj` project as a live archive mode (cross-platform).
     std::function<void()> open_archive;
     /// Promote the current project into a live, unbound archive bundle seeded
     /// with its archivable content. Gated by `can_create_archive`.
@@ -46,6 +53,8 @@ struct UiActions {
     /// Persist the current archive: write in place if bound, else save-as
     /// (native) / download (web). Gated by `is_archive_mode`.
     std::function<void()> save_archive;
+    /// Publish the current project as a self-contained web package (web only).
+    std::function<void()> publish_package;
     std::function<void()> frame_scene;
     std::function<void()> close_project;
     std::function<void()> rescan_project;

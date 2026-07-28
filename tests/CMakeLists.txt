@@ -52,6 +52,7 @@ endif()
 if(NODEHAMMER_WITH_VIEWER)
     target_sources(nodehammer_tests PRIVATE
         viewer/test_zip_working_set.cpp
+        viewer/test_project_manifest.cpp
     )
 endif()
 

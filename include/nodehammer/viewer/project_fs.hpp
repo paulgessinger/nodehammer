@@ -77,9 +77,10 @@ struct ProjectDropDecision {
 };
 
 /// Pluggable virtual filesystem used by the App to load a viewer project.
-/// Backends nominate where bytes come from: URL fetches (UrlProjectFs),
-/// drag-drop / file-picker bags (BagProjectFs), and (future) archives,
-/// watched filesystems, editor overlays.
+/// Backends nominate where bytes come from: on-disk folders
+/// (FilesystemProjectFs, WatchedFilesystemProjectFs), the native drop/pick bag
+/// (NativeBagProjectFs), and the ZIP working set that backs archive mode + the
+/// web app/viewer project (ArchiveProjectFs).
 ///
 /// Decoration discipline: future stages will wrap an existing project in
 /// a decorator (e.g. OverlayProjectFs for the editor, WatchedFilesystemProjectFs

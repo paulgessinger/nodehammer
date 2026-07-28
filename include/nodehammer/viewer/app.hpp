@@ -74,9 +74,9 @@ class App {
     /// builds the scene from the project's resolved paths. The project is
     /// long-lived: drag-drop and the file-picker push files into the
     /// existing project rather than allocate a new one. Replacing the
-    /// project (e.g. swapping a BagProjectFs for a UrlProjectFs at startup,
-    /// or wrapping the current one in a future overlay/watcher decorator)
-    /// clears the current scene.
+    /// project (e.g. swapping the empty working set for an opened archive, or
+    /// wrapping the current one in an overlay/watcher decorator) clears the
+    /// current scene. Honors a self-describing archive's project manifest.
     void setProject(std::unique_ptr<ProjectFs> project);
 
     /// Live project the App is polling, never null after construction.
@@ -89,8 +89,40 @@ class App {
 
     /// Add files to the current project through the App. The ProjectFs decides
     /// whether to accept, reject, or require confirmation; App owns the UI.
+    /// A dropped/picked `.nhproj` is recognised and opened as a whole project
+    /// (see `openArchiveFromBytes`) rather than added as a file.
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+
+    /// Open `.nhproj` bytes as a live project (unbound `ArchiveProjectFs`,
+    /// provenance `Local`). Used by the web open-archive picker / drop and any
+    /// caller that already has the archive bytes in hand. On a bad archive it
+    /// surfaces an error notification and leaves the current project in place.
+    void openArchiveFromBytes(std::span<const std::byte> bytes);
+
+    /// Open fetched `.nhproj` bytes as a web *viewer-mode* project (provenance
+    /// `Remote`): content-`locked` per the sidecar, never persisted to IDB,
+    /// re-fetched from source on reload. Called by the startup archive fetch.
+    void openArchiveRemote(std::span<const std::byte> bytes, bool locked);
+
+    /// Publish the current project as a self-contained web package (§6.6). Web
+    /// only: seeds a package with the sidecar + `.nhproj`, then the platform fetches
+    /// the app's own runtime siblings — `addPackageFile` collects each and
+    /// `finalizePackage` serializes + downloads `nodehammer-package.zip`. The two
+    /// callbacks are invoked by the runtime; `publishPackage` is the entry point.
+    void publishPackage();
+    void addPackageFile(const std::string &name, std::span<const std::byte> bytes);
+    void finalizePackage();
+
+    /// Web application-mode IDB persistence hooks (no-ops on native / viewer mode):
+    ///   - `restoreWebProjectFromIdb()` kicks the async cold-load at startup.
+    ///   - `onProjectBlobLoaded(bytes)` is the runtime callback for that load;
+    ///     it restores the saved working set if the project is still pristine.
+    ///   - `flushWebProjectPersistence()` force-writes the working set to IDB
+    ///     (called on `beforeunload`).
+    void restoreWebProjectFromIdb();
+    void onProjectBlobLoaded(std::span<const std::byte> bytes);
+    void flushWebProjectPersistence();
 
     /// Promote the current project into an in-memory archive bundle seeded with
     /// its archivable content (build closure for filesystem mode, whole working

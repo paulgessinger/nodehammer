@@ -250,12 +250,66 @@ void applyViewerStartupOverrides(const ConfigStartupOverrides &overrides, Config
     }
 }
 
+std::optional<ConfigStartupOverrides> parseManifestViewSteer(std::string_view toml_bytes) {
+    toml::table root;
+    try {
+        root = toml::parse(toml_bytes);
+    } catch (const toml::parse_error &) {
+        return std::nullopt;
+    }
+    const auto *view = root["view"].as_table();
+    if (view == nullptr) {
+        return std::nullopt;
+    }
+    ConfigStartupOverrides ov;
+    if (auto v = (*view)["cull"].value<std::string>()) {
+        if (auto parsed = parseCullOverride(*v)) {
+            ov.cull = *parsed;
+        }
+    }
+    if (auto v = (*view)["pause_when_unfocused"].value<bool>()) {
+        ov.pause_when_unfocused = *v;
+    }
+    if (auto v = (*view)["auto_orbit"].value<bool>()) {
+        ov.auto_orbit = *v;
+    }
+    if (auto v = finiteFloat(*view, "auto_orbit_speed_deg")) {
+        ov.auto_orbit_speed_deg = *v;
+    }
+    if (auto v = (*view)["angle_cut"].value<bool>()) {
+        ov.angle_cut = *v;
+    }
+    if (auto v = (*view)["shader_angle_cut"].value<bool>()) {
+        ov.shader_angle_cut = *v;
+    }
+    if (auto v = (*view)["boolean_cut"].value<bool>()) {
+        ov.boolean_cut = *v;
+    }
+    if (auto v = finiteFloat(*view, "angle_cut_start_deg")) {
+        ov.angle_cut_start_deg = *v;
+    }
+    if (auto v = finiteFloat(*view, "angle_cut_end_deg")) {
+        ov.angle_cut_end_deg = *v;
+    }
+    if (auto v = (*view)["enable_pbr"].value<bool>()) {
+        ov.enable_pbr = *v;
+    }
+    if (const auto *cam = (*view)["camera"].as_table()) {
+        ov.camera = parseCamera(*cam);
+    }
+    return ov;
+}
+
 std::string viewerConfigStateToToml(const ViewerConfigState &state) {
     toml::table ui{
         {"show_project", state.show_project},
         {"show_status", state.show_status},
         {"show_view", state.show_view},
         {"show_debug", state.show_debug},
+        {"show_sync", state.show_sync},
+        {"url_sync_continuous", state.url_sync_continuous},
+        {"url_sync_camera", state.url_sync_camera},
+        {"url_sync_view", state.url_sync_view},
     };
     toml::table view{
         {"cull", cullOverrideName(state.cull)},
@@ -292,6 +346,10 @@ std::optional<ViewerConfigState> viewerConfigStateFromToml(std::string_view byte
         readBool(*ui, "show_status", state.show_status);
         readBool(*ui, "show_view", state.show_view);
         readBool(*ui, "show_debug", state.show_debug);
+        readBool(*ui, "show_sync", state.show_sync);
+        readBool(*ui, "url_sync_continuous", state.url_sync_continuous);
+        readBool(*ui, "url_sync_camera", state.url_sync_camera);
+        readBool(*ui, "url_sync_view", state.url_sync_view);
     }
     if (const auto *view = root["view"].as_table()) {
         readCullOverride(*view, "cull", state.cull);

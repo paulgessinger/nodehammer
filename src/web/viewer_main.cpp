@@ -10,10 +10,11 @@
 //   1. JS shell calls `_nh_viewer_start(opts_json)` once.
 //   2. Options JSON populates a viewer::Config + (optionally) an
 //      initial_camera.
-//   3. If both `config` and `input` URL-style paths are supplied, a
-//      UrlProjectFs is mounted on the App and fetches them via
-//      emscripten_fetch. Otherwise the App keeps its eagerly-allocated
-//      BagProjectFs; drag-drop or the file picker push files into it.
+//   3. If an `archive` URL is supplied (viewer mode — the sidecar names a
+//      `.nhproj`), its bytes are fetched via emscripten_fetch and opened as a
+//      content-locked, provenance-Remote project. Otherwise the App keeps its
+//      empty working set (application mode) and kicks an IndexedDB restore;
+//      drag-drop / the file picker / Open-archive push into it.
 //   4. `App::run()` registers the sokol main loop with emscripten and
 //      unwinds; subsequent frame callbacks fire from the event queue.
 //
@@ -23,14 +24,18 @@
 
 #include <nodehammer/viewer/app.hpp>
 #include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/url_project_fs.hpp>
 
+#include <emscripten/fetch.h>
 #include <glm/glm.hpp>
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -40,10 +45,10 @@ namespace {
 // sync with the readField calls below — the warnUnknownKeys check uses it
 // to flag silent typos in JSON keys (the boundary's main weakness vs. a
 // strongly-typed binding like embind).
-constexpr std::array<std::string_view, 18> kKnownOptionKeys = {
+constexpr std::array<std::string_view, 17> kKnownOptionKeys = {
     "title",     "width",      "height",   "vsync",          "cull",       "pauseWhenUnfocused",
     "autoOrbit", "orbitSpeed", "angleCut", "shaderAngleCut", "booleanCut", "cutStart",
-    "cutEnd",    "pbr",        "input",    "config",         "assetBase",  "camera",
+    "cutEnd",    "pbr",        "archive",  "lock",           "camera",
 };
 
 constexpr std::array<std::string_view, 7> kKnownCameraKeys = {
@@ -183,26 +188,45 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
     cfg.initial_camera = parseCamera(j);
     cfg.startup_overrides.camera = cfg.initial_camera;
 
-    std::string inputPath, configPath, assetBase;
-    readField(j, "input", inputPath);
-    readField(j, "config", configPath);
-    readField(j, "assetBase", assetBase);
+    std::string archiveUrl;
+    bool lock = true; // viewer-mode publications are content-locked by default
+    readField(j, "archive", archiveUrl);
+    readField(j, "lock", lock);
 
     nodehammer::viewer::App::Handle application(cfg);
 
-    if (!inputPath.empty() && !configPath.empty()) {
-        auto loader = std::make_unique<nodehammer::viewer::UrlProjectFs>();
-        loader->setAssetBase(assetBase);
-        application->setProject(std::move(loader));
-        // Stage 2: BuildSession resolves these keys lazily through
-        // UrlProjectFs::resolve, which kicks off emscripten_fetch on
-        // first miss. No upfront enqueue needed — the session does it.
-        application->setRootKeys(configPath, inputPath);
+    if (!archiveUrl.empty()) {
+        // Viewer mode: fetch the .nhproj bytes; the callback installs a Remote,
+        // content-locked project. The App runs with its empty working set until the
+        // archive lands (a brief loading state). `lock` rides along in userData.
+        emscripten_fetch_attr_t attr;
+        emscripten_fetch_attr_init(&attr);
+        std::strcpy(attr.requestMethod, "GET");
+        attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+        attr.userData = reinterpret_cast<void *>(static_cast<std::uintptr_t>(lock ? 1 : 0));
+        attr.onsuccess = [](emscripten_fetch_t *f) {
+            auto *app = nodehammer::viewer::App::instance();
+            if (app != nullptr) {
+                const bool locked = reinterpret_cast<std::uintptr_t>(f->userData) != 0;
+                app->openArchiveRemote(
+                    std::as_bytes(std::span{reinterpret_cast<const std::byte *>(f->data),
+                                            static_cast<std::size_t>(f->numBytes)}),
+                    locked);
+            }
+            emscripten_fetch_close(f);
+        };
+        attr.onerror = [](emscripten_fetch_t *f) {
+            std::fprintf(stderr, "viewer: failed to fetch archive (HTTP %d)\n", f->status);
+            emscripten_fetch_close(f);
+        };
+        emscripten_fetch(&attr, archiveUrl.c_str());
+    } else {
+        // Application mode (no sidecar-provided archive): the App keeps its
+        // eagerly-allocated empty working set. Kick an async IndexedDB restore so a
+        // previously-persisted project reappears; drops/picks otherwise accumulate
+        // into the working set and App-side recognition picks the root keys.
+        application->restoreWebProjectFromIdb();
     }
-    // Otherwise the App keeps its eagerly-allocated BagProjectFs — the
-    // user's first drop or Open-files gesture pushes into it directly,
-    // and App-side recognition picks the .toml + .nhb/.nhb.zst entries
-    // as the build's root keys.
 
     application->run();
     return 0;

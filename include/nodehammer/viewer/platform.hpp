@@ -26,9 +26,10 @@ inline constexpr bool kIsWeb = false;
 
 /// Construct the App's "empty project" backend. Native returns a
 /// write-through `NativeBagProjectFs` rooted at a process-owned tmp
-/// dir (strategy doc step 3); web returns the in-memory `BagProjectFs`
-/// until `WebBagProjectFs` (step 8) lands. Defined per-platform so the
-/// App TU stays free of bag-backend headers.
+/// dir (strategy doc step 3); web returns an empty `ArchiveProjectFs`
+/// working set (provenance `Empty`, §0 reshape / R1) that loose drops
+/// accumulate into and application mode persists to IDB. Defined
+/// per-platform so the App TU stays free of backend headers.
 std::unique_ptr<ProjectFs> makeEmptyBag();
 
 struct WindowCustomizationRequest {
@@ -157,11 +158,29 @@ class Platform {
     std::optional<std::string> saveExportedImage(const std::string &filename,
                                                  std::span<const std::byte> bytes);
 
-    /// Deliver a `.zip` archive blob to the user. Web triggers a browser download
-    /// under `filename` (how unbound web archives persist). Native is a no-op —
-    /// native archives are written to a path picked via `saveArchivePicker()`.
-    /// `bytes` is consumed during the call.
+    /// Deliver a `.nhproj` archive blob to the user. Web triggers a browser
+    /// download under `filename` (how unbound web archives persist). Native is a
+    /// no-op — native archives are written to a path picked via
+    /// `saveArchivePicker()`. `bytes` is consumed during the call.
     void downloadArchive(const std::string &filename, std::span<const std::byte> bytes);
+
+    /// Web application-mode project persistence to IndexedDB (the working set that
+    /// makes the web app feel native — it survives reload). Native is a no-op:
+    /// native modes persist through their own on-disk backing.
+    ///   - `loadProjectBlob()` kicks an async IDB read; when it resolves the
+    ///     runtime calls `App::onProjectBlobLoaded(bytes)` (empty span on a miss).
+    ///   - `saveProjectBlob(bytes)` writes the blob (fire-and-forget).
+    ///   - `clearProjectBlob()` deletes it (Close project).
+    void loadProjectBlob();
+    void saveProjectBlob(std::span<const std::byte> bytes);
+    void clearProjectBlob();
+
+    /// Web "Publish package": fetch the running app's own same-origin runtime
+    /// siblings (viewer.html + the gles3/wgpu/compute js+wasm) and hand each back
+    /// to `App::addPackageFile`, then call `App::finalizePackage` to serialize the
+    /// self-contained deployable and download it. Native is a no-op for now — a
+    /// native publish would copy a staged web runtime (§6.6, feasibility TBD).
+    void fetchRuntimeForPublish();
 
     /// Request a "pick files" gesture. Web dispatches the browser's
     /// transient `<input type=file multiple>` inline (the browser

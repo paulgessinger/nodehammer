@@ -1,7 +1,8 @@
 #include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
+#include <nodehammer/viewer/archive_project_fs.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/project_fs.hpp>
+#include <nodehammer/viewer/zip_working_set.hpp>
 
 #include <emscripten/emscripten.h>
 #include <sokol_app.h>
@@ -86,6 +87,116 @@ EM_JS(void, nh_viewer_download_bytes,
     a.click();
     document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(url); }, 1000);
+});
+// clang-format on
+
+// IndexedDB blob store for web application-mode project persistence. One object
+// store ("blobs") in DB "nodehammer" keyed by a short string; values are the raw
+// `.nhproj` bytes as a Uint8Array. Reads are async: on completion the runtime is
+// called back at Module._nh_viewer_project_blob_loaded(ptr,len) (len 0 = miss).
+// clang-format off
+EM_JS(void, nh_viewer_idb_open_helper, (), {
+    // Lazily define a shared open() helper the get/put/delete calls reuse.
+    if (Module.__nhIdbOpen) { return; }
+    Module.__nhIdbOpen = function() {
+        return new Promise(function(resolve, reject) {
+            var req = indexedDB.open('nodehammer', 1);
+            req.onupgradeneeded = function() {
+                var db = req.result;
+                if (!db.objectStoreNames.contains('blobs')) {
+                    db.createObjectStore('blobs');
+                }
+            };
+            req.onsuccess = function() { resolve(req.result); };
+            req.onerror = function() { reject(req.error); };
+        });
+    };
+});
+
+EM_JS(void, nh_viewer_idb_get, (const char *key), {
+    var k = UTF8ToString(key);
+    nh_viewer_idb_open_helper();
+    Module.__nhIdbOpen().then(function(db) {
+        var tx = db.transaction('blobs', 'readonly');
+        var req = tx.objectStore('blobs').get(k);
+        req.onsuccess = function() {
+            var val = req.result;
+            if (!val) {
+                Module['_nh_viewer_project_blob_loaded'](0, 0);
+                return;
+            }
+            var bytes = new Uint8Array(val);
+            var ptr = Module['_malloc'](bytes.length);
+            Module.HEAPU8.set(bytes, ptr);
+            Module['_nh_viewer_project_blob_loaded'](ptr, bytes.length);
+            Module['_free'](ptr);
+        };
+        req.onerror = function() { Module['_nh_viewer_project_blob_loaded'](0, 0); };
+    }).catch(function(e) {
+        console.warn('nodehammer: IDB get failed', e);
+        Module['_nh_viewer_project_blob_loaded'](0, 0);
+    });
+});
+
+EM_JS(void, nh_viewer_idb_put, (const char *key, const uint8_t *data, int size), {
+    var k = UTF8ToString(key);
+    // Copy out of the wasm heap now (it can move before the async write runs).
+    var copy = new Uint8Array(HEAPU8.subarray(data, data + size));
+    nh_viewer_idb_open_helper();
+    Module.__nhIdbOpen().then(function(db) {
+        var tx = db.transaction('blobs', 'readwrite');
+        tx.objectStore('blobs').put(copy, k);
+    }).catch(function(e) { console.warn('nodehammer: IDB put failed', e); });
+});
+
+EM_JS(void, nh_viewer_idb_delete, (const char *key), {
+    var k = UTF8ToString(key);
+    nh_viewer_idb_open_helper();
+    Module.__nhIdbOpen().then(function(db) {
+        var tx = db.transaction('blobs', 'readwrite');
+        tx.objectStore('blobs').delete(k);
+    }).catch(function(e) { console.warn('nodehammer: IDB delete failed', e); });
+});
+// clang-format on
+
+// The single IDB key for the current application-mode project (single-document
+// now; a named multi-document switcher would key per name — §12 R6).
+static constexpr const char *kProjectBlobKey = "project/default";
+
+// "Publish package": fetch the app's own same-origin runtime siblings and push each
+// back to C++ (App::addPackageFile), then finalize. The archive + sidecar were
+// already written into the pending package working set by App::publishPackage.
+// clang-format off
+EM_JS(void, nh_viewer_publish_fetch_runtime, (), {
+    var path = window.location.pathname;
+    var base = path.slice(0, path.lastIndexOf('/') + 1);
+    var names = ['viewer.html',
+                 'nodehammer-gles3.js', 'nodehammer-gles3.wasm',
+                 'nodehammer-wgpu.js',  'nodehammer-wgpu.wasm',
+                 'nodehammer-compute.js', 'nodehammer-compute.wasm'];
+    var enc = new TextEncoder();
+    Promise.all(names.map(function(n) {
+        return fetch(base + n, { cache: 'no-store' }).then(function(r) {
+            return r.ok ? r.arrayBuffer().then(function(buf) { return { name: n, buf: buf }; })
+                        : null;
+        }).catch(function() { return null; });
+    })).then(function(results) {
+        for (var i = 0; i < results.length; ++i) {
+            var e = results[i];
+            if (!e) { continue; } // a missing backend variant is tolerated
+            var bytes = new Uint8Array(e.buf);
+            var data_ptr = Module['_malloc'](bytes.length);
+            Module.HEAPU8.set(bytes, data_ptr);
+            var name_utf8 = enc.encode(e.name);
+            var name_ptr = Module['_malloc'](name_utf8.length + 1);
+            Module.HEAPU8.set(name_utf8, name_ptr);
+            Module.HEAPU8[name_ptr + name_utf8.length] = 0;
+            Module['_nh_viewer_publish_add_file'](name_ptr, data_ptr, bytes.length);
+            Module['_free'](name_ptr);
+            Module['_free'](data_ptr);
+        }
+        Module['_nh_viewer_publish_finalize']();
+    });
 });
 // clang-format on
 
@@ -248,7 +359,7 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
     var input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = '.toml,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
+    input.accept = '.nhproj,.toml,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
     input.style.display = 'none';
     input.addEventListener(
         'change', async function(ev) {
@@ -283,9 +394,45 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
 });
 // clang-format on
 
+// Open a single `.nhproj` archive as a whole project. A transient
+// `<input type=file accept=.nhproj>` (dispatched inline off the click gesture),
+// then the archive bytes are pushed to C++ via `nh_viewer_open_archive`, which
+// calls `App::openArchiveFromBytes` → a fresh working set (setProject swap).
+// clang-format off
+EM_JS(void, nh_viewer_open_archive_picker, (), {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.nhproj';
+    input.style.display = 'none';
+    input.addEventListener(
+        'change', async function(ev) {
+            var files = Array.from(ev.target.files);
+            document.body.removeChild(input);
+            if (files.length === 0) {
+                return;
+            }
+            var buffer = await files[0].arrayBuffer();
+            var bytes = new Uint8Array(buffer);
+            var data_ptr = Module['_malloc'](bytes.length);
+            Module.HEAPU8.set(bytes, data_ptr);
+            Module['_nh_viewer_open_archive'](data_ptr, bytes.length);
+            Module['_free'](data_ptr);
+        });
+    document.body.appendChild(input);
+    input.click();
+});
+// clang-format on
+
 namespace nodehammer::viewer::platform {
 
-std::unique_ptr<ProjectFs> makeEmptyBag() { return std::make_unique<BagProjectFs>(); }
+std::unique_ptr<ProjectFs> makeEmptyBag() {
+    // The web "empty project" is a scratch working set (provenance Empty): loose
+    // drops accumulate into it with basename-fallback resolve, and application
+    // mode persists it to IDB. Opening a `.nhproj` or entering viewer mode swaps
+    // in a fresh working set with Local/Remote provenance.
+    return std::make_unique<ArchiveProjectFs>(ZipWorkingSet::create(),
+                                              ArchiveProjectFs::Provenance::Empty);
+}
 
 namespace {
 
@@ -426,9 +573,20 @@ void Platform::downloadArchive(const std::string &filename, std::span<const std:
                              static_cast<int>(bytes.size()));
 }
 
+void Platform::loadProjectBlob() { nh_viewer_idb_get(kProjectBlobKey); }
+
+void Platform::saveProjectBlob(std::span<const std::byte> bytes) {
+    nh_viewer_idb_put(kProjectBlobKey, reinterpret_cast<const std::uint8_t *>(bytes.data()),
+                      static_cast<int>(bytes.size()));
+}
+
+void Platform::clearProjectBlob() { nh_viewer_idb_delete(kProjectBlobKey); }
+
+void Platform::fetchRuntimeForPublish() { nh_viewer_publish_fetch_runtime(); }
+
 void Platform::openFilePicker() { nh_viewer_open_file_picker(); }
-void Platform::openFolderPicker() {}  // no folder picker on web today
-void Platform::openArchivePicker() {} // web open-archive lands in step 8
+void Platform::openFolderPicker() {} // no folder picker on web today
+void Platform::openArchivePicker() { nh_viewer_open_archive_picker(); }
 void Platform::saveArchivePicker() {} // web archives persist via downloadArchive
 void Platform::drainPickers() {}      // web pickers dispatch inline
 
@@ -509,6 +667,33 @@ void nh_viewer_end_upload_batch(void * /*handle*/) {
 }
 
 EMSCRIPTEN_KEEPALIVE
+void nh_viewer_open_archive(const std::uint8_t *data, std::size_t size) {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr || data == nullptr) {
+        std::println(stderr, "[viewer] nh_viewer_open_archive: no app / null data");
+        return;
+    }
+    app->openArchiveFromBytes(std::as_bytes(std::span{data, size}));
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_publish_add_file(const char *name, const std::uint8_t *data, std::size_t size) {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr || name == nullptr) {
+        return;
+    }
+    app->addPackageFile(name, std::as_bytes(std::span{data, size}));
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_publish_finalize() {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app != nullptr) {
+        app->finalizePackage();
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE
 void nh_viewer_platform_set_drag_hover(std::uintptr_t handle, int active, float x, float y,
                                        int file_count, int file_like) {
     auto *impl = reinterpret_cast<nodehammer::viewer::platform::Platform::Impl *>(handle);
@@ -528,7 +713,19 @@ void nh_viewer_save_persistent_state() {
     auto *app = nodehammer::viewer::App::instance();
     if (app != nullptr) {
         app->savePersistentState();
+        // beforeunload also flushes the application-mode working set to IDB so the
+        // last edits survive a reload even if the debounce hadn't fired yet.
+        app->flushWebProjectPersistence();
     }
+}
+
+EMSCRIPTEN_KEEPALIVE
+void nh_viewer_project_blob_loaded(const std::uint8_t *data, std::size_t size) {
+    auto *app = nodehammer::viewer::App::instance();
+    if (app == nullptr) {
+        return;
+    }
+    app->onProjectBlobLoaded(std::as_bytes(std::span{data, size}));
 }
 
 } // extern "C"

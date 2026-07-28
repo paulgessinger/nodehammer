@@ -102,7 +102,7 @@ function(nodehammer_apply_emscripten_viewer_options target)
         # _main, so opt _malloc / _free in explicitly. HEAPU8 is also
         # opt-in under modern emscripten and is needed to copy the JS
         # bytes into the wasm heap before handing off to the C++ side.
-        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_nh_viewer_begin_upload_batch,_nh_viewer_add_upload,_nh_viewer_end_upload_batch,_nh_viewer_start"
+        "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_nh_viewer_begin_upload_batch,_nh_viewer_add_upload,_nh_viewer_end_upload_batch,_nh_viewer_open_archive,_nh_viewer_project_blob_loaded,_nh_viewer_publish_add_file,_nh_viewer_publish_finalize,_nh_viewer_start"
         # ccall is opt-in under modern emscripten and is needed by the JS
         # shell to invoke nh_viewer_start with a JSON string after runtime
         # init (auto-marshals std::string).

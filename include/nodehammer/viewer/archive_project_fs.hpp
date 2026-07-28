@@ -38,15 +38,31 @@ namespace nodehammer::viewer {
 /// blob (web). The POSIX file-write internals are the only native-only piece.
 class ArchiveProjectFs final : public ProjectFs {
   public:
-    /// Open the archive at `path` (bound mode). Does not throw on a bad archive:
-    /// the backend enters `ProjectFsStatus::Error` and the message describes it,
-    /// so the App can install it and surface the failure like any other backend.
+    /// Where the working set came from. Drives the App's persistence/posture
+    /// choices and the `resolve()` basename-fallback policy:
+    ///   - `Empty`  — a scratch working set (started empty, may accumulate flat
+    ///                loose drops). Basename-fallback resolve is ON so an include
+    ///                like `sub/common.toml` still links to a root-dropped
+    ///                `common.toml`. Web app mode persists these to IDB.
+    ///   - `Local`  — opened from a real `.nhproj` (bound path, dropped/picked
+    ///                bytes, or "create archive from scene"). Full paths, strict
+    ///                resolve.
+    ///   - `Remote` — fetched from a URL (web viewer mode). Full paths, strict
+    ///                resolve; the App keeps it locked and never persists it.
+    enum class Provenance { Empty, Local, Remote };
+
+    /// Open the archive at `path` (bound mode, `Local`). Does not throw on a bad
+    /// archive: the backend enters `ProjectFsStatus::Error` and the message
+    /// describes it, so the App can install it and surface the failure like any
+    /// other backend.
     explicit ArchiveProjectFs(std::filesystem::path path);
 
     /// Wrap an in-memory working set (unbound mode): no backing file yet. Ready
     /// immediately; `save()` fails until a path is bound (native `saveTo`), and
-    /// `serialize()` feeds the web download path.
-    explicit ArchiveProjectFs(ZipWorkingSet ws);
+    /// `serialize()` feeds the web download path. `provenance` defaults to `Local`
+    /// (a real curated set, e.g. create-from-scene or an opened `.nhproj`); pass
+    /// `Empty` for a scratch web project and `Remote` for a fetched viewer-mode one.
+    explicit ArchiveProjectFs(ZipWorkingSet ws, Provenance provenance = Provenance::Local);
 
     ~ArchiveProjectFs() override;
 
@@ -66,6 +82,9 @@ class ArchiveProjectFs final : public ProjectFs {
                                      std::span<const std::byte> bytes) const override;
     void addPath(const std::filesystem::path &path) override;
     void addBytes(std::string_view filename, std::span<const std::byte> bytes) override;
+
+    /// Where the working set came from (persistence/posture + resolve policy).
+    Provenance provenance() const;
 
     /// The bound archive path (the `Save` target); empty in unbound mode.
     const std::filesystem::path &path() const;

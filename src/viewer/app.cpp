@@ -26,6 +26,7 @@
 #include <nodehammer/viewer/backend_caps.hpp>
 #include <nodehammer/viewer/platform.hpp>
 #include <nodehammer/viewer/png_export.hpp>
+#include <nodehammer/viewer/project_manifest.hpp>
 #include <nodehammer/viewer/render_quality.hpp>
 
 #include <nodehammer/ir/render.hpp>
@@ -48,7 +49,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -167,6 +170,26 @@ struct App::Impl {
     platform::WindowCustomizationRequest window_customization;
     platform::PlatformWindowState platform_window_state;
     std::vector<platform::PlatformGestureEvent> platform_gesture_events;
+
+    // Web application-mode IDB persistence: debounce a working-set flush keyed on
+    // the project generation. `flushed_gen == seen_gen` means IDB is up to date.
+    std::uint64_t persist_seen_gen_{0};
+    std::uint64_t persist_flushed_gen_{0};
+    std::chrono::steady_clock::time_point persist_dirty_at_{};
+    bool persist_pending_{false};
+
+    // Web viewer mode: a sidecar-driven, content-locked presentation. Ingestion is
+    // ignored while locked (edits go through Save-as-archive → open in app mode).
+    bool viewer_locked_{false};
+
+    // Continuous URL steer sync (Sync-to-URL window): debounce on the last query.
+    std::string last_url_query_;
+    std::chrono::steady_clock::time_point last_url_commit_{};
+
+    // In-flight "Publish package" working set: seeded with the sidecar + archive,
+    // then the async runtime fetch adds the viewer.html + wasm files before
+    // finalize serializes + downloads it.
+    std::optional<ZipWorkingSet> package_ws_;
     SceneRenderer scene_renderer;     ///< draws the uncut base scene
     SceneRenderer cut_renderer;       ///< draws the Boolean-cut scene
     SceneRenderer *active_renderer{}; ///< last renderer drawn; for UI stats
@@ -422,12 +445,31 @@ struct App::Impl {
     void syncBrowserUrl() const;
     void addProjectPath(const std::filesystem::path &path);
     void addProjectBytes(const std::string &filename, std::span<const std::byte> bytes);
+    void openArchiveFromBytes(std::span<const std::byte> bytes);
+    void openArchiveRemote(std::span<const std::byte> bytes, bool locked);
+    void installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked);
+    void applyProjectManifest();
     void createArchiveFromScene();
+
+    // Publish package (web): seed the package with sidecar + archive, then the
+    // async runtime fetch fills in the rest before finalize downloads it.
+    void publishPackage();
+    void addPackageFile(const std::string &name, std::span<const std::byte> bytes);
+    void finalizePackage();
+
+    // Web application-mode project persistence (IndexedDB). No-ops on native and
+    // in web viewer mode; see the strategy doc §3.2 / R2.
+    [[nodiscard]] bool webAppModeProject() const;
+    void tickWebProjectPersistence();
+    void flushWebProjectPersistence();
+    void onProjectBlobLoaded(std::span<const std::byte> bytes);
+    void restoreWebProjectFromIdb();
     void saveActiveArchiveTo(const std::filesystem::path &path);
     void enqueueModal(RetainedModal modal);
     void enqueueProjectDropModal(ProjectDropDecision decision, std::function<void()> on_confirm);
     void renderActiveModal();
-    [[nodiscard]] std::string browserUrlStateQuery() const;
+    [[nodiscard]] std::string browserUrlStateQuery(bool include_view, bool include_camera) const;
+    void tickUrlSync();
 
     static void initCb(void *user) { static_cast<Impl *>(user)->onInit(); }
     static void frameCb(void *user) { static_cast<Impl *>(user)->onFrame(); }
@@ -451,6 +493,10 @@ void App::Impl::loadViewerConfigState() {
     ui_state.show_status = state->show_status;
     ui_state.show_view = state->show_view;
     ui_state.show_debug = state->show_debug;
+    ui_state.show_sync = state->show_sync;
+    ui_state.url_sync_continuous = state->url_sync_continuous;
+    ui_state.url_sync_camera = state->url_sync_camera;
+    ui_state.url_sync_view = state->url_sync_view;
 
     const bool keep_launch_camera = launch_had_initial_camera;
     applyViewerConfigState(*state, cfg, keep_launch_camera ? nullptr : &camera);
@@ -481,6 +527,10 @@ std::string App::Impl::currentViewerConfigStateToml() const {
     state.show_status = ui_state.show_status;
     state.show_view = ui_state.show_view;
     state.show_debug = ui_state.show_debug;
+    state.show_sync = ui_state.show_sync;
+    state.url_sync_continuous = ui_state.url_sync_continuous;
+    state.url_sync_camera = ui_state.url_sync_camera;
+    state.url_sync_view = ui_state.url_sync_view;
     return viewerConfigStateToToml(state);
 }
 
@@ -1623,50 +1673,73 @@ bool App::Impl::presentCachedFrame() {
     return true;
 }
 
-std::string App::Impl::browserUrlStateQuery() const {
+namespace {
+// Every URL query key the steer sync manages; unchecked categories emit no value
+// so their keys are cleared from the address bar on the next commit.
+constexpr const char *kUrlManagedKeys =
+    "cull,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,booleanCut,"
+    "cutStart,cutEnd,pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,"
+    "cameraPitch,cameraProjection";
+} // namespace
+
+std::string App::Impl::browserUrlStateQuery(bool include_view, bool include_camera) const {
     std::string query;
-    if (cfg.cull != CullOverride::Auto) {
-        appendUrlParam(query, "cull",
-                       cfg.cull == CullOverride::ForceCull ? "force-on" : "force-off");
+    if (include_view) {
+        if (cfg.cull != CullOverride::Auto) {
+            appendUrlParam(query, "cull",
+                           cfg.cull == CullOverride::ForceCull ? "force-on" : "force-off");
+        }
+        appendUrlBool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
+        appendUrlBool(query, "autoOrbit", cfg.auto_orbit, false);
+        appendUrlFloat(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
+        appendUrlBool(query, "angleCut", cfg.angle_cut, false);
+        appendUrlBool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
+        appendUrlBool(query, "booleanCut", cfg.boolean_cut, false);
+        appendUrlFloat(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
+        appendUrlFloat(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
+        appendUrlBool(query, "pbr", cfg.enable_pbr, true);
     }
-    appendUrlBool(query, "pauseWhenUnfocused", cfg.pause_when_unfocused, true);
-    appendUrlBool(query, "autoOrbit", cfg.auto_orbit, false);
-    appendUrlFloat(query, "orbitSpeed", cfg.auto_orbit_speed_deg, 15.f);
-    appendUrlBool(query, "angleCut", cfg.angle_cut, false);
-    appendUrlBool(query, "shaderAngleCut", cfg.shader_angle_cut, true);
-    appendUrlBool(query, "booleanCut", cfg.boolean_cut, false);
-    appendUrlFloat(query, "cutStart", cfg.angle_cut_start_deg, 0.f);
-    appendUrlFloat(query, "cutEnd", cfg.angle_cut_end_deg, 90.f);
-    appendUrlBool(query, "pbr", cfg.enable_pbr, true);
-    appendUrlParam(query, "cameraTargetX", formatUrlFloat(camera.target.x));
-    appendUrlParam(query, "cameraTargetY", formatUrlFloat(camera.target.y));
-    appendUrlParam(query, "cameraTargetZ", formatUrlFloat(camera.target.z));
-    appendUrlParam(query, "cameraDistance", formatUrlFloat(camera.distance));
-    appendUrlParam(query, "cameraYaw", formatUrlFloat(glm::degrees(camera.yaw)));
-    appendUrlParam(query, "cameraPitch", formatUrlFloat(glm::degrees(camera.pitch)));
-    if (camera.projection == ProjectionMode::Orthographic) {
-        appendUrlParam(query, "cameraProjection", "orthographic");
+    if (include_camera) {
+        appendUrlParam(query, "cameraTargetX", formatUrlFloat(camera.target.x));
+        appendUrlParam(query, "cameraTargetY", formatUrlFloat(camera.target.y));
+        appendUrlParam(query, "cameraTargetZ", formatUrlFloat(camera.target.z));
+        appendUrlParam(query, "cameraDistance", formatUrlFloat(camera.distance));
+        appendUrlParam(query, "cameraYaw", formatUrlFloat(glm::degrees(camera.yaw)));
+        appendUrlParam(query, "cameraPitch", formatUrlFloat(glm::degrees(camera.pitch)));
+        if (camera.projection == ProjectionMode::Orthographic) {
+            appendUrlParam(query, "cameraProjection", "orthographic");
+        }
     }
     return query;
 }
 
 void App::Impl::syncBrowserUrl() const {
     if constexpr (platform::kIsWeb) {
-        const std::string state_query = browserUrlStateQuery();
-        constexpr const char *kManagedKeys =
-            "cull,pauseWhenUnfocused,autoOrbit,orbitSpeed,angleCut,shaderAngleCut,booleanCut,"
-            "cutStart,"
-            "cutEnd,"
-            "pbr,cameraTargetX,cameraTargetY,cameraTargetZ,cameraDistance,cameraYaw,cameraPitch,"
-            "cameraProjection";
-        platform_->commitUrlState(state_query, kManagedKeys);
+        const std::string state_query =
+            browserUrlStateQuery(ui_state.url_sync_view, ui_state.url_sync_camera);
+        platform_->commitUrlState(state_query, kUrlManagedKeys);
+    }
+}
+
+void App::Impl::tickUrlSync() {
+    if (!platform::kIsWeb || !ui_state.url_sync_continuous) {
+        return;
+    }
+    // Debounce: only re-write the address bar when the steer actually changed and
+    // at most a few times a second, so orbiting doesn't spam history.replaceState.
+    auto query = browserUrlStateQuery(ui_state.url_sync_view, ui_state.url_sync_camera);
+    const auto now = std::chrono::steady_clock::now();
+    if (query != last_url_query_ && now - last_url_commit_ > std::chrono::milliseconds(300)) {
+        platform_->commitUrlState(query, kUrlManagedKeys);
+        last_url_query_ = std::move(query);
+        last_url_commit_ = now;
     }
 }
 
 void App::Impl::addProjectPath(const std::filesystem::path &path) {
     using enum ProjectDropDecision::Kind;
-    if (path.empty() || project_ == nullptr) {
-        return;
+    if (path.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no ingestion
     }
     auto decision = project_->planAddPath(path);
     if (decision.kind == Accept) {
@@ -1688,9 +1761,52 @@ void App::Impl::addProjectPath(const std::filesystem::path &path) {
     }
 }
 
+namespace {
+/// FNV-1a 64-bit content hash as 16 hex chars, for the published archive filename
+/// (`project.<hash>.nhproj`) so republishing yields a new name → free cache-bust.
+std::string contentHashHex(std::span<const std::byte> bytes) {
+    std::uint64_t h = 0xcbf29ce484222325ULL;
+    for (const std::byte b : bytes) {
+        h ^= static_cast<std::uint64_t>(std::to_integer<unsigned char>(b));
+        h *= 0x00000100000001B3ULL;
+    }
+    return std::format("{:016x}", h);
+}
+
+std::vector<std::byte> stringToBytes(std::string_view s) {
+    std::vector<std::byte> out(s.size());
+    std::memcpy(out.data(), s.data(), s.size());
+    return out;
+}
+
+/// Case-insensitive check for the `.nhproj` project-archive extension.
+bool isNhprojName(std::string_view name) {
+    constexpr std::string_view ext = ".nhproj";
+    if (name.size() < ext.size()) {
+        return false;
+    }
+    const auto tail = name.substr(name.size() - ext.size());
+    for (std::size_t i = 0; i < ext.size(); ++i) {
+        char c = tail[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = static_cast<char>(c - 'A' + 'a');
+        }
+        if (c != ext[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+} // namespace
+
 void App::Impl::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
     using enum ProjectDropDecision::Kind;
-    if (filename.empty() || project_ == nullptr) {
+    if (filename.empty() || project_ == nullptr || viewer_locked_) {
+        return; // viewer mode is a locked presentation — no ingestion
+    }
+    // A dropped/picked `.nhproj` is a whole project, not a file to add: open it.
+    if (isNhprojName(filename)) {
+        openArchiveFromBytes(bytes);
         return;
     }
     auto decision = project_->planAddBytes(filename, bytes);
@@ -1711,6 +1827,223 @@ void App::Impl::addProjectBytes(const std::string &filename, std::span<const std
     } else {
         enqueueProjectDropModal(std::move(decision), {});
     }
+}
+
+void App::Impl::installArchiveProject(std::unique_ptr<ProjectFs> proj, bool locked) {
+    // Install like setProject: swap the backend, re-point the log sink, clear the
+    // stale root keys, and drop any pending modals. Then honor the archive's
+    // project manifest (which may re-seed the root keys) and set the viewer lock.
+    project_ = std::move(proj);
+    project_->setLogSink(&notifications);
+    build_controller_.setRootKeys({}, {});
+    active_modals.clear();
+    viewer_locked_ = locked;
+    // Reset IDB persistence bookkeeping; the debounce re-evaluates from the new set.
+    persist_seen_gen_ = 0;
+    persist_flushed_gen_ = 0;
+    persist_pending_ = false;
+    applyProjectManifest();
+}
+
+void App::Impl::applyProjectManifest() {
+    // A self-describing archive carries a root `nodehammer.toml` with a [project]
+    // section naming the entry config + geometry; honoring it makes the archive
+    // "just build" on open (native, app mode, viewer mode). Absent or malformed →
+    // fall back to extension-based recognition (leaves root keys empty).
+    if (!project_) {
+        return;
+    }
+    auto r = project_->resolve("nodehammer.toml");
+    if (r.status != ResolveStatus::Ready) {
+        return;
+    }
+    const auto sp = r.file.bytes.span();
+    if (auto m = parseProjectManifest(sp)) {
+        build_controller_.setRootKeys(m->config_key, m->geometry_key);
+    }
+    // Archive [view] is the archive layer of the steer cascade. URL/sidecar
+    // startup overrides already landed on `cfg` at construction, so apply the
+    // archive's view only for keys the URL didn't pin — a shared posed link (URL)
+    // still wins over the archive's default view.
+    const std::string_view toml_sv{reinterpret_cast<const char *>(sp.data()), sp.size()};
+    if (auto ov = parseManifestViewSteer(toml_sv)) {
+        ConfigStartupOverrides eff;
+        if (!startup_overrides.cull) {
+            eff.cull = ov->cull;
+        }
+        if (!startup_overrides.pause_when_unfocused) {
+            eff.pause_when_unfocused = ov->pause_when_unfocused;
+        }
+        if (!startup_overrides.auto_orbit) {
+            eff.auto_orbit = ov->auto_orbit;
+        }
+        if (!startup_overrides.auto_orbit_speed_deg) {
+            eff.auto_orbit_speed_deg = ov->auto_orbit_speed_deg;
+        }
+        if (!startup_overrides.angle_cut) {
+            eff.angle_cut = ov->angle_cut;
+        }
+        if (!startup_overrides.shader_angle_cut) {
+            eff.shader_angle_cut = ov->shader_angle_cut;
+        }
+        if (!startup_overrides.boolean_cut) {
+            eff.boolean_cut = ov->boolean_cut;
+        }
+        if (!startup_overrides.angle_cut_start_deg) {
+            eff.angle_cut_start_deg = ov->angle_cut_start_deg;
+        }
+        if (!startup_overrides.angle_cut_end_deg) {
+            eff.angle_cut_end_deg = ov->angle_cut_end_deg;
+        }
+        if (!startup_overrides.enable_pbr) {
+            eff.enable_pbr = ov->enable_pbr;
+        }
+        if (!startup_overrides.camera) {
+            eff.camera = ov->camera;
+        }
+        applyViewerStartupOverrides(eff, cfg, &camera);
+    }
+}
+
+void App::Impl::openArchiveFromBytes(std::span<const std::byte> bytes) {
+    std::unique_ptr<ProjectFs> proj;
+    try {
+        proj = std::make_unique<ArchiveProjectFs>(ZipWorkingSet::openFromBytes(bytes),
+                                                  ArchiveProjectFs::Provenance::Local);
+    } catch (const std::exception &e) {
+        notifications.error(std::string{"Failed to open archive: "} + e.what());
+        return;
+    }
+    installArchiveProject(std::move(proj), /*locked=*/false);
+    notifications.info("Opened archive");
+}
+
+void App::Impl::openArchiveRemote(std::span<const std::byte> bytes, bool locked) {
+    std::unique_ptr<ProjectFs> proj;
+    try {
+        proj = std::make_unique<ArchiveProjectFs>(ZipWorkingSet::openFromBytes(bytes),
+                                                  ArchiveProjectFs::Provenance::Remote);
+    } catch (const std::exception &e) {
+        notifications.error(std::string{"Failed to load viewer project: "} + e.what());
+        return;
+    }
+    installArchiveProject(std::move(proj), locked);
+}
+
+bool App::Impl::webAppModeProject() const {
+    if (!platform::kIsWeb) {
+        return false;
+    }
+    // The working set persists in application mode (Empty scratch or a Local
+    // opened `.nhproj`); web viewer mode is Remote and must never touch IDB.
+    auto *ar = dynamic_cast<ArchiveProjectFs *>(project_.get());
+    return ar != nullptr && ar->provenance() != ArchiveProjectFs::Provenance::Remote;
+}
+
+void App::Impl::tickWebProjectPersistence() {
+    if (!webAppModeProject()) {
+        return;
+    }
+    const auto gen = project_->generation();
+    if (gen != persist_seen_gen_) {
+        persist_seen_gen_ = gen;
+        persist_dirty_at_ = std::chrono::steady_clock::now();
+        persist_pending_ = gen != persist_flushed_gen_;
+    }
+    if (persist_pending_ &&
+        std::chrono::steady_clock::now() - persist_dirty_at_ > std::chrono::milliseconds(1500)) {
+        flushWebProjectPersistence();
+    }
+}
+
+void App::Impl::flushWebProjectPersistence() {
+    if (!webAppModeProject()) {
+        return;
+    }
+    const auto gen = project_->generation();
+    if (gen == persist_flushed_gen_) {
+        return; // IDB already matches the working set
+    }
+    auto *ar = static_cast<ArchiveProjectFs *>(project_.get());
+    const auto blob = ar->serialize();
+    platform_->saveProjectBlob(blob);
+    persist_flushed_gen_ = gen;
+    persist_pending_ = false;
+}
+
+void App::Impl::onProjectBlobLoaded(std::span<const std::byte> bytes) {
+    if (bytes.empty()) {
+        return; // IDB miss — keep the fresh empty project
+    }
+    // Only restore if the user hasn't already started working while the async load
+    // was in flight: the current project must still be a pristine empty scratch
+    // working set (Empty provenance, nothing dropped yet).
+    auto *ar = dynamic_cast<ArchiveProjectFs *>(project_.get());
+    if (ar == nullptr || ar->provenance() != ArchiveProjectFs::Provenance::Empty ||
+        !project_->list("").empty()) {
+        return;
+    }
+    std::unique_ptr<ProjectFs> proj;
+    try {
+        proj = std::make_unique<ArchiveProjectFs>(ZipWorkingSet::openFromBytes(bytes),
+                                                  ArchiveProjectFs::Provenance::Empty);
+    } catch (const std::exception &e) {
+        notifications.warning(std::string{"Could not restore saved project: "} + e.what());
+        return;
+    }
+    project_ = std::move(proj);
+    project_->setLogSink(&notifications);
+    build_controller_.setRootKeys({}, {});
+    // The restored set already matches IDB, so seed the flushed generation so the
+    // debounce doesn't immediately re-write identical bytes.
+    persist_seen_gen_ = project_->generation();
+    persist_flushed_gen_ = persist_seen_gen_;
+    persist_pending_ = false;
+    notifications.info("Restored your saved project");
+}
+
+void App::Impl::restoreWebProjectFromIdb() {
+    if (!platform::kIsWeb) {
+        return;
+    }
+    platform_->loadProjectBlob();
+}
+
+void App::Impl::publishPackage() {
+    if (!platform::kIsWeb) {
+        notifications.info("Publish package is currently web-only");
+        return;
+    }
+    auto *ar = dynamic_cast<ArchiveProjectFs *>(project_.get());
+    if (ar == nullptr) {
+        notifications.warning("No project to publish");
+        return;
+    }
+    auto archive_bytes = ar->serialize();
+    const std::string name = "project." + contentHashHex(archive_bytes) + ".nhproj";
+    // A minimal sidecar: viewer.html fetches nh_manifest.json → viewer mode.
+    const std::string sidecar = "{\n  \"archive\": \"" + name + "\",\n  \"lock\": true\n}\n";
+    package_ws_ = ZipWorkingSet::create();
+    package_ws_->writeEntry("nh_manifest.json", stringToBytes(sidecar));
+    package_ws_->writeEntry(name, std::move(archive_bytes));
+    // Async: the runtime fetch adds viewer.html + the js/wasm, then finalize().
+    platform_->fetchRuntimeForPublish();
+}
+
+void App::Impl::addPackageFile(const std::string &name, std::span<const std::byte> bytes) {
+    if (package_ws_) {
+        package_ws_->writeEntry(name, std::vector<std::byte>(bytes.begin(), bytes.end()));
+    }
+}
+
+void App::Impl::finalizePackage() {
+    if (!package_ws_) {
+        return;
+    }
+    auto zip = package_ws_->serialize();
+    package_ws_.reset();
+    platform_->downloadArchive("nodehammer-package.zip", zip);
+    notifications.info("Published package downloaded — unzip onto any static host");
 }
 
 void App::Impl::createArchiveFromScene() {
@@ -1860,6 +2193,14 @@ void App::Impl::onFrame() {
         project_.get(),
         BuildController::AngleCut{cfg.boolean_cut, cfg.angle_cut_start_deg, cfg.angle_cut_end_deg},
         cut_uploaded);
+
+    // Web application mode: debounce-flush the working set to IndexedDB so edits
+    // survive a reload. No-op on native and in web viewer mode.
+    tickWebProjectPersistence();
+
+    // Continuous URL steer sync (Sync-to-URL window): keep the address bar equal to
+    // the current screen when enabled. No-op otherwise.
+    tickUrlSync();
 
     // Benchmark mode takes over the frame entirely: it drives the camera/state
     // sequence and renders at full rate, bypassing the idle/UI/input path below.
@@ -2101,13 +2442,14 @@ void App::Impl::onFrame() {
 #endif
         } else {
 #ifdef __EMSCRIPTEN__
-            platform_->downloadArchive("project.zip", archive->serialize());
+            platform_->downloadArchive("project.nhproj", archive->serialize());
 #else
             // Unbound: pick a path, then saveActiveArchiveTo binds + writes.
             platform_->saveArchivePicker();
 #endif
         }
     };
+    ui_actions.publish_package = [this]() { publishPackage(); };
     ui_actions.frame_scene = [this]() {
         if (!scene) {
             return;
@@ -2122,8 +2464,16 @@ void App::Impl::onFrame() {
         cut_renderer.clearScene();
         scene.reset();
         cut_scene.reset();
+        // Web application mode: closing clears the persisted IDB slot so the empty
+        // project doesn't get restored on the next reload.
+        if (webAppModeProject()) {
+            platform_->clearProjectBlob();
+        }
         project_ = platform::makeEmptyBag();
         project_->setLogSink(&notifications);
+        persist_seen_gen_ = 0;
+        persist_flushed_gen_ = 0;
+        persist_pending_ = false;
         // Drops the pristine cache, root keys, session keys, the pending-cut
         // flag, and the persistent error in one shot.
         build_controller_.reset();
@@ -2280,6 +2630,11 @@ void App::setProject(std::unique_ptr<ProjectFs> project) {
     // recognition on the next generation bump (bag mode).
     impl_->build_controller_.setRootKeys({}, {});
     impl_->active_modals.clear();
+    // An explicit setProject is always an editable (app-mode / native) install —
+    // viewer mode installs via openArchiveRemote. Honor a self-describing archive's
+    // project manifest (re-seeds the root keys if present).
+    impl_->viewer_locked_ = false;
+    impl_->applyProjectManifest();
 }
 
 void App::setRootKeys(std::string config_key, std::string geometry_key) {
@@ -2293,6 +2648,30 @@ void App::addProjectPath(const std::filesystem::path &path) { impl_->addProjectP
 void App::addProjectBytes(const std::string &filename, std::span<const std::byte> bytes) {
     impl_->addProjectBytes(filename, bytes);
 }
+
+void App::openArchiveFromBytes(std::span<const std::byte> bytes) {
+    impl_->openArchiveFromBytes(bytes);
+}
+
+void App::openArchiveRemote(std::span<const std::byte> bytes, bool locked) {
+    impl_->openArchiveRemote(bytes, locked);
+}
+
+void App::publishPackage() { impl_->publishPackage(); }
+
+void App::addPackageFile(const std::string &name, std::span<const std::byte> bytes) {
+    impl_->addPackageFile(name, bytes);
+}
+
+void App::finalizePackage() { impl_->finalizePackage(); }
+
+void App::onProjectBlobLoaded(std::span<const std::byte> bytes) {
+    impl_->onProjectBlobLoaded(bytes);
+}
+
+void App::flushWebProjectPersistence() { impl_->flushWebProjectPersistence(); }
+
+void App::restoreWebProjectFromIdb() { impl_->restoreWebProjectFromIdb(); }
 
 void App::createArchiveFromScene() { impl_->createArchiveFromScene(); }
 
