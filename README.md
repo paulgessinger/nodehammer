@@ -194,6 +194,22 @@ just odd    # full ODD → glb (see the Justfile for single-stave recipes too)
 build/RelWithDebInfo/nodehammer viewer
 ```
 
+### …in a browser
+
+Every push to `main` publishes the wasm viewer to
+<https://paulgessinger.github.io/nodehammer/>, in both of the postures the
+web build supports:
+
+| | |
+|---|---|
+| [`/app/`](https://paulgessinger.github.io/nodehammer/app/viewer.html) | the open application — empty start; drop a `.nhproj` or loose config/geometry files onto it |
+| [`/odd/`](https://paulgessinger.github.io/nodehammer/odd/viewer.html) | the full Open Data Detector, preconfigured and content-locked |
+| [`/odd-simple/`](https://paulgessinger.github.io/nodehammer/odd-simple/viewer.html) | the simplified ODD — same, lighter to build |
+
+Each directory is a self-contained static package of the kind the viewer's
+**Publish** command emits. Reproduce the whole site locally with
+`just pages-site` after `just wasm-release`.
+
 ## Project layout
 
 ```

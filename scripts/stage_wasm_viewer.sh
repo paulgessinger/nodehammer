@@ -4,7 +4,9 @@ shopt -s nullglob
 
 usage() {
     echo "usage: $0 <link|copy> <scene|none> <target-dir> [src-dir]" >&2
-    echo "  scene names any fixtures/configs/<scene>.toml (e.g. odd, odd_simple)" >&2
+    echo "  scene names any fixtures/configs/<scene>.toml (e.g. odd, odd_simple)," >&2
+    echo "  packed into a .nhproj + nh_manifest.json sidecar -> viewer mode." >&2
+    echo "  'none' omits the sidecar -> the viewer comes up as the application." >&2
 }
 
 if [ "$#" -lt 3 ] || [ "$#" -gt 4 ]; then
@@ -70,69 +72,45 @@ for bundle in "${bundles[@]}"; do
     stage_file "$bundle" "$out/$(basename "$bundle")"
 done
 
-# Clean any stale manifest from a previous run; we'll re-emit below only if a
-# scene was requested. Drop legacy synthetic-name symlinks from earlier recipes.
+# Clean any stale manifest/archive from a previous run; we'll re-emit below only
+# if a scene was requested. Also drop the loose scene files earlier recipes
+# staged (pre-archive sidecar schema) and legacy synthetic-name symlinks.
 rm -f "$out/nh_manifest.json"
-rm -f "$out/scene.nhb.zst" "$out/scene.toml"
-
-# Recursively collects the `include = [...]` (or `include = "..."`) paths of a
-# fixtures/configs/*.toml file, relative to fixtures/configs/. Good enough for
-# these configs' plain quoted-string includes; not a general TOML parser.
-collect_includes() {
-    local rel="$1"
-    local path="$configs_dir/$rel"
-    local reldir
-    reldir="$(dirname "$rel")"
-    [ -f "$path" ] || { echo "config include not found: $rel" >&2; exit 1; }
-    if [[ " ${seen[*]} " == *" $rel "* ]]; then
-        return 0
+rm -f "$out"/project.*.nhproj
+rm -f "$out/scene.nhb.zst" "$out/scene.toml" "$out/odd.nhb.zst"
+rm -rf "$out/odd"
+# Entry configs were staged at the root under their fixture name; only remove a
+# .toml that is one of ours, never something else living in the target dir.
+for stale in "$out"/*.toml; do
+    if [ -e "$root/fixtures/configs/$(basename "$stale")" ]; then
+        rm -f "$stale"
     fi
-    seen+=("$rel")
-
-    local include_expr
-    include_expr="$(perl -0777 -ne 'print $1 if /^\s*include\s*=\s*(\[[^\]]*\]|"[^"]*")/ms' "$path")"
-    [ -n "$include_expr" ] || return 0
-    while IFS= read -r inc; do
-        [ -n "$inc" ] || continue
-        local inc_rel
-        if [ "$reldir" = "." ]; then
-            inc_rel="$inc"
-        else
-            inc_rel="$reldir/$inc"
-        fi
-        collect_includes "$inc_rel"
-    done < <(printf '%s' "$include_expr" | grep -o '"[^"]*"' | tr -d '"')
-}
+done
 
 case "$scene" in
     none|'')
-        scene_mode="upload-only (no manifest)"
+        scene_mode="application mode (no sidecar)"
         ;;
     *)
-        configs_dir="$root/fixtures/configs"
-        scene_toml="$configs_dir/$scene.toml"
-        if [ ! -f "$scene_toml" ]; then
-            echo "unknown scene '$scene' - no fixtures/configs/$scene.toml (use 'none' for upload-only)" >&2
+        if [ ! -f "$root/fixtures/configs/$scene.toml" ]; then
+            echo "unknown scene '$scene' - no fixtures/configs/$scene.toml (use 'none' for application mode)" >&2
             exit 1
         fi
 
-        seen=()
-        collect_includes "$scene.toml"
-
-        stage_file "$root/odd.nhb.zst" "$out/odd.nhb.zst"
-        for rel in "${seen[@]}"; do
-            mkdir -p "$out/$(dirname "$rel")"
-            stage_file "$configs_dir/$rel" "$out/$rel"
-        done
+        # Viewer mode is archive-driven: pack the scene (entry config + its
+        # include chain + geometry + project manifest) into a content-hashed
+        # `.nhproj`, then point the sidecar at it. The archive is always a real
+        # file — `link` mode only shortcuts the shell/runtime files.
+        archive="$("$root/scripts/make_nhproj.py" "$scene" "$out")"
 
         printf '%s\n' \
             '{' \
-            '  "input": "odd.nhb.zst",' \
-            "  \"config\": \"$scene.toml\"," \
-            "  \"title\": \"$scene\"" \
+            "  \"archive\": \"$archive\"," \
+            '  "lock": true,' \
+            "  \"title\": \"nodehammer — $scene\"" \
             '}' \
             > "$out/nh_manifest.json"
-        scene_mode="autoload ($scene)"
+        scene_mode="viewer mode ($scene -> $archive)"
         ;;
 esac
 
