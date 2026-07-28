@@ -50,6 +50,13 @@ option(NODEHAMMER_VIEWER_NATIVE_DIALOG "Use the native file dialog (NFD); OFF co
 option(NODEHAMMER_ENABLE_ASAN   "Enable AddressSanitizer"                              OFF)
 option(NODEHAMMER_WERROR        "Treat project warnings as errors"                     OFF)
 option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                           OFF)
+option(NODEHAMMER_BUILD_PYTHON  "Build the nanobind Python extension module"           OFF)
+
+# Everything the extension module links has to be relocatable, and the static
+# libs are built as their own targets. Set this before any target is defined.
+if(NODEHAMMER_BUILD_PYTHON)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
 option(NODEHAMMER_PROFILING     "Preserve symbols and frame pointers for sampling profilers" OFF)
 option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at build time (consumed in cmake/Sokol.cmake)" ON)
 
@@ -190,6 +197,7 @@ nodehammer_set_compiler_options(nodehammer_lib)
 # its own C-export bootstrap (src/web/viewer_main.cpp) and the CI bench is
 # a separate exe under tests/. Nothing in the wasm closure links this lib.
 add_library(nodehammer_cli STATIC
+    src/cli/run.cpp
     src/cli/pager.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
@@ -392,6 +400,74 @@ else()
     target_link_libraries(nodehammer PRIVATE nodehammer_cli)
     nodehammer_set_compiler_options(nodehammer)
     nodehammer_apply_emscripten_exe_options(nodehammer)
+endif()
+
+# ── Python extension module ────────────────────────────────────────────────────
+# The wheel ships exactly one native artifact: this module, with nodehammer_lib
+# and nodehammer_cli linked into it statically. There is no separate `nodehammer`
+# executable in the wheel — the console_script entry point is Python calling
+# `_nodehammer.main(sys.argv)`, which lands in the same `nodehammer::cli::run`
+# the native binary's `main` shim calls. One copy of the code, one artifact.
+if(NODEHAMMER_BUILD_PYTHON)
+    # SKBUILD_SABI_COMPONENT expands to "Development.SABIModule" when
+    # scikit-build-core is building a limited-API wheel (wheel.py-api = cp312),
+    # and to nothing otherwise. nanobind silently downgrades STABLE_ABI to a
+    # version-locked module unless the Python::SABIModule target exists, so
+    # omitting this yields a wheel *tagged* abi3 that only imports on the
+    # interpreter it was built with.
+    find_package(Python 3.10 REQUIRED
+        COMPONENTS Interpreter Development.Module ${SKBUILD_SABI_COMPONENT})
+
+    # nanobind ships its CMake config inside the installed Python package rather
+    # than on CMAKE_PREFIX_PATH, so ask the interpreter where it lives.
+    execute_process(
+        COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        OUTPUT_VARIABLE nanobind_ROOT
+        COMMAND_ERROR_IS_FATAL ANY)
+    find_package(nanobind CONFIG REQUIRED)
+
+    # STABLE_ABI builds a cp312-abi3 module on Python >= 3.12 (silently ignored
+    # below that), so one wheel per platform covers every later interpreter
+    # instead of one wheel per Python version.
+    nanobind_add_module(_nodehammer STABLE_ABI src/python/bindings.cpp)
+    target_link_libraries(_nodehammer PRIVATE nodehammer_cli)
+    nodehammer_set_compiler_options(_nodehammer)
+
+    # A Python extension module shares its process with every other extension
+    # module. Exporting our statically-linked deps (zstd, flatbuffers, manifold,
+    # lua, ...) invites symbol interposition against a different build of the
+    # same library in some unrelated wheel — a crash with no useful stack.
+    #
+    # Visibility presets on our own targets are *not* sufficient: most of the
+    # leakage is plain C symbols (ZSTD_*, lua_*) from Conan-built archives we
+    # don't compile. Measured on macOS before this block: 1299 exported symbols,
+    # 864 of them third-party. So pin the export list at link time instead —
+    # PyInit__nodehammer is the only symbol an extension module owes anyone.
+    set_target_properties(nodehammer_lib nodehammer_cli PROPERTIES
+        C_VISIBILITY_PRESET hidden
+        CXX_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON)
+    if(APPLE)
+        # Mach-O prefixes C symbols with an underscore.
+        target_link_options(_nodehammer PRIVATE
+            "LINKER:-exported_symbol,_PyInit__nodehammer")
+    elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # --exclude-libs hides symbols pulled from static archives; the version
+        # script then pins what remains. Belt and braces, because a dep linked
+        # as a shared object would slip past --exclude-libs.
+        file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/nodehammer_python.map"
+            "{ global: PyInit__nodehammer; local: *; };\n")
+        target_link_options(_nodehammer PRIVATE
+            "LINKER:--exclude-libs,ALL"
+            "LINKER:--version-script=${CMAKE_CURRENT_BINARY_DIR}/nodehammer_python.map")
+    endif()
+
+    # Installed under its own component so scikit-build-core can take just this
+    # and leave the native `nodehammer` executable / headers out of the wheel.
+    install(TARGETS _nodehammer
+        LIBRARY DESTINATION nodehammer
+        COMPONENT python)
 endif()
 
 # ── Tests ──────────────────────────────────────────────────────────────────────

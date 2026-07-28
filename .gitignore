@@ -18,3 +18,6 @@ CMakeUserPresets.json
 
 # Local perf/geometry analysis artifacts (screenshots, dumps)
 /analysis/
+
+# Python wheel build
+/dist/

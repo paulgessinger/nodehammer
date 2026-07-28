@@ -1,0 +1,42 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.4"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nodehammer"
+# SPIKE: static. The C++ version comes from the nearest git tag via
+# cmake/Version.cmake; a real packaging pass should derive this from the same
+# source (scikit-build-core's setuptools_scm or regex metadata provider) so the
+# wheel version and `nodehammer --version` can never disagree.
+version = "0.0.0"
+description = "HEP geometry conversion pipeline"
+requires-python = ">=3.10"
+license = "MIT"
+
+[project.scripts]
+nodehammer = "nodehammer:_console_script"
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/wheel/{wheel_tag}"
+# Pure-Python half of the package; the extension module is installed into it by
+# the `python` CMake install component below.
+wheel.packages = ["python/nodehammer"]
+# Without this the wheel would also pick up the native `nodehammer` executable,
+# the headers, and anything else the top-level install() rules emit.
+install.components = ["python"]
+cmake.version = ">=3.25"
+cmake.build-type = "Release"
+# Only the extension module — without this the native `nodehammer` executable
+# gets built too and then thrown away, since install.components excludes it.
+build.targets = ["_nodehammer"]
+# Match nanobind's STABLE_ABI: the module is compiled against the limited API,
+# so tag the wheel abi3 and one build covers 3.12+.
+wheel.py-api = "cp312"
+
+[tool.scikit-build.cmake.define]
+NODEHAMMER_BUILD_PYTHON = "ON"
+# The wheel is the headless flavour: no sokol/GL/X11/Cocoa, no native window.
+# The GUI story for this distribution is the wasm viewer served over HTTP.
+NODEHAMMER_WITH_VIEWER = "OFF"
+NODEHAMMER_BUILD_TESTS = "OFF"
