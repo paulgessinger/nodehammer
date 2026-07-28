@@ -21,9 +21,7 @@
 namespace nodehammer::detail {
 
 class SemanticScene;
-struct SemanticSceneState;
 struct RenderScene;
-struct RenderSceneState;
 
 /// Freeze a scene into a handle. Takes shared ownership of an already-const
 /// scene, so no mutable alias to it can survive the call. Eagerly computes the
@@ -37,9 +35,6 @@ wrapSemanticScene(std::shared_ptr<const SemanticScene> scene);
 
 [[nodiscard]] const std::shared_ptr<const SemanticScene> &
 unwrapSemanticScene(const nodehammer::SemanticScene &handle) noexcept;
-
-[[nodiscard]] const std::shared_ptr<const SemanticSceneState> &
-unwrapSemanticSceneState(const nodehammer::SemanticScene &handle) noexcept;
 
 [[nodiscard]] nodehammer::RenderScene wrapRenderScene(std::shared_ptr<const RenderScene> scene);
 

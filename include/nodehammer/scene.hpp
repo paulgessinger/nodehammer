@@ -4,7 +4,9 @@
 //
 // A handle is a value type on the outside and a shared_ptr on the inside: it
 // copies cheaply, it can be held across calls, and it keeps the scene alive for
-// exactly as long as someone is looking at it.
+// exactly as long as someone is looking at it. It is exactly one pointer wide
+// and wrapping is O(1) — nothing is precomputed, because a caller that imports
+// only to serialize should not pay for a traversal it never looks at.
 //
 // The surface here is deliberately whole-scene. Consumers hold a scene between
 // verbs — import it, select, tessellate, export, serialize — and ask summary
@@ -35,30 +37,14 @@ class SemanticScene;
 
 namespace detail {
 class SemanticScene;
-struct SemanticSceneState;
 
 // Declared here only so the handle can befriend them; defined in
 // <nodehammer/detail/handle_seam.hpp>, which is where callers get them.
 nodehammer::SemanticScene wrapSemanticScene(std::shared_ptr<const SemanticScene>);
 const std::shared_ptr<const SemanticScene> &
 unwrapSemanticScene(const nodehammer::SemanticScene &) noexcept;
-const std::shared_ptr<const SemanticSceneState> &
-unwrapSemanticSceneState(const nodehammer::SemanticScene &) noexcept;
-} // namespace detail
 
-/// Whole-scene counts, computed once when the handle is created.
-struct SemanticStats {
-    std::size_t nodeCount{};
-    std::size_t logicalVolumeCount{};
-    std::size_t shapeCount{};
-    std::size_t materialCount{};
-    /// Nodes actually reachable from the root. Can be lower than `nodeCount`:
-    /// a prune may leave detached nodes in the map.
-    std::size_t reachableNodeCount{};
-    std::size_t leafCount{};
-    std::size_t booleanShapeCount{};
-    int maxDepth{};
-};
+} // namespace detail
 
 /// A shape-kind tally, e.g. {"box", 692}, ordered by name. The counterpart of
 /// asking "what is in this file" without being handed the geometry itself.
@@ -85,7 +71,6 @@ class SemanticScene {
     [[nodiscard]] std::size_t logicalVolumeCount() const noexcept;
     [[nodiscard]] std::size_t shapeCount() const noexcept;
     [[nodiscard]] std::size_t materialCount() const noexcept;
-    [[nodiscard]] const SemanticStats &stats() const noexcept;
 
     /// Shape kinds present, with counts, ordered by kind name.
     [[nodiscard]] std::vector<ShapeKindCount> shapeKindCounts() const;
@@ -95,16 +80,13 @@ class SemanticScene {
     [[nodiscard]] std::vector<std::string> materialNames() const;
 
   private:
-    friend struct detail::SemanticSceneState;
     friend SemanticScene detail::wrapSemanticScene(std::shared_ptr<const detail::SemanticScene>);
     friend const std::shared_ptr<const detail::SemanticScene> &
     detail::unwrapSemanticScene(const SemanticScene &) noexcept;
-    friend const std::shared_ptr<const detail::SemanticSceneState> &
-    detail::unwrapSemanticSceneState(const SemanticScene &) noexcept;
 
-    explicit SemanticScene(std::shared_ptr<const detail::SemanticSceneState> state) noexcept;
+    explicit SemanticScene(std::shared_ptr<const detail::SemanticScene> scene) noexcept;
 
-    std::shared_ptr<const detail::SemanticSceneState> state_;
+    std::shared_ptr<const detail::SemanticScene> scene_;
 };
 
 } // namespace nodehammer

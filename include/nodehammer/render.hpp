@@ -24,6 +24,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace nodehammer {
 
@@ -32,7 +33,6 @@ class RenderScene;
 namespace detail {
 struct MeshAsset;
 struct RenderScene;
-struct RenderSceneState;
 
 // Declared here only so the handle can befriend them; defined in
 // <nodehammer/detail/handle_seam.hpp>.
@@ -75,10 +75,10 @@ class MeshView {
 
   private:
     friend class RenderScene;
-    MeshView(std::shared_ptr<const detail::RenderSceneState> state,
+    MeshView(std::shared_ptr<const detail::RenderScene> scene,
              const detail::MeshAsset *mesh) noexcept;
 
-    std::shared_ptr<const detail::RenderSceneState> state_;
+    std::shared_ptr<const detail::RenderScene> scene_;
     const detail::MeshAsset *mesh_{nullptr};
 };
 
@@ -113,8 +113,8 @@ class RenderScene {
 
     /// Mesh ids in ascending id order — deliberately *not* map order, which
     /// varies with the container, the standard library and the amalgamated
-    /// header's unordered_dense shim.
-    [[nodiscard]] std::span<const MeshAssetId> meshIds() const noexcept;
+    /// header's unordered_dense shim. Built on demand.
+    [[nodiscard]] std::vector<MeshAssetId> meshIds() const;
 
   private:
     friend class MeshView;
@@ -122,9 +122,9 @@ class RenderScene {
     friend const std::shared_ptr<const detail::RenderScene> &
     detail::unwrapRenderScene(const RenderScene &) noexcept;
 
-    explicit RenderScene(std::shared_ptr<const detail::RenderSceneState> state) noexcept;
+    explicit RenderScene(std::shared_ptr<const detail::RenderScene> scene) noexcept;
 
-    std::shared_ptr<const detail::RenderSceneState> state_;
+    std::shared_ptr<const detail::RenderScene> scene_;
 };
 
 } // namespace nodehammer

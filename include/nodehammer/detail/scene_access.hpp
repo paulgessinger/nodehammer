@@ -24,6 +24,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace nodehammer::detail {
 
@@ -170,13 +171,13 @@ class SemanticNodeView {
 
 /// Stable orders that do not depend on the backing container: `nodeIds` is
 /// depth-first preorder from the root (so unreachable nodes are absent), the
-/// rest are ascending by id.
-[[nodiscard]] std::span<const SemanticNodeId> nodeIds(const nodehammer::SemanticScene &scene);
-[[nodiscard]] std::span<const SemanticLogVolId>
+/// rest are ascending by id. Built on demand — call once and keep the result if
+/// you need it more than once.
+[[nodiscard]] std::vector<SemanticNodeId> nodeIds(const nodehammer::SemanticScene &scene);
+[[nodiscard]] std::vector<SemanticLogVolId>
 logicalVolumeIds(const nodehammer::SemanticScene &scene);
-[[nodiscard]] std::span<const SemanticShapeId> shapeIds(const nodehammer::SemanticScene &scene);
-[[nodiscard]] std::span<const SemanticMaterialId>
-materialIds(const nodehammer::SemanticScene &scene);
+[[nodiscard]] std::vector<SemanticShapeId> shapeIds(const nodehammer::SemanticScene &scene);
+[[nodiscard]] std::vector<SemanticMaterialId> materialIds(const nodehammer::SemanticScene &scene);
 
 /// One step of a traversal. `siblingIndex`/`siblingCount` and `isLastSibling`
 /// are what a tree printer needs to draw its prefix, which is why they are here

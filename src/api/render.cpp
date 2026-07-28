@@ -1,34 +1,18 @@
 #include <nodehammer/render.hpp>
 
-#include "state.hpp"
+#include <nodehammer/detail/handle_seam.hpp>
+#include <nodehammer/ir/render.hpp>
 
 #include <algorithm>
 #include <utility>
 
 namespace nodehammer {
 
-namespace detail {
-
-RenderSceneState::RenderSceneState(std::shared_ptr<const RenderScene> s) : scene(std::move(s)) {
-    if (!scene) {
-        return;
-    }
-
-    meshIds.reserve(scene->meshAssets.size());
-    for (const auto &[id, mesh] : scene->meshAssets) {
-        meshIds.push_back(id);
-        triangleCount += mesh.indices.size() / 3;
-    }
-    std::ranges::sort(meshIds, [](MeshAssetId a, MeshAssetId b) { return a.value < b.value; });
-}
-
-} // namespace detail
-
 // ── MeshView ──────────────────────────────────────────────────────────────────
 
-MeshView::MeshView(std::shared_ptr<const detail::RenderSceneState> state,
+MeshView::MeshView(std::shared_ptr<const detail::RenderScene> scene,
                    const detail::MeshAsset *mesh) noexcept
-    : state_(std::move(state)), mesh_(mesh) {}
+    : scene_(std::move(scene)), mesh_(mesh) {}
 
 MeshAssetId MeshView::id() const noexcept { return mesh_->id; }
 
@@ -48,14 +32,14 @@ std::shared_ptr<const Vertex[]> MeshView::ownedVertices() const {
     // Aliasing constructor: shares the state's control block while pointing at
     // the vertex array. No copy, no allocation, and the scene stays alive for
     // as long as the returned pointer does.
-    return {state_, mesh_->vertices.data()};
+    return {scene_, mesh_->vertices.data()};
 }
 
 std::shared_ptr<const std::uint32_t[]> MeshView::ownedIndices() const {
-    return {state_, mesh_->indices.data()};
+    return {scene_, mesh_->indices.data()};
 }
 
-RenderScene MeshView::scene() const { return RenderScene{state_}; }
+RenderScene MeshView::scene() const { return RenderScene{scene_}; }
 
 // ── RenderScene ───────────────────────────────────────────────────────────────
 
@@ -66,55 +50,69 @@ RenderScene &RenderScene::operator=(const RenderScene &) = default;
 RenderScene &RenderScene::operator=(RenderScene &&) noexcept = default;
 RenderScene::~RenderScene() = default;
 
-RenderScene::RenderScene(std::shared_ptr<const detail::RenderSceneState> state) noexcept
-    : state_(std::move(state)) {}
+RenderScene::RenderScene(std::shared_ptr<const detail::RenderScene> scene) noexcept
+    : scene_(std::move(scene)) {}
 
-bool RenderScene::valid() const noexcept { return state_ != nullptr && state_->scene != nullptr; }
+bool RenderScene::valid() const noexcept { return scene_ != nullptr; }
 
 RenderNodeId RenderScene::rootId() const noexcept {
-    return valid() ? state_->scene->rootId : RenderNodeId{};
+    return valid() ? scene_->rootId : RenderNodeId{};
 }
 
-std::size_t RenderScene::nodeCount() const noexcept {
-    return valid() ? state_->scene->nodes.size() : 0;
-}
+std::size_t RenderScene::nodeCount() const noexcept { return valid() ? scene_->nodes.size() : 0; }
 
 std::size_t RenderScene::meshCount() const noexcept {
-    return valid() ? state_->scene->meshAssets.size() : 0;
+    return valid() ? scene_->meshAssets.size() : 0;
 }
 
 std::size_t RenderScene::materialCount() const noexcept {
-    return valid() ? state_->scene->materials.size() : 0;
+    return valid() ? scene_->materials.size() : 0;
 }
 
 std::size_t RenderScene::triangleCount() const noexcept {
-    return valid() ? state_->triangleCount : 0;
+    if (!valid()) {
+        return 0;
+    }
+    std::size_t total = 0;
+    for (const auto &[id, mesh] : scene_->meshAssets) {
+        total += mesh.indices.size() / 3;
+    }
+    return total;
 }
 
 std::optional<MeshView> RenderScene::mesh(MeshAssetId id) const {
     if (!valid()) {
         return std::nullopt;
     }
-    const auto it = state_->scene->meshAssets.find(id);
-    if (it == state_->scene->meshAssets.end()) {
+    const auto it = scene_->meshAssets.find(id);
+    if (it == scene_->meshAssets.end()) {
         return std::nullopt;
     }
-    return MeshView{state_, &it->second};
+    return MeshView{scene_, &it->second};
 }
 
 std::optional<RenderMaterial> RenderScene::material(RenderMaterialId id) const {
     if (!valid()) {
         return std::nullopt;
     }
-    const auto it = state_->scene->materials.find(id);
-    if (it == state_->scene->materials.end()) {
+    const auto it = scene_->materials.find(id);
+    if (it == scene_->materials.end()) {
         return std::nullopt;
     }
     return it->second;
 }
 
-std::span<const MeshAssetId> RenderScene::meshIds() const noexcept {
-    return state_ ? std::span<const MeshAssetId>{state_->meshIds} : std::span<const MeshAssetId>{};
+std::vector<MeshAssetId> RenderScene::meshIds() const {
+    if (!valid()) {
+        return {};
+    }
+    std::vector<MeshAssetId> ids;
+    ids.reserve(scene_->meshAssets.size());
+    for (const auto &[id, mesh] : scene_->meshAssets) {
+        ids.push_back(id);
+    }
+    std::ranges::sort(ids, [](MeshAssetId a, MeshAssetId b) { return a.value < b.value; });
+    return ids;
 }
 
 namespace detail {
@@ -122,16 +120,12 @@ namespace detail {
 // ── Seam ──────────────────────────────────────────────────────────────────────
 
 nodehammer::RenderScene wrapRenderScene(std::shared_ptr<const RenderScene> scene) {
-    if (!scene) {
-        return nodehammer::RenderScene{};
-    }
-    return nodehammer::RenderScene{std::make_shared<const RenderSceneState>(std::move(scene))};
+    return nodehammer::RenderScene{std::move(scene)};
 }
 
 const std::shared_ptr<const RenderScene> &
 unwrapRenderScene(const nodehammer::RenderScene &handle) noexcept {
-    static const std::shared_ptr<const RenderScene> empty;
-    return handle.state_ ? handle.state_->scene : empty;
+    return handle.scene_;
 }
 
 } // namespace detail

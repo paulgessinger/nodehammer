@@ -1,7 +1,7 @@
 #include <nodehammer/detail/handle_seam.hpp>
-#include <nodehammer/detail/scene_access.hpp>
 
-#include "state.hpp"
+#include <algorithm>
+#include <nodehammer/detail/scene_access.hpp>
 
 #include <unordered_set>
 #include <utility>
@@ -249,28 +249,68 @@ std::optional<SourceMaterialView> material(const nodehammer::SemanticScene &hand
     return scene ? lookup<SourceMaterialView>(handle, scene->materials, id) : std::nullopt;
 }
 
-std::span<const SemanticNodeId> nodeIds(const nodehammer::SemanticScene &handle) {
-    const auto &state = unwrapSemanticSceneState(handle);
-    return state ? std::span<const SemanticNodeId>{state->nodeIds}
-                 : std::span<const SemanticNodeId>{};
+namespace {
+
+template <typename Id, typename Map> std::vector<Id> sortedIds(const Map &map) {
+    std::vector<Id> ids;
+    ids.reserve(map.size());
+    for (const auto &[id, value] : map) {
+        ids.push_back(id);
+    }
+    std::ranges::sort(ids, [](Id a, Id b) { return a.value < b.value; });
+    return ids;
 }
 
-std::span<const SemanticLogVolId> logicalVolumeIds(const nodehammer::SemanticScene &handle) {
-    const auto &state = unwrapSemanticSceneState(handle);
-    return state ? std::span<const SemanticLogVolId>{state->logVolIds}
-                 : std::span<const SemanticLogVolId>{};
+} // namespace
+
+std::vector<SemanticNodeId> nodeIds(const nodehammer::SemanticScene &handle) {
+    // Depth-first preorder from the root, so the order is a property of the tree
+    // rather than of the backing container. Guards a missing id and a repeat
+    // visit, so a cyclic or partially-pruned graph terminates.
+    const auto &scene = unwrapSemanticScene(handle);
+    if (!scene) {
+        return {};
+    }
+
+    std::vector<SemanticNodeId> ids;
+    ids.reserve(scene->nodes.size());
+    std::unordered_set<SemanticNodeId> seen;
+    seen.reserve(scene->nodes.size());
+
+    std::vector<SemanticNodeId> stack;
+    if (scene->nodes.contains(scene->rootId)) {
+        stack.push_back(scene->rootId);
+    }
+    while (!stack.empty()) {
+        const auto id = stack.back();
+        stack.pop_back();
+        const auto it = scene->nodes.find(id);
+        if (it == scene->nodes.end() || !seen.insert(id).second) {
+            continue;
+        }
+        ids.push_back(id);
+        const auto &children = it->second.children;
+        for (std::size_t i = children.size(); i-- > 0;) {
+            stack.push_back(children[i]);
+        }
+    }
+    return ids;
 }
 
-std::span<const SemanticShapeId> shapeIds(const nodehammer::SemanticScene &handle) {
-    const auto &state = unwrapSemanticSceneState(handle);
-    return state ? std::span<const SemanticShapeId>{state->shapeIds}
-                 : std::span<const SemanticShapeId>{};
+std::vector<SemanticLogVolId> logicalVolumeIds(const nodehammer::SemanticScene &handle) {
+    const auto &scene = unwrapSemanticScene(handle);
+    return scene ? sortedIds<SemanticLogVolId>(scene->logVols) : std::vector<SemanticLogVolId>{};
 }
 
-std::span<const SemanticMaterialId> materialIds(const nodehammer::SemanticScene &handle) {
-    const auto &state = unwrapSemanticSceneState(handle);
-    return state ? std::span<const SemanticMaterialId>{state->materialIds}
-                 : std::span<const SemanticMaterialId>{};
+std::vector<SemanticShapeId> shapeIds(const nodehammer::SemanticScene &handle) {
+    const auto &scene = unwrapSemanticScene(handle);
+    return scene ? sortedIds<SemanticShapeId>(scene->shapes) : std::vector<SemanticShapeId>{};
+}
+
+std::vector<SemanticMaterialId> materialIds(const nodehammer::SemanticScene &handle) {
+    const auto &scene = unwrapSemanticScene(handle);
+    return scene ? sortedIds<SemanticMaterialId>(scene->materials)
+                 : std::vector<SemanticMaterialId>{};
 }
 
 // ── Traversal ─────────────────────────────────────────────────────────────────

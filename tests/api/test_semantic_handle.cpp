@@ -80,11 +80,21 @@ TEST_CASE("SemanticScene handle: counts and stats", "[api][semantic]") {
     REQUIRE(handle.shapeCount() == 3);
     REQUIRE(handle.materialCount() == 1);
 
-    const auto &stats = handle.stats();
-    REQUIRE(stats.reachableNodeCount == 5);
-    REQUIRE(stats.leafCount == 3); // a1, a2, b
-    REQUIRE(stats.maxDepth == 2);
-    REQUIRE(stats.booleanShapeCount == 1);
+    // Reachability, depth and leaf counts are derivable from the traversal
+    // rather than precomputed; nothing asked for them as a scene-level number.
+    REQUIRE(detail::nodeIds(handle).size() == 5);
+
+    int leaves = 0;
+    int maxDepth = 0;
+    detail::traverse(handle, [&](const detail::Visit &v) {
+        if (v.node.isLeaf()) {
+            ++leaves;
+        }
+        maxDepth = std::max(maxDepth, v.depth);
+        return true;
+    });
+    REQUIRE(leaves == 3); // a1, a2, b
+    REQUIRE(maxDepth == 2);
 }
 
 TEST_CASE("SemanticScene handle: a default handle is inert", "[api][semantic]") {
@@ -95,7 +105,6 @@ TEST_CASE("SemanticScene handle: a default handle is inert", "[api][semantic]") 
     REQUIRE(detail::nodeIds(handle).empty());
     REQUIRE_FALSE(detail::root(handle).has_value());
     REQUIRE_FALSE(detail::node(handle, SemanticNodeId{1}).has_value());
-    REQUIRE(handle.stats().nodeCount == 0);
     REQUIRE(traversalNames(handle).empty()); // must not trap
 }
 
@@ -269,8 +278,10 @@ TEST_CASE("SemanticScene handle: unreachable nodes count but are not traversed",
 
     const auto handle = detail::wrapSemanticScene(std::move(raw));
 
-    REQUIRE(handle.stats().nodeCount == 6);
-    REQUIRE(handle.stats().reachableNodeCount == 5);
+    // The map still holds it, but the traversal does not reach it — two numbers
+    // that can legitimately disagree.
+    REQUIRE(handle.nodeCount() == 6);
+    REQUIRE(detail::nodeIds(handle).size() == 5);
     REQUIRE(detail::nodeIds(handle).size() == 5);
     // Still directly addressable — it is in the map, just not in the tree.
     REQUIRE(detail::node(handle, orphan).has_value());

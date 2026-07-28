@@ -102,9 +102,7 @@ TEST_CASE("RenderScene handle: meshIds are ascending, not container order", "[ap
     REQUIRE(ids[1].value < ids[2].value);
 
     // Same input, same order — the public order must not inherit the map's.
-    const auto again = detail::wrapRenderScene(makeScene());
-    REQUIRE(std::vector(again.meshIds().begin(), again.meshIds().end()) ==
-            std::vector(ids.begin(), ids.end()));
+    REQUIRE(detail::wrapRenderScene(makeScene()).meshIds() == ids);
 }
 
 TEST_CASE("MeshView: vertex and index spans are the scene's own bytes", "[api][render]") {
