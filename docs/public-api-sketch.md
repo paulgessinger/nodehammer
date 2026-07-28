@@ -189,27 +189,92 @@ the Python console script.
 - Tessellation internals (`tessellation_pass`, `primitive_tessellator`,
   `boolean_tessellator`) — the job and pipeline entry points are the surface.
 
-## 7. Mechanism
+## 7. Mechanism: `NH_API`
 
-The earlier instinct in this spike was per-symbol `NH_API`
-visibility annotation. That is the wrong tool here:
+The surface is marked in the code, per symbol, with an `NH_API` macro. The
+alternative considered — a separate manifest of "public headers" — was
+rejected because a list in a doc drifts away from the code it describes,
+while a macro sitting on the declaration cannot.
 
-- The Python module statically links the core into one `.so`. Measured: with
-  the full pipeline bound, the module still exports exactly
-  `PyInit__nodehammer`. Binding more API changes nothing about visibility.
-- The amalgamation is compiled from source in the consumer's TU — §7 is
-  explicit that there is "no binary boundary to protect".
+Note what the macro does *not* do today. Neither current consumer has a
+binary boundary:
 
-So the surface needs to be **declared**, not *exported*. What actually needs a
-machine-readable list is the amalgamator (§9.2) — it must know which headers
-and TUs form the slice, and the golden-equivalence test (§10.2) enforces that
-the assembled header matches the modular build. That list *is* the public API
-definition, and it is load-bearing whether or not anyone annotates a symbol.
+- The Python module statically links the core into one `.so`. Measured with
+  the full pipeline bound: the module exports exactly `PyInit__nodehammer`,
+  and binding more API does not change that.
+- The amalgamation compiles in the experiment's own TU —
+  `docs/event-display-design.md` §7 is explicit that there is "no binary
+  boundary to protect".
 
-Visibility annotation becomes necessary only if the core ever becomes a shared
-library with more than one consumer — the "one dylib for viewer + bindings"
-option. Statically linking into both costs ~3 MB of duplicated disk and avoids
-the entire question.
+So `NH_API` starts as a **declaration** that happens to already be the right
+**export** mechanism the day a shared core appears. That day is plausible:
+a native viewer and a Python module both wanting the same code is exactly
+the "one dylib" shape. Statically linking into both remains an option — it
+costs ~3 MB of duplicated disk and sidesteps ABI entirely — but the
+annotation is what keeps that a free choice rather than a forced one.
+
+### 7.1 Four branches, not two
+
+```cpp
+#if defined(NH_AMALGAMATED)
+#  define NH_API                                     // one TU, no boundary (§7)
+#elif defined(__EMSCRIPTEN__)
+#  define NH_API                                     // exports via -sEXPORTED_FUNCTIONS
+#elif defined(_WIN32)
+#  define NH_API __declspec(dllexport)               // dllimport for consumers
+#else
+#  define NH_API __attribute__((visibility("default")))
+#endif
+```
+
+The amalgamation branch is the one that is easy to forget, and the one that
+breaks the §7 vendoring story if it is wrong.
+
+### 7.2 Annotation nobody links against is annotation nobody can trust
+
+The failure mode of adopting `NH_API` early is annotating it wrong for two
+years, then discovering every mistake at once when the shared build finally
+happens — paying the cost without the payoff.
+
+So pair the macro with a **CI-only shared build**: compile `nodehammer_lib`
+as `SHARED` with `-fvisibility=hidden`, link a small consumer that exercises
+the public API, and let missing annotations fail as undefined symbols. The
+artifact is never shipped; it exists to keep the annotation honest from the
+first commit. One extra CMake configuration.
+
+That check is also the only thing that catches the failure modes the macro
+alone will not:
+
+- **Vtable emission** follows the key function's visibility; a polymorphic
+  type exported without its key function is a runtime surprise, not a link
+  error. `ISemanticImporter` is the live example.
+- **Templates** instantiated on both sides can end up as distinct hidden
+  instantiations, breaking `type_info` identity and function-pointer
+  comparison.
+- **Inline functions** in the surface — of which the vocabulary headers have
+  many.
+
+Current risk is low and worth recording: the only exception types thrown are
+`std::runtime_error` (21 sites) and `std::logic_error`, with **no custom
+exception classes**. Standard exception typeinfo comes from the C++ runtime
+at default visibility, so the classic "hidden typeinfo makes `catch` silently
+miss and `terminate()` fire" trap is not live. It becomes live the day
+someone writes `class ConfigError : public std::runtime_error`.
+
+### 7.3 What `NH_API` still does not cover
+
+The macro marks *symbols*. The amalgamator (§9.2) needs *files* — which
+headers and TUs form the slice, with the golden-equivalence test (§10.2)
+enforcing that the assembled header matches the modular build. Related, but
+not the same list.
+
+They are complementary rather than duplicative: the set of files containing
+`NH_API` symbols is a good seed for the amalgamator's manifest, and a file in
+the slice with no annotated symbols in it is a smell worth flagging.
+
+Two further constraints sit outside the macro's reach and need their own CI,
+already anticipated by §10.3: the C++17/C++20 language floor for the slice,
+and the vendor/shim/assume dependency discipline of §7.3.
 
 ## 8. Prerequisite: stop printing
 
@@ -228,3 +293,22 @@ real API, and it is a larger job than the packaging work around it.
   vocabulary.
 - `to_json` free functions currently live beside `Diagnostic`; splitting them
   out is what lets the vocabulary header stay nlohmann-free.
+- Ownership has to be settled before anything is annotated, since it changes
+  the signatures `NH_API` sits on: `SceneBuildResult::scene` is a
+  `shared_ptr<RenderScene>`, `ImportResult::scene` is a `SemanticScene` by
+  value (§3.1).
+
+## 10. Suggested order
+
+Annotation is cheap per symbol and expensive to redo, so settle the shape
+first and mark second.
+
+1. **Ownership + opaque-handle accessors** (§3.1) — decide the signatures.
+2. **`NH_API` macro + the CI shared build** (§7.1, §7.2) — mechanism and its
+   enforcement land together, so the first annotation is validated.
+3. **Annotate the uncontroversial vocabulary**: `Diagnostic`,
+   `DiagnosticList`, the `StrongId` family, `RenderScene`/`MeshAsset`
+   accessors.
+4. **Stop printing** (§8) — the precondition for any non-CLI consumer.
+5. **Annotate the pipeline verbs** (§4) once §9's open calls are settled.
+6. **Amalgamator manifest** (§7.3), seeded from the annotated set.
