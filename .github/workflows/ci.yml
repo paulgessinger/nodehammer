@@ -62,9 +62,14 @@ jobs:
           echo "CC=gcc-14" >> "$GITHUB_ENV"
           echo "CXX=g++-14" >> "$GITHUB_ENV"
 
+      # ilammy/msvc-dev-cmd is unmaintained and still targets Node.js 20, which
+      # the runners now warn about. setup-msvc-dev is an actively maintained
+      # equivalent on Node.js 24; unlike msvc-dev-cmd it has no default arch.
       - name: Set up MSVC environment
         if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9 # v4.1.0
+        with:
+          arch: x64
 
       - name: Install emsdk
         if: matrix.kind == 'wasm'
