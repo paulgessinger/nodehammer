@@ -4,8 +4,7 @@
 #include <CLI/CLI.hpp>
 #include <map>
 #include <nodehammer/detail/markup.hpp>
-#include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/scene.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <print>
 #include <set>
@@ -25,39 +24,21 @@ nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
 
 // ── Summary ─��─────────────────────────────────���──────────────────────────────
 
-void printSummary(const nodehammer::detail::ImportResult &result, std::string_view formatName) {
+void printSummary(const nodehammer::SemanticScene &scene, const nodehammer::DiagnosticList &diags,
+                  std::string_view formatName) {
     std::map<std::string, int> shapeCounts;
-    for (const auto &[id, shape] : result.scene.shapes) {
-        std::string typeName = std::visit(
-            nodehammer::detail::overloaded{
-                [](const nodehammer::BoxShape &) -> std::string { return "box"; },
-                [](const nodehammer::TubeShape &) -> std::string { return "tube"; },
-                [](const nodehammer::ConeShape &) -> std::string { return "cone"; },
-                [](const nodehammer::TrdShape &) -> std::string { return "trd"; },
-                [](const nodehammer::ParaShape &) -> std::string { return "para"; },
-                [](const nodehammer::PconShape &) -> std::string { return "pcon"; },
-                [](const nodehammer::PgonShape &) -> std::string { return "pgon"; },
-                [](const nodehammer::TorusShape &) -> std::string { return "torus"; },
-                [](const nodehammer::TessellatedShape &) -> std::string { return "tessellated"; },
-                [](const nodehammer::BooleanUnion &) -> std::string { return "union"; },
-                [](const nodehammer::BooleanIntersection &) -> std::string {
-                    return "intersection";
-                },
-                [](const nodehammer::BooleanSubtraction &) -> std::string { return "subtraction"; },
-                [](const nodehammer::UnknownShape &) -> std::string { return "unknown"; },
-            },
-            shape.data);
-        shapeCounts[typeName]++;
+    for (const auto id : scene.shapeIds()) {
+        shapeCounts[std::string{scene.shape(id)->kindName()}]++;
     }
 
     std::vector<std::string> matNames;
-    matNames.reserve(result.scene.materials.size());
-    for (const auto &[id, mat] : result.scene.materials) {
-        matNames.push_back(mat.name);
+    matNames.reserve(scene.materialCount());
+    for (const auto id : scene.materialIds()) {
+        matNames.emplace_back(scene.material(id)->name());
     }
 
     int warnings = 0, errors = 0;
-    for (const auto &d : result.diags.items()) {
+    for (const auto &d : diags.items()) {
         if (d.severity >= nodehammer::DiagnosticSeverity::Error) {
             ++errors;
         } else if (d.severity == nodehammer::DiagnosticSeverity::Warning) {
@@ -66,7 +47,7 @@ void printSummary(const nodehammer::detail::ImportResult &result, std::string_vi
     }
 
     std::println("Format:    {}", formatName);
-    std::println("Nodes:     {}", result.scene.nodes.size());
+    std::println("Nodes:     {}", scene.nodeCount());
 
     std::string shapeStr;
     for (const auto &[name, count] : shapeCounts) {
@@ -90,100 +71,73 @@ void printSummary(const nodehammer::detail::ImportResult &result, std::string_vi
 
 // ── Tree ───────────────────────────���───────────────────────────���─────────────
 
-void printTree(const nodehammer::detail::SemanticScene &scene, int maxDepth,
-               const std::string &filter, const nodehammer::detail::Console &con) {
-    if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
-        return;
-    }
-
-    struct Entry {
-        nodehammer::SemanticNodeId id;
-        int depth;
-        std::string prefix; // tree-drawing prefix
-        bool isLast;
-    };
-
-    // DFS via explicit stack for tree drawing.
-    std::vector<Entry> stack;
-    stack.push_back({scene.rootId, 0, "", true});
-
+void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
+               const nodehammer::detail::Console &con) {
     int printed = 0;
     int filtered = 0;
 
-    while (!stack.empty()) {
-        auto [id, depth, prefix, isLast] = stack.back();
-        stack.pop_back();
+    // The drawing prefix is the ancestors' "am I the last child" flags. Preorder
+    // guarantees every ancestor was visited before us and its flag is still
+    // current, so tracking one flag per depth is enough — no need to carry a
+    // built-up string through the traversal.
+    std::vector<bool> isLastAtDepth;
 
-        if (!scene.nodes.contains(id)) {
-            continue;
+    scene.traverse([&](const nodehammer::SemanticScene::Visit &v) {
+        const auto depth = static_cast<std::size_t>(v.depth);
+        if (isLastAtDepth.size() <= depth) {
+            isLastAtDepth.resize(depth + 1);
         }
-        const auto &node = scene.nodes.at(id);
+        isLastAtDepth[depth] = v.isLastSibling;
 
-        // Check depth limit.
-        if (maxDepth >= 0 && depth > maxDepth) {
-            continue;
-        }
-
-        // Check filter.
-        bool show = true;
-        if (!filter.empty()) {
-            show = nodehammer::matchGlob(filter, node.originalPath);
-        }
-
-        if (show) {
-            // Draw tree lines.
-            std::string line;
-            if (depth > 0) {
-                line = std::format("[dim]{}[/]", isLast ? "\\-- " : "|-- ");
-            }
-            bool isLeaf = node.children.empty();
-            line += std::format("[bold]{}[/]", node.name);
-
-            // Annotations.
-            std::string ann;
-            if (!node.tags.empty()) {
-                for (const auto &[k, v] : node.tags) {
-                    if (!ann.empty()) {
-                        ann += "[dim],[/] ";
-                    }
-                    ann += std::format("[cyan]{}[/][dim]=[/][yellow]{}[/]", k, v);
-                }
-            }
-            int nChildren = static_cast<int>(node.children.size());
-            if (nChildren > 0 && maxDepth >= 0 && depth == maxDepth) {
-                if (!ann.empty()) {
-                    ann += "[dim],[/] ";
-                }
-                ann += std::format("[dim]{} children[/]", nChildren);
-            }
-            if (isLeaf) {
-                if (!ann.empty()) {
-                    ann += "[dim],[/] ";
-                }
-                ann += "[dim]leaf[/]";
-            }
-
-            // Colorize the prefix (tree lines).
-            std::string colorPrefix = std::format("[dim]{}[/]", prefix);
-
-            if (!ann.empty()) {
-                con.println("{}{}  [dim]\\[[/]{}[dim]][/]", colorPrefix, line, ann);
-            } else {
-                con.println("{}{}", colorPrefix, line);
-            }
-            ++printed;
-        } else {
+        const bool show = filter.empty() || nodehammer::matchGlob(filter, v.node.originalPath());
+        if (!show) {
             ++filtered;
+            // Filtering hides a node but not its descendants, as before.
+            return maxDepth < 0 || v.depth < maxDepth;
         }
 
-        // Push children in reverse order so they come off the stack in order.
-        const std::string childPrefix = (depth > 0) ? prefix + (isLast ? "    " : "|   ") : "";
-        for (int i = static_cast<int>(node.children.size()) - 1; i >= 0; --i) {
-            bool childIsLast = (i == static_cast<int>(node.children.size()) - 1);
-            stack.push_back(
-                {node.children[static_cast<std::size_t>(i)], depth + 1, childPrefix, childIsLast});
+        std::string prefix;
+        for (std::size_t d = 1; d < depth; ++d) {
+            prefix += isLastAtDepth[d] ? "    " : "|   ";
         }
-    }
+
+        std::string line;
+        if (v.depth > 0) {
+            line = std::format("[dim]{}[/]", v.isLastSibling ? "\\-- " : "|-- ");
+        }
+        line += std::format("[bold]{}[/]", v.node.name());
+
+        std::string ann;
+        v.node.forEachTag([&](std::string_view k, std::string_view val) {
+            if (!ann.empty()) {
+                ann += "[dim],[/] ";
+            }
+            ann += std::format("[cyan]{}[/][dim]=[/][yellow]{}[/]", k, val);
+        });
+        const auto nChildren = v.node.childCount();
+        if (nChildren > 0 && maxDepth >= 0 && v.depth == maxDepth) {
+            if (!ann.empty()) {
+                ann += "[dim],[/] ";
+            }
+            ann += std::format("[dim]{} children[/]", nChildren);
+        }
+        if (v.node.isLeaf()) {
+            if (!ann.empty()) {
+                ann += "[dim],[/] ";
+            }
+            ann += "[dim]leaf[/]";
+        }
+
+        const std::string colorPrefix = std::format("[dim]{}[/]", prefix);
+        if (!ann.empty()) {
+            con.println("{}{}  [dim]\\[[/]{}[dim]][/]", colorPrefix, line, ann);
+        } else {
+            con.println("{}{}", colorPrefix, line);
+        }
+        ++printed;
+
+        return maxDepth < 0 || v.depth < maxDepth;
+    });
 
     if (!filter.empty()) {
         con.println("[dim]({} shown, {} filtered)[/]", printed, filtered);
@@ -192,21 +146,20 @@ void printTree(const nodehammer::detail::SemanticScene &scene, int maxDepth,
 
 // ── Tags ──────────��───────────────────────────────���──────────────────────────
 
-void printTags(const nodehammer::detail::SemanticScene &scene,
-               const nodehammer::detail::Console &con) {
+void printTags(const nodehammer::SemanticScene &scene, const nodehammer::detail::Console &con) {
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
     int nodesWithTags = 0;
-    for (const auto &[id, node] : scene.nodes) {
-        if (!node.tags.empty()) {
+    for (const auto id : scene.nodeIds()) {
+        const auto node = *scene.node(id);
+        if (node.tagCount() > 0) {
             ++nodesWithTags;
         }
-        for (const auto &[k, v] : node.tags) {
-            tagValues[k].insert(v);
-        }
+        node.forEachTag(
+            [&](std::string_view k, std::string_view v) { tagValues[std::string{k}].emplace(v); });
     }
 
-    con.println("Nodes with tags: [bold]{}[/] / {}", nodesWithTags, scene.nodes.size());
+    con.println("Nodes with tags: [bold]{}[/] / {}", nodesWithTags, scene.nodeCount());
     con.println("Unique tag keys: [bold]{}[/]", tagValues.size());
     con.println("");
 
@@ -257,7 +210,7 @@ void registerCmdInspect(CLI::App &app) {
     sumSub->callback([=] {
         auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
         nodehammer::cli::Pager pager;
-        printSummary(result, fmt);
+        printSummary(nodehammer::wrapSemanticScene(std::move(result.scene)), result.diags, fmt);
     });
 
     // ── tree ───��───────────────���─────────────────────────────────────────────
@@ -282,7 +235,7 @@ void registerCmdInspect(CLI::App &app) {
 
         nodehammer::cli::Pager pager;
         nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
-        printTree(result.scene, maxDepth, filter, con);
+        printTree(nodehammer::wrapSemanticScene(std::move(result.scene)), maxDepth, filter, con);
     });
 
     // ── tags ────────────────────────────────────���───────────────────────────���
@@ -295,6 +248,6 @@ void registerCmdInspect(CLI::App &app) {
 
         nodehammer::cli::Pager pager;
         nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
-        printTags(result.scene, con);
+        printTags(nodehammer::wrapSemanticScene(std::move(result.scene)), con);
     });
 }
