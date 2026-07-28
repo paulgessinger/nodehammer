@@ -50,7 +50,7 @@ struct SceneFingerprint {
     bool operator==(const SceneFingerprint &) const = default;
 };
 
-SceneFingerprint fingerprint(const RenderScene &sc) {
+SceneFingerprint fingerprint(const detail::RenderScene &sc) {
     SceneFingerprint fp;
     fp.nodeCount = sc.nodes.size();
     fp.meshCount = sc.meshAssets.size();
@@ -71,7 +71,8 @@ std::shared_ptr<const NHConfig> emptyConfig() { return std::make_shared<const NH
 
 // The pre-refactor synchronous reference: prep (with an inline wedge, matching
 // the old buildSceneFromPaths / convert ordering) then a one-shot lower().
-RenderScene referenceBuild(const SemanticScene &scene, std::optional<WedgeCutParams> wedge) {
+detail::RenderScene referenceBuild(const SemanticScene &scene,
+                                   std::optional<WedgeCutParams> wedge) {
     ScenePrepResult prep = prepareSceneForTessellationFromInputs(NHConfig{}, scene, wedge);
     REQUIRE(prep.ok);
     TessellationPass pass{prep.config};
@@ -99,7 +100,7 @@ TEST_CASE("BuildPipeline: drive-to-completion parity with one-shot lower", "[bui
     REQUIRE_FALSE(built.diags.hasErrors());
     REQUIRE(built.scene != nullptr);
 
-    const RenderScene reference = referenceBuild(scene, std::nullopt);
+    const detail::RenderScene reference = referenceBuild(scene, std::nullopt);
     REQUIRE(fingerprint(*built.scene) == fingerprint(reference));
 }
 
@@ -115,7 +116,7 @@ TEST_CASE("BuildPipeline: wedge parity with the pre-refactor synchronous path",
     // Reference applies the wedge inline in prep; the pipeline defers it to a
     // WedgeCutJob. wedge_cut.hpp documents applyWedgeCut as a thin shim over
     // WedgeCutJob, so the geometry must match.
-    const RenderScene reference = referenceBuild(scene, wedge);
+    const detail::RenderScene reference = referenceBuild(scene, wedge);
     REQUIRE(fingerprint(*built.scene) == fingerprint(reference));
 }
 
@@ -138,7 +139,7 @@ TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pip
     // false returns before completion.
     REQUIRE(falses >= 2);
 
-    const RenderScene reference = referenceBuild(scene, std::nullopt);
+    const detail::RenderScene reference = referenceBuild(scene, std::nullopt);
     REQUIRE(fingerprint(*sliced.scene) == fingerprint(reference));
 }
 
@@ -222,7 +223,7 @@ TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pip
 
 TEST_CASE("BuildPipeline: degenerate and absent wedge skip Cutting", "[build_pipeline]") {
     const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
-    const RenderScene reference = referenceBuild(scene, std::nullopt);
+    const detail::RenderScene reference = referenceBuild(scene, std::nullopt);
 
     SECTION("absent wedge") {
         SceneBuildResult r = drivePipeline(scene, std::nullopt, kSpin);

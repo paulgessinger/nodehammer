@@ -43,9 +43,9 @@ class BuildController {
 
     struct Callbacks {
         /// A fresh uncut base scene finished tessellating → upload + frame it.
-        std::function<void(std::shared_ptr<const RenderScene>)> on_base_scene_ready;
+        std::function<void(std::shared_ptr<const detail::RenderScene>)> on_base_scene_ready;
         /// A Boolean-cut bake finished → upload it into the cut renderer.
-        std::function<void(std::shared_ptr<const RenderScene>)> on_cut_scene_ready;
+        std::function<void(std::shared_ptr<const detail::RenderScene>)> on_cut_scene_ready;
         /// A new project build is starting → invalidate the resident cut bake
         /// (drop `cut_scene`, its upload flag, and clear the cut renderer).
         std::function<void()> on_project_build_starting;

@@ -18,7 +18,7 @@
 namespace {
 
 // Build a RenderScene from a synthetic single-box scene with a default config.
-nodehammer::RenderScene buildBoxRenderScene() {
+nodehammer::detail::RenderScene buildBoxRenderScene() {
     nodehammer::SemanticScene semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
     nodehammer::NHConfig cfg;
     nodehammer::TessellationPass pass{cfg};

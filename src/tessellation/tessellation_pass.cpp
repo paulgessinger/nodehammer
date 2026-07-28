@@ -587,8 +587,9 @@ size_t removeCoincidentInteriorFaces(MatGroupMap &groups, bool apply = true) {
 
 // Resolve extras from the first matching rule that has them, falling back to
 // config-level defaults.
-RenderExtrasMap resolveExtras(const std::vector<CompiledRule> &rules,
-                              const std::optional<ExtrasMap> &defaults, const NodeView &view) {
+detail::RenderExtrasMap resolveExtras(const std::vector<CompiledRule> &rules,
+                                      const std::optional<ExtrasMap> &defaults,
+                                      const NodeView &view) {
     for (const auto &cr : rules) {
         if (!cr.rule->extras.has_value()) {
             continue;
@@ -604,7 +605,7 @@ RenderExtrasMap resolveExtras(const std::vector<CompiledRule> &rules,
 }
 
 // Build a default grey RenderMaterial from a SourceMaterial.
-RenderMaterial makeDefaultMaterial(RenderScene &rs, const SourceMaterial &src) {
+RenderMaterial makeDefaultMaterial(detail::RenderScene &rs, const SourceMaterial &src) {
     RenderMaterial mat;
     mat.id = rs.nextMaterialId();
     mat.name = src.name;
@@ -781,14 +782,15 @@ struct TessellationJob::Impl {
     // finalizes `rn` into the render scene and returns the same bool contract
     // as stepOneNode (false only on a fallback=fail abort).
     bool stepOneNode();
-    bool tessellateMergeDescendants(const SemanticNode &semNode, RenderNode &rn, RenderNodeId rnId,
-                                    const ResolvedTessellation &rule);
+    bool tessellateMergeDescendants(const SemanticNode &semNode, detail::RenderNode &rn,
+                                    RenderNodeId rnId, const ResolvedTessellation &rule);
     bool tessellateBooleanNode(const SemanticNode &semNode, const SemanticLogicalVolume &lv,
-                               const SemanticShape &shape, RenderNode &rn, RenderNodeId rnId,
-                               const ResolvedTessellation &rule, const TessellationParams &params);
+                               const SemanticShape &shape, detail::RenderNode &rn,
+                               RenderNodeId rnId, const ResolvedTessellation &rule,
+                               const TessellationParams &params);
     bool tessellatePrimitiveNode(const SemanticNode &semNode, const SemanticLogicalVolume &lv,
-                                 const SemanticShape &shape, RenderNode &rn, RenderNodeId rnId,
-                                 const TessellationParams &params);
+                                 const SemanticShape &shape, detail::RenderNode &rn,
+                                 RenderNodeId rnId, const TessellationParams &params);
 
     // Count the number of nodes that the outer BFS in `stepOneNode`
     // will actually process. Mirrors that loop's children-skip rules so
@@ -908,7 +910,7 @@ bool TessellationJob::Impl::stepOneNode() {
 
     // ── Create RenderNode ──────────────────────────────────────────────────
     const RenderNodeId rnId = result.scene.nextNodeId();
-    RenderNode rn;
+    detail::RenderNode rn;
     rn.id = rnId;
     rn.name = semNode.name;
     rn.localTransform = glm::mat4(semNode.localTransform);
@@ -978,8 +980,8 @@ bool TessellationJob::Impl::stepOneNode() {
     return tessellatePrimitiveNode(semNode, lv, shape, rn, rnId, params);
 }
 
-bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNode, RenderNode &rn,
-                                                       RenderNodeId rnId,
+bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNode,
+                                                       detail::RenderNode &rn, RenderNodeId rnId,
                                                        const ResolvedTessellation &rule) {
     MergeCacheKey mergeKey;
     mergeKey.fallback = rule.fallback;
@@ -1139,7 +1141,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
             if (tessOut.vertices.empty()) {
                 continue;
             }
-            MeshAsset ma;
+            detail::MeshAsset ma;
             ma.id = result.scene.nextMeshId();
             ma.name = descLv.name;
             ma.vertices = std::move(tessOut.vertices);
@@ -1156,7 +1158,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         if (!result.scene.meshAssets.contains(descMid)) {
             continue;
         }
-        const MeshAsset &srcMesh = result.scene.meshAssets.at(descMid);
+        const detail::MeshAsset &srcMesh = result.scene.meshAssets.at(descMid);
         if (srcMesh.vertices.empty()) {
             continue;
         }
@@ -1311,7 +1313,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
                 const RenderMaterialId pmId = pm.id;
                 result.scene.materials[pmId] = std::move(pm);
 
-                MeshAsset pmesh;
+                detail::MeshAsset pmesh;
                 pmesh.id = result.scene.nextMeshId();
                 pmesh.name = semNode.name + "_lod_hull";
                 pmesh.vertices = hullMesh.vertices;
@@ -1329,7 +1331,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     // Create one MeshAsset per material group → one MeshBinding each.
     for (auto &[rmId, grp] : groups) {
         MeshAssetId mid = result.scene.nextMeshId();
-        MeshAsset ma;
+        detail::MeshAsset ma;
         ma.id = mid;
         ma.name = semNode.name + "_merged";
         ma.vertices = std::move(grp.verts);
@@ -1350,8 +1352,8 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
 
 bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
                                                   const SemanticLogicalVolume &lv,
-                                                  const SemanticShape &shape, RenderNode &rn,
-                                                  RenderNodeId rnId,
+                                                  const SemanticShape &shape,
+                                                  detail::RenderNode &rn, RenderNodeId rnId,
                                                   const ResolvedTessellation &rule,
                                                   const TessellationParams &params) {
     // Check the mesh cache first — same shapeId + segments → same mesh.
@@ -1372,7 +1374,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
         result.diags.append(boolOut.diags);
         if (!boolOut.vertices.empty()) {
             boolMid = result.scene.nextMeshId();
-            MeshAsset ma;
+            detail::MeshAsset ma;
             ma.id = boolMid;
             ma.name = lv.name + "_boolean";
             ma.vertices = std::move(boolOut.vertices);
@@ -1423,7 +1425,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
         auto bboxOut = makeBBoxProxy(shape.data, *scene, tess, params);
         result.diags.append(bboxOut.diags);
         MeshAssetId mid = result.scene.nextMeshId();
-        MeshAsset ma;
+        detail::MeshAsset ma;
         ma.id = mid;
         ma.name = semNode.name + "_bbox";
         ma.vertices = std::move(bboxOut.vertices);
@@ -1452,8 +1454,8 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
 
 bool TessellationJob::Impl::tessellatePrimitiveNode(const SemanticNode &semNode,
                                                     const SemanticLogicalVolume &lv,
-                                                    const SemanticShape &shape, RenderNode &rn,
-                                                    RenderNodeId rnId,
+                                                    const SemanticShape &shape,
+                                                    detail::RenderNode &rn, RenderNodeId rnId,
                                                     const TessellationParams &params) {
     // ── Tessellate primitive shape ─────────────────────────────────────────
     MeshAssetId mid;
@@ -1461,7 +1463,7 @@ bool TessellationJob::Impl::tessellatePrimitiveNode(const SemanticNode &semNode,
     if (!segMap.contains(params.maxSegmentsCircle)) {
         auto tessOut = tess.tessellate(shape.data, params);
         result.diags.append(tessOut.diags);
-        MeshAsset ma;
+        detail::MeshAsset ma;
         ma.id = result.scene.nextMeshId();
         ma.name = lv.name;
         ma.vertices = std::move(tessOut.vertices);

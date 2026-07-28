@@ -80,7 +80,7 @@ TestScene makeScene() {
     return ts;
 }
 
-const RenderNode *findBySemId(const RenderScene &rs, SemanticNodeId sid) {
+const detail::RenderNode *findBySemId(const detail::RenderScene &rs, SemanticNodeId sid) {
     for (const auto &[id, rn] : rs.nodes) {
         (void)id;
         if (rn.semanticNodeId == sid) {
@@ -90,7 +90,7 @@ const RenderNode *findBySemId(const RenderScene &rs, SemanticNodeId sid) {
     return nullptr;
 }
 
-bool meshNonEmpty(const RenderScene &rs, MeshAssetId mid) {
+bool meshNonEmpty(const detail::RenderScene &rs, MeshAssetId mid) {
     auto it = rs.meshAssets.find(mid);
     return it != rs.meshAssets.end() && !it->second.indices.empty();
 }
@@ -123,9 +123,9 @@ TEST_CASE("wedge cut: lowers to a valid render scene", "[tessellation][wedgecut]
     auto result = pass.lower(ts.scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    const RenderNode *a = findBySemId(result.scene, ts.a);
-    const RenderNode *b = findBySemId(result.scene, ts.b);
-    const RenderNode *d = findBySemId(result.scene, ts.d);
+    const detail::RenderNode *a = findBySemId(result.scene, ts.a);
+    const detail::RenderNode *b = findBySemId(result.scene, ts.b);
+    const detail::RenderNode *d = findBySemId(result.scene, ts.d);
     REQUIRE(a);
     REQUIRE(b);
     REQUIRE(d);
@@ -161,7 +161,7 @@ TEST_CASE("wedge cut: removes the geometry on the requested side", "[tessellatio
     auto result = pass.lower(ts.scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    const RenderNode *d = findBySemId(result.scene, ts.d);
+    const detail::RenderNode *d = findBySemId(result.scene, ts.d);
     REQUIRE(d);
     REQUIRE(d->meshBindings.size() == 1);
     const auto meshIt = result.scene.meshAssets.find(d->meshBindings[0].meshId);
@@ -241,7 +241,7 @@ TEST_CASE("wedge cut: wrap-around sector across 0 degrees", "[tessellation][wedg
     TessellationPass pass{cfg};
     auto result = pass.lower(ts.scene);
     CHECK_FALSE(result.diags.hasErrors());
-    const RenderNode *d = findBySemId(result.scene, ts.d);
+    const detail::RenderNode *d = findBySemId(result.scene, ts.d);
     REQUIRE(d);
     REQUIRE(d->meshBindings.size() == 1);
     CHECK(meshNonEmpty(result.scene, d->meshBindings[0].meshId));
@@ -350,9 +350,9 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
     auto result = pass.lower(scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    const RenderNode *r0 = findBySemId(result.scene, pxZ0);
-    const RenderNode *rz = findBySemId(result.scene, pxZ50);
-    const RenderNode *rpy = findBySemId(result.scene, py);
+    const detail::RenderNode *r0 = findBySemId(result.scene, pxZ0);
+    const detail::RenderNode *rz = findBySemId(result.scene, pxZ50);
+    const detail::RenderNode *rpy = findBySemId(result.scene, py);
     REQUIRE(r0);
     REQUIRE(rz);
     REQUIRE(rpy);
@@ -464,7 +464,7 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     // The emptied Boolean must not be reported as a failure …
     CHECK_FALSE(result.diags.hasErrors());
     // … and the surviving sibling must still contribute a merged mesh.
-    const RenderNode *rn = findBySemId(result.scene, stave);
+    const detail::RenderNode *rn = findBySemId(result.scene, stave);
     REQUIRE(rn);
     REQUIRE(rn->meshBindings.size() == 1);
     CHECK(meshNonEmpty(result.scene, rn->meshBindings[0].meshId));

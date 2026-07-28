@@ -88,7 +88,7 @@ class IRenderExporter {
 
     /// Write the scene to path. Format (GLB vs GLTF vs OBJ) may be inferred from
     /// config.format or from the path extension.
-    [[nodiscard]] virtual ExportResult write(const RenderScene &scene,
+    [[nodiscard]] virtual ExportResult write(const detail::RenderScene &scene,
                                              const std::filesystem::path &path,
                                              const ExportConfig &config) const = 0;
 };

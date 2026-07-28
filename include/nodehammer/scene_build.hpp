@@ -16,7 +16,7 @@ namespace nodehammer {
 /// null and diags carries the reason. Warnings can accompany a successful
 /// build, so callers should always render diags regardless of success.
 struct SceneBuildResult {
-    std::shared_ptr<RenderScene> scene;
+    std::shared_ptr<detail::RenderScene> scene;
     DiagnosticList diags;
 };
 

@@ -15,7 +15,7 @@ std::string_view ObjExporter::formatName() const noexcept { return "obj"; }
 
 std::vector<std::string> ObjExporter::supportedExtensions() const { return {".obj"}; }
 
-ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem::path &path,
+ExportResult ObjExporter::write(const detail::RenderScene &scene, const std::filesystem::path &path,
                                 const ExportConfig &config) const {
     ExportResult result;
 
@@ -86,13 +86,13 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
         if (!scene.nodes.contains(rnId)) {
             continue;
         }
-        const RenderNode &rn = scene.nodes.at(rnId);
+        const detail::RenderNode &rn = scene.nodes.at(rnId);
 
         for (const auto &binding : rn.meshBindings) {
             if (!scene.meshAssets.contains(binding.meshId)) {
                 continue;
             }
-            const MeshAsset &ma = scene.meshAssets.at(binding.meshId);
+            const detail::MeshAsset &ma = scene.meshAssets.at(binding.meshId);
             if (ma.vertices.empty()) {
                 continue;
             }

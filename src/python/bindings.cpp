@@ -78,12 +78,13 @@ NB_MODULE(_nodehammer, m) {
                    d.code + ": " + d.message + ">";
         });
 
-    nb::class_<nodehammer::RenderScene>(m, "RenderScene")
-        .def_prop_ro("node_count", [](const nodehammer::RenderScene &s) { return s.nodes.size(); })
+    nb::class_<nodehammer::detail::RenderScene>(m, "RenderScene")
+        .def_prop_ro("node_count",
+                     [](const nodehammer::detail::RenderScene &s) { return s.nodes.size(); })
         .def_prop_ro("mesh_count",
-                     [](const nodehammer::RenderScene &s) { return s.meshAssets.size(); })
+                     [](const nodehammer::detail::RenderScene &s) { return s.meshAssets.size(); })
         .def_prop_ro("material_count",
-                     [](const nodehammer::RenderScene &s) { return s.materials.size(); });
+                     [](const nodehammer::detail::RenderScene &s) { return s.materials.size(); });
 
     nb::class_<nodehammer::SceneBuildResult>(m, "SceneBuildResult")
         .def_ro("scene", &nodehammer::SceneBuildResult::scene)

@@ -256,7 +256,7 @@ struct SceneRenderer::Impl {
     // `next_pending_mesh == pending_mesh_ids.size()`, the finalize step
     // (materials, groups, bounds, instance buffer) runs in one shot and
     // the upload is marked complete.
-    std::shared_ptr<const RenderScene> pending_scene;
+    std::shared_ptr<const detail::RenderScene> pending_scene;
     std::vector<MeshAssetId> pending_mesh_ids;
     size_t next_pending_mesh{0};
     bool upload_busy{false};
@@ -265,7 +265,7 @@ struct SceneRenderer::Impl {
     void ensurePipelines(sg_pixel_format color_fmt);
     void destroyGpu();
     void uploadInstanceBuffer();
-    void uploadOneMesh(MeshAssetId id, const MeshAsset &asset);
+    void uploadOneMesh(MeshAssetId id, const detail::MeshAsset &asset);
     void finalizeUpload();
 };
 
@@ -483,7 +483,7 @@ void SceneRenderer::release() {
     impl_->initialised = false;
 }
 
-void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const MeshAsset &asset) {
+void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const detail::MeshAsset &asset) {
     if (asset.vertices.empty() || asset.indices.empty()) {
         return;
     }
@@ -524,7 +524,7 @@ void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const MeshAsset &asset) 
 }
 
 void SceneRenderer::Impl::finalizeUpload() {
-    const RenderScene &scene = *pending_scene;
+    const detail::RenderScene &scene = *pending_scene;
 
     for (const auto &[id, mat] : scene.materials) {
         GpuMaterial gm;
@@ -542,7 +542,7 @@ void SceneRenderer::Impl::finalizeUpload() {
     glm::vec3 bmax{std::numeric_limits<float>::lowest()};
     bool any_bounds = false;
 
-    auto addBindings = [&](const RenderNode &node, const std::vector<MeshBinding> &bindings,
+    auto addBindings = [&](const detail::RenderNode &node, const std::vector<MeshBinding> &bindings,
                            LodRole role) {
         for (const auto &binding : bindings) {
             auto mesh_it = meshes.find(binding.meshId);
@@ -613,7 +613,7 @@ void SceneRenderer::Impl::finalizeUpload() {
     upload_busy = false;
 }
 
-void SceneRenderer::beginUpload(std::shared_ptr<const RenderScene> scene) {
+void SceneRenderer::beginUpload(std::shared_ptr<const detail::RenderScene> scene) {
     static_assert(sizeof(Vertex) == 24, "Vertex layout must match shader: 3f position + 3f normal");
     impl_->ensureInit();
     impl_->destroyGpu();

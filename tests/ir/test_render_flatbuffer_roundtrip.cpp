@@ -13,8 +13,8 @@ using Catch::Approx;
 
 namespace {
 
-MeshAsset makeMesh(MeshAssetId id, const char *name) {
-    MeshAsset m;
+detail::MeshAsset makeMesh(MeshAssetId id, const char *name) {
+    detail::MeshAsset m;
     m.id = id;
     m.name = name;
     m.vertices = {
@@ -34,8 +34,8 @@ MeshAsset makeMesh(MeshAssetId id, const char *name) {
 
 /// A RenderScene with two meshes, a fully-populated material, a bare material,
 /// and a 3-node hierarchy carrying transforms / bindings / semantic refs.
-RenderScene makeScene() {
-    RenderScene scene;
+detail::RenderScene makeScene() {
+    detail::RenderScene scene;
 
     const auto meshA = scene.nextMeshId();
     const auto meshB = scene.nextMeshId();
@@ -81,7 +81,7 @@ RenderScene makeScene() {
     const auto rootId = scene.nextNodeId();
     scene.rootId = rootId;
     {
-        RenderNode n;
+        detail::RenderNode n;
         n.id = rootId;
         n.name = "root";
         n.semanticNodeId = SemanticNodeId{42};
@@ -90,7 +90,7 @@ RenderScene makeScene() {
     // Child with non-identity transforms + two mesh bindings.
     const auto childId = scene.nextNodeId();
     {
-        RenderNode n;
+        detail::RenderNode n;
         n.id = childId;
         n.name = "child";
         n.localTransform = glm::mat4{1.f};
@@ -112,7 +112,7 @@ RenderScene makeScene() {
     // Grandchild, identity transform, single binding.
     const auto grandId = scene.nextNodeId();
     {
-        RenderNode n;
+        detail::RenderNode n;
         n.id = grandId;
         n.name = "grand";
         n.parentId = childId;
@@ -242,7 +242,7 @@ TEST_CASE("Render FlatBuffer roundtrip: hierarchy, transforms, bindings",
 
     REQUIRE(restored.nodes.size() == 3);
 
-    auto byName = [&](std::string_view name) -> const RenderNode * {
+    auto byName = [&](std::string_view name) -> const detail::RenderNode * {
         for (const auto &[id, n] : restored.nodes) {
             if (n.name == name) {
                 return &n;

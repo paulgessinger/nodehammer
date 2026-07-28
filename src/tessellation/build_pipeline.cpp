@@ -126,7 +126,7 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         if (tess.diags.hasErrors()) {
             s.result.scene = nullptr;
         } else {
-            s.result.scene = std::make_shared<RenderScene>(std::move(tess.scene));
+            s.result.scene = std::make_shared<detail::RenderScene>(std::move(tess.scene));
         }
         s.result.diags = std::move(s.prep.diags);
         s.prep = {};

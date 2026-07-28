@@ -57,7 +57,7 @@ flatbuffers::Offset<fbr::Provenance> serializeProvenance(flatbuffers::FlatBuffer
 }
 
 flatbuffers::Offset<fbr::MeshAsset> serializeMeshAsset(flatbuffers::FlatBufferBuilder &b,
-                                                       const MeshAsset &asset) {
+                                                       const detail::MeshAsset &asset) {
     auto name = b.CreateString(asset.name);
     // Vertex layout matches fbr::Vertex (static_assert above), so the source
     // array is reinterpreted as fbs structs and copied wholesale.
@@ -135,7 +135,7 @@ flatbuffers::Offset<fbr::RenderMaterial> serializeMaterial(flatbuffers::FlatBuff
 }
 
 flatbuffers::Offset<fbr::RenderNode> serializeNode(flatbuffers::FlatBufferBuilder &b,
-                                                   const RenderNode &node) {
+                                                   const detail::RenderNode &node) {
     auto name = b.CreateString(node.name);
     std::vector<uint64_t> childIds;
     childIds.reserve(node.children.size());
@@ -194,7 +194,7 @@ Provenance deserializeProvenance(const fbr::Provenance *p) {
 } // namespace
 
 flatbuffers::Offset<fbr::RenderScene>
-renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const RenderScene &scene) {
+renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const detail::RenderScene &scene) {
     std::vector<flatbuffers::Offset<fbr::RenderNode>> nodeOffsets;
     nodeOffsets.reserve(scene.nodes.size());
     for (const auto &[id, node] : scene.nodes) {
@@ -223,13 +223,13 @@ renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const RenderSce
     return sb.Finish();
 }
 
-RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
-    RenderScene scene;
+detail::RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
+    detail::RenderScene scene;
     scene.rootId = RenderNodeId{fb.root_id()};
 
     if (const auto *meshes = fb.mesh_assets(); meshes != nullptr) {
         for (const auto *m : *meshes) {
-            MeshAsset asset;
+            detail::MeshAsset asset;
             asset.id = MeshAssetId{m->id()};
             if (m->name() != nullptr) {
                 asset.name = m->name()->str();
@@ -307,7 +307,7 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
 
     if (const auto *nodes = fb.nodes(); nodes != nullptr) {
         for (const auto *n : *nodes) {
-            RenderNode node;
+            detail::RenderNode node;
             node.id = RenderNodeId{n->id()};
             if (n->name() != nullptr) {
                 node.name = n->name()->str();
@@ -351,7 +351,7 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
-std::vector<std::byte> renderSceneToBytes(const RenderScene &scene) {
+std::vector<std::byte> renderSceneToBytes(const detail::RenderScene &scene) {
     flatbuffers::FlatBufferBuilder builder{1024};
     auto root = renderSceneToFlatBuffer(builder, scene);
     fbr::FinishRenderSceneBuffer(builder, root);
@@ -361,7 +361,7 @@ std::vector<std::byte> renderSceneToBytes(const RenderScene &scene) {
     return std::vector<std::byte>(span.begin(), span.end());
 }
 
-RenderScene renderSceneFromBytes(std::span<const std::byte> buf) {
+detail::RenderScene renderSceneFromBytes(std::span<const std::byte> buf) {
     const auto *ptr = reinterpret_cast<const uint8_t *>(buf.data());
     flatbuffers::Verifier verifier{ptr, buf.size()};
     if (!fbr::VerifyRenderSceneBuffer(verifier)) {

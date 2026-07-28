@@ -15,16 +15,6 @@ void to_json(nlohmann::json &j, const Vertex &v) {
     };
 }
 
-void to_json(nlohmann::json &j, const MeshAsset &a) {
-    j = {
-        {"id", a.id},
-        {"name", a.name},
-        {"vertexCount", a.vertices.size()},
-        {"indexCount", a.indices.size()},
-        {"provenance", a.provenance},
-    };
-}
-
 void to_json(nlohmann::json &j, const RenderMaterial &m) {
     j = {
         {"id", m.id},
@@ -39,6 +29,21 @@ void to_json(nlohmann::json &j, const RenderMaterial &m) {
 
 void to_json(nlohmann::json &j, const MeshBinding &b) {
     j = {{"meshId", b.meshId}, {"materialId", b.materialId}};
+}
+
+// These three sit in `detail` because that is where their argument types live,
+// and nlohmann finds to_json by ADL — an overload in the parent namespace is
+// simply not looked at.
+namespace detail {
+
+void to_json(nlohmann::json &j, const MeshAsset &a) {
+    j = {
+        {"id", a.id},
+        {"name", a.name},
+        {"vertexCount", a.vertices.size()},
+        {"indexCount", a.indices.size()},
+        {"provenance", a.provenance},
+    };
 }
 
 void to_json(nlohmann::json &j, const RenderNode &n) {
@@ -77,5 +82,7 @@ void to_json(nlohmann::json &j, const RenderScene &sc) {
         {"materials", mats},
     };
 }
+
+} // namespace detail
 
 } // namespace nodehammer

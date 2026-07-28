@@ -69,7 +69,9 @@ tinygltf::Value jsonToGltfValue(const nlohmann::json &j) {
 }
 
 /// Convert RenderExtrasMap (nlohmann::json) to a tinygltf::Value for extras.
-tinygltf::Value extrasToValue(const RenderExtrasMap &extras) { return jsonToGltfValue(extras); }
+tinygltf::Value extrasToValue(const detail::RenderExtrasMap &extras) {
+    return jsonToGltfValue(extras);
+}
 
 } // namespace
 
@@ -77,7 +79,8 @@ std::string_view GltfExporter::formatName() const noexcept { return "gltf"; }
 
 std::vector<std::string> GltfExporter::supportedExtensions() const { return {".glb", ".gltf"}; }
 
-ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem::path &path,
+ExportResult GltfExporter::write(const detail::RenderScene &scene,
+                                 const std::filesystem::path &path,
                                  const ExportConfig &config) const {
     ExportResult result;
 

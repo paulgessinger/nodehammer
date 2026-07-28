@@ -231,7 +231,8 @@ class WorkerBackend final : public IWebBackend {
                 const auto *bytes =
                     reinterpret_cast<const std::byte *>(static_cast<uintptr_t>(ptr));
                 auto rendered = ::nodehammer::renderSceneFromBytes(std::span{bytes, len});
-                result_.scene = std::make_shared<::nodehammer::RenderScene>(std::move(rendered));
+                result_.scene =
+                    std::make_shared<::nodehammer::detail::RenderScene>(std::move(rendered));
             } catch (const std::exception &ex) {
                 result_.scene = nullptr;
                 result_.diags.error(::nodehammer::codes::kErrComputeWorker,

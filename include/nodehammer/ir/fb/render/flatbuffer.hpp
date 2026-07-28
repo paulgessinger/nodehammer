@@ -26,21 +26,21 @@ namespace nodehammer {
 /// Serialize a RenderScene into an in-progress FlatBufferBuilder.
 /// Returns the offset; the caller decides whether to Finish or nest it.
 flatbuffers::Offset<fbs::render::RenderScene>
-renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const RenderScene &scene);
+renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const detail::RenderScene &scene);
 
 /// Reconstruct a RenderScene from a parsed FlatBuffer pointer. Rebuilds the
 /// id-keyed maps; restores children/parent as stored.
-RenderScene renderSceneFromFlatBuffer(const fbs::render::RenderScene &fb);
+detail::RenderScene renderSceneFromFlatBuffer(const fbs::render::RenderScene &fb);
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
 /// Serialize a RenderScene to a standalone FlatBuffer byte buffer
 /// (with file identifier "NHR8").
-std::vector<std::byte> renderSceneToBytes(const RenderScene &scene);
+std::vector<std::byte> renderSceneToBytes(const detail::RenderScene &scene);
 
 /// Deserialize a standalone FlatBuffer byte buffer to a RenderScene.
 /// Verifies the buffer and file identifier before parsing.
 /// Throws std::runtime_error on verification failure.
-RenderScene renderSceneFromBytes(std::span<const std::byte> buf);
+detail::RenderScene renderSceneFromBytes(std::span<const std::byte> buf);
 
 } // namespace nodehammer

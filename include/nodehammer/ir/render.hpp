@@ -47,6 +47,20 @@ struct StackAverage {
     float featureSize{0.f};
 };
 
+// ── Internal storage types ────────────────────────────────────────────────────
+//
+// These live in `detail` because the public API reaches them only through the
+// handles in <nodehammer/render.hpp>. That is what lets their layout, container
+// choice and iteration order change without breaking a consumer — and it is why
+// `RenderNode::extras` (an nlohmann::json alias) can exist at all without
+// dragging nlohmann into the public surface.
+//
+// The vocabulary above (ids, Vertex, MeshBinding, RenderMaterial) stays public:
+// it appears in handle signatures, and Vertex's layout is a frozen contract
+// (schemas/render.fbs) rather than an implementation detail.
+
+namespace detail {
+
 struct MeshAsset {
     MeshAssetId id;
     std::string name;
@@ -56,6 +70,8 @@ struct MeshAsset {
     /// Set only on merged sampling-stack meshes; nullopt otherwise. See StackAverage.
     std::optional<StackAverage> stackAverage;
 };
+
+} // namespace detail
 
 // ── Material (per-instance binding) ──────────────────────────────────────────
 
@@ -98,6 +114,8 @@ struct MeshBinding {
 };
 
 // ── Extras ────────────────────────────────────────────────────────────────────
+
+namespace detail {
 
 /// Free-form metadata for export, emitted as glTF extras or similar.
 using RenderExtrasMap = nlohmann::json;
@@ -150,5 +168,7 @@ struct RenderScene {
     uint64_t nextMeshId_{1};
     uint64_t nextMaterialId_{1};
 };
+
+} // namespace detail
 
 } // namespace nodehammer

@@ -13,10 +13,14 @@
 namespace nodehammer {
 
 void to_json(nlohmann::json &j, const Vertex &v);
-void to_json(nlohmann::json &j, const MeshAsset &a);
 void to_json(nlohmann::json &j, const RenderMaterial &m);
 void to_json(nlohmann::json &j, const MeshBinding &b);
+
+// Declared in `detail` so nlohmann's ADL lookup finds them — see render_json.cpp.
+namespace detail {
+void to_json(nlohmann::json &j, const MeshAsset &a);
 void to_json(nlohmann::json &j, const RenderNode &n);
 void to_json(nlohmann::json &j, const RenderScene &sc);
+} // namespace detail
 
 } // namespace nodehammer

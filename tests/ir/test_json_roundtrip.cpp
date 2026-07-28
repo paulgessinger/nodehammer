@@ -59,7 +59,7 @@ TEST_CASE("to_json: DiagnosticList serialization", "[ir][json]") {
 }
 
 TEST_CASE("to_json: MeshAsset serialization", "[ir][json]") {
-    nodehammer::MeshAsset asset;
+    nodehammer::detail::MeshAsset asset;
     asset.id = nodehammer::MeshAssetId{3};
     asset.name = "boxMesh";
     asset.provenance.sourceSystem = "synthetic";
@@ -79,7 +79,7 @@ TEST_CASE("to_json: MeshAsset serialization", "[ir][json]") {
 }
 
 TEST_CASE("to_json: RenderNode extras", "[ir][json]") {
-    nodehammer::RenderNode node;
+    nodehammer::detail::RenderNode node;
     node.id = nodehammer::RenderNodeId{1};
     node.name = "volume";
     node.semanticNodeId = nodehammer::SemanticNodeId{9};

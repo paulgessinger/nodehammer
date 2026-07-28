@@ -241,7 +241,7 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
     auto result = pass.lower(scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    auto findRenderNode = [&](std::string_view name) -> const RenderNode * {
+    auto findRenderNode = [&](std::string_view name) -> const detail::RenderNode * {
         for (const auto &[_, node] : result.scene.nodes) {
             if (node.name == name) {
                 return &node;
@@ -250,7 +250,7 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
         return nullptr;
     };
 
-    auto localCenterZ = [&](const RenderNode &node, std::string_view materialName) {
+    auto localCenterZ = [&](const detail::RenderNode &node, std::string_view materialName) {
         for (const auto &binding : node.meshBindings) {
             const auto &mat = result.scene.materials.at(binding.materialId);
             if (mat.name != materialName) {

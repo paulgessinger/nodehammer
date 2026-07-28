@@ -8,7 +8,7 @@
 namespace nodehammer {
 
 struct TessellationPassResult {
-    RenderScene scene;
+    detail::RenderScene scene;
     DiagnosticList diags;
 };
 
