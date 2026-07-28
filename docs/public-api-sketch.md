@@ -1,7 +1,9 @@
 # Public API surface — sketch
 
-Status: sketch, not a plan of record. Written while spiking the nanobind
-bindings (`src/python/bindings.cpp`), to answer "what *is* the public API?"
+Status: §3.1, §4 and §7 are now plan of record and partly built — see
+§11 for what landed and what changed. The rest remains sketch. Written while
+spiking the nanobind bindings (`src/python/bindings.cpp`), to answer "what *is*
+the public API?"
 
 ## 1. Why this needs deciding at all
 
@@ -21,10 +23,17 @@ constraints:
 |---|---|---|---|
 | Python module (`_nodehammer`) | static into one `.so` | C++23 | anything Conan resolves |
 | CLI / viewer | static into an exe | C++23 | anything |
-| **Amalgamated header** (`docs/event-display-design.md` §7) | compiled in the experiment's own TU | **C++17** connector / **C++20** convert | vendor flatbuffers; shim glm + unordered_dense; assume DD4hep/ROOT |
+| **Amalgamated header** (`docs/event-display-design.md` §7) | compiled in the experiment's own TU | **C++20** (single floor) | vendor flatbuffers; shim glm + unordered_dense; assume DD4hep/ROOT |
 
-The amalgamation is the binding constraint, and it is *already* the most
-carefully specified. §7.3 of the event-display design did the analysis: the
+The amalgamation is the binding constraint **for the semantic side only** —
+and it is narrower than this section originally claimed. §7.1 of the
+event-display design scopes the slice to "the semantic IR, the serializer, and
+the selected importer" plus the connector; `buildSceneFromPaths`, `RenderScene`,
+`MeshAsset` and tessellation appear nowhere in it. So `SemanticScene` must
+survive the glm/unordered_dense shims and the C++20 floor, while the render
+vocabulary answers only to Python, the viewer and the CLI.
+
+Within that scope it is *already* the most carefully specified. §7.3 of the event-display design did the analysis: the
 write slice uses glm only for column-major element access, and
 `unordered_dense` only as `StrongId`-keyed scene maps. That analysis is
 already a public-API boundary definition — it says exactly which types may
@@ -121,8 +130,9 @@ export      ExportConfig + exporter registry
 serialize   toNhb(SemanticScene) -> bytes
 ```
 
-`buildSceneFromPaths` and `toNhb` are the two the amalgamation needs; the
-rest is the modular decomposition the CLI and viewer already use.
+`importDD4hep`/`importTGeo` and `toNhb` are the ones the amalgamation needs —
+not `buildSceneFromPaths`, which an earlier draft of this doc claimed. The rest
+is the modular decomposition the CLI and viewer already use.
 
 ## 5. Layer 2 — per-consumer surfaces
 
@@ -293,17 +303,15 @@ real API, and it is a larger job than the packaging work around it.
   vocabulary.
 - `to_json` free functions currently live beside `Diagnostic`; splitting them
   out is what lets the vocabulary header stay nlohmann-free.
-- Ownership has to be settled before anything is annotated, since it changes
-  the signatures `NH_API` sits on: `SceneBuildResult::scene` is a
-  `shared_ptr<RenderScene>`, `ImportResult::scene` is a `SemanticScene` by
-  value (§3.1).
+- ~~Ownership has to be settled before anything is annotated~~ — settled, see
+  §11.
 
 ## 10. Suggested order
 
 Annotation is cheap per symbol and expensive to redo, so settle the shape
 first and mark second.
 
-1. **Ownership + opaque-handle accessors** (§3.1) — decide the signatures.
+1. ~~**Ownership + opaque-handle accessors** (§3.1)~~ — done, §11.
 2. **`NH_API` macro + the CI shared build** (§7.1, §7.2) — mechanism and its
    enforcement land together, so the first annotation is validated.
 3. **Annotate the uncontroversial vocabulary**: `Diagnostic`,
@@ -312,3 +320,101 @@ first and mark second.
 4. **Stop printing** (§8) — the precondition for any non-CLI consumer.
 5. **Annotate the pipeline verbs** (§4) once §9's open calls are settled.
 6. **Amalgamator manifest** (§7.3), seeded from the annotated set.
+
+
+## 11. What was decided, and what it cost
+
+Step 1 of §10 is built. The decisions, and the two places reality differed from
+the sketch above.
+
+### The handle is a value outside and a `shared_ptr` inside
+
+`nodehammer::SemanticScene` and `nodehammer::RenderScene` are value types that
+copy cheaply, can be held across calls, and expose no fields. That satisfies
+§7.4 of the event-display design — `SemanticScene scene = importDD4hep(d);`
+still compiles and still means what it says — while giving Python a refcount
+that outlives the call that produced it. §3.1 asked for "one ownership story";
+this is it, and it needed no change to how the pipeline passes scenes around.
+
+**Handles are read-only, and that is load-bearing rather than cautious.**
+`build_pipeline.hpp` invariant #5 says prep copies its inputs so the caller's
+pristine scene is never mutated — which is what the wedge re-aim path rebuilds
+from. A handle that shared a *mutable* scene would break that with no compile
+error. So mutation stays on the internal struct and public verbs return new
+handles.
+
+Two supporting decisions that were not obvious up front:
+
+- **`SceneBuildResult::scene` had to become `shared_ptr<const>`.** It was the
+  only non-const `shared_ptr<RenderScene>` in the tree. Wrapping it by implicit
+  conversion would have left the producer holding a mutable alias to the same
+  object — and mutating through it would dangle the `string_view`s and `span`s
+  the accessors hand out, not merely change values.
+- **Derived data is computed eagerly at wrap time**, into a state object the
+  handle owns. Map order is not a stable public order — it varies with the
+  container, the standard library and the amalgamation's `unordered_dense`
+  shim — so the handle publishes DFS-preorder node ids and ascending ids for
+  everything else. Eager rather than lazy because scenes cross thread
+  boundaries (`build_controller.cpp` hands one to a worker), and computing once
+  up front removes the thread-safety question instead of answering it.
+
+### Namespaces: `nodehammer::` is the API
+
+No `nh` alias, in either the modular or the amalgamated header. Internals move
+to `nodehammer::detail` as the API claims their names — the convention already
+existed (`include/nodehammer/detail`, and `nodehammer::viewer` carving out the
+viewer), it was just applied unevenly.
+
+Applied narrowly on purpose. `SemanticScene`, `RenderScene`, `RenderNode`,
+`MeshAsset` and `ImportResult` moved; `SemanticNode`, `SemanticShapeVariant`
+and the thirteen shape structs did **not**, because the surface names them
+through `*View` types and requalifying ~750 call sites would buy tidiness and
+nothing else. The render side went further than the semantic side for a
+specific reason: `RenderNode::extras` is an `nlohmann::json` alias that had to
+be put out of reach of a public signature.
+
+### `ShapeKind`, and why the variant stays hidden
+
+The surface exposes the shape *kind* as a flat enum and no parameters. That is
+what let both near-identical thirteen-way `std::visit` blocks
+(`cmd_inspect.cpp`, `cmd_dump_semantic.cpp`) be deleted: they existed only
+because there was no way to ask "what kind of solid is this". The mapping is
+the variant index, pinned by `static_assert`s on `variant_size` and on the
+boundary alternatives, so adding or reordering one breaks the build instead of
+silently reporting the wrong kind.
+
+### The C++20 floor is enforced, not asserted
+
+§7.5 of the event-display design says the slice must stay within its floor
+"forever", but nothing checked it: the repo compiles at C++23 and CI asserts
+`<print>` exists. `nodehammer_cxx20_floor` recompiles the API sources and
+everything they include at C++20. It is never linked or shipped; it exists to
+fail, and it was verified to fail (a `std::print` call breaks it).
+
+This is the same argument §7.2 makes for pairing `NH_API` with a shared build,
+arrived at independently — an unenforced rule about a build nobody performs is
+a rule that is already broken.
+
+### What the migration proved, and what it did not
+
+`inspect` and `dump-semantic` now read scenes only through the handle. Output
+is byte-identical to the pre-migration binary across the ODD geometry — the
+full 325k-line tree, plus depth-limited and filtered variants — with one
+intended exception: `inspect summary` lists materials in id order rather than
+map order, which is the handle declining to expose an order that was never
+stable.
+
+One gap the migration surfaced: `dump-semantic` has its own display names
+(`bool/union`, not `union`; the unknown type carried inline), so `kindName()`
+is not universally a drop-in. `kind()` still expresses it without the variant.
+
+Not yet done: the ASan pass over the Python bindings. The lifetime evidence is
+pointer identity in C++ and value-equality after the scene is dropped in
+Python, which catches a lost ndarray owner in most cases but not all.
+
+### Still true, and still the biggest item
+
+§8. `build_scene` prints tessellation statistics to stdout, and that is now
+visible on the Python path — the binding test prints them mid-notebook. It
+remains a precondition for any non-CLI consumer and is larger than the
+packaging work around it.

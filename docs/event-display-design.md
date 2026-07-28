@@ -374,18 +374,32 @@ Producer usage:
 #include "nodehammer_convert.h"
 ```
 ```cpp
-nh::SemanticScene scene = nh::importDD4hep(detector);  // or importTGeo(gGeoManager)
-std::vector<uint8_t> nhb = nh::toNhb(scene);           // raw .nhb bytes
-v.sendGeometry(nhb);                                   // POST /geometry
+nodehammer::SemanticScene scene = nodehammer::importDD4hep(detector);  // or importTGeo(gGeoManager)
+std::vector<uint8_t> nhb = nodehammer::toNhb(scene);                   // raw .nhb bytes
+v.sendGeometry(nhb);                                                   // POST /geometry
 ```
+
+One namespace, `nodehammer`, and it *is* the API — no `nh` alias, and internals
+live in `nodehammer::detail`. `SemanticScene` here is the opaque handle
+(`docs/public-api-sketch.md` §3.1): a value type holding a `shared_ptr`, so this
+line still reads and behaves as written while the scene's layout stays private.
 
 ### 7.5 Standard floor
 
 The slice is C++20-clean except one `std::print` in the DD4hep importer
 (`importer.cpp:18`); everything else is C++20-or-lower (`std::format`, `std::span`,
-`std::bit_cast`, `std::numbers`). **C++20 is the floor** for the convert path
-(covers LCG_104+); the connector-only path holds at **C++17**. These specific
-files must stay within their floor forever, enforced by CI (§10.3).
+`std::bit_cast`, `std::numbers`). **C++20 is the floor everywhere**, connector
+included (covers LCG_104+). These specific files must stay within it forever.
+
+The floor used to be split — C++20 for convert, C++17 for the connector — but
+§4.1 already contradicted that by spelling `addHits` with `std::span<const
+double>`, which is C++20. A single floor removes the contradiction and means the
+vocabulary shared between the event API and the IR handles has one rule.
+
+Enforced by a build target rather than by discipline: `nodehammer_cxx20_floor`
+recompiles the public API sources, and everything they include, at C++20. The
+repo otherwise compiles at C++23 and CI asserts `<print>` exists, so nothing
+else would stop a C++23 feature reaching code this header has to carry.
 
 ---
 
