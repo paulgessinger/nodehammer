@@ -27,6 +27,9 @@ its own source of truth). The old per-key URL "manifest" collapses into a thin
 
 ### Vocabulary (used throughout the rest of this doc)
 
+This table is the canonical definition; the README carries a condensed copy for
+readers who never open this document — keep the two in sync when a term changes.
+
 | Term | Meaning |
 |---|---|
 | **Working set** | the live editable `ZipWorkingSet` that *is* the project (web always; native archive mode). |
