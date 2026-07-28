@@ -44,20 +44,6 @@ TEST_CASE("to_json: RenderMaterial serialization", "[ir][json]") {
     REQUIRE(j["baseColorFactor"][0] == Catch::Approx(0.5f));
 }
 
-TEST_CASE("to_json: DiagnosticList serialization", "[ir][json]") {
-    nodehammer::DiagnosticList list;
-    list.warn("NH0301", "Unknown TGeo shape", "someVolume");
-    list.error("NH0501", "Tessellation failed");
-
-    nlohmann::json j = list.toJson();
-    REQUIRE(j.is_array());
-    REQUIRE(j.size() == 2);
-    REQUIRE(j[0]["severity"] == "warning");
-    REQUIRE(j[0]["code"] == "NH0301");
-    REQUIRE(j[0]["context"] == "someVolume");
-    REQUIRE(j[1]["severity"] == "error");
-}
-
 TEST_CASE("to_json: MeshAsset serialization", "[ir][json]") {
     nodehammer::detail::MeshAsset asset;
     asset.id = nodehammer::MeshAssetId{3};

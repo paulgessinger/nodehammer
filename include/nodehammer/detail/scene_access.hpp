@@ -15,6 +15,7 @@
 // because members would have to be declared in the public header and would
 // therefore be public whether or not anyone wanted them to be.
 
+#include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/scene.hpp>
 
 #include <cstddef>
@@ -25,8 +26,6 @@
 #include <string_view>
 
 namespace nodehammer::detail {
-
-class SemanticScene;
 
 class LogicalVolumeView;
 class ShapeView;

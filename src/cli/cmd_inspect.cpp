@@ -3,6 +3,7 @@
 
 #include <CLI/CLI.hpp>
 #include <map>
+#include <nodehammer/detail/handle_seam.hpp>
 #include <nodehammer/detail/markup.hpp>
 #include <nodehammer/detail/scene_access.hpp>
 #include <nodehammer/scene.hpp>
@@ -203,7 +204,8 @@ void registerCmdInspect(CLI::App &app) {
     sumSub->callback([=] {
         auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
         nodehammer::cli::Pager pager;
-        printSummary(nodehammer::wrapSemanticScene(std::move(result.scene)), result.diags, fmt);
+        printSummary(nodehammer::detail::wrapSemanticScene(std::move(result.scene)), result.diags,
+                     fmt);
     });
 
     // ── tree ───��───────────────���─────────────────────────────────────────────
@@ -228,7 +230,8 @@ void registerCmdInspect(CLI::App &app) {
 
         nodehammer::cli::Pager pager;
         nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
-        printTree(nodehammer::wrapSemanticScene(std::move(result.scene)), maxDepth, filter, con);
+        printTree(nodehammer::detail::wrapSemanticScene(std::move(result.scene)), maxDepth, filter,
+                  con);
     });
 
     // ── tags ────────────────────────────────────���───────────────────────────���
@@ -241,6 +244,6 @@ void registerCmdInspect(CLI::App &app) {
 
         nodehammer::cli::Pager pager;
         nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
-        printTags(nodehammer::wrapSemanticScene(std::move(result.scene)), con);
+        printTags(nodehammer::detail::wrapSemanticScene(std::move(result.scene)), con);
     });
 }

@@ -10,22 +10,12 @@
 // it is the one dependency the public surface must stay clear of.
 
 #include <glm/glm.hpp>
-#include <nodehammer/ir/semantic.hpp> // StrongId
+#include <nodehammer/ir/ids.hpp>
 
 #include <optional>
 #include <string>
 
 namespace nodehammer {
-
-// ── Strong IDs ────────────────────────────────────────────────────────────────
-
-struct RenderNodeTag {};
-struct MeshAssetTag {};
-struct RenderMaterialTag {};
-
-using RenderNodeId = StrongId<RenderNodeTag>;
-using MeshAssetId = StrongId<MeshAssetTag>;
-using RenderMaterialId = StrongId<RenderMaterialTag>;
 
 // ── Vertex ────────────────────────────────────────────────────────────────────
 

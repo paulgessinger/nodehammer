@@ -27,13 +27,19 @@
 
 namespace nodehammer {
 
+class RenderScene;
+
 namespace detail {
 struct MeshAsset;
 struct RenderScene;
 struct RenderSceneState;
-} // namespace detail
 
-class RenderScene;
+// Declared here only so the handle can befriend them; defined in
+// <nodehammer/detail/handle_seam.hpp>.
+nodehammer::RenderScene wrapRenderScene(std::shared_ptr<const RenderScene>);
+const std::shared_ptr<const RenderScene> &
+unwrapRenderScene(const nodehammer::RenderScene &) noexcept;
+} // namespace detail
 
 // ── Mesh ──────────────────────────────────────────────────────────────────────
 
@@ -112,25 +118,13 @@ class RenderScene {
 
   private:
     friend class MeshView;
-    friend RenderScene wrapRenderScene(std::shared_ptr<const detail::RenderScene>);
+    friend RenderScene detail::wrapRenderScene(std::shared_ptr<const detail::RenderScene>);
     friend const std::shared_ptr<const detail::RenderScene> &
-    unwrapRenderScene(const RenderScene &) noexcept;
+    detail::unwrapRenderScene(const RenderScene &) noexcept;
 
     explicit RenderScene(std::shared_ptr<const detail::RenderSceneState> state) noexcept;
 
     std::shared_ptr<const detail::RenderSceneState> state_;
 };
-
-// ── Seam ──────────────────────────────────────────────────────────────────────
-//
-// Not part of the stable surface: these convert between the handle and the
-// storage type, and only nodehammer's own sources should call them.
-
-/// Freeze a scene into a handle. Takes shared ownership of an already-const
-/// scene, so no mutable alias to it can survive the call.
-[[nodiscard]] RenderScene wrapRenderScene(std::shared_ptr<const detail::RenderScene> scene);
-
-[[nodiscard]] const std::shared_ptr<const detail::RenderScene> &
-unwrapRenderScene(const RenderScene &handle) noexcept;
 
 } // namespace nodehammer

@@ -165,29 +165,33 @@ std::vector<std::string> SemanticScene::materialNames() const {
     }
     return names;
 }
+namespace detail {
+
 // ── Seam ──────────────────────────────────────────────────────────────────────
 
-SemanticScene wrapSemanticScene(std::shared_ptr<const detail::SemanticScene> scene) {
+nodehammer::SemanticScene wrapSemanticScene(std::shared_ptr<const SemanticScene> scene) {
     if (!scene) {
-        return SemanticScene{};
+        return nodehammer::SemanticScene{};
     }
-    return SemanticScene{std::make_shared<const detail::SemanticSceneState>(std::move(scene))};
+    return nodehammer::SemanticScene{std::make_shared<const SemanticSceneState>(std::move(scene))};
 }
 
-SemanticScene wrapSemanticScene(detail::SemanticScene scene) {
-    return wrapSemanticScene(std::make_shared<const detail::SemanticScene>(std::move(scene)));
+nodehammer::SemanticScene wrapSemanticScene(SemanticScene scene) {
+    return wrapSemanticScene(std::make_shared<const SemanticScene>(std::move(scene)));
 }
 
-const std::shared_ptr<const detail::SemanticScene> &
-unwrapSemanticScene(const SemanticScene &handle) noexcept {
-    static const std::shared_ptr<const detail::SemanticScene> empty;
+const std::shared_ptr<const SemanticScene> &
+unwrapSemanticScene(const nodehammer::SemanticScene &handle) noexcept {
+    static const std::shared_ptr<const SemanticScene> empty;
     return handle.state_ ? handle.state_->scene : empty;
 }
 
-const std::shared_ptr<const detail::SemanticSceneState> &
-unwrapSemanticSceneState(const SemanticScene &handle) noexcept {
-    static const std::shared_ptr<const detail::SemanticSceneState> empty;
+const std::shared_ptr<const SemanticSceneState> &
+unwrapSemanticSceneState(const nodehammer::SemanticScene &handle) noexcept {
+    static const std::shared_ptr<const SemanticSceneState> empty;
     return handle.state_ ? handle.state_ : empty;
 }
+
+} // namespace detail
 
 } // namespace nodehammer

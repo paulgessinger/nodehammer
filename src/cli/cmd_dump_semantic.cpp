@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
+#include <nodehammer/detail/handle_seam.hpp>
 #include <nodehammer/detail/markup.hpp>
 #include <nodehammer/detail/scene_access.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
@@ -229,8 +230,8 @@ void registerCmdDumpSemantic(CLI::App &app) {
             nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
             // Moved, not copied: this branch is exclusive with the serializing
             // one below, and a 325k-node scene is not worth duplicating.
-            printRichTree(nodehammer::wrapSemanticScene(std::move(result.scene)), maxDepth, filter,
-                          con);
+            printRichTree(nodehammer::detail::wrapSemanticScene(std::move(result.scene)), maxDepth,
+                          filter, con);
         } else {
             std::string outPath;
             if (*outputOpt) {

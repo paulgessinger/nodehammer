@@ -21,7 +21,7 @@
 // This header is on the amalgamated header's C++20 floor and must stay clear of
 // nlohmann. glm and unordered_dense are fine — both are shimmed there.
 
-#include <nodehammer/ir/semantic.hpp>
+#include <nodehammer/ir/ids.hpp>
 
 #include <cstddef>
 #include <memory>
@@ -31,9 +31,19 @@
 
 namespace nodehammer {
 
+class SemanticScene;
+
 namespace detail {
 class SemanticScene;
 struct SemanticSceneState;
+
+// Declared here only so the handle can befriend them; defined in
+// <nodehammer/detail/handle_seam.hpp>, which is where callers get them.
+nodehammer::SemanticScene wrapSemanticScene(std::shared_ptr<const SemanticScene>);
+const std::shared_ptr<const SemanticScene> &
+unwrapSemanticScene(const nodehammer::SemanticScene &) noexcept;
+const std::shared_ptr<const SemanticSceneState> &
+unwrapSemanticSceneState(const nodehammer::SemanticScene &) noexcept;
 } // namespace detail
 
 /// Whole-scene counts, computed once when the handle is created.
@@ -86,30 +96,15 @@ class SemanticScene {
 
   private:
     friend struct detail::SemanticSceneState;
-    friend SemanticScene wrapSemanticScene(std::shared_ptr<const detail::SemanticScene>);
+    friend SemanticScene detail::wrapSemanticScene(std::shared_ptr<const detail::SemanticScene>);
     friend const std::shared_ptr<const detail::SemanticScene> &
-    unwrapSemanticScene(const SemanticScene &) noexcept;
+    detail::unwrapSemanticScene(const SemanticScene &) noexcept;
     friend const std::shared_ptr<const detail::SemanticSceneState> &
-    unwrapSemanticSceneState(const SemanticScene &) noexcept;
+    detail::unwrapSemanticSceneState(const SemanticScene &) noexcept;
 
     explicit SemanticScene(std::shared_ptr<const detail::SemanticSceneState> state) noexcept;
 
     std::shared_ptr<const detail::SemanticSceneState> state_;
 };
-
-// ── Seam ──────────────────────────────────────────────────────────────────────
-// Not part of the stable surface; only nodehammer's own sources call these.
-
-[[nodiscard]] SemanticScene wrapSemanticScene(std::shared_ptr<const detail::SemanticScene> scene);
-
-/// Convenience for producers holding a scene by value, which is how every
-/// importer builds one. Freezes by move.
-[[nodiscard]] SemanticScene wrapSemanticScene(detail::SemanticScene scene);
-
-[[nodiscard]] const std::shared_ptr<const detail::SemanticScene> &
-unwrapSemanticScene(const SemanticScene &handle) noexcept;
-
-[[nodiscard]] const std::shared_ptr<const detail::SemanticSceneState> &
-unwrapSemanticSceneState(const SemanticScene &handle) noexcept;
 
 } // namespace nodehammer

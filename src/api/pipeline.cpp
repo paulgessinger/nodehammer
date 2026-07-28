@@ -1,5 +1,6 @@
 #include <nodehammer/pipeline.hpp>
 
+#include <nodehammer/detail/handle_seam.hpp>
 #include <nodehammer/ir/semantic/importer.hpp>
 #include <nodehammer/scene_build.hpp>
 
@@ -24,7 +25,8 @@ ImportResult importGeometry(const std::filesystem::path &path, std::string_view 
     auto imported = importer->import(path);
     // The importer builds its scene by value; freezing it here by move is what
     // makes the handle's promise hold — no mutable alias survives the call.
-    return ImportResult{wrapSemanticScene(std::move(imported.scene)), std::move(imported.diags)};
+    return ImportResult{detail::wrapSemanticScene(std::move(imported.scene)),
+                        std::move(imported.diags)};
 }
 
 std::vector<std::string> importFormats() {
@@ -42,7 +44,7 @@ BuildResult buildScene(const std::filesystem::path &configPath,
     auto built = buildSceneFromPaths(configPath, geometryPath);
     // `built.scene` is null on any pipeline-stage failure; wrapRenderScene maps
     // that to an invalid handle, so failure is one check rather than two.
-    return BuildResult{wrapRenderScene(std::move(built.scene)), std::move(built.diags)};
+    return BuildResult{detail::wrapRenderScene(std::move(built.scene)), std::move(built.diags)};
 }
 
 } // namespace nodehammer

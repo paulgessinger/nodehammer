@@ -1,3 +1,4 @@
+#include <nodehammer/detail/handle_seam.hpp>
 #include <nodehammer/detail/scene_access.hpp>
 
 #include "state.hpp"

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <nodehammer/detail/handle_seam.hpp>
 #include <nodehammer/ir/render.hpp>
 #include <nodehammer/render.hpp>
 
@@ -55,7 +56,7 @@ std::shared_ptr<detail::RenderScene> makeScene() {
 
 TEST_CASE("RenderScene handle: counts mirror the underlying scene", "[api][render]") {
     auto raw = makeScene();
-    const auto handle = wrapRenderScene(raw);
+    const auto handle = detail::wrapRenderScene(raw);
 
     REQUIRE(handle.valid());
     REQUIRE(static_cast<bool>(handle));
@@ -81,19 +82,19 @@ TEST_CASE("RenderScene handle: a default handle is inert, not a trap", "[api][re
 }
 
 TEST_CASE("RenderScene handle: wrapping a null scene yields an invalid handle", "[api][render]") {
-    const auto handle = wrapRenderScene(nullptr);
+    const auto handle = detail::wrapRenderScene(nullptr);
     REQUIRE_FALSE(handle.valid());
 }
 
 TEST_CASE("RenderScene handle: lookup of an absent id returns nullopt", "[api][render]") {
-    const auto handle = wrapRenderScene(makeScene());
+    const auto handle = detail::wrapRenderScene(makeScene());
 
     REQUIRE_FALSE(handle.mesh(MeshAssetId{999999}).has_value());
     REQUIRE_FALSE(handle.material(RenderMaterialId{999999}).has_value());
 }
 
 TEST_CASE("RenderScene handle: meshIds are ascending, not container order", "[api][render]") {
-    const auto handle = wrapRenderScene(makeScene());
+    const auto handle = detail::wrapRenderScene(makeScene());
     const auto ids = handle.meshIds();
 
     REQUIRE(ids.size() == 3);
@@ -101,14 +102,14 @@ TEST_CASE("RenderScene handle: meshIds are ascending, not container order", "[ap
     REQUIRE(ids[1].value < ids[2].value);
 
     // Same input, same order — the public order must not inherit the map's.
-    const auto again = wrapRenderScene(makeScene());
+    const auto again = detail::wrapRenderScene(makeScene());
     REQUIRE(std::vector(again.meshIds().begin(), again.meshIds().end()) ==
             std::vector(ids.begin(), ids.end()));
 }
 
 TEST_CASE("MeshView: vertex and index spans are the scene's own bytes", "[api][render]") {
     auto raw = makeScene();
-    const auto handle = wrapRenderScene(raw);
+    const auto handle = detail::wrapRenderScene(raw);
 
     for (const auto id : handle.meshIds()) {
         const auto view = handle.mesh(id);
@@ -132,7 +133,7 @@ TEST_CASE("MeshView: outlives the scene handle it came from", "[api][render]") {
     {
         auto raw = makeScene();
         expected = raw->meshAssets.begin()->second.vertices.data();
-        const auto handle = wrapRenderScene(std::move(raw));
+        const auto handle = detail::wrapRenderScene(std::move(raw));
         view = handle.mesh(handle.meshIds()[0]);
         REQUIRE(view.has_value());
     }
@@ -149,7 +150,7 @@ TEST_CASE("MeshView: ownedVertices keeps the scene alive by itself", "[api][rend
     std::size_t vertexCount = 0;
 
     {
-        const auto handle = wrapRenderScene(makeScene());
+        const auto handle = detail::wrapRenderScene(makeScene());
         const auto view = handle.mesh(handle.meshIds()[2]);
         REQUIRE(view.has_value());
         vertexCount = view->vertexCount();
@@ -171,8 +172,8 @@ TEST_CASE("MeshView: ownedVertices keeps the scene alive by itself", "[api][rend
 TEST_CASE("RenderScene handle: unwrap round-trips the underlying scene", "[api][render]") {
     auto raw = makeScene();
     const auto *address = raw.get();
-    const auto handle = wrapRenderScene(std::move(raw));
+    const auto handle = detail::wrapRenderScene(std::move(raw));
 
-    REQUIRE(unwrapRenderScene(handle).get() == address);
-    REQUIRE(unwrapRenderScene(RenderScene{}) == nullptr);
+    REQUIRE(detail::unwrapRenderScene(handle).get() == address);
+    REQUIRE(detail::unwrapRenderScene(RenderScene{}) == nullptr);
 }

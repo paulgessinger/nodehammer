@@ -117,19 +117,23 @@ std::span<const MeshAssetId> RenderScene::meshIds() const noexcept {
     return state_ ? std::span<const MeshAssetId>{state_->meshIds} : std::span<const MeshAssetId>{};
 }
 
+namespace detail {
+
 // ── Seam ──────────────────────────────────────────────────────────────────────
 
-RenderScene wrapRenderScene(std::shared_ptr<const detail::RenderScene> scene) {
+nodehammer::RenderScene wrapRenderScene(std::shared_ptr<const RenderScene> scene) {
     if (!scene) {
-        return RenderScene{};
+        return nodehammer::RenderScene{};
     }
-    return RenderScene{std::make_shared<const detail::RenderSceneState>(std::move(scene))};
+    return nodehammer::RenderScene{std::make_shared<const RenderSceneState>(std::move(scene))};
 }
 
-const std::shared_ptr<const detail::RenderScene> &
-unwrapRenderScene(const RenderScene &handle) noexcept {
-    static const std::shared_ptr<const detail::RenderScene> empty;
+const std::shared_ptr<const RenderScene> &
+unwrapRenderScene(const nodehammer::RenderScene &handle) noexcept {
+    static const std::shared_ptr<const RenderScene> empty;
     return handle.state_ ? handle.state_->scene : empty;
 }
+
+} // namespace detail
 
 } // namespace nodehammer
