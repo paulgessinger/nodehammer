@@ -408,9 +408,27 @@ One gap the migration surfaced: `dump-semantic` has its own display names
 (`bool/union`, not `union`; the unknown type carried inline), so `kindName()`
 is not universally a drop-in. `kind()` still expresses it without the variant.
 
-Not yet done: the ASan pass over the Python bindings. The lifetime evidence is
-pointer identity in C++ and value-equality after the scene is dropped in
-Python, which catches a lost ndarray owner in most cases but not all.
+### Where the lifetime evidence is strong, and where it is not
+
+The C++ side is well covered: the full suite (404 cases) is clean under an ASan
+build, and the handle tests assert pointer identity against the internal vector
+and that both views and `ownedVertices()` outlive every handle.
+
+The Python `ndarray` owner chain is **not** empirically verified, and it is
+worth being precise about why. ASan cannot intercept on that path — the
+interpreter is not itself instrumented, so preloading the runtime via
+`DYLD_INSERT_LIBRARIES` reports "interceptors are not working". Nor could a
+negative control be built without it: removing the `owner` argument and then
+dropping the scene still reads correct data, even after forcing 64 MB of
+allocation churn, because freed-but-unreused memory reads the same as live
+memory.
+
+So the owner chain rests on construction (`nb::object self` is passed as the
+array's owner, and the `Mesh` object holds a refcount on the scene) and on the
+C++ layer beneath it — not on a demonstrated failure. Anyone changing those
+accessors to take `const MeshView &` instead of `nb::object self` would silently
+break it, and no test in this repo would notice. That is a real gap, and the
+fix is a sanitizer-instrumented Python, not a cleverer assertion.
 
 ### Still true, and still the biggest item
 
