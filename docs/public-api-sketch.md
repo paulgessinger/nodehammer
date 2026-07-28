@@ -56,6 +56,55 @@ Rules that fall out of the amalgamation constraint:
   `to_json` free functions sit right next to `Diagnostic`, which drags the
   dependency into the vocabulary header.
 
+### 3.1 Opaque handles: hold the IR, don't see it
+
+Consumers need to *hold* an IR between calls — import once, then select,
+tessellate, export, inspect — without the round-trip through bytes that a
+process boundary would force. They do not need to see its layout.
+
+So the vocabulary types enter the surface as **opaque handles**: forward
+declarations plus accessor functions, never field access. Python holds an
+`nh.SemanticScene`, passes it to the next verb, and keeps it alive; it never
+learns that `nodes` is an `ankerl::unordered_dense::map`.
+
+What this buys:
+
+- `SemanticScene`'s four `StrongId`-keyed maps
+  (`ir/semantic.hpp:247-251`) can change container, gain fields, or reorder
+  without breaking a single consumer.
+- The amalgamation's `unordered_dense` shim (§7.3) still has to make the
+  *internals* compile, but the shim can no longer leak into a signature — so
+  "byte-identical output not required" stops being a risk to the API.
+- It matches the §7.4 usage already sketched for client code: hold a
+  `nh::SemanticScene` between `importDD4hep` and `toNhb`, poke at nothing.
+
+The spike already follows this by accident: `RenderScene` is bound with
+computed properties (`node_count`, `mesh_count`, `material_count`) and no
+field access at all.
+
+**Lifetime needs to be made consistent.** `SceneBuildResult::scene` is a
+`std::shared_ptr<RenderScene>` — refcounted, and nanobind's `shared_ptr`
+caster maps it directly. `ImportResult::scene` is a `SemanticScene` by value.
+Handles want one ownership story; shared ownership is the one that survives a
+Python object outliving the call that produced it.
+
+### 3.2 The one deliberate exception: vertex buffers
+
+Zero-copy mesh access does expose binary layout — a strided ndarray bakes in
+`sizeof(Vertex) == 24` and the position/normal offsets. That is fine, because
+this particular layout is *already* a frozen public contract. `schemas/render.fbs:24-26`:
+
+> Interleaved vertex: matches `nodehammer::Vertex` (pos+normal, 6 contiguous
+> floats) so the codec can memcpy whole arrays on the hot path.
+
+The FlatBuffer codec memcpys whole arrays against that promise, and it is
+versioned with the schema. Handing out an ndarray view over the same bytes
+commits to nothing that `.nhr` files don't already commit to.
+
+So the line is: **scene structure opaque, vertex buffers contractual.** Those
+are the two different stability guarantees, and they should be documented as
+such rather than blurred.
+
 ## 4. Layer 1 — pipeline verbs
 
 One entry point per stage, each returning data plus diagnostics rather than
