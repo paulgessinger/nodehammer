@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <nodehammer/detail/scene_access.hpp>
 #include <nodehammer/ir/semantic.hpp>
 #include <nodehammer/scene.hpp>
 
@@ -60,7 +61,7 @@ detail::SemanticScene makeScene() {
 
 std::vector<std::string> traversalNames(const SemanticScene &scene) {
     std::vector<std::string> names;
-    scene.traverse([&](const SemanticScene::Visit &v) {
+    detail::traverse(scene, [&](const detail::Visit &v) {
         names.emplace_back(v.node.name());
         return true;
     });
@@ -90,9 +91,9 @@ TEST_CASE("SemanticScene handle: a default handle is inert", "[api][semantic]") 
 
     REQUIRE_FALSE(handle.valid());
     REQUIRE(handle.nodeCount() == 0);
-    REQUIRE(handle.nodeIds().empty());
-    REQUIRE_FALSE(handle.root().has_value());
-    REQUIRE_FALSE(handle.node(SemanticNodeId{1}).has_value());
+    REQUIRE(detail::nodeIds(handle).empty());
+    REQUIRE_FALSE(detail::root(handle).has_value());
+    REQUIRE_FALSE(detail::node(handle, SemanticNodeId{1}).has_value());
     REQUIRE(handle.stats().nodeCount == 0);
     REQUIRE(traversalNames(handle).empty()); // must not trap
 }
@@ -106,8 +107,8 @@ TEST_CASE("SemanticScene handle: traversal is preorder, children in stored order
     // nodeIds is the same order, and is what a consumer iterates instead of the
     // backing map.
     std::vector<std::string> viaIds;
-    for (const auto id : handle.nodeIds()) {
-        viaIds.emplace_back(handle.node(id)->name());
+    for (const auto id : detail::nodeIds(handle)) {
+        viaIds.emplace_back(detail::node(handle, id)->name());
     }
     REQUIRE(viaIds == traversalNames(handle));
 }
@@ -115,7 +116,7 @@ TEST_CASE("SemanticScene handle: traversal is preorder, children in stored order
 TEST_CASE("SemanticScene handle: traversal carries depth and sibling position", "[api][semantic]") {
     const auto handle = wrapSemanticScene(makeScene());
 
-    handle.traverse([](const SemanticScene::Visit &v) {
+    detail::traverse(handle, [](const detail::Visit &v) {
         if (v.node.name() == "root") {
             REQUIRE(v.depth == 0);
             REQUIRE(v.isLastSibling);
@@ -140,7 +141,7 @@ TEST_CASE("SemanticScene handle: returning false prunes the subtree", "[api][sem
     const auto handle = wrapSemanticScene(makeScene());
 
     std::vector<std::string> names;
-    handle.traverse([&](const SemanticScene::Visit &v) {
+    detail::traverse(handle, [&](const detail::Visit &v) {
         names.emplace_back(v.node.name());
         return v.node.name() != "a"; // skip a's children
     });
@@ -174,13 +175,13 @@ TEST_CASE("SemanticScene handle: traversal skips a dangling child id", "[api][se
 
 TEST_CASE("SemanticScene handle: node -> logVol -> {shape, material} chain", "[api][semantic]") {
     const auto handle = wrapSemanticScene(makeScene());
-    const auto root = handle.root();
+    const auto root = detail::root(handle);
     REQUIRE(root.has_value());
 
     REQUIRE(root->logicalVolume().has_value());
     REQUIRE(root->logicalVolume()->name() == "boxLV");
     REQUIRE(root->shape().has_value());
-    REQUIRE(root->shape()->kind() == ShapeKind::Box);
+    REQUIRE(root->shape()->kind() == detail::ShapeKind::Box);
     REQUIRE(root->shape()->kindName() == "box");
     REQUIRE(root->material().has_value());
     REQUIRE(root->material()->name() == "silicon");
@@ -191,27 +192,27 @@ TEST_CASE("SemanticScene handle: node -> logVol -> {shape, material} chain", "[a
 TEST_CASE("SemanticScene handle: shape kinds map to the variant alternatives", "[api][semantic]") {
     const auto handle = wrapSemanticScene(makeScene());
 
-    std::vector<ShapeKind> kinds;
-    for (const auto id : handle.shapeIds()) {
-        kinds.push_back(handle.shape(id)->kind());
+    std::vector<detail::ShapeKind> kinds;
+    for (const auto id : detail::shapeIds(handle)) {
+        kinds.push_back(detail::shape(handle, id)->kind());
     }
-    REQUIRE(kinds ==
-            std::vector<ShapeKind>{ShapeKind::Box, ShapeKind::Tube, ShapeKind::Subtraction});
+    REQUIRE(kinds == std::vector<detail::ShapeKind>{detail::ShapeKind::Box, detail::ShapeKind::Tube,
+                                                    detail::ShapeKind::Subtraction});
 
-    const auto boolShape = handle.shape(handle.shapeIds()[2]);
+    const auto boolShape = detail::shape(handle, detail::shapeIds(handle)[2]);
     REQUIRE(boolShape->isBoolean());
     REQUIRE(boolShape->booleanLeft().has_value());
     REQUIRE(boolShape->booleanRight().has_value());
-    REQUIRE(*boolShape->booleanLeft() == handle.shapeIds()[0]);
+    REQUIRE(*boolShape->booleanLeft() == detail::shapeIds(handle)[0]);
 
-    REQUIRE_FALSE(handle.shape(handle.shapeIds()[0])->isBoolean());
-    REQUIRE_FALSE(handle.shape(handle.shapeIds()[0])->booleanLeft().has_value());
+    REQUIRE_FALSE(detail::shape(handle, detail::shapeIds(handle)[0])->isBoolean());
+    REQUIRE_FALSE(detail::shape(handle, detail::shapeIds(handle)[0])->booleanLeft().has_value());
 }
 
 TEST_CASE("SemanticScene handle: every ShapeKind has a distinct name", "[api][semantic]") {
     std::vector<std::string_view> names;
-    for (std::uint8_t i = 0; i <= static_cast<std::uint8_t>(ShapeKind::Unknown); ++i) {
-        names.push_back(shapeKindName(static_cast<ShapeKind>(i)));
+    for (std::uint8_t i = 0; i <= static_cast<std::uint8_t>(detail::ShapeKind::Unknown); ++i) {
+        names.push_back(detail::shapeKindName(static_cast<detail::ShapeKind>(i)));
     }
     auto unique = names;
     std::sort(unique.begin(), unique.end());
@@ -222,9 +223,9 @@ TEST_CASE("SemanticScene handle: every ShapeKind has a distinct name", "[api][se
 TEST_CASE("SemanticScene handle: tags are accessible without exposing the map", "[api][semantic]") {
     const auto handle = wrapSemanticScene(makeScene());
 
-    const SemanticNodeView *tagged = nullptr;
-    std::optional<SemanticNodeView> holder;
-    handle.traverse([&](const SemanticScene::Visit &v) {
+    const detail::SemanticNodeView *tagged = nullptr;
+    std::optional<detail::SemanticNodeView> holder;
+    detail::traverse(handle, [&](const detail::Visit &v) {
         if (v.node.name() == "a2") {
             holder = v.node;
         }
@@ -244,16 +245,15 @@ TEST_CASE("SemanticScene handle: tags are accessible without exposing the map", 
 }
 
 TEST_CASE("SemanticScene handle: a view outlives the handle it came from", "[api][semantic]") {
-    std::optional<SemanticNodeView> view;
+    std::optional<detail::SemanticNodeView> view;
     {
         const auto handle = wrapSemanticScene(makeScene());
-        view = handle.root();
+        view = detail::root(handle);
         REQUIRE(view.has_value());
     }
     REQUIRE(view->name() == "root");
     REQUIRE(view->originalPath() == "/root");
     REQUIRE(view->childCount() == 2);
-    REQUIRE(view->scene().valid());
 }
 
 TEST_CASE("SemanticScene handle: unreachable nodes count but are not traversed",
@@ -270,7 +270,7 @@ TEST_CASE("SemanticScene handle: unreachable nodes count but are not traversed",
 
     REQUIRE(handle.stats().nodeCount == 6);
     REQUIRE(handle.stats().reachableNodeCount == 5);
-    REQUIRE(handle.nodeIds().size() == 5);
+    REQUIRE(detail::nodeIds(handle).size() == 5);
     // Still directly addressable — it is in the map, just not in the tree.
-    REQUIRE(handle.node(orphan).has_value());
+    REQUIRE(detail::node(handle, orphan).has_value());
 }

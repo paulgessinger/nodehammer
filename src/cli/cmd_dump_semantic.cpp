@@ -7,6 +7,7 @@
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
 #include <nodehammer/detail/markup.hpp>
+#include <nodehammer/detail/scene_access.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/diagnostics.hpp>
 #include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
@@ -33,15 +34,15 @@ nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
 /// This command's own display names — "bool/union" rather than "union", and
 /// the unknown type carried inline. ShapeKind is what makes that expressible
 /// without visiting the variant.
-std::string shapeTypeName(const nodehammer::ShapeView &shape) {
+std::string shapeTypeName(const nodehammer::detail::ShapeView &shape) {
     switch (shape.kind()) {
-    case nodehammer::ShapeKind::Union:
+    case nodehammer::detail::ShapeKind::Union:
         return "bool/union";
-    case nodehammer::ShapeKind::Intersection:
+    case nodehammer::detail::ShapeKind::Intersection:
         return "bool/intersect";
-    case nodehammer::ShapeKind::Subtraction:
+    case nodehammer::detail::ShapeKind::Subtraction:
         return "bool/subtract";
-    case nodehammer::ShapeKind::Unknown:
+    case nodehammer::detail::ShapeKind::Unknown:
         return std::format("unknown({})", shape.originalType());
     default:
         return std::string{shape.kindName()};
@@ -65,7 +66,7 @@ void printRichTree(const nodehammer::SemanticScene &scene, int maxDepth, const s
     // every ancestor was visited before us and its flag is still current.
     std::vector<bool> isLastAtDepth;
 
-    scene.traverse([&](const nodehammer::SemanticScene::Visit &v) {
+    nodehammer::detail::traverse(scene, [&](const nodehammer::detail::Visit &v) {
         const auto depth = static_cast<std::size_t>(v.depth);
         if (isLastAtDepth.size() <= depth) {
             isLastAtDepth.resize(depth + 1);

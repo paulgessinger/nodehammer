@@ -17,7 +17,9 @@
 #include <nodehammer/scene.hpp>
 
 #include <cstddef>
+#include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace nodehammer::detail {
@@ -35,6 +37,8 @@ struct SemanticSceneState {
     std::vector<SemanticMaterialId> materialIds;
 
     SemanticStats stats;
+    /// Shape kinds present, name -> count, ordered by name.
+    std::map<std::string, std::size_t> shapeKindCounts;
 
     explicit SemanticSceneState(std::shared_ptr<const SemanticScene> s);
 };

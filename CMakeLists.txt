@@ -123,6 +123,7 @@ add_library(nodehammer_lib STATIC
     src/ir/semantic_json.cpp
     src/api/render.cpp
     src/api/semantic.cpp
+    src/api/scene_access.cpp
     src/api/pipeline.cpp
     src/ir/render_json.cpp
     src/config/config_loader.cpp
@@ -209,6 +210,7 @@ nodehammer_set_compiler_options(nodehammer_lib)
 add_library(nodehammer_cxx20_floor OBJECT EXCLUDE_FROM_ALL
     src/api/render.cpp
     src/api/semantic.cpp
+    src/api/scene_access.cpp
     src/api/pipeline.cpp
 )
 set_target_properties(nodehammer_cxx20_floor PROPERTIES

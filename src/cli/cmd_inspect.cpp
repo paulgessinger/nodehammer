@@ -4,6 +4,7 @@
 #include <CLI/CLI.hpp>
 #include <map>
 #include <nodehammer/detail/markup.hpp>
+#include <nodehammer/detail/scene_access.hpp>
 #include <nodehammer/scene.hpp>
 #include <nodehammer/selection/predicate.hpp>
 #include <print>
@@ -26,16 +27,8 @@ nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
 
 void printSummary(const nodehammer::SemanticScene &scene, const nodehammer::DiagnosticList &diags,
                   std::string_view formatName) {
-    std::map<std::string, int> shapeCounts;
-    for (const auto id : scene.shapeIds()) {
-        shapeCounts[std::string{scene.shape(id)->kindName()}]++;
-    }
-
-    std::vector<std::string> matNames;
-    matNames.reserve(scene.materialCount());
-    for (const auto id : scene.materialIds()) {
-        matNames.emplace_back(scene.material(id)->name());
-    }
+    const auto shapeCounts = scene.shapeKindCounts();
+    const auto matNames = scene.materialNames();
 
     int warnings = 0, errors = 0;
     for (const auto &d : diags.items()) {
@@ -82,7 +75,7 @@ void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::
     // built-up string through the traversal.
     std::vector<bool> isLastAtDepth;
 
-    scene.traverse([&](const nodehammer::SemanticScene::Visit &v) {
+    nodehammer::detail::traverse(scene, [&](const nodehammer::detail::Visit &v) {
         const auto depth = static_cast<std::size_t>(v.depth);
         if (isLastAtDepth.size() <= depth) {
             isLastAtDepth.resize(depth + 1);
@@ -150,8 +143,8 @@ void printTags(const nodehammer::SemanticScene &scene, const nodehammer::detail:
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
     int nodesWithTags = 0;
-    for (const auto id : scene.nodeIds()) {
-        const auto node = *scene.node(id);
+    for (const auto id : nodehammer::detail::nodeIds(scene)) {
+        const auto node = *nodehammer::detail::node(scene, id);
         if (node.tagCount() > 0) {
             ++nodesWithTags;
         }

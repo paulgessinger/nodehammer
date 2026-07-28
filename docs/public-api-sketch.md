@@ -373,15 +373,42 @@ nothing else. The render side went further than the semantic side for a
 specific reason: `RenderNode::extras` is an `nlohmann::json` alias that had to
 be put out of reach of a public signature.
 
-### `ShapeKind`, and why the variant stays hidden
+### The public surface is whole-scene; per-node access is not public
 
-The surface exposes the shape *kind* as a flat enum and no parameters. That is
-what let both near-identical thirteen-way `std::visit` blocks
-(`cmd_inspect.cpp`, `cmd_dump_semantic.cpp`) be deleted: they existed only
-because there was no way to ask "what kind of solid is this". The mapping is
-the variant index, pinned by `static_assert`s on `variant_size` and on the
-boundary alternatives, so adding or reordering one breaks the build instead of
-silently reporting the wrong kind.
+The public API covers **conversion, diagnostics and basic inspection** — and
+"basic inspection" means whole-scene questions: counts, `stats()`,
+`shapeKindCounts()`, `materialNames()`. It does not include walking the tree
+node by node.
+
+The first cut got this wrong. It shipped four view types (`SemanticNodeView`,
+`LogicalVolumeView`, `ShapeView`, `SourceMaterialView`) plus `traverse` and
+per-id lookups as public API — 129 of the header's 269 lines. Checking who
+actually needed them: the Python module never touched the semantic surface at
+all, §7.4's connector pokes at nothing, and the only consumers were nodehammer's
+own two CLI commands. The accessor set was being justified by migrating internal
+code, which is circular. §9 had also left "semantic IR in the Python surface at
+all?" explicitly open, and building it answered a question that had not been
+asked.
+
+Per-node access now lives in `include/nodehammer/detail/scene_access.hpp`, as
+free functions over the handle rather than members — members would have to be
+declared in the public header and would therefore be public whether or not
+anyone wanted them to be. In-tree consumers may use it; the include line makes
+that choice visible.
+
+`ShapeKind` moved with it. The flat enum is still what let both near-identical
+thirteen-way `std::visit` blocks be deleted, and the mapping is still the
+variant index pinned by `static_assert`s — it is just not something an external
+consumer needs. What the public surface exposes instead is
+`shapeKindCounts()`: the histogram, not the geometry.
+
+`inspect summary` now runs entirely on the public API, which is the point — the
+public inspection surface has a real consumer validating it, while `tree`,
+`tags` and `--rich` reach for the internal header and are honest about it.
+
+Every public type is a permanent `NH_API` obligation, so a speculative one is
+not free. The rule that falls out: **a type earns its place in the surface when
+an external consumer needs it, not when it would be convenient if one did.**
 
 ### The C++20 floor is enforced, not asserted
 
