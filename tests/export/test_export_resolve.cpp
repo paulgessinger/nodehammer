@@ -3,6 +3,10 @@
 
 #include <nodehammer/export_resolve.hpp>
 
+#include <optional>
+#include <string>
+#include <utility>
+
 using nodehammer::ExportConfig;
 using nodehammer::NHConfig;
 using nodehammer::resolveExportConfig;
@@ -10,15 +14,43 @@ using Format = nodehammer::ExportConfig::Format;
 
 namespace {
 
-/// `[export.gltf]` with every field set, so a test can tell which table won.
-nodehammer::GltfExportFormatConfig gltfTable(double unitScale, bool bake, bool multiScene,
-                                             std::string separator) {
+// Every field is optional, mirroring TOML: an omitted key is `std::nullopt`,
+// and only a key that is present overrides the format default. Designated
+// initializers at the call sites keep partial tables readable.
+// The defaults are spelled out so a partial designated initializer does not
+// trip -Wmissing-field-initializers under -Wextra.
+struct GltfOpts {
+    std::optional<double> unitScale = std::nullopt;
+    std::optional<bool> bake = std::nullopt;
+    std::optional<bool> multiScene = std::nullopt;
+    std::optional<std::string> separator = std::nullopt;
+};
+
+struct ObjOpts {
+    std::optional<double> unitScale = std::nullopt;
+    std::optional<bool> bake = std::nullopt;
+};
+
+// These return the *variant*, not the concrete format config, and every test
+// assigns through them. Assigning a bare `GltfExportFormatConfig` lvalue into
+// `exportFormats` instead trips a -Wmaybe-uninitialized false positive on GCC
+// 14 and 15 at -O3: `variant::operator=(T&&)` builds an internal temporary, and
+// GCC cannot prove the disengaged `optional<std::string>` payload inside it is
+// never read. Building the variant here keeps the workaround in one place.
+nodehammer::ExportFormatConfig gltfTable(GltfOpts o) {
     nodehammer::GltfExportFormatConfig g;
-    g.common.unitScale = unitScale;
-    g.common.bakeUnitScale = bake;
-    g.multiScene = multiScene;
-    g.sceneNameSeparator = std::move(separator);
+    g.common.unitScale = o.unitScale;
+    g.common.bakeUnitScale = o.bake;
+    g.multiScene = o.multiScene;
+    g.sceneNameSeparator = std::move(o.separator);
     return g;
+}
+
+nodehammer::ExportFormatConfig objTable(ObjOpts o) {
+    nodehammer::ObjExportFormatConfig obj;
+    obj.common.unitScale = o.unitScale;
+    obj.common.bakeUnitScale = o.bake;
+    return obj;
 }
 
 } // namespace
@@ -59,11 +91,8 @@ TEST_CASE("resolveExportConfig: empty config yields the format defaults", "[expo
 
 TEST_CASE("resolveExportConfig: matching table overrides field by field", "[export][resolve]") {
     NHConfig cfg;
-    nodehammer::GltfExportFormatConfig g;
-    g.common.unitScale = 0.1; // set
-    g.multiScene = true;      // set
-    // bakeUnitScale and sceneNameSeparator left unset -> defaults survive.
-    cfg.exportFormats["gltf"] = g;
+    // bake and separator omitted -> their defaults must survive.
+    cfg.exportFormats["gltf"] = gltfTable({.unitScale = 0.1, .multiScene = true});
 
     const auto ecfg = resolveExportConfig(cfg, "out.gltf");
     CHECK(ecfg.unitScale == Catch::Approx(0.1));
@@ -75,9 +104,7 @@ TEST_CASE("resolveExportConfig: matching table overrides field by field", "[expo
 TEST_CASE("resolveExportConfig: obj table applies and can keep the bake default",
           "[export][resolve]") {
     NHConfig cfg;
-    nodehammer::ObjExportFormatConfig o;
-    o.common.unitScale = 1.0;
-    cfg.exportFormats["obj"] = o;
+    cfg.exportFormats["obj"] = objTable({.unitScale = 1.0});
 
     const auto ecfg = resolveExportConfig(cfg, "out.obj");
     CHECK(ecfg.unitScale == Catch::Approx(1.0));
@@ -86,11 +113,7 @@ TEST_CASE("resolveExportConfig: obj table applies and can keep the bake default"
 
 TEST_CASE("resolveExportConfig: a non-matching table is ignored", "[export][resolve]") {
     NHConfig cfg;
-    cfg.exportFormats["obj"] = [] {
-        nodehammer::ObjExportFormatConfig o;
-        o.common.unitScale = 42.0;
-        return o;
-    }();
+    cfg.exportFormats["obj"] = objTable({.unitScale = 42.0});
 
     // Writing glTF must not pick up the OBJ scale.
     CHECK(resolveExportConfig(cfg, "out.gltf").unitScale == Catch::Approx(0.01));
@@ -100,7 +123,8 @@ TEST_CASE("resolveExportConfig: a non-matching table is ignored", "[export][reso
 
 TEST_CASE("resolveExportConfig: GLB falls back to the gltf table", "[export][resolve]") {
     NHConfig cfg;
-    cfg.exportFormats["gltf"] = gltfTable(0.1, true, true, "::");
+    cfg.exportFormats["gltf"] =
+        gltfTable({.unitScale = 0.1, .bake = true, .multiScene = true, .separator = "::"});
 
     const auto ecfg = resolveExportConfig(cfg, "out.glb");
     CHECK(ecfg.format == Format::GLB);
@@ -112,8 +136,10 @@ TEST_CASE("resolveExportConfig: GLB falls back to the gltf table", "[export][res
 
 TEST_CASE("resolveExportConfig: an explicit glb table wins over gltf", "[export][resolve]") {
     NHConfig cfg;
-    cfg.exportFormats["gltf"] = gltfTable(0.1, true, true, "::");
-    cfg.exportFormats["glb"] = gltfTable(0.5, false, false, "/");
+    cfg.exportFormats["gltf"] =
+        gltfTable({.unitScale = 0.1, .bake = true, .multiScene = true, .separator = "::"});
+    cfg.exportFormats["glb"] =
+        gltfTable({.unitScale = 0.5, .bake = false, .multiScene = false, .separator = "/"});
 
     const auto ecfg = resolveExportConfig(cfg, "out.glb");
     CHECK(ecfg.unitScale == Catch::Approx(0.5));
@@ -129,11 +155,9 @@ TEST_CASE("resolveExportConfig: an explicit glb table wins over gltf", "[export]
 TEST_CASE("resolveExportConfig: a partial glb table suppresses gltf entirely",
           "[export][resolve]") {
     NHConfig cfg;
-    cfg.exportFormats["gltf"] = gltfTable(0.1, true, true, "::");
-
-    nodehammer::GltfExportFormatConfig glbOnly;
-    glbOnly.multiScene = false; // the only field set
-    cfg.exportFormats["glb"] = glbOnly;
+    cfg.exportFormats["gltf"] =
+        gltfTable({.unitScale = 0.1, .bake = true, .multiScene = true, .separator = "::"});
+    cfg.exportFormats["glb"] = gltfTable({.multiScene = false}); // the only field set
 
     const auto ecfg = resolveExportConfig(cfg, "out.glb");
     CHECK_FALSE(ecfg.gltf.multiScene);
@@ -147,7 +171,8 @@ TEST_CASE("resolveExportConfig: a partial glb table suppresses gltf entirely",
 TEST_CASE("resolveExportConfig: gltf output does not fall back to the glb table",
           "[export][resolve]") {
     NHConfig cfg;
-    cfg.exportFormats["glb"] = gltfTable(0.5, true, true, "/");
+    cfg.exportFormats["glb"] =
+        gltfTable({.unitScale = 0.5, .bake = true, .multiScene = true, .separator = "/"});
 
     const auto ecfg = resolveExportConfig(cfg, "out.gltf");
     CHECK(ecfg.unitScale == Catch::Approx(0.01));
@@ -159,9 +184,7 @@ TEST_CASE("resolveExportConfig: gltf output does not fall back to the glb table"
 TEST_CASE("resolveExportConfig: the table is chosen by resolved format, not extension",
           "[export][resolve]") {
     NHConfig cfg;
-    nodehammer::ObjExportFormatConfig o;
-    o.common.unitScale = 7.0;
-    cfg.exportFormats["obj"] = o;
+    cfg.exportFormats["obj"] = objTable({.unitScale = 7.0});
 
     // Extension says glTF, hint says OBJ -> the OBJ table applies.
     const auto ecfg = resolveExportConfig(cfg, "out.gltf", "obj");
