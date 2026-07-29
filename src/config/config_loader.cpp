@@ -58,15 +58,27 @@ void mergeToml(toml::table &dst, const toml::table &src) {
     }
 }
 
-/// Byte-driven include resolver. The visited set tracks
-/// string keys instead of canonical filesystem paths — the caller's key
-/// scheme decides equivalence (URL keys are pre-normalised, bag keys
-/// are basenames, etc.). Each include is computed via the same
-/// `parent_dir / rel` arithmetic the filesystem variant uses, then
-/// resolved through the supplied `fetcher`.
+/// Byte-driven include resolver. Both sets track string keys instead of
+/// canonical filesystem paths — the caller's key scheme decides equivalence
+/// (URL keys are pre-normalised, bag keys are basenames, etc.). Each include is
+/// computed via the same `parent_dir / rel` arithmetic the filesystem variant
+/// uses, then resolved through the supplied `fetcher`.
+///
+/// The two sets answer different questions, and conflating them is what made a
+/// diamond look like a cycle:
+///
+///   - `merged` is every key pulled in anywhere in the tree. A second
+///     encounter means the content is already present, so it is skipped
+///     silently — `top -> {b, c} -> base` merges base once, which is also what
+///     keeps `[[rules]]` and `[[selection_rules]]` from being duplicated by a
+///     shared base.
+///   - `onPath` is only the chain currently being resolved, and is therefore
+///     passed **by value** so sibling branches never see each other's. A hit
+///     here means an include reaches one of its own ancestors: a real cycle,
+///     which would not terminate, so it is an error.
 void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
-                              const IncludeFetcher &fetcher, std::set<std::string> &visited,
-                              DiagnosticList &diags) {
+                              const IncludeFetcher &fetcher, std::set<std::string> &merged,
+                              std::set<std::string> onPath, DiagnosticList &diags) {
     const auto *includeNode = tbl.get("include");
     if (includeNode == nullptr) {
         return;
@@ -93,12 +105,14 @@ void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
     for (const auto &relPath : paths) {
         std::string absKey = ConfigLoader::resolveIncludeKey(parent_key, relPath);
 
-        if (visited.contains(absKey)) {
+        if (onPath.contains(absKey)) {
             diags.error(codes::kErrConfigParse,
                         std::format("circular include detected: '{}'", absKey), "<include>");
             continue;
         }
-        visited.insert(absKey);
+        if (!merged.insert(absKey).second) {
+            continue; // already merged via another branch; not a cycle
+        }
 
         auto bytes = fetcher(absKey);
         if (!bytes) {
@@ -119,7 +133,9 @@ void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
             continue;
         }
 
-        resolveIncludesFromBytes(included, absKey, fetcher, visited, diags);
+        auto childPath = onPath;
+        childPath.insert(absKey);
+        resolveIncludesFromBytes(included, absKey, fetcher, merged, std::move(childPath), diags);
         includedTables.push_back(std::move(included));
     }
 
@@ -611,24 +627,14 @@ ConfigResult parseTable(const toml::table &tbl) {
     }
     if (const auto *exportTbl = tbl["export"].as_table()) {
         // ── Table-driven export config ───────────────────────────────────────
-        // Each key declares which formats accept it (empty = all).
-        // Each format group defines a factory that constructs its variant type
-        // from the parsed TOML table + common config.
+        // Which key each format accepts now lives in config_keys.hpp
+        // (keys::kExportKeys), shared with the Lua front-end. Only the format
+        // *groups* below are loader-local: they build the variant from a
+        // toml::table, which Lua has no equivalent of.
         // Named static arrays so the spans below remain valid; storing an
         // initializer_list inline dangles its backing array on MSVC.
         static constexpr std::string_view kGltfGlbFormats[] = {"gltf", "glb"};
         static constexpr std::string_view kObjFormats[] = {"obj"};
-
-        struct ExportKeyDef {
-            std::string_view key;
-            std::span<const std::string_view> formats;
-        };
-        static constexpr ExportKeyDef kExportKeys[] = {
-            {keys::kUnitScale, {}},
-            {keys::kBakeUnitScale, kGltfGlbFormats},
-            {keys::kMultiScene, kGltfGlbFormats},
-            {keys::kSceneNameSeparator, kGltfGlbFormats},
-        };
 
         struct FormatGroup {
             std::span<const std::string_view> formats;
@@ -668,10 +674,8 @@ ConfigResult parseTable(const toml::table &tbl) {
 
             // Build the valid key set for this format and check for misplaced keys.
             std::vector<std::string_view> validKeys;
-            for (const auto &kd : kExportKeys) {
-                const bool allowed =
-                    kd.formats.size() == 0 ||
-                    std::find(kd.formats.begin(), kd.formats.end(), fmtKey) != kd.formats.end();
+            for (const auto &kd : keys::kExportKeys) {
+                const bool allowed = keys::exportKeyAllowed(kd, fmtKey);
                 if (allowed) {
                     validKeys.push_back(kd.key);
                 } else if ((*fmtTbl)[kd.key]) {
@@ -838,8 +842,8 @@ ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
             std::string_view{reinterpret_cast<const char *>(root_bytes.data()), root_bytes.size()},
             root_key);
 
-        std::set<std::string> visited{std::string{root_key}};
-        resolveIncludesFromBytes(tbl, root_key, fetcher, visited, diags);
+        std::set<std::string> merged{std::string{root_key}};
+        resolveIncludesFromBytes(tbl, root_key, fetcher, merged, merged, diags);
         if (diags.hasErrors()) {
             return ConfigResult{{}, std::move(diags)};
         }

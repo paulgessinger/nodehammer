@@ -261,10 +261,9 @@ TEST_CASE("evalLuaConfig: unknown keys are reported like the TOML loader", "[con
         eval(R"LUA(rule { match = 'path ~= "/w"', material = "x" })LUA").diags));
 }
 
-// bake_unit_scale is glTF/GLB-only, so under export("obj") it lands in the
-// unknown-key path -- the same treatment multi_scene and scene_name_separator
-// already get here. (The TOML loader escalates the equivalent mistake to an
-// error; that front-end asymmetry predates this key and is not specific to it.)
+// Both front-ends now walk the same keys::kExportKeys table, so a format-specific
+// key misplaced in Lua is an *error* with a precise message, exactly as in TOML --
+// only the syntax in the message differs.
 TEST_CASE("evalLuaConfig: bake_unit_scale is glTF/GLB-only", "[config][lua]") {
     auto gltf = eval(R"LUA(export("gltf", { bake_unit_scale = true }))LUA");
     REQUIRE_FALSE(gltf.diags.hasErrors());
@@ -272,5 +271,31 @@ TEST_CASE("evalLuaConfig: bake_unit_scale is glTF/GLB-only", "[config][lua]") {
     REQUIRE(std::get<GltfExportFormatConfig>(gltf.config.exportFormats.at("gltf")).bakeUnitScale ==
             true);
 
-    REQUIRE(hasUnknownKeyWarning(eval(R"LUA(export("obj", { bake_unit_scale = true }))LUA").diags));
+    auto obj = eval(R"LUA(export("obj", { bake_unit_scale = true }))LUA");
+    REQUIRE(obj.diags.hasErrors());
+    bool precise = false;
+    for (const auto &d : obj.diags.items()) {
+        if (d.message.find("bake_unit_scale") != std::string::npos &&
+            d.message.find("export('gltf')") != std::string::npos) {
+            precise = true;
+        }
+    }
+    REQUIRE(precise);
+    // Reported once: misplaced, not unknown.
+    REQUIRE_FALSE(hasUnknownKeyWarning(obj.diags));
+}
+
+// The escalation covers every format-specific key, not just the new one --
+// that is the point of both front-ends reading one table.
+TEST_CASE("evalLuaConfig: multi_scene misplaced under obj is an error too", "[config][lua]") {
+    auto r = eval(R"LUA(export("obj", { multi_scene = true }))LUA");
+    REQUIRE(r.diags.hasErrors());
+    REQUIRE_FALSE(hasUnknownKeyWarning(r.diags));
+}
+
+// A genuinely unknown key is still just a warning on both paths.
+TEST_CASE("evalLuaConfig: unknown export key stays a warning", "[config][lua]") {
+    auto r = eval(R"LUA(export("obj", { frobnicate = 1 }))LUA");
+    REQUIRE_FALSE(r.diags.hasErrors());
+    REQUIRE(hasUnknownKeyWarning(r.diags));
 }

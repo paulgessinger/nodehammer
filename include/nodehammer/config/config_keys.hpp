@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <span>
 #include <string_view>
 
 // Canonical config key names, in one place.
@@ -90,12 +92,34 @@ inline constexpr std::string_view kBakeUnitScale = "bake_unit_scale";           
 inline constexpr std::string_view kMultiScene = "multi_scene";                  // gltf/glb only
 inline constexpr std::string_view kSceneNameSeparator = "scene_name_separator"; // gltf/glb only
 
-inline constexpr std::array kExportCommonKeys = {kUnitScale};
-inline constexpr std::array kExportGltfKeys = {
-    kUnitScale,
-    kBakeUnitScale,
-    kMultiScene,
-    kSceneNameSeparator,
+inline constexpr std::string_view kGltfGlbFormats[] = {"gltf", "glb"};
+
+/// Which `[export.<fmt>]` keys each format accepts.
+///
+/// This is the schema itself, not a per-front-end allowlist: both the TOML
+/// loader and the Lua builder walk this table, so a format-specific key cannot
+/// be right in one front-end and wrong in the other. Adding a key here is the
+/// whole registration step.
+///
+/// An empty `formats` means every format accepts the key. A key used outside its
+/// formats is *misplaced* rather than unknown, and both front-ends say so
+/// precisely — each in its own syntax, which is why only the data is shared and
+/// the message is not.
+struct ExportKeyDef {
+    std::string_view key;
+    std::span<const std::string_view> formats;
 };
+
+inline constexpr ExportKeyDef kExportKeys[] = {
+    {kUnitScale, {}},
+    {kBakeUnitScale, kGltfGlbFormats},
+    {kMultiScene, kGltfGlbFormats},
+    {kSceneNameSeparator, kGltfGlbFormats},
+};
+
+[[nodiscard]] inline bool exportKeyAllowed(const ExportKeyDef &kd, std::string_view fmt) {
+    return kd.formats.empty() ||
+           std::find(kd.formats.begin(), kd.formats.end(), fmt) != kd.formats.end();
+}
 
 } // namespace nodehammer::keys
