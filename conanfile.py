@@ -12,7 +12,18 @@ class Nodehammer(ConanFile):
     generators = "CMakeDeps", "CMakeToolchain"
 
     options = {"viewer": [True, False]}
-    default_options = {"viewer": False}
+    # Every dependency archive that can be linked into a shared object — the
+    # planned installed shared library, and the Python extension, which links
+    # the static nodehammer_lib into a .so — has to be position independent.
+    # Most recipes already default fPIC=True on Linux/macOS, but that is their
+    # default and not a guarantee; pinning it makes the requirement explicit and
+    # part of the package_id, so a profile that flips it forces a rebuild rather
+    # than silently reusing a non-PIC binary. Pattern-scoped options are not
+    # strict in Conan 2, so packages that have no fPIC option (header-only ones)
+    # or that delete it (Windows, or shared=True) are skipped rather than
+    # erroring. The in-tree side of the same requirement is
+    # CMAKE_POSITION_INDEPENDENT_CODE in CMakeLists.txt.
+    default_options = {"viewer": False, "*/*:fPIC": True}
 
     tool_requires = ("flatbuffers/25.12.19",)
 
