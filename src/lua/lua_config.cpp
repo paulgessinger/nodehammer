@@ -387,9 +387,6 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
             if (const sol::optional<double> v = t[keys::kUnitScale]) {
                 common.unitScale = *v;
             }
-            if (const sol::optional<bool> v = t[keys::kBakeUnitScale]) {
-                common.bakeUnitScale = *v;
-            }
             if (name == "obj") {
                 warnUnknownKeys(t, keys::kExportCommonKeys, ctx, diags);
                 ObjExportFormatConfig c;
@@ -399,6 +396,12 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
                 warnUnknownKeys(t, keys::kExportGltfKeys, ctx, diags);
                 GltfExportFormatConfig c;
                 c.common = common;
+                // glTF/GLB-only, like multi_scene below: under export('obj') this
+                // key falls through to warnUnknownKeys, matching how the other
+                // format-specific keys already behave here.
+                if (const sol::optional<bool> v = t[keys::kBakeUnitScale]) {
+                    c.bakeUnitScale = *v;
+                }
                 if (const sol::optional<bool> v = t[keys::kMultiScene]) {
                     c.multiScene = *v;
                 }

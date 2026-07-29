@@ -260,3 +260,17 @@ TEST_CASE("evalLuaConfig: unknown keys are reported like the TOML loader", "[con
     REQUIRE_FALSE(hasUnknownKeyWarning(
         eval(R"LUA(rule { match = 'path ~= "/w"', material = "x" })LUA").diags));
 }
+
+// bake_unit_scale is glTF/GLB-only, so under export("obj") it lands in the
+// unknown-key path -- the same treatment multi_scene and scene_name_separator
+// already get here. (The TOML loader escalates the equivalent mistake to an
+// error; that front-end asymmetry predates this key and is not specific to it.)
+TEST_CASE("evalLuaConfig: bake_unit_scale is glTF/GLB-only", "[config][lua]") {
+    auto gltf = eval(R"LUA(export("gltf", { bake_unit_scale = true }))LUA");
+    REQUIRE_FALSE(gltf.diags.hasErrors());
+    REQUIRE_FALSE(hasUnknownKeyWarning(gltf.diags));
+    REQUIRE(std::get<GltfExportFormatConfig>(gltf.config.exportFormats.at("gltf")).bakeUnitScale ==
+            true);
+
+    REQUIRE(hasUnknownKeyWarning(eval(R"LUA(export("obj", { bake_unit_scale = true }))LUA").diags));
+}

@@ -165,12 +165,22 @@ struct Rule {
 
 /// Fields shared by all export formats.
 struct CommonExportConfig {
-    std::optional<double> unitScale;   ///< Overrides the format's default scale
-    std::optional<bool> bakeUnitScale; ///< Bake scale into vertices & translations
+    std::optional<double> unitScale; ///< Overrides the format's default scale
 };
 
 struct GltfExportFormatConfig {
     CommonExportConfig common;
+    /// Bake the scale into vertices & translations instead of the root node.
+    ///
+    /// glTF/GLB-only, deliberately: OBJ has no scene graph to carry a root
+    /// transform, so `ObjExporter` rejects a false value outright — leaving the
+    /// only legal OBJ value `true`, which is already the default. A knob with
+    /// one legal value is not a knob, so OBJ does not get this field at all and
+    /// `[export.obj] bake_unit_scale` is rejected at load time. That makes the
+    /// unsatisfiable combination unrepresentable rather than merely diagnosed:
+    /// the Lua builder and any future programmatic constructor get the
+    /// guarantee for free, not just the TOML front-end.
+    std::optional<bool> bakeUnitScale;
     std::optional<bool> multiScene;                ///< Split render tree into multiple glTF scenes
     std::optional<std::string> sceneNameSeparator; ///< Separator for hierarchical scene names
 };

@@ -625,7 +625,7 @@ ConfigResult parseTable(const toml::table &tbl) {
         };
         static constexpr ExportKeyDef kExportKeys[] = {
             {keys::kUnitScale, {}},
-            {keys::kBakeUnitScale, {}},
+            {keys::kBakeUnitScale, kGltfGlbFormats},
             {keys::kMultiScene, kGltfGlbFormats},
             {keys::kSceneNameSeparator, kGltfGlbFormats},
         };
@@ -639,6 +639,9 @@ ConfigResult parseTable(const toml::table &tbl) {
              [](const toml::table &t, const CommonExportConfig &c) -> ExportFormatConfig {
                  GltfExportFormatConfig out;
                  out.common = c;
+                 if (auto v = t["bake_unit_scale"].value<bool>()) {
+                     out.bakeUnitScale = *v;
+                 }
                  if (auto v = t["multi_scene"].value<bool>()) {
                      out.multiScene = *v;
                  }
@@ -679,6 +682,10 @@ ConfigResult parseTable(const toml::table &tbl) {
                         }
                         validFmts += std::format("[export.{}]", *it);
                     }
+                    // Suppress the generic unknown-key warning below: this key is
+                    // known, just misplaced, and the error above says so precisely.
+                    // Without this a misplaced key is reported twice.
+                    validKeys.push_back(kd.key);
                     diags.error(codes::kErrConfigParse,
                                 std::format("'{}' is only valid under {}, not [export.{}]", kd.key,
                                             validFmts, fmtKey),
@@ -691,9 +698,6 @@ ConfigResult parseTable(const toml::table &tbl) {
             CommonExportConfig common;
             if (auto v = (*fmtTbl)["unit_scale"].value<double>()) {
                 common.unitScale = *v;
-            }
-            if (auto v = (*fmtTbl)["bake_unit_scale"].value<bool>()) {
-                common.bakeUnitScale = *v;
             }
 
             // Find the matching format group and build the variant.

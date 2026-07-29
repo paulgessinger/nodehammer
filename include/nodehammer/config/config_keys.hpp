@@ -86,11 +86,11 @@ inline constexpr std::array kDefaultsKeys = {kTessellation, kExtras};
 
 // ── [export.<fmt>] ───────────────────────────────────────────────────────────
 inline constexpr std::string_view kUnitScale = "unit_scale";
-inline constexpr std::string_view kBakeUnitScale = "bake_unit_scale";
+inline constexpr std::string_view kBakeUnitScale = "bake_unit_scale";           // gltf/glb only
 inline constexpr std::string_view kMultiScene = "multi_scene";                  // gltf/glb only
 inline constexpr std::string_view kSceneNameSeparator = "scene_name_separator"; // gltf/glb only
 
-inline constexpr std::array kExportCommonKeys = {kUnitScale, kBakeUnitScale};
+inline constexpr std::array kExportCommonKeys = {kUnitScale};
 inline constexpr std::array kExportGltfKeys = {
     kUnitScale,
     kBakeUnitScale,

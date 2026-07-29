@@ -26,9 +26,10 @@ struct GltfOpts {
     std::optional<std::string> separator = std::nullopt;
 };
 
+// No `bake`: bakeUnitScale is glTF/GLB-only by construction, so an OBJ table
+// cannot carry one. See GltfExportFormatConfig::bakeUnitScale.
 struct ObjOpts {
     std::optional<double> unitScale = std::nullopt;
-    std::optional<bool> bake = std::nullopt;
 };
 
 // These return the *variant*, not the concrete format config, and every test
@@ -40,7 +41,7 @@ struct ObjOpts {
 nodehammer::ExportFormatConfig gltfTable(GltfOpts o) {
     nodehammer::GltfExportFormatConfig g;
     g.common.unitScale = o.unitScale;
-    g.common.bakeUnitScale = o.bake;
+    g.bakeUnitScale = o.bake;
     g.multiScene = o.multiScene;
     g.sceneNameSeparator = std::move(o.separator);
     return g;
@@ -49,7 +50,6 @@ nodehammer::ExportFormatConfig gltfTable(GltfOpts o) {
 nodehammer::ExportFormatConfig objTable(ObjOpts o) {
     nodehammer::ObjExportFormatConfig obj;
     obj.common.unitScale = o.unitScale;
-    obj.common.bakeUnitScale = o.bake;
     return obj;
 }
 
@@ -101,14 +101,28 @@ TEST_CASE("resolveExportConfig: matching table overrides field by field", "[expo
     CHECK(ecfg.gltf.sceneNameSeparator == " > ");
 }
 
-TEST_CASE("resolveExportConfig: obj table applies and can keep the bake default",
+// The OBJ bake default is not merely "usually kept" -- it cannot be overridden,
+// because ObjExportFormatConfig has no bakeUnitScale field to override it with.
+// ObjExporter rejects a false value, so this is what keeps every resolvable OBJ
+// config writable.
+TEST_CASE("resolveExportConfig: the OBJ bake default cannot be configured away",
           "[export][resolve]") {
     NHConfig cfg;
     cfg.exportFormats["obj"] = objTable({.unitScale = 1.0});
 
     const auto ecfg = resolveExportConfig(cfg, "out.obj");
     CHECK(ecfg.unitScale == Catch::Approx(1.0));
-    CHECK(ecfg.bakeUnitScale); // untouched by the table, so the OBJ default stands
+    CHECK(ecfg.bakeUnitScale);
+}
+
+// Nor can a glTF table reach OBJ output and disable baking there: the OBJ
+// branch never consults [export.gltf].
+TEST_CASE("resolveExportConfig: a gltf bake=false does not leak into OBJ output",
+          "[export][resolve]") {
+    NHConfig cfg;
+    cfg.exportFormats["gltf"] = gltfTable({.bake = false});
+
+    CHECK(resolveExportConfig(cfg, "out.obj").bakeUnitScale);
 }
 
 TEST_CASE("resolveExportConfig: a non-matching table is ignored", "[export][resolve]") {

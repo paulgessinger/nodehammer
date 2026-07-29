@@ -129,11 +129,11 @@ toml::table buildExportTable(const std::map<std::string, ExportFormatConfig> &fo
         if (common.unitScale) {
             fmtTbl.insert("unit_scale", *common.unitScale);
         }
-        if (common.bakeUnitScale) {
-            fmtTbl.insert("bake_unit_scale", *common.bakeUnitScale);
-        }
         std::visit(overloaded{
                        [&](const GltfExportFormatConfig &cfg) {
+                           if (cfg.bakeUnitScale) {
+                               fmtTbl.insert("bake_unit_scale", *cfg.bakeUnitScale);
+                           }
                            if (cfg.multiScene) {
                                fmtTbl.insert("multi_scene", *cfg.multiScene);
                            }

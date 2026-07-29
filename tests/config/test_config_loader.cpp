@@ -386,6 +386,72 @@ multi_scene = true
     REQUIRE(glbCfg.multiScene == true);
 }
 
+// bake_unit_scale is glTF/GLB-only for a stronger reason than the other two:
+// ObjExporter rejects a false value outright, so the only legal OBJ value is
+// the default. Rejecting the key at load time turns a config that could only
+// ever fail at write time into an error the user sees immediately.
+TEST_CASE("ConfigLoader: bake_unit_scale under [export.obj] -> Error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.obj]
+bake_unit_scale = false
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(result.diags.hasErrors());
+    bool found = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.code == nodehammer::codes::kErrConfigParse &&
+            d.message.find("bake_unit_scale") != std::string::npos) {
+            found = true;
+        }
+    }
+    REQUIRE(found);
+}
+
+// Rejected on value `true` as well: the key is not accepted under [export.obj]
+// at all, rather than accepted-and-validated. A knob whose only legal value is
+// its default is not a knob.
+TEST_CASE("ConfigLoader: bake_unit_scale = true under [export.obj] -> Error", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.obj]
+bake_unit_scale = true
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(result.diags.hasErrors());
+}
+
+// A misplaced export key is known-but-in-the-wrong-place, so it gets the precise
+// error and *not* the generic "unknown key" warning on top of it. Applies to
+// every format-specific export key, not just this one.
+TEST_CASE("ConfigLoader: a misplaced export key is reported exactly once", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.obj]
+bake_unit_scale = false
+multi_scene = true
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE(result.diags.hasErrors());
+    std::size_t unknownKeyWarnings = 0;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("unknown key") != std::string::npos) {
+            ++unknownKeyWarnings;
+        }
+    }
+    REQUIRE(unknownKeyWarnings == 0);
+    REQUIRE(result.diags.size() == 2); // one error per misplaced key, nothing else
+}
+
+TEST_CASE("ConfigLoader: bake_unit_scale under [export.gltf] -> parsed", "[config][loader]") {
+    constexpr std::string_view toml = R"(
+[export.gltf]
+bake_unit_scale = true
+)";
+    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    const auto &gltfCfg =
+        std::get<nodehammer::GltfExportFormatConfig>(result.config.exportFormats.at("gltf"));
+    REQUIRE(gltfCfg.bakeUnitScale == true);
+}
+
 TEST_CASE("ConfigLoader: scene_name_separator under [export.obj] -> Error", "[config][loader]") {
     constexpr std::string_view toml = R"(
 [export.obj]
