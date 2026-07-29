@@ -27,6 +27,23 @@ endif()
 # Export compile commands for tooling
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Every object that can end up inside a shared object must be position
+# independent: the planned installed shared library, and — sooner — the Python
+# extension module, which links the *static* library into a .so. CMake adds
+# -fPIC automatically for SHARED/MODULE targets but never for STATIC ones, so
+# the archive is the case that needs this. Set here, before Dependencies.cmake,
+# so FetchContent subprojects inherit it too (flatbuffers is the one that does
+# not set it itself). It expands to nothing for MSVC, and makes native
+# executables PIE, which is already the default on most distributions.
+# NODEHAMMER_PIC_CHECK (below) is what keeps this honest.
+#
+# Skipped under Emscripten: there is no shared object to build there, and emcc
+# warns on -fPIC unless dynamic linking is enabled — which the wasm CI job,
+# building with NODEHAMMER_WERROR=ON, would take as an error.
+if(NOT EMSCRIPTEN)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # Emscripten: compile and link all in-tree code (including FetchContent'd
 # manifold/clipper2) with native wasm exceptions. Must be set BEFORE
 # Dependencies.cmake so FetchContent targets inherit it. The matching conan
@@ -52,6 +69,7 @@ option(NODEHAMMER_WERROR        "Treat project warnings as errors"              
 option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                           OFF)
 option(NODEHAMMER_PROFILING     "Preserve symbols and frame pointers for sampling profilers" OFF)
 option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at build time (consumed in cmake/Sokol.cmake)" ON)
+option(NODEHAMMER_PIC_CHECK     "Link a probe shared module against the static library to prove every object is position-independent (consumed in cmake/PicProbe.cmake)" OFF)
 
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
@@ -399,6 +417,10 @@ if(NODEHAMMER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+
+# Included last: the probe links every library target that can end up inside a
+# shared object, so all of them have to exist first.
+include(cmake/PicProbe.cmake)
 
 # ── Install ────────────────────────────────────────────────────────────────────
 include(GNUInstallDirs)
