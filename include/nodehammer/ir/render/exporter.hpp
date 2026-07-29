@@ -41,6 +41,25 @@ struct ExportConfig {
         return 1.0;
     }
 
+    /// Default bake mode for each format. OBJ is not merely a preference: the
+    /// format has no scene graph to carry a root transform, so `ObjExporter`
+    /// rejects `bakeUnitScale == false` outright. glTF/GLB scale the root node
+    /// instead, so they default to not baking.
+    ///
+    /// Lives next to `defaultUnitScale` because the two are one decision: a
+    /// caller that resolves the scale without the matching bake mode produces a
+    /// config the exporter refuses.
+    static constexpr bool defaultBakeUnitScale(Format fmt) noexcept {
+        switch (fmt) {
+        case Format::GLB:
+        case Format::GLTF:
+            return false;
+        case Format::OBJ:
+            return true;
+        }
+        return false;
+    }
+
     /// Map a path extension or explicit format hint ("glb"/"gltf"/"obj") to a
     /// Format. The hint wins when it matches a known name; otherwise the path
     /// extension is consulted. Falls back to GLB when neither is recognised
