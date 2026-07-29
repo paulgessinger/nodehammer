@@ -172,3 +172,65 @@ TEST_CASE("SemanticScene JSON: logical volumes omit empty daughters", "[ir][sema
     auto lv2 = j.get<nodehammer::SemanticLogicalVolume>();
     REQUIRE(lv2.daughters.empty());
 }
+
+TEST_CASE("SemanticScene: visitBFS terminates on a cycle", "[ir][semantic]") {
+    nodehammer::SemanticScene scene;
+
+    auto makeNode = [&](std::string name) {
+        auto id = scene.nextNodeId();
+        nodehammer::SemanticNode n;
+        n.id = id;
+        n.name = std::move(name);
+        scene.nodes[id] = n;
+        return id;
+    };
+
+    auto rootId = makeNode("root");
+    auto childId = makeNode("child");
+    scene.rootId = rootId;
+
+    // Deliberate cycle: root -> child -> root.
+    scene.nodes[rootId].children.push_back(childId);
+    scene.nodes[childId].children.push_back(rootId);
+
+    std::vector<nodehammer::SemanticNodeId> visited;
+    scene.visitBFS([&](const auto &node) { visited.push_back(node.id); });
+
+    REQUIRE(visited.size() == 2);
+    REQUIRE(visited.at(0) == rootId);
+    REQUIRE(visited.at(1) == childId);
+}
+
+TEST_CASE("SemanticScene: visitBFS skips a dangling child id", "[ir][semantic]") {
+    nodehammer::SemanticScene scene;
+
+    auto rootId = scene.nextNodeId();
+    nodehammer::SemanticNode root;
+    root.id = rootId;
+    root.name = "root";
+    scene.nodes[rootId] = root;
+    scene.rootId = rootId;
+
+    // Child id that was never inserted into `nodes` — e.g. left behind by a
+    // partial prune. Must be skipped rather than throwing from nodes.at().
+    scene.nodes[rootId].children.push_back(nodehammer::SemanticNodeId{9999});
+
+    std::vector<nodehammer::SemanticNodeId> visited;
+    REQUIRE_NOTHROW(scene.visitBFS([&](const auto &node) { visited.push_back(node.id); }));
+    REQUIRE(visited.size() == 1);
+    REQUIRE(visited.at(0) == rootId);
+}
+
+TEST_CASE("SemanticScene: visitBFS on a scene whose root is absent", "[ir][semantic]") {
+    nodehammer::SemanticScene scene;
+
+    auto orphanId = scene.nextNodeId();
+    nodehammer::SemanticNode orphan;
+    orphan.id = orphanId;
+    scene.nodes[orphanId] = orphan;
+    scene.rootId = nodehammer::SemanticNodeId{4242}; // never inserted
+
+    int calls = 0;
+    REQUIRE_NOTHROW(scene.visitBFS([&](const auto &) { ++calls; }));
+    REQUIRE(calls == 0);
+}

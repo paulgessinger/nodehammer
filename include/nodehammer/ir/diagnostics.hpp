@@ -1,6 +1,5 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -39,17 +38,6 @@ struct Diagnostic {
 
     [[nodiscard]] bool isFatal() const noexcept { return severity == DiagnosticSeverity::Fatal; }
 };
-
-inline void to_json(nlohmann::json &j, const Diagnostic &d) {
-    j = nlohmann::json{
-        {"severity", severityName(d.severity)},
-        {"code", d.code},
-        {"message", d.message},
-    };
-    if (!d.context.empty()) {
-        j["context"] = d.context;
-    }
-}
 
 class DiagnosticList {
   public:
@@ -105,18 +93,8 @@ class DiagnosticList {
     [[nodiscard]] bool empty() const noexcept { return items_.empty(); }
     [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
 
-    [[nodiscard]] nlohmann::json toJson() const {
-        auto arr = nlohmann::json::array();
-        for (const auto &d : items_) {
-            arr.push_back(d);
-        }
-        return arr;
-    }
-
   private:
     std::vector<Diagnostic> items_;
 };
-
-inline void to_json(nlohmann::json &j, const DiagnosticList &dl) { j = dl.toJson(); }
 
 } // namespace nodehammer

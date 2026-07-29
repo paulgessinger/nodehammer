@@ -244,8 +244,12 @@ void SemanticScene::computeWorldTransforms() {
     nodes.at(rootId).worldTransform = nodes.at(rootId).localTransform;
     visitBFS([this](const SemanticNode &node) {
         for (const auto childId : node.children) {
-            auto &child = nodes.at(childId);
-            child.worldTransform = node.worldTransform * child.localTransform;
+            // Skip rather than throw on a dangling child id, matching visitBFS.
+            const auto it = nodes.find(childId);
+            if (it == nodes.end()) {
+                continue;
+            }
+            it->second.worldTransform = node.worldTransform * it->second.localTransform;
         }
     });
 }
@@ -257,8 +261,12 @@ void SemanticScene::computeOriginalPaths() {
     nodes.at(rootId).originalPath = "/" + nodes.at(rootId).name;
     visitBFS([this](const SemanticNode &node) {
         for (const auto childId : node.children) {
-            auto &child = nodes.at(childId);
-            child.originalPath = node.originalPath + "/" + child.name;
+            // Skip rather than throw on a dangling child id, matching visitBFS.
+            const auto it = nodes.find(childId);
+            if (it == nodes.end()) {
+                continue;
+            }
+            it->second.originalPath = node.originalPath + "/" + it->second.name;
         }
     });
 }

@@ -16,7 +16,12 @@ namespace nodehammer {
 /// null and diags carries the reason. Warnings can accompany a successful
 /// build, so callers should always render diags regardless of success.
 struct SceneBuildResult {
-    std::shared_ptr<RenderScene> scene;
+    /// Const because the scene is shared, never owned exclusively: the viewer
+    /// hands the same pointer to `SceneRenderer::beginUpload` while holding it
+    /// as the resident scene, and every downstream consumer already spells it
+    /// `shared_ptr<const RenderScene>`. Keeping the producer's handle mutable
+    /// was the one gap in that chain.
+    std::shared_ptr<const RenderScene> scene;
     DiagnosticList diags;
 };
 
