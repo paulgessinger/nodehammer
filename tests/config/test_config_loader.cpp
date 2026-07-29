@@ -552,6 +552,30 @@ TEST_CASE("ConfigLoader: circular include -> Error", "[config][loader][include]"
     REQUIRE(foundCycle);
 }
 
+// A diamond is not a cycle. Two siblings including one shared base is the
+// normal way to compose configs — it is what fixtures/configs/odd/base.toml
+// exists for — and used to be rejected outright, because "already seen
+// anywhere" and "already on the current path" were the same set.
+TEST_CASE("ConfigLoader: diamond include is not circular", "[config][loader][include]") {
+    auto result =
+        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_diamond.toml");
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    // The shared base is merged exactly once: merging it per branch would
+    // duplicate its array entries, since arrays concatenate rather than replace.
+    std::size_t markerRules = 0;
+    for (const auto &r : result.config.rules) {
+        if (r.material == "diamond_base_marker") {
+            ++markerRules;
+        }
+    }
+    REQUIRE(markerRules == 1);
+
+    // Content from both the base and the root still lands.
+    REQUIRE_FALSE(result.config.deduplicateShapes); // from diamond_base.toml
+    REQUIRE(result.config.hoistOrphans);            // from the root
+}
+
 TEST_CASE("ConfigLoader: include non-existent file -> Error", "[config][loader][include]") {
     auto result =
         nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_bad_path.toml");

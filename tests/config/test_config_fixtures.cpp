@@ -36,8 +36,8 @@ struct FixtureCase {
 // assert on parsed content, not just pass/fail) — listed here only so the
 // coverage check below doesn't flag them as untracked.
 const std::vector<std::string> kCoveredElsewhere = {
-    "full_example.toml",  "include_bad_path.toml", "include_basic.toml",
-    "include_cycle.toml", "include_nested.toml",   "minimal.toml",
+    "full_example.toml",    "include_bad_path.toml", "include_basic.toml", "include_cycle.toml",
+    "include_diamond.toml", "include_nested.toml",   "minimal.toml",
 };
 
 const std::vector<FixtureCase> kFixtureCases = {
