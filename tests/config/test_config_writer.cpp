@@ -287,7 +287,7 @@ TEST_CASE("ConfigWriter: gltf export config round-trip", "[config][writer]") {
     NHConfig cfg;
     GltfExportFormatConfig gltf;
     gltf.common.unitScale = 0.001;
-    gltf.common.bakeUnitScale = true;
+    gltf.bakeUnitScale = true;
     gltf.multiScene = true;
     gltf.sceneNameSeparator = "::";
     cfg.exportFormats["gltf"] = gltf;
@@ -298,7 +298,7 @@ TEST_CASE("ConfigWriter: gltf export config round-trip", "[config][writer]") {
     REQUIRE(std::holds_alternative<GltfExportFormatConfig>(v));
     const auto &g = std::get<GltfExportFormatConfig>(v);
     REQUIRE(g.common.unitScale == Catch::Approx(0.001));
-    REQUIRE(g.common.bakeUnitScale == true);
+    REQUIRE(g.bakeUnitScale == true);
     REQUIRE(g.multiScene == true);
     REQUIRE(g.sceneNameSeparator == "::");
 }

@@ -387,18 +387,43 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
             if (const sol::optional<double> v = t[keys::kUnitScale]) {
                 common.unitScale = *v;
             }
-            if (const sol::optional<bool> v = t[keys::kBakeUnitScale]) {
-                common.bakeUnitScale = *v;
+            // Same schema table the TOML loader walks (config_keys.hpp), so a
+            // format-specific key cannot be enforced on one front-end and not the
+            // other. A misplaced key is known-but-in-the-wrong-place: it gets the
+            // precise error and joins the valid set, so the generic unknown-key
+            // pass below does not report it a second time. Only the message
+            // differs from the loader's, because the syntax does.
+            std::vector<std::string_view> validKeys;
+            for (const auto &kd : keys::kExportKeys) {
+                validKeys.push_back(kd.key);
+                if (keys::exportKeyAllowed(kd, name) || !t[kd.key].valid()) {
+                    continue;
+                }
+                std::string validFmts;
+                for (const auto &f : kd.formats) {
+                    if (!validFmts.empty()) {
+                        validFmts += " or ";
+                    }
+                    validFmts += std::format("export('{}')", f);
+                }
+                diags.error(codes::kErrConfigParse,
+                            std::format("'{}' is only valid under {}, not export('{}')", kd.key,
+                                        validFmts, name),
+                            ctx);
             }
+
             if (name == "obj") {
-                warnUnknownKeys(t, keys::kExportCommonKeys, ctx, diags);
+                warnUnknownKeys(t, validKeys, ctx, diags);
                 ObjExportFormatConfig c;
                 c.common = common;
                 cfg.exportFormats[name] = c;
             } else if (name == "gltf" || name == "glb") {
-                warnUnknownKeys(t, keys::kExportGltfKeys, ctx, diags);
+                warnUnknownKeys(t, validKeys, ctx, diags);
                 GltfExportFormatConfig c;
                 c.common = common;
+                if (const sol::optional<bool> v = t[keys::kBakeUnitScale]) {
+                    c.bakeUnitScale = *v;
+                }
                 if (const sol::optional<bool> v = t[keys::kMultiScene]) {
                     c.multiScene = *v;
                 }

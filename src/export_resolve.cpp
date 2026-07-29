@@ -31,10 +31,12 @@ bool applyFormatTable(ExportConfig &ecfg, const NHConfig &cfg, const std::string
     if (auto v = common.unitScale) {
         ecfg.unitScale = *v;
     }
-    if (auto v = common.bakeUnitScale) {
-        ecfg.bakeUnitScale = *v;
-    }
     if (const auto *gltfCfg = std::get_if<GltfExportFormatConfig>(&variant)) {
+        // OBJ has no bake override by construction: the field is glTF/GLB-only,
+        // so `defaultBakeUnitScale(OBJ) == true` always stands.
+        if (auto v = gltfCfg->bakeUnitScale) {
+            ecfg.bakeUnitScale = *v;
+        }
         if (auto v = gltfCfg->multiScene) {
             ecfg.gltf.multiScene = *v;
         }

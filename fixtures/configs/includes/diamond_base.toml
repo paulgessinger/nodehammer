@@ -1,0 +1,7 @@
+# Shared base pulled in by two siblings. The point of the diamond fixture is
+# that this file is merged exactly once, so the rule below must not appear
+# twice in the resolved config.
+deduplicate_shapes = false
+
+[[rules]]
+material = "diamond_base_marker"

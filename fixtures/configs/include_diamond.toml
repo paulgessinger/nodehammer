@@ -1,0 +1,5 @@
+# A diamond, not a cycle: both branches pull in the same base.
+#   include_diamond -> {diamond_left, diamond_right} -> diamond_base
+include = ["includes/diamond_left.toml", "includes/diamond_right.toml"]
+
+hoist_orphans = true
