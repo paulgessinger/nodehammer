@@ -6,6 +6,7 @@
 #include <nodehammer/config/config_loader.hpp>
 #include <nodehammer/config/config_validator.hpp>
 #include <nodehammer/detail/timing.hpp>
+#include <nodehammer/export_resolve.hpp>
 #include <nodehammer/ir/diagnostic_codes.hpp>
 #include <nodehammer/ir/render/exporter.hpp>
 #include <nodehammer/ir/semantic/importer.hpp>
@@ -204,30 +205,6 @@ void registerCmdConvert(CLI::App &app) {
         // ── Export (one pass per output path) ─────────────────────────────────
         const auto expRegistry = nodehammer::RenderExporterRegistry::makeDefault();
 
-        // Look up per-format config; GLB falls back to "gltf" if "glb" isn't set.
-        const auto applyFmtCfg = [&](nodehammer::ExportConfig &ecfg, const std::string &key) {
-            if (!cfg.exportFormats.contains(key)) {
-                return false;
-            }
-            const auto &variant = cfg.exportFormats.at(key);
-            const auto &common = nodehammer::commonConfig(variant);
-            if (auto v = common.unitScale) {
-                ecfg.unitScale = *v;
-            }
-            if (auto v = common.bakeUnitScale) {
-                ecfg.bakeUnitScale = *v;
-            }
-            if (const auto *gltfCfg = std::get_if<nodehammer::GltfExportFormatConfig>(&variant)) {
-                if (auto v = gltfCfg->multiScene) {
-                    ecfg.gltf.multiScene = *v;
-                }
-                if (auto v = gltfCfg->sceneNameSeparator) {
-                    ecfg.gltf.sceneNameSeparator = *v;
-                }
-            }
-            return true;
-        };
-
         for (const auto &outputPath : outputPaths) {
             const auto *exp = expRegistry.resolve(outputPath, outputFmt);
             if (!exp) {
@@ -236,20 +213,7 @@ void registerCmdConvert(CLI::App &app) {
                 std::exit(1);
             }
 
-            nodehammer::ExportConfig ecfg;
-            ecfg.format = nodehammer::ExportConfig::formatFromExtension(outputPath, outputFmt);
-
-            ecfg.unitScale = nodehammer::ExportConfig::defaultUnitScale(ecfg.format);
-            if (ecfg.format == nodehammer::ExportConfig::Format::OBJ) {
-                ecfg.bakeUnitScale = true;
-            }
-            const std::string fmtKey =
-                (ecfg.format == nodehammer::ExportConfig::Format::GLB)    ? "glb"
-                : (ecfg.format == nodehammer::ExportConfig::Format::GLTF) ? "gltf"
-                                                                          : "obj";
-            if (!applyFmtCfg(ecfg, fmtKey) && fmtKey == "glb") {
-                applyFmtCfg(ecfg, "gltf");
-            }
+            const auto ecfg = nodehammer::resolveExportConfig(cfg, outputPath, outputFmt);
 
             std::println("Writing {} ...", outputPath);
             nodehammer::detail::Timer expTimer;

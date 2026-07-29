@@ -158,6 +158,7 @@ add_library(nodehammer_lib STATIC
     src/ir/semantic/exporter_registry.cpp
     src/detail/markup.cpp
     src/scene_build.cpp
+    src/export_resolve.cpp
     src/viewer/app_state.cpp
     src/viewer/camera.cpp
     # Headless, GPU-free viewer controller: the adaptive render-scale state
