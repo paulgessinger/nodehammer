@@ -6,6 +6,7 @@
 
 #include <sokol_app.h>
 
+#include <span>
 #include <utility>
 #include <vector>
 

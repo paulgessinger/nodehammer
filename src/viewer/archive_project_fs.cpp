@@ -8,6 +8,7 @@
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>

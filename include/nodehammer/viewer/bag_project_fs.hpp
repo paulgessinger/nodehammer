@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string_view>
 
 namespace nodehammer::viewer {

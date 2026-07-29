@@ -7,6 +7,7 @@
 #include <chrono>
 #include <exception>
 #include <format>
+#include <span>
 #include <system_error>
 #include <utility>
 #include <vector>

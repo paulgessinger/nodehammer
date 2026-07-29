@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <fstream>
+#include <span>
 
 #ifndef NODEHAMMER_FIXTURES_DIR
 #error "NODEHAMMER_FIXTURES_DIR must be defined by CMake"

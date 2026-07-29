@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <deque>
 #include <optional>
+#include <span>
 #include <unordered_set>
 #include <utility>
 #include <vector>
