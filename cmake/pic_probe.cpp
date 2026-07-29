@@ -3,6 +3,4 @@
 // in around it — the whole nodehammer archive — not this file; CMake just
 // requires a MODULE library to have at least one source, and a linker requires
 // at least one symbol to be worth emitting.
-extern "C" int nodehammer_pic_probe_marker(void) {
-    return 0;
-}
+extern "C" int nodehammer_pic_probe_marker(void) { return 0; }
