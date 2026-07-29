@@ -6,11 +6,11 @@
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/ir/gltf/render/exporter.hpp>
-#include <nodehammer/ir/obj/render/exporter.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <config/config_ast.hpp>
+#include <ir/gltf/render/exporter.hpp>
+#include <ir/obj/render/exporter.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <tessellation/tessellation_pass.hpp>
 
 #include <filesystem>
 #include <fstream>

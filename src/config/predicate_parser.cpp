@@ -1,4 +1,4 @@
-#include <nodehammer/config/predicate_parser.hpp>
+#include <config/predicate_parser.hpp>
 
 #include <cctype>
 #include <format>

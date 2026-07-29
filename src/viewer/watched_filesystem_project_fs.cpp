@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/watched_filesystem_project_fs.hpp>
+#include <viewer/watched_filesystem_project_fs.hpp>
 
 #include <wtr/watcher.hpp>
 

@@ -1,6 +1,6 @@
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
 
-#include <nodehammer/detail/overloaded.hpp>
+#include <detail/overloaded.hpp>
 
 #include <flatbuffers/flatbuffers.h>
 

@@ -20,7 +20,7 @@ cubemap in the composite pass. The analytical directional light and
 the IBL bake share a single sun-direction source of truth. Reversed-Z
 is preserved end-to-end; ImGui still renders in the swapchain pass.
 
-**Quality settings + UI** (`include/nodehammer/viewer/render_quality.hpp`,
+**Quality settings + UI** (`src/viewer/render_quality.hpp`,
 `src/viewer/ui/view_panel.cpp`). Live: `debug_view`, `enable_fxaa`,
 `enable_hdr`, `enable_tonemap`, `exposure_stops`, `tonemap_mode`
 (ACES/Reinhard/AgX), `enable_ao`, `ao_intensity`, `ao_radius`,
@@ -191,7 +191,7 @@ reversed-Z — producing both z-fighting on close surfaces and a fragment-bound
 perf regression that scales with on-screen triangle area.
 
 The viewer therefore branches the depth convention by backend at runtime via
-`useReversedZ()` (`include/nodehammer/viewer/backend_caps.hpp`):
+`useReversedZ()` (`src/viewer/backend_caps.hpp`):
 
 - on `[0, 1]` clip-depth backends: reversed-Z, `GREATER_EQUAL`, depth-clear
   `0.0`, projection maps near→1
@@ -718,7 +718,7 @@ glossy black backplanes, copper modules, polished metallic beam pipe.
 **The IR already carries this information**; the viewer is throwing
 most of it away on upload.
 
-`RenderMaterial` (`include/nodehammer/ir/render.hpp`) carries:
+`RenderMaterial` (`src/ir/render.hpp`) carries:
 
 - `baseColorFactor`, `metallicFactor`, `roughnessFactor` — used
 - `emissiveFactor` — populated by tessellation, exported to glTF,

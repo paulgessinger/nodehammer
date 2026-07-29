@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/render/exporter.hpp>
+#include <ir/render/exporter.hpp>
 
 using namespace nodehammer;
 

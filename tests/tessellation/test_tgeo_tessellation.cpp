@@ -7,10 +7,10 @@
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/tgeo/semantic/shape_dispatch.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
+#include <ir/diagnostics.hpp>
+#include <ir/semantic.hpp>
+#include <ir/tgeo/semantic/shape_dispatch.hpp>
+#include <tessellation/primitive_tessellator.hpp>
 
 #include <TGeoBBox.h>
 #include <TGeoCone.h>

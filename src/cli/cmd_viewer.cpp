@@ -1,11 +1,11 @@
 #include <CLI/CLI.hpp>
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/archive_project_fs.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
-#include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
-#include <nodehammer/viewer/watched_filesystem_project_fs.hpp>
+#include <detail/file_io.hpp>
+#include <viewer/app.hpp>
+#include <viewer/archive_project_fs.hpp>
+#include <viewer/bag_project_fs.hpp>
+#include <viewer/config.hpp>
+#include <viewer/filesystem_project_fs.hpp>
+#include <viewer/watched_filesystem_project_fs.hpp>
 
 #include <algorithm>
 #include <cctype>

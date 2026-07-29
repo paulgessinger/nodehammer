@@ -184,9 +184,15 @@ configure_file(
     @ONLY
 )
 
+# `include/` holds the public headers; every internal header lives next to its
+# source under `src/` and is included as <ir/semantic.hpp>, <config/...>, etc.
+# The split is physical, so nothing internal *can* leak into an install: the
+# BUILD_INTERFACE genex keeps src/ on the include path for every in-tree target
+# (cli, lua, viewer, tests) while dropping it from the exported interface.
 target_include_directories(nodehammer_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_BINARY_DIR}/include
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
 )
 
 target_link_libraries(nodehammer_lib PUBLIC

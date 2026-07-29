@@ -1,7 +1,7 @@
-#include <nodehammer/viewer/native_bag_project_fs.hpp>
+#include <viewer/native_bag_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
+#include <detail/file_io.hpp>
+#include <viewer/filesystem_project_fs.hpp>
 
 #include <atomic>
 #include <chrono>

@@ -1,6 +1,6 @@
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
+#include <viewer/filesystem_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
+#include <detail/file_io.hpp>
 
 #include <algorithm>
 #include <mutex>

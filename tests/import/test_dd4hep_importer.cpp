@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/dd4hep/semantic/importer.hpp>
-#include <nodehammer/ir/semantic.hpp>
+#include <ir/dd4hep/semantic/importer.hpp>
+#include <ir/semantic.hpp>
 
 #include <string>
 #include <unordered_set>

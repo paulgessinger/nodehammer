@@ -1,6 +1,6 @@
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/provenance.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/provenance.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
 
 #include <glm/glm.hpp>
 

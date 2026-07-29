@@ -4,8 +4,8 @@
 #include "scene_render_target.hpp"
 #include "ui/notifications.hpp"
 
-#include <nodehammer/viewer/png_export.hpp>
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/png_export.hpp>
+#include <viewer/render_quality.hpp>
 
 #include <cstdint>
 #include <functional>

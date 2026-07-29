@@ -1,6 +1,6 @@
-#include <nodehammer/config/config_enums.hpp>
-#include <nodehammer/config/config_writer.hpp>
-#include <nodehammer/detail/overloaded.hpp>
+#include <config/config_enums.hpp>
+#include <config/config_writer.hpp>
+#include <detail/overloaded.hpp>
 
 #include <toml++/toml.hpp>
 

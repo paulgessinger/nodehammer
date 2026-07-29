@@ -176,14 +176,14 @@ branch here). The reliable incantation that worked this session:
   `StackAverage` (volume-weighted C_avg + percentile feature size), hull proxy
   gen, `MergeResult` cache.
 - `src/tessellation/boolean_tessellator.{hpp,cpp}` — `convexHull`.
-- `include/nodehammer/ir/render.hpp` — `StackAverage`,
+- `src/ir/render.hpp` — `StackAverage`,
   `RenderNode::lodProxyBindings`.
 - `shaders/scene.glsl` — prefilter blend + specular AA (`stack_prefilter`,
   `mode_flags.w` enable).
 - `src/viewer/scene_renderer.{hpp,cpp}` — `GpuMesh` stack fields,
   `DrawGroup::LodRole`, LOD-gated cull/draw, `RenderFlags::{material_prefilter,
   material_prefilter_scale, hull_lod}`.
-- `include/nodehammer/viewer/render_quality.hpp` — the runtime toggles/sliders.
+- `src/viewer/render_quality.hpp` — the runtime toggles/sliders.
 - `src/viewer/ui/view_panel.cpp` — the UI controls.
 - `fixtures/configs/odd/calorimeters.toml` — `average_material_stack = true` on
   the calo stave rule.

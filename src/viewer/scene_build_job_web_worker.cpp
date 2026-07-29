@@ -3,11 +3,11 @@
 #include "scene_build_job_internal.hpp"
 #include "scene_build_job_web_backend.hpp"
 
-#include <nodehammer/config/config_writer.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/fb/render/flatbuffer.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/scene_build.hpp>
+#include <config/config_writer.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/fb/render/flatbuffer.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <scene_build.hpp>
 
 #include <emscripten/emscripten.h>
 

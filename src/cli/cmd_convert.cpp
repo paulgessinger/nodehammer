@@ -1,20 +1,20 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
+#include <detail/timing.hpp>
+#include <export_resolve.hpp>
 #include <filesystem>
 #include <format>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/detail/timing.hpp>
-#include <nodehammer/export_resolve.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/render/exporter.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
-#include <nodehammer/selection/selector.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/render/exporter.hpp>
+#include <ir/semantic/importer.hpp>
 #include <print>
+#include <selection/selector.hpp>
 #include <string>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 using nodehammer::cli::printDiags;
 

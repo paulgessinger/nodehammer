@@ -1,8 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/render_json.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
+#include <ir/diagnostics.hpp>
+#include <ir/render_json.hpp>
+#include <ir/semantic_json.hpp>
 
 TEST_CASE("to_json: BoxShape serialization", "[ir][json]") {
     nodehammer::BoxShape box{1.0, 2.0, 3.0};

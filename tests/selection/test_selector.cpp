@@ -1,8 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/selection/selector.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <selection/selector.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 

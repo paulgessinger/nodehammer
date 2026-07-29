@@ -1,6 +1,6 @@
-#include <nodehammer/viewer/bag_project_fs.hpp>
+#include <viewer/bag_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
+#include <detail/file_io.hpp>
 
 #include <span>
 #include <unordered_map>

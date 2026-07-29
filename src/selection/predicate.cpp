@@ -1,5 +1,5 @@
-#include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/selection/predicate.hpp>
+#include <detail/overloaded.hpp>
+#include <selection/predicate.hpp>
 
 #include <memory>
 

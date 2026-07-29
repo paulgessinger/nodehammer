@@ -68,8 +68,8 @@ constraints dominate every decision:
   semantic format**. On web it is an HTTP *client* (`emscripten_fetch` in
   `url_project_fs_web.cpp`). **There is no server, socket, or websocket code
   anywhere.**
-- **Two IRs**: semantic (`include/nodehammer/ir/semantic.hpp`) and render
-  (`include/nodehammer/ir/render.hpp`). Serialized via FlatBuffers —
+- **Two IRs**: semantic (`src/ir/semantic.hpp`) and render
+  (`src/ir/render.hpp`). Serialized via FlatBuffers —
   `schemas/semantic.fbs` (`file_identifier "NHS8"`, `.nhb`) and
   `schemas/render.fbs` (`"NHR8"`, `.nhr`). `.nhb.zst` is a zstd frame.
 - **Importer registry** (`src/ir/semantic/importer_registry.cpp`,
@@ -359,7 +359,7 @@ nlohmann (§3.2), so the slim connector has **zero** vendored/assumed libraries.
 ### 7.4 Live entry points
 
 - **TGeo: already exists** — `import(TGeoManager*)`
-  (`include/nodehammer/ir/tgeo/semantic/importer.hpp:38`); pass `gGeoManager`.
+  (`src/ir/tgeo/semantic/importer.hpp:38`); pass `gGeoManager`.
 - **DD4hep: ~15-line refactor** — today file-path only
   (`fromCompact`, `src/ir/dd4hep/semantic/importer.cpp:105-106`); split the walk
   (`:116-142`) into a helper taking `TGeoManager&` + `DetElement` and add an

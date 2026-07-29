@@ -22,8 +22,8 @@
 
 #include <nlohmann/json.hpp>
 
-#include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/config.hpp>
+#include <viewer/app.hpp>
+#include <viewer/config.hpp>
 
 #include <emscripten/fetch.h>
 #include <glm/glm.hpp>

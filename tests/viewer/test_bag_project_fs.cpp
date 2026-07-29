@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/viewer/bag_project_fs.hpp>
+#include <viewer/bag_project_fs.hpp>
 
 #include <cstddef>
 #include <cstring>

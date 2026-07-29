@@ -1,8 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/tgeo/semantic/importer.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/semantic.hpp>
+#include <ir/tgeo/semantic/importer.hpp>
 
 #include <TGeoBBox.h>
 #include <TGeoCompositeShape.h>

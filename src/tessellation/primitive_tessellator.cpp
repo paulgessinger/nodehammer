@@ -1,6 +1,6 @@
-#include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
+#include <detail/overloaded.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <tessellation/primitive_tessellator.hpp>
 
 #include <glm/glm.hpp>
 

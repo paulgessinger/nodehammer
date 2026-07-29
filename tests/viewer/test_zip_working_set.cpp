@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <viewer/zip_working_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

@@ -1,8 +1,8 @@
-#include <nodehammer/tessellation/build_pipeline.hpp>
+#include <tessellation/build_pipeline.hpp>
 
-#include <nodehammer/tessellation/tessellation_job.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <tessellation/tessellation_job.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <memory>
 #include <optional>

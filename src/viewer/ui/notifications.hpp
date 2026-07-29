@@ -1,7 +1,7 @@
 #pragma once
 
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/log_sink.hpp>
+#include <ir/diagnostics.hpp>
+#include <log_sink.hpp>
 
 #include <chrono>
 #include <cstddef>

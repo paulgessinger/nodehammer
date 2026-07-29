@@ -1,6 +1,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
+#include <ir/semantic_json.hpp>
 
 TEST_CASE("SemanticScene: construction and node lookup by ID", "[ir][semantic]") {
     nodehammer::SemanticScene scene;

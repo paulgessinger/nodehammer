@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
-#include <nodehammer/viewer/build_session.hpp>
+#include <detail/file_io.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/semantic.hpp>
+#include <viewer/bag_project_fs.hpp>
+#include <viewer/build_session.hpp>
 
 #include <cstddef>
 #include <cstring>

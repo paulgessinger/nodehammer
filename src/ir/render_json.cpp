@@ -1,10 +1,10 @@
-#include <nodehammer/ir/render_json.hpp>
+#include <ir/render_json.hpp>
 
 // The Render codec serializes glm vectors/matrices (glm_json), the SemanticNodeId
 // back-reference and Provenance (both from the Semantic IR's codec). Pulling these
 // in here — rather than in render.hpp — is exactly what keeps the header lean.
-#include <nodehammer/detail/glm_json.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
+#include <detail/glm_json.hpp>
+#include <ir/semantic_json.hpp>
 
 namespace nodehammer {
 

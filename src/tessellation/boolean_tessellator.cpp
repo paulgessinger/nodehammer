@@ -1,9 +1,9 @@
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/tessellation/boolean_tessellator.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <tessellation/boolean_tessellator.hpp>
 
 #include <manifold/manifold.h>
 
-#include <nodehammer/detail/overloaded.hpp>
+#include <detail/overloaded.hpp>
 
 #include <cstring>
 #include <format>

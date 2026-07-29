@@ -1,11 +1,11 @@
-#include <nodehammer/lua/lua_config.hpp>
+#include <lua/lua_config.hpp>
 
-#include <nodehammer/config/color_parse.hpp>
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/config/config_enums.hpp>
-#include <nodehammer/config/config_keys.hpp>
-#include <nodehammer/config/predicate_parser.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
+#include <config/color_parse.hpp>
+#include <config/config_ast.hpp>
+#include <config/config_enums.hpp>
+#include <config/config_keys.hpp>
+#include <config/predicate_parser.hpp>
+#include <ir/diagnostic_codes.hpp>
 
 #include <sol/sol.hpp>
 

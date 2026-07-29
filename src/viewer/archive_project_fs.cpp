@@ -1,8 +1,8 @@
-#include <nodehammer/viewer/archive_project_fs.hpp>
+#include <viewer/archive_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/viewer/archive_export.hpp>
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <detail/file_io.hpp>
+#include <viewer/archive_export.hpp>
+#include <viewer/zip_working_set.hpp>
 
 #include <cstring>
 #include <exception>

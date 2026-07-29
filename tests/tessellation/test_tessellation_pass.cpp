@@ -1,17 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <tessellation/primitive_tessellator.hpp>
+#include <tessellation/tessellation_pass.hpp>
 
 #include <limits>
 #include <map>
 #include <set>
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <ir/semantic_json.hpp>
 #include <nlohmann/json.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
-#include <nodehammer/tessellation/boolean_tessellator.hpp>
+#include <tessellation/boolean_tessellator.hpp>
 
 using namespace nodehammer;
 

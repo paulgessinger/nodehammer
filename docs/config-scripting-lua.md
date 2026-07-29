@@ -9,7 +9,7 @@ the remaining trade-offs stay mapped.
 The existing TOML config is described operationally in
 [predicate-expressions.md](predicate-expressions.md); the parser lives in
 [`config_loader.cpp`](../src/config/config_loader.cpp) and the data model in
-[`config_ast.hpp`](../include/nodehammer/config/config_ast.hpp). This doc
+[`config_ast.hpp`](../src/config/config_ast.hpp). This doc
 assumes familiarity with both.
 
 ---
@@ -57,7 +57,7 @@ the `configToToml` writer) knows about TOML. A scripting front-end therefore
 only has to **produce an `NHConfig`**; the entire rest of the system is
 untouched. The entry points it would sit beside are
 `ConfigLoader::loadFromString` / `loadFromFile` / `parseAndMerge`
-([`config_loader.hpp`](../include/nodehammer/config/config_loader.hpp)).
+([`config_loader.hpp`](../src/config/config_loader.hpp)).
 
 There is already an `NHConfig → TOML` writer (`configToToml`) and a
 `config-flatten` command, so the data model round-trips *out* to TOML today.

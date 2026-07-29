@@ -1,12 +1,12 @@
-#include <nodehammer/viewer/archive_project_fs.hpp>
+#include <viewer/archive_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <detail/file_io.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/semantic.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/project_fs.hpp>
+#include <viewer/zip_working_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

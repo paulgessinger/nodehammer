@@ -1,4 +1,4 @@
-#include <nodehammer/export_resolve.hpp>
+#include <export_resolve.hpp>
 
 #include <string>
 #include <variant>

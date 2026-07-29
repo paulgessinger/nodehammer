@@ -7,7 +7,7 @@
 // that macro is defined at compile time. When the macro is absent the call
 // compiles to a no-op, so tests can call it unconditionally.
 
-#include <nodehammer/tessellation/tessellator.hpp>
+#include <tessellation/tessellator.hpp>
 
 #include <filesystem>
 #include <fstream>

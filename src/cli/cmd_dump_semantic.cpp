@@ -3,19 +3,19 @@
 
 #include <CLI/CLI.hpp>
 #include <cmath>
+#include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
+#include <detail/markup.hpp>
+#include <detail/overloaded.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/diagnostics.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/semantic/exporter.hpp>
+#include <ir/semantic_json.hpp>
 #include <nlohmann/json.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/detail/markup.hpp>
-#include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/ir/semantic/exporter.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
-#include <nodehammer/selection/predicate.hpp>
-#include <nodehammer/selection/selector.hpp>
 #include <print>
+#include <selection/predicate.hpp>
+#include <selection/selector.hpp>
 #include <string>
 
 namespace {

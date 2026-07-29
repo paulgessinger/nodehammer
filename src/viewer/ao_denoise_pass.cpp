@@ -1,7 +1,7 @@
 #include "ao_denoise_pass.hpp"
 
-#include <nodehammer/viewer/backend_caps.hpp>
-#include <nodehammer/viewer/camera.hpp>
+#include <viewer/backend_caps.hpp>
+#include <viewer/camera.hpp>
 
 #include "ao_render_target.hpp"
 #include "scene_render_target.hpp"

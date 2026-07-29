@@ -1,6 +1,6 @@
-#include <nodehammer/viewer/build_session.hpp>
+#include <viewer/build_session.hpp>
 
-#include <nodehammer/ir/fb/semantic/importer.hpp>
+#include <ir/fb/semantic/importer.hpp>
 
 #include <algorithm>
 #include <cstddef>

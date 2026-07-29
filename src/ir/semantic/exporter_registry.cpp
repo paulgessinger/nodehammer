@@ -1,7 +1,7 @@
-#include <nodehammer/ir/semantic/exporter.hpp>
+#include <ir/semantic/exporter.hpp>
 
-#include <nodehammer/ir/fb/semantic/exporter.hpp>
-#include <nodehammer/ir/json/semantic/exporter.hpp>
+#include <ir/fb/semantic/exporter.hpp>
+#include <ir/json/semantic/exporter.hpp>
 
 #include <algorithm>
 #include <cctype>

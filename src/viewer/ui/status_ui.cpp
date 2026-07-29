@@ -1,8 +1,8 @@
 #include "status_ui.hpp"
 
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/platform.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/platform.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <imgui.h>
 

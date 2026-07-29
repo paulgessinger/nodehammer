@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/semantic/exporter.hpp>
+#include <ir/semantic/exporter.hpp>
 
 using namespace nodehammer;
 

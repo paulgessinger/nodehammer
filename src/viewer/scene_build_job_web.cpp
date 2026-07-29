@@ -3,8 +3,8 @@
 #include "scene_build_job_internal.hpp"
 #include "scene_build_job_web_backend.hpp"
 
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
+#include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
 
 #include <cstdint>
 #include <iostream>

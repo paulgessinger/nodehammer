@@ -1,9 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/tessellation/boolean_tessellator.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
+#include <ir/diagnostics.hpp>
+#include <ir/semantic.hpp>
+#include <tessellation/boolean_tessellator.hpp>
+#include <tessellation/primitive_tessellator.hpp>
 
 #include <manifold/manifold.h>
 

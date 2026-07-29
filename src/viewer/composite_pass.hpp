@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/render_quality.hpp>
 
 #include <glm/mat4x4.hpp>
 #include <glm/vec3.hpp>

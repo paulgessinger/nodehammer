@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
+#include <ir/semantic.hpp>
+#include <tessellation/primitive_tessellator.hpp>
 
 #include <glm/glm.hpp>
 

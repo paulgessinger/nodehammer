@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/app_state.hpp>
+#include <viewer/app_state.hpp>
 
 #include <glm/gtc/constants.hpp>
 #include <toml++/toml.hpp>

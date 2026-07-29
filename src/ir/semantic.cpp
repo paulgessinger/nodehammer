@@ -1,6 +1,6 @@
-#include <nodehammer/ir/semantic.hpp>
+#include <ir/semantic.hpp>
 
-#include <nodehammer/detail/overloaded.hpp>
+#include <detail/overloaded.hpp>
 
 #include <algorithm>
 #include <bit>

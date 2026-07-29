@@ -1,8 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/ir/fb/render/flatbuffer.hpp>
-#include <nodehammer/ir/render.hpp>
+#include <ir/fb/render/flatbuffer.hpp>
+#include <ir/render.hpp>
 
 #include <cstdint>
 #include <span>

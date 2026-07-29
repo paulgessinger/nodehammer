@@ -1,8 +1,8 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
 #include <print>
 #include <string>
 

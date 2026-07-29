@@ -1,8 +1,8 @@
-#include <nodehammer/ir/fb/semantic/importer.hpp>
+#include <ir/fb/semantic/importer.hpp>
 
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
 
 #include <format>
 #include <span>

@@ -3,12 +3,12 @@
 #include "scene_build_job.hpp"
 #include "ui/notifications.hpp"
 
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/ir/render.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
+#include <config/config_ast.hpp>
+#include <ir/render.hpp>
+#include <ir/semantic.hpp>
+#include <tessellation/wedge_cut.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <chrono>
 #include <cstdint>

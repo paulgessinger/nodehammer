@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/app.hpp>
+#include <viewer/app.hpp>
 
 #include "ao_denoise_pass.hpp"
 #include "ao_pass.hpp"
@@ -21,21 +21,21 @@
 #include "ui/perf_history.hpp"
 #include "ui/viewer_ui.hpp"
 
-#include <nodehammer/viewer/archive_export.hpp>
-#include <nodehammer/viewer/archive_project_fs.hpp>
-#include <nodehammer/viewer/backend_caps.hpp>
-#include <nodehammer/viewer/platform.hpp>
-#include <nodehammer/viewer/png_export.hpp>
-#include <nodehammer/viewer/project_manifest.hpp>
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/archive_export.hpp>
+#include <viewer/archive_project_fs.hpp>
+#include <viewer/backend_caps.hpp>
+#include <viewer/platform.hpp>
+#include <viewer/png_export.hpp>
+#include <viewer/project_manifest.hpp>
+#include <viewer/render_quality.hpp>
 
-#include <nodehammer/ir/render.hpp>
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/viewer/app_state.hpp>
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/dynamic_render_scale.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
+#include <ir/render.hpp>
+#include <scene_build.hpp>
+#include <viewer/app_state.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/camera.hpp>
+#include <viewer/dynamic_render_scale.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <imgui.h>
 #include <imgui_internal.h>

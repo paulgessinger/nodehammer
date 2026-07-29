@@ -1,7 +1,7 @@
-#include <nodehammer/viewer/archive_export.hpp>
+#include <viewer/archive_export.hpp>
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
+#include <config/config_loader.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <algorithm>
 #include <deque>
@@ -12,7 +12,7 @@
 #include <vector>
 
 #ifndef __EMSCRIPTEN__
-#include <nodehammer/detail/file_io.hpp>
+#include <detail/file_io.hpp>
 
 #include <cstring>
 #include <exception>

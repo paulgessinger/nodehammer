@@ -7,10 +7,10 @@
 //
 // Exit code is non-zero on any pipeline-stage error; diagnostics go to stderr.
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/export_resolve.hpp>
-#include <nodehammer/ir/render/exporter.hpp>
-#include <nodehammer/scene_build.hpp>
+#include <config/config_loader.hpp>
+#include <export_resolve.hpp>
+#include <ir/render/exporter.hpp>
+#include <scene_build.hpp>
 
 #include <filesystem>
 #include <iostream>

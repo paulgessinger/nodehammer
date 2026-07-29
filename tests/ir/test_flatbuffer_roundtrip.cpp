@@ -1,10 +1,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/ir/fb/semantic/importer.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/fb/semantic/importer.hpp>
+#include <ir/semantic.hpp>
+#include <ir/semantic/importer.hpp>
 
 #include <chrono>
 #include <cmath>

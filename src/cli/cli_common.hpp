@@ -1,11 +1,11 @@
 #pragma once
 
 #include <CLI/CLI.hpp>
-#include <nodehammer/detail/markup.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
+#include <detail/markup.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/semantic/importer.hpp>
 
-#include <nodehammer/ir/diagnostics.hpp>
+#include <ir/diagnostics.hpp>
 
 #include <print>
 #include <string>

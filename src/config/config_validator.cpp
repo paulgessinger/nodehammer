@@ -1,5 +1,5 @@
-#include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
+#include <config/config_validator.hpp>
+#include <ir/diagnostic_codes.hpp>
 
 #include <format>
 #include <unordered_set>

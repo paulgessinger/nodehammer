@@ -1,10 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <config/config_ast.hpp>
+#include <ir/diagnostics.hpp>
+#include <ir/semantic.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 

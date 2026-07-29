@@ -1,4 +1,4 @@
-#include <nodehammer/ir/fb/render/flatbuffer.hpp>
+#include <ir/fb/render/flatbuffer.hpp>
 
 #include <flatbuffers/flatbuffers.h>
 

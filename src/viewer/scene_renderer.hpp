@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/viewer/config.hpp>
+#include <viewer/config.hpp>
 
 #include <glm/glm.hpp>
 #include <memory>

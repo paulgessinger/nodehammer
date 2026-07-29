@@ -1,8 +1,8 @@
 #include "bench_runner.hpp"
 
-#include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/camera.hpp>
+#include <viewer/config.hpp>
+#include <viewer/render_quality.hpp>
 
 #include <algorithm>
 #include <cmath>

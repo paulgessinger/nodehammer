@@ -1,10 +1,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/provenance.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/provenance.hpp>
+#include <ir/semantic.hpp>
+#include <ir/semantic/importer.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
 
 #include <unordered_set>
 

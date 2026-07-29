@@ -22,12 +22,12 @@
 // so re-aiming the wedge cut (same scene, new angle) doesn't re-deserialize:
 // the caller passes the bytes only when the epoch changes.
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/ir/fb/render/flatbuffer.hpp>
-#include <nodehammer/ir/fb/semantic/importer.hpp>
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <config/config_loader.hpp>
+#include <ir/fb/render/flatbuffer.hpp>
+#include <ir/fb/semantic/importer.hpp>
+#include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <emscripten/emscripten.h>
 

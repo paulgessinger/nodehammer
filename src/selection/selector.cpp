@@ -1,6 +1,6 @@
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/selection/predicate.hpp>
-#include <nodehammer/selection/selector.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <selection/predicate.hpp>
+#include <selection/selector.hpp>
 
 #include <glm/gtc/matrix_inverse.hpp>
 

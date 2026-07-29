@@ -1,11 +1,11 @@
 #include "scene_renderer.hpp"
 
-#include <nodehammer/viewer/backend_caps.hpp>
-#include <nodehammer/viewer/camera.hpp>
+#include <viewer/backend_caps.hpp>
+#include <viewer/camera.hpp>
 
 #include <ankerl/unordered_dense.h>
 #include <glm/gtc/type_ptr.hpp>
-#include <nodehammer/ir/render.hpp>
+#include <ir/render.hpp>
 #include <sokol_gfx.h>
 
 #include "ibl.hpp"

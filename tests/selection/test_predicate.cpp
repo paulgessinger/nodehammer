@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/selection/predicate.hpp>
+#include <config/config_ast.hpp>
+#include <selection/predicate.hpp>
 
 #include <map>
 

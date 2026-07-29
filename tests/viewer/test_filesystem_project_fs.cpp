@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/filesystem_project_fs.hpp>
 
 #include <algorithm>
 #include <cstddef>

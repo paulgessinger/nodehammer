@@ -1,6 +1,6 @@
 #include "build_controller.hpp"
 
-#include <nodehammer/ir/diagnostics.hpp>
+#include <ir/diagnostics.hpp>
 
 #include <chrono>
 #include <cstdio>

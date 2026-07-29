@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/viewer/byte_buffer.hpp>
+#include <viewer/byte_buffer.hpp>
 
 #include <cstddef>
 #include <cstring>

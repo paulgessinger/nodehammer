@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/scene_build.hpp>
+#include <scene_build.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 

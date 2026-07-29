@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/dynamic_render_scale.hpp>
+#include <viewer/dynamic_render_scale.hpp>
 
 #include <algorithm>
 #include <cmath>

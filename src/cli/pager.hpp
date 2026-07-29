@@ -1,7 +1,7 @@
 #pragma once
 
-#include "nodehammer/detail/markup.hpp"
 #include <cstdio>
+#include <detail/markup.hpp>
 
 namespace nodehammer::cli {
 

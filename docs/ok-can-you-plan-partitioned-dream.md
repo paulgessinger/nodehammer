@@ -96,7 +96,7 @@ distinct modes.
 ## Concrete substrate
 
 Build the working-set backend by **generalizing the existing `ArchiveProjectFs`**
-(`include/nodehammer/viewer/archive_project_fs.{hpp,cpp}`), which already wraps
+(`src/viewer/archive_project_fs.{hpp,cpp}`), which already wraps
 `ZipWorkingSet`, is cross-platform, and supports unbound mode + `serialize()` +
 drops. Add:
 - **Provenance** (`Empty | Local(name) | Remote(url)`) as a member + accessor.
@@ -227,10 +227,10 @@ durable, versioned, CORS-enabled runtime host; additive, out of scope now.
 
 ## Files touched (representative)
 
-- `include/nodehammer/viewer/archive_project_fs.hpp` + `src/viewer/archive_project_fs.cpp` — provenance + basename-fallback resolve policy.
+- `src/viewer/archive_project_fs.hpp` + `src/viewer/archive_project_fs.cpp` — provenance + basename-fallback resolve policy.
 - `src/viewer/bag_project_fs.{hpp,cpp}` — retire from web closure.
 - `src/viewer/platform_web.cpp` — IDB EM_JS bridge, `.zip` open input, `makeEmptyBag`, ingestion routing, steer writeback.
-- `include/nodehammer/viewer/platform.hpp` + native platform TUs — `*PersistentBlob`, web `openArchivePicker`.
+- `src/viewer/platform.hpp` + native platform TUs — `*PersistentBlob`, web `openArchivePicker`.
 - `src/web/viewer_main.cpp` — sidecar startup branch.
 - `src/viewer/app.cpp` / `app.hpp` — `openArchiveFromBytes`, provenance/posture, IDB persist loop, fork-to-edit, publish.
 - `src/viewer/app_state.{hpp,cpp}` — extended steer serialization.

@@ -1,6 +1,6 @@
 #include "composite_pass.hpp"
 
-#include <nodehammer/viewer/backend_caps.hpp>
+#include <viewer/backend_caps.hpp>
 
 #include "ao_pass.hpp"
 #include "ao_render_target.hpp"

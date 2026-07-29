@@ -5,9 +5,11 @@ bindings (`src/python/bindings.cpp`), to answer "what *is* the public API?"
 
 ## 1. Why this needs deciding at all
 
-`include/nodehammer/**` is 69 headers with no public/internal distinction.
-Everything is reachable, so every binding, every vendored slice, and every
-future consumer silently pins whatever it touches. The spike hit this within
+When this was written, `include/nodehammer/**` was 69 headers with no
+public/internal distinction. Everything is reachable, so every binding, every
+vendored slice, and every future consumer silently pins whatever it touches.
+(Since resolved: those 69 headers moved next to their sources under `src/`, and
+`include/` is now public-only — issue #41 step 4.) The spike hit this within
 minutes: `DiagnosticList` has no `begin()`, so the binding uses `items()`,
 which returns `const std::vector<Diagnostic>&` — the Python API is now coupled
 to the diagnostics backing store being a `vector`.

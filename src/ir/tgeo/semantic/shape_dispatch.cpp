@@ -1,5 +1,5 @@
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/tgeo/semantic/shape_dispatch.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/tgeo/semantic/shape_dispatch.hpp>
 
 #include <TGeoBBox.h>
 #include <TGeoBoolNode.h>

@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/project_manifest.hpp>
+#include <viewer/project_manifest.hpp>
 
 #include <toml++/toml.hpp>
 

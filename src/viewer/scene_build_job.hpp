@@ -1,7 +1,7 @@
 #pragma once
 
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
+#include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
 
 #include <cstdint>
 #include <memory>

@@ -1,6 +1,6 @@
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <tessellation/wedge_cut.hpp>
 
-#include <nodehammer/detail/overloaded.hpp>
+#include <detail/overloaded.hpp>
 
 #include <ankerl/unordered_dense.h>
 #include <glm/glm.hpp>

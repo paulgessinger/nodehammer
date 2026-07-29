@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/render_quality.hpp>
 
 #include <sokol_gfx.h>
 

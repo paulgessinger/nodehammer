@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/png_export.hpp>
+#include <viewer/png_export.hpp>
 
 #include <stb_image_write.h>
 

@@ -2,12 +2,12 @@
 #include "pager.hpp"
 
 #include <CLI/CLI.hpp>
+#include <detail/markup.hpp>
+#include <detail/overloaded.hpp>
+#include <ir/semantic.hpp>
 #include <map>
-#include <nodehammer/detail/markup.hpp>
-#include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/selection/predicate.hpp>
 #include <print>
+#include <selection/predicate.hpp>
 #include <set>
 #include <string>
 

@@ -1,4 +1,4 @@
-#include <nodehammer/config/color_parse.hpp>
+#include <config/color_parse.hpp>
 
 #include <cmath>
 #include <cstddef>

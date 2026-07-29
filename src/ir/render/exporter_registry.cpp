@@ -1,6 +1,6 @@
-#include <nodehammer/ir/gltf/render/exporter.hpp>
-#include <nodehammer/ir/obj/render/exporter.hpp>
-#include <nodehammer/ir/render/exporter.hpp>
+#include <ir/gltf/render/exporter.hpp>
+#include <ir/obj/render/exporter.hpp>
+#include <ir/render/exporter.hpp>
 
 #include <algorithm>
 #include <cctype>

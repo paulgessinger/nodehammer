@@ -1,7 +1,7 @@
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/json/semantic/importer.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/json/semantic/importer.hpp>
+#include <ir/semantic_json.hpp>
 
 #include <nlohmann/json.hpp>
 

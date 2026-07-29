@@ -1,4 +1,4 @@
-#include <nodehammer/ir/semantic_json.hpp>
+#include <ir/semantic_json.hpp>
 
 #include <numbers>
 

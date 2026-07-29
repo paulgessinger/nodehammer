@@ -1,12 +1,12 @@
-#include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/selection/predicate.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
-#include <nodehammer/tessellation/tessellation_job.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <detail/overloaded.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <selection/predicate.hpp>
+#include <tessellation/primitive_tessellator.hpp>
+#include <tessellation/tessellation_job.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
-#include <nodehammer/tessellation/boolean_tessellator.hpp>
+#include <tessellation/boolean_tessellator.hpp>
 
 #include <glm/gtc/matrix_inverse.hpp>
 

@@ -1,9 +1,9 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
-#include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/config/config_writer.hpp>
-#include <nodehammer/lua/lua_config.hpp>
+#include <config/config_validator.hpp>
+#include <config/config_writer.hpp>
+#include <lua/lua_config.hpp>
 
 #include <filesystem>
 #include <fstream>

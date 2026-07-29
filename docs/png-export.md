@@ -47,7 +47,7 @@ freed with the `sg_image`.
 
 ### Where it lives
 
-- `include/nodehammer/viewer/png_export.hpp` — `PngExportSettings`
+- `src/viewer/png_export.hpp` — `PngExportSettings`
   (`out_width`, `out_height`, `supersample`) + `downscaleBoxRgba8` /
   `encodePngRgba8` helpers.
 - `src/viewer/png_export.cpp` — downscale + encode (no GPU).
@@ -63,7 +63,7 @@ freed with the `sg_image`.
   backend, selected in CMake by the `SOKOL_<backend>` being compiled.
 - `src/viewer/app.cpp` — export state machine + render integration.
 - `src/viewer/ui/{view_panel,menu_bar,ui_context}.*` — UI + action wiring.
-- `src/viewer/platform*.{cpp,mm}` + `include/nodehammer/viewer/platform.hpp` —
+- `src/viewer/platform*.{cpp,mm}` + `src/viewer/platform.hpp` —
   `saveExportedImage` (native file write / web download).
 - `src/cli/cmd_viewer.cpp` — headless `--screenshot` CLI mode.
 

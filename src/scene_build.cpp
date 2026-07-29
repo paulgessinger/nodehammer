@@ -1,13 +1,13 @@
-#include <nodehammer/scene_build.hpp>
+#include <scene_build.hpp>
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
-#include <nodehammer/selection/selector.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/semantic/importer.hpp>
+#include <selection/selector.hpp>
+#include <tessellation/build_pipeline.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <limits>
 #include <memory>

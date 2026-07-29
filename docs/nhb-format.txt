@@ -36,7 +36,7 @@ Two variants exist, distinguished by extension:
 Compression is decided purely by the ".zst" suffix (case-insensitive). For
 .nhb.zst the whole buffer is a single standard zstd frame; the frame stores its
 uncompressed content size, which the reader uses to size the output buffer.
-See include/nodehammer/detail/zstd_io.hpp.
+See src/detail/zstd_io.hpp.
 
 Within the (decompressed) FlatBuffers buffer:
 

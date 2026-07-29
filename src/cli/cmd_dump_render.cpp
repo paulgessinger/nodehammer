@@ -1,15 +1,15 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
+#include <config/config_ast.hpp>
+#include <config/config_loader.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/render_json.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
 #include <nlohmann/json.hpp>
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/render_json.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
 #include <print>
 #include <string>
+#include <tessellation/tessellation_pass.hpp>
 
 void registerCmdDumpRender(CLI::App &app) {
     auto *sub = app.add_subcommand("dump-render", "Dump the render IR of a geometry as JSON");

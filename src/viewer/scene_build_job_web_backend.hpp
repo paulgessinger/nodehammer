@@ -2,8 +2,8 @@
 
 #include "scene_build_job.hpp"
 
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <scene_build.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <cstddef>
 #include <cstdint>

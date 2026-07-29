@@ -1,6 +1,6 @@
 #include "menu_bar.hpp"
 
-#include <nodehammer/viewer/platform.hpp>
+#include <viewer/platform.hpp>
 
 #include <imgui.h>
 

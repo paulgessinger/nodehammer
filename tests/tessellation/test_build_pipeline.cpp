@@ -12,11 +12,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <algorithm>
 #include <cstdint>

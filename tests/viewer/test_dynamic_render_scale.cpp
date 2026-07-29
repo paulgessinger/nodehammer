@@ -6,7 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
-#include <nodehammer/viewer/dynamic_render_scale.hpp>
+#include <viewer/dynamic_render_scale.hpp>
 
 using namespace nodehammer::viewer;
 using Catch::Matchers::WithinAbs;

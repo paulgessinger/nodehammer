@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
+#include <ir/diagnostic_codes.hpp>
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

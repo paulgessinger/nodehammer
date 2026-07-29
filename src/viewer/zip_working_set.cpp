@@ -1,6 +1,6 @@
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <viewer/zip_working_set.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
+#include <detail/file_io.hpp>
 
 #include <miniz.h>
 

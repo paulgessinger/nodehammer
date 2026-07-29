@@ -18,9 +18,9 @@
 #pragma GCC diagnostic pop
 #endif
 
-#include <nodehammer/ir/gltf/render/exporter.hpp>
+#include <ir/gltf/render/exporter.hpp>
 
-#include <nodehammer/ir/diagnostic_codes.hpp>
+#include <ir/diagnostic_codes.hpp>
 #include <set>
 
 #include <glm/glm.hpp>
