@@ -21,6 +21,7 @@
 #include <memory>
 #include <optional>
 #include <print>
+#include <span>
 #include <string>
 
 namespace nodehammer::viewer::platform {

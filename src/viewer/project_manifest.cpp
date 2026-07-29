@@ -3,6 +3,7 @@
 #include <toml++/toml.hpp>
 
 #include <exception>
+#include <span>
 #include <string_view>
 
 namespace nodehammer::viewer {

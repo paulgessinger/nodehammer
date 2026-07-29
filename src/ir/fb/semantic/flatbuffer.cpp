@@ -11,6 +11,7 @@
 #include <format>
 #include <limits>
 #include <map>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>

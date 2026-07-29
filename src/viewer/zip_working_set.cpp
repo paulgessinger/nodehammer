@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>

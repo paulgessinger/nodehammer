@@ -2,6 +2,7 @@
 
 #include <nodehammer/detail/file_io.hpp>
 
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>

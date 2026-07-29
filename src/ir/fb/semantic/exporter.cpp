@@ -5,6 +5,7 @@
 #include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
 
 #include <format>
+#include <span>
 
 namespace nodehammer {
 

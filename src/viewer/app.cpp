@@ -61,6 +61,7 @@
 #include <memory>
 #include <optional>
 #include <print>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
