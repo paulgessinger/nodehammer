@@ -42,10 +42,10 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
-# The Lua config front-end (nodehammer_lua) is native-only; its test links it.
+# The Lua config front-end is compiled into nodehammer_lib, but only natively;
+# its test follows the same gate.
 if(NOT EMSCRIPTEN)
     target_sources(nodehammer_tests PRIVATE config/test_lua_config.cpp)
-    target_link_libraries(nodehammer_tests PRIVATE nodehammer_lua)
 endif()
 
 # ZipWorkingSet is compiled into nodehammer_lib whenever the viewer is on

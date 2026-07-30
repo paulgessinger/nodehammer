@@ -47,9 +47,9 @@ class Nodehammer(ConanFile):
         # Lua scripting config front-end (the `config-lua` CLI command). Lua is
         # a small C interpreter; sol2 is its header-only C++ binding (and pulls
         # lua transitively, but we pin lua explicitly for parity with the CMake
-        # find_package). Native-only: the front-end lives in nodehammer_lua,
-        # linked solely by the CLI + tests, never by the wasm closure — so skip
-        # the deps entirely under Emscripten and keep them out of the .wasm.
+        # find_package). Native-only: the front-end is a build-gated source in
+        # nodehammer_lib, never compiled into the wasm closure — so skip the
+        # deps entirely under Emscripten and keep them out of the .wasm.
         if self.settings.os != "Emscripten":
             self.requires("lua/5.4.6")
             self.requires("sol2/3.5.0")

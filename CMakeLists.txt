@@ -70,9 +70,14 @@ option(NODEHAMMER_BUILD_TESTS   "Build the unit-test binary"                    
 option(NODEHAMMER_PROFILING     "Preserve symbols and frame pointers for sampling profilers" OFF)
 option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at build time (consumed in cmake/Sokol.cmake)" ON)
 option(NODEHAMMER_PIC_CHECK     "Link a probe shared module against the static library to prove every object is position-independent (consumed in cmake/PicProbe.cmake)" OFF)
+option(NODEHAMMER_BUILD_SHARED  "Also build and install the shared library + public headers + CMake package config" OFF)
 
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
+
+# Included early: the core-library helper below bakes CMAKE_INSTALL_INCLUDEDIR
+# into the shared target's INSTALL_INTERFACE include path.
+include(GNUInstallDirs)
 
 # ── FlatBuffers code generation ──────────────────────────────────────────────
 set(NH_FBS_SCHEMAS
@@ -123,13 +128,24 @@ if(NODEHAMMER_PROFILING)
     endif()
 endif()
 
-# ── Core library ───────────────────────────────────────────────────────────────
+# ── Core library configuration ────────────────────────────────────────────────
 # Pipeline core: IR + config + selection + tessellation + importers/exporters
 # + scene_build. Deliberately free of CLI11 and the cmd_*.cpp dispatchers so
 # the bench harness, the test binary, and the future browser entry point can
 # link against it without pulling subcommand registration code (and CLI11's
 # header-only template forest) into their closure.
-add_library(nodehammer_lib STATIC
+#
+# Accumulated into variables rather than written straight onto a target because
+# the core is built *twice* in a packaging build: once as the static archive
+# every in-tree target links, and once as the installed shared library. The two
+# cannot share objects — __declspec(dllexport) is codegen-affecting, so DLL
+# objects are not valid inside a static library, which rules out the OBJECT
+# library trick on Windows — so the configuration is what gets shared instead,
+# and nh_add_core_library() below is the only place either target is described.
+# Anything appended here lands in both variants by construction; that symmetry
+# is the point, since a source present in one and absent from the other would
+# surface as a link error only in the packaging job.
+set(NH_CORE_SOURCES
     src/ir/semantic.cpp
     src/ir/semantic_json.cpp
     src/ir/render_json.cpp
@@ -185,18 +201,7 @@ configure_file(
     @ONLY
 )
 
-# `include/` holds the public headers; every internal header lives next to its
-# source under `src/` and is included as <ir/semantic.hpp>, <config/...>, etc.
-# The split is physical, so nothing internal *can* leak into an install: the
-# BUILD_INTERFACE genex keeps src/ on the include path for every in-tree target
-# (cli, lua, viewer, tests) while dropping it from the exported interface.
-target_include_directories(nodehammer_lib PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_BINARY_DIR}/include
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
-)
-
-target_link_libraries(nodehammer_lib PUBLIC
+set(NH_CORE_DEPS
     tomlplusplus::tomlplusplus
     nlohmann_json::nlohmann_json
     glm::glm
@@ -206,17 +211,220 @@ target_link_libraries(nodehammer_lib PUBLIC
     unordered_dense::unordered_dense
 )
 
-add_dependencies(nodehammer_lib flatbuffers_generate)
-target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_FBS_GENERATED_DIR})
+set(NH_CORE_DEFINES "")
+
+# ── Core library: optional pieces ─────────────────────────────────────────────
+# Everything below appends to the three lists above, so it reaches both the
+# static and the shared variant. find_package() calls stay here rather than
+# inside the helper: they are configuration, not target description, and must
+# run exactly once.
+
+# Lua config front-end. Compiled into the core rather than a library of its own.
+#
+# It used to be a separate nodehammer_lua target, which read as the tidy way to
+# keep the interpreter out of the wasm closure — but the constraint was only
+# ever "no lua under Emscripten", and a gated source satisfies that identically
+# (docs/config-scripting-lua.md, and #41 §6). The separate target actively cost
+# us three things: `Config::read` dispatching a `.lua` path needs the engine
+# *inside* the shared library, which a target that itself links the core cannot
+# provide without linking the core into itself; NH_WITH_LUA sat on the CLI where
+# the library could not see it, though the library is what has to answer
+# `Config::formats()`; and cmake/PicProbe.cmake needed a special case to avoid
+# pulling the core archive twice under --whole-archive.
+#
+# The dependency direction is unchanged: lua_config.hpp includes
+# config/config_loader.hpp, never the reverse, so this is a merge downhill.
+# `-Wconversion`/`-Wsign-conversion` are silenced by a scoped #pragma inside
+# lua_config.cpp (sol2's proxy conversions are not clean under them), kept in
+# the TU so it cannot leak to neighbouring sources now that they share a target.
+if(NOT EMSCRIPTEN)
+    list(APPEND NH_CORE_SOURCES src/lua/lua_config.cpp)
+    list(APPEND NH_CORE_DEPS lua::lua sol2::sol2)
+    list(APPEND NH_CORE_DEFINES NH_WITH_LUA=1)
+endif()
+
+if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
+    find_package(ROOT REQUIRED COMPONENTS Geom)
+    list(APPEND NH_CORE_SOURCES src/ir/tgeo/semantic/shape_dispatch.cpp)
+    list(APPEND NH_CORE_DEPS ROOT::Geom)
+    list(APPEND NH_CORE_DEFINES NH_WITH_TGEO=1)
+endif()
+
+if(NODEHAMMER_WITH_TGEO)
+    list(APPEND NH_CORE_SOURCES src/ir/tgeo/semantic/importer.cpp)
+endif()
+
+if(NODEHAMMER_WITH_DD4HEP)
+    find_package(DD4hep REQUIRED)
+    list(APPEND NH_CORE_SOURCES src/ir/dd4hep/semantic/importer.cpp)
+    list(APPEND NH_CORE_DEPS DD4hep::DDCore)
+    list(APPEND NH_CORE_DEFINES NH_WITH_DD4HEP=1)
+endif()
+
+if(NODEHAMMER_WITH_GEANT4)
+    find_package(Geant4 REQUIRED)
+    list(APPEND NH_CORE_DEPS ${Geant4_LIBRARIES})
+    list(APPEND NH_CORE_DEFINES NH_WITH_GEANT4=1)
+endif()
+
+list(APPEND NH_CORE_SOURCES src/tessellation/boolean_tessellator.cpp)
+list(APPEND NH_CORE_DEPS manifold::manifold)
+
+# FilesystemProjectFs mounts a real on-disk directory; the web sandbox
+# has no equivalent (no recursive_directory_iterator, no readable host
+# fs without NODERAWFS), so the source is native-only. It lives in the
+# core alongside bag/build_session because future `buildSceneFromPaths`
+# callers will want to mount the geometry's parent directory in CLI mode.
+#
+# NativeBagProjectFs (strategy doc step 3) wraps FilesystemProjectFs
+# pointed at a process-owned tmp dir. Native-only for the same reason
+# the underlying FS backend is.
+#
+# The in-memory BagProjectFs stays in the core for both platforms: the web
+# empty project is now an ArchiveProjectFs working set (§0 reshape / R1) so
+# the web *runtime* no longer references BagProjectFs (static-lib dead-strip
+# keeps it out of the wasm viewer), but the native CLI (cmd_viewer) and the
+# unit tests on both platforms still use it.
+if(NOT EMSCRIPTEN)
+    list(APPEND NH_CORE_SOURCES
+        src/viewer/filesystem_project_fs.cpp
+        src/viewer/native_bag_project_fs.cpp
+    )
+endif()
+
+# WatchedFilesystemProjectFs (strategy doc step 4) decorates FilesystemProjectFs
+# and uses the wtr.watcher Conan dep to bump generation() on disk changes.
+# Viewer-gated like platform_folders (the dep is only required when
+# `-o '&:viewer=True'`), native-only like the FS backend it wraps. The Apple
+# CoreServices/CoreFoundation frameworks the recipe propagates have to reach
+# the final executables, which they do via the static variant's PUBLIC link.
+if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
+    list(APPEND NH_CORE_SOURCES src/viewer/watched_filesystem_project_fs.cpp)
+    find_package(watcher CONFIG REQUIRED)
+    list(APPEND NH_CORE_DEPS watcher::watcher)
+endif()
+
+# ZipWorkingSet (strategy doc step 5) + ArchiveProjectFs (step 6) + archive
+# export (step 7): ZIP-backed read/override/serialize substrate and the archive
+# backend. Archive mode is cross-platform — only the POSIX save internals are
+# native-only (guarded inside the .cpp) — so these are viewer-gated but *not*
+# native-only; miniz builds for Emscripten too, and the web bag (step 8) reuses
+# the same substrate.
+if(NODEHAMMER_WITH_VIEWER)
+    list(APPEND NH_CORE_SOURCES
+        src/viewer/zip_working_set.cpp
+        src/viewer/archive_project_fs.cpp
+        src/viewer/archive_export.cpp
+    )
+    find_package(miniz CONFIG REQUIRED)
+    list(APPEND NH_CORE_DEPS miniz::miniz)
+    list(APPEND NH_CORE_DEFINES NH_WITH_VIEWER=1)
+endif()
+
+# ── Core library targets ──────────────────────────────────────────────────────
+# Describe one core-library variant from the lists above.
+#
+# `depScope` is the whole difference between the two, and it is not cosmetic.
+# The static archive is never installed, so its dependencies are PUBLIC: in-tree
+# targets include internal headers that include toml++, glm and nlohmann
+# directly, and they reach them through this link. The shared library is the one
+# that ships, and by §10 it absorbs its static dependencies whole — so they are
+# PRIVATE *and* wrapped in $<BUILD_INTERFACE:>, which drops them from the
+# generated export set. That is what spares an external consumer a
+# find_dependency() for zstd/flatbuffers/manifold it has no way to satisfy and
+# no reason to know about.
+function(nh_add_core_library target type depScope)
+    add_library(${target} ${type} ${NH_CORE_SOURCES})
+
+    # `include/` holds the public headers; every internal header lives next to
+    # its source under `src/` and is included as <ir/semantic.hpp>,
+    # <config/...>, etc. The split is physical, so nothing internal *can* leak
+    # into an install: the BUILD_INTERFACE genex keeps src/ on the include path
+    # for every in-tree target (cli, viewer, tests) while dropping it from the
+    # exported interface, which carries only the installed include dir.
+    target_include_directories(${target} PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    )
+
+    if(depScope STREQUAL "PRIVATE")
+        foreach(dep IN LISTS NH_CORE_DEPS)
+            target_link_libraries(${target} PRIVATE "$<BUILD_INTERFACE:${dep}>")
+        endforeach()
+    else()
+        target_link_libraries(${target} ${depScope} ${NH_CORE_DEPS})
+    endif()
+
+    target_compile_definitions(${target} PUBLIC ${NH_CORE_DEFINES})
+
+    add_dependencies(${target} flatbuffers_generate)
+    target_include_directories(${target} SYSTEM PRIVATE ${NH_FBS_GENERATED_DIR})
+
+    nodehammer_set_compiler_options(${target})
+    nodehammer_set_visibility(${target})
+endfunction()
+
+nh_add_core_library(nodehammer_lib STATIC PUBLIC)
 
 # NH_STATIC collapses NH_API to nothing (include/nodehammer/api.hpp). PUBLIC so
-# every in-tree consumer — CLI, lua, viewer, tests — inherits it and no target
-# has to remember; without it they would see the dllimport spelling on Windows
-# and fail to link against the archive.
+# every in-tree consumer — CLI, viewer, tests — inherits it and no target has to
+# remember; without it they would see the dllimport spelling on Windows and fail
+# to link against the archive.
 target_compile_definitions(nodehammer_lib PUBLIC NH_STATIC)
 
-nodehammer_set_compiler_options(nodehammer_lib)
-nodehammer_set_visibility(nodehammer_lib)
+# The generated FlatBuffers headers are PRIVATE to the core in the helper above,
+# but in-tree targets that include <ir/fb/...> transitively need them too, and
+# only the static variant has in-tree consumers.
+target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_FBS_GENERATED_DIR})
+
+if(NODEHAMMER_BUILD_SHARED)
+    if(EMSCRIPTEN)
+        message(FATAL_ERROR
+            "NODEHAMMER_BUILD_SHARED is not meaningful under Emscripten: there "
+            "is no shared object to build, and the wasm targets are statically "
+            "linked executables whose exports are named by the link flags.")
+    endif()
+
+    nh_add_core_library(nodehammer_shared SHARED PRIVATE)
+
+    # NH_EXPORTS selects the dllexport spelling of NH_API while compiling the
+    # library itself; PRIVATE, since a consumer must see dllimport instead.
+    target_compile_definitions(nodehammer_shared PRIVATE NH_EXPORTS)
+
+    # The exported name is `nodehammer`; the target cannot be, because the CLI
+    # executable already owns that target name.
+    set_target_properties(nodehammer_shared PROPERTIES
+        OUTPUT_NAME nodehammer
+        EXPORT_NAME nodehammer
+        VERSION ${PROJECT_VERSION}
+        SOVERSION ${PROJECT_VERSION_MAJOR}
+    )
+
+    # Hidden visibility only governs the objects *we* compile. The static
+    # dependencies absorbed into this .so were compiled without it, so their
+    # symbols are default-visible and would land in the dynamic export table
+    # wholesale — zstd, flatbuffers, manifold and friends, re-exported by
+    # accident. --exclude-libs,ALL forces every symbol arriving from a static
+    # archive to hidden, which is what makes the export table equal the public
+    # API rather than merely contain it.
+    #
+    # --no-undefined then asserts the other half of §10's claim: that a shared
+    # library resolves its private dependencies internally, so an external
+    # consumer needs no find_dependency() for them.
+    #
+    # ELF-only, like cmake/PicProbe.cmake and for the same reason: ld64 has no
+    # equivalent of either flag (only per-archive -hidden-l), so on macOS the
+    # dependencies' symbols do stay visible in the dylib. ci/check_shared_exports.py
+    # is correspondingly Linux-only.
+    if(UNIX AND NOT APPLE)
+        target_link_options(nodehammer_shared PRIVATE
+            "LINKER:--exclude-libs,ALL"
+            "LINKER:--no-undefined"
+        )
+    endif()
+endif()
 
 # ── CLI library ────────────────────────────────────────────────────────────────
 # Subcommand dispatchers + CLI11 glue. Native-only: the wasm viewer ships
@@ -239,107 +447,12 @@ target_link_libraries(nodehammer_cli PUBLIC
 
 nodehammer_set_compiler_options(nodehammer_cli)
 
-# ── Lua config front-end (native-only) ──────────────────────────────────────────
-# The `config-lua` CLI command evaluates a Lua config script into an NHConfig and
-# emits flattened TOML (Option A of docs/config-scripting-lua.md). lua + sol2 are
-# deliberately kept out of nodehammer_lib — and therefore out of the Emscripten
-# closure — so the interpreter lives in this dedicated library, linked only by the
-# CLI and the unit tests. Skipped entirely under Emscripten.
+# The `config-lua` subcommand: evaluates a Lua config script into an NHConfig
+# and emits flattened TOML (Option A of docs/config-scripting-lua.md). The
+# engine itself is in the core; only the dispatcher is CLI-side, and only
+# natively — NH_WITH_LUA comes from the core's PUBLIC defines.
 if(NOT EMSCRIPTEN)
-    add_library(nodehammer_lua STATIC src/lua/lua_config.cpp)
-    target_link_libraries(nodehammer_lua PUBLIC nodehammer_lib lua::lua sol2::sol2)
-    nodehammer_set_compiler_options(nodehammer_lua)
-    # NB: lua_config.cpp silences -Wconversion/-Wsign-conversion in-source via a
-    # scoped #pragma (sol2's proxy conversions are not -Wconversion clean). It is
-    # kept in the TU rather than here so it can't leak to other sources.
-
-    # Compile the subcommand into the native CLI and expose NH_WITH_LUA. The
-    # define is PUBLIC so the executables that compile src/cli/main.cpp (the
-    # headless `nodehammer` and the native viewer) see it and register the
-    # subcommand via #ifdef.
     target_sources(nodehammer_cli PRIVATE src/cli/cmd_config_lua.cpp)
-    target_link_libraries(nodehammer_cli PUBLIC nodehammer_lua)
-    target_compile_definitions(nodehammer_cli PUBLIC NH_WITH_LUA=1)
-endif()
-
-# ── Optional backends ──────────────────────────────────────────────────────────
-if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
-    find_package(ROOT REQUIRED COMPONENTS Geom)
-    target_sources(nodehammer_lib PRIVATE src/ir/tgeo/semantic/shape_dispatch.cpp)
-    target_link_libraries(nodehammer_lib PUBLIC ROOT::Geom)
-    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_TGEO=1)
-endif()
-
-if(NODEHAMMER_WITH_TGEO)
-    target_sources(nodehammer_lib PRIVATE src/ir/tgeo/semantic/importer.cpp)
-endif()
-
-if(NODEHAMMER_WITH_DD4HEP)
-    find_package(DD4hep REQUIRED)
-    target_sources(nodehammer_lib PRIVATE src/ir/dd4hep/semantic/importer.cpp)
-    target_link_libraries(nodehammer_lib PUBLIC DD4hep::DDCore)
-    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_DD4HEP=1)
-endif()
-
-if(NODEHAMMER_WITH_GEANT4)
-    find_package(Geant4 REQUIRED)
-    target_link_libraries(nodehammer_lib PUBLIC ${Geant4_LIBRARIES})
-    target_include_directories(nodehammer_lib PUBLIC ${Geant4_INCLUDE_DIRS})
-    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_GEANT4=1)
-endif()
-
-target_sources(nodehammer_lib PRIVATE src/tessellation/boolean_tessellator.cpp)
-target_link_libraries(nodehammer_lib PUBLIC manifold::manifold)
-
-# FilesystemProjectFs mounts a real on-disk directory; the web sandbox
-# has no equivalent (no recursive_directory_iterator, no readable host
-# fs without NODERAWFS), so the source is native-only. It lives in
-# nodehammer_lib alongside bag/build_session because future
-# `buildSceneFromPaths` callers will want to mount the geometry's
-# parent directory in CLI mode.
-#
-# NativeBagProjectFs (strategy doc step 3) wraps FilesystemProjectFs
-# pointed at a process-owned tmp dir. Native-only for the same reason
-# the underlying FS backend is.
-#
-# The in-memory BagProjectFs stays in nodehammer_lib for both platforms:
-# the web empty project is now an ArchiveProjectFs working set (§0 reshape
-# / R1) so the web *runtime* no longer references BagProjectFs (static-lib
-# dead-strip keeps it out of the wasm viewer), but the native CLI
-# (cmd_viewer) and the unit tests on both platforms still use it.
-if(NOT EMSCRIPTEN)
-    target_sources(nodehammer_lib PRIVATE
-        src/viewer/filesystem_project_fs.cpp
-        src/viewer/native_bag_project_fs.cpp
-    )
-endif()
-
-# WatchedFilesystemProjectFs (strategy doc step 4) decorates FilesystemProjectFs
-# and uses the wtr.watcher Conan dep to bump generation() on disk changes.
-# Viewer-gated like platform_folders (the dep is only required when
-# `-o '&:viewer=True'`), native-only like the FS backend it wraps. PUBLIC link
-# so the Apple CoreServices/CoreFoundation frameworks the recipe propagates
-# reach the final executables.
-if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
-    target_sources(nodehammer_lib PRIVATE
-        src/viewer/watched_filesystem_project_fs.cpp)
-    find_package(watcher CONFIG REQUIRED)
-    target_link_libraries(nodehammer_lib PUBLIC watcher::watcher)
-endif()
-
-# ZipWorkingSet (strategy doc step 5) + ArchiveProjectFs (step 6) + archive
-# export (step 7): ZIP-backed read/override/serialize substrate and the archive
-# backend. Archive mode is cross-platform — only the POSIX save internals are
-# native-only (guarded inside the .cpp) — so these are viewer-gated but *not*
-# native-only; miniz builds for Emscripten too, and the web bag (step 8) reuses
-# the same substrate.
-if(NODEHAMMER_WITH_VIEWER)
-    target_sources(nodehammer_lib PRIVATE
-        src/viewer/zip_working_set.cpp
-        src/viewer/archive_project_fs.cpp
-        src/viewer/archive_export.cpp)
-    find_package(miniz CONFIG REQUIRED)
-    target_link_libraries(nodehammer_lib PUBLIC miniz::miniz)
 endif()
 
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
@@ -353,7 +466,6 @@ if(NODEHAMMER_WITH_VIEWER)
     add_subdirectory(shaders)
     # Defines nh_add_viewer_lib(name sokol_lib).
     add_subdirectory(src/viewer)
-    target_compile_definitions(nodehammer_lib PUBLIC NH_WITH_VIEWER=1)
 
     # Compose one viewer executable. The native build keeps the CLI
     # dispatcher (`nodehammer viewer …` alongside the other subcommands);

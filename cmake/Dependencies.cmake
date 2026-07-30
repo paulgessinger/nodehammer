@@ -191,11 +191,12 @@ if(TARGET flatbuffers)
 endif()
 
 # ── Lua config front-end (lua + sol2) ────────────────────────────────────────
-# Powers the native-only `config-lua` CLI command (nodehammer_lua library).
+# Powers the `config-lua` CLI command and, from step 6 of #41, Config::read's
+# `.lua` branch — a build-gated source in nodehammer_lib either way.
 # Both come from Conan (lua has no clean upstream CMake — it ships a Makefile —
 # so, like imgui/implot below, we resolve via find_package rather than a git
-# FetchContent fallback). Skipped under Emscripten: nothing in the wasm closure
-# links nodehammer_lua, so the interpreter never enters the .wasm.
+# FetchContent fallback). Skipped under Emscripten, where the source is gated
+# out of the core, so the interpreter never enters the .wasm.
 # Targets: lua::lua, sol2::sol2 (sol2 links lua transitively).
 if(NOT EMSCRIPTEN)
     find_package(lua REQUIRED CONFIG)
