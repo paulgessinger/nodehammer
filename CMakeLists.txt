@@ -357,7 +357,20 @@ function(nh_add_core_library target type depScope)
         target_link_libraries(${target} ${depScope} ${NH_CORE_DEPS})
     endif()
 
-    target_compile_definitions(${target} PUBLIC ${NH_CORE_DEFINES})
+    # Same scope split, and for a sharper reason than the deps. In-tree code
+    # gates on NH_WITH_TGEO / NH_WITH_LUA / NH_WITH_VIEWER, so the archive
+    # propagates them. The installed library must not: by §5 no public header
+    # contains an #if, so a consumer has no use for them, and pushing
+    # NH_WITH_LUA=1 into someone else's translation units is a collision
+    # waiting to happen. PRIVATE here is what keeps INTERFACE_COMPILE_DEFINITIONS
+    # empty in the generated export, which is in turn what makes the installed
+    # headers self-describing — the same property §5 is protecting.
+    target_compile_definitions(${target} ${depScope} ${NH_CORE_DEFINES})
+
+    # The one usage requirement that *is* real for a consumer: these headers
+    # need C++23. CMAKE_CXX_STANDARD is a build-tree setting and does not
+    # propagate through an export, so state it on the target.
+    target_compile_features(${target} PUBLIC cxx_std_23)
 
     add_dependencies(${target} flatbuffers_generate)
     target_include_directories(${target} SYSTEM PRIVATE ${NH_FBS_GENERATED_DIR})
@@ -550,7 +563,8 @@ endif()
 include(cmake/PicProbe.cmake)
 
 # ── Install ────────────────────────────────────────────────────────────────────
-include(GNUInstallDirs)
+# (GNUInstallDirs is included near the top — the core-library helper needs
+# CMAKE_INSTALL_INCLUDEDIR for the shared target's INSTALL_INTERFACE.)
 
 # Native: single nodehammer executable. Emscripten + viewer: per-backend
 # wasm bundles named nodehammer-{gles3,wgpu}.{js,wasm}. Emscripten + no
@@ -579,6 +593,59 @@ endif()
 install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
 )
+
+# ── Library install: the shared library, the public headers, a package config ──
+# Gated on NODEHAMMER_BUILD_SHARED, which is what makes the split load-bearing
+# rather than aspirational: the only headers that can reach a consumer are the
+# ones under include/nodehammer, because that is the only directory named here.
+# There is no manifest of public headers to keep in sync with reality and no
+# annotation an internal header could carry by mistake — an internal header is
+# unreachable because it lives somewhere else on disk (#41 §1).
+if(NODEHAMMER_BUILD_SHARED)
+    install(TARGETS nodehammer_shared
+        EXPORT nodehammer-targets
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}   # Windows import library
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}   # Windows DLL
+    )
+
+    # FILES_MATCHING "*.hpp" also excludes version.hpp.in, which would otherwise
+    # install an uninstantiated template next to the header generated from it.
+    install(DIRECTORY include/nodehammer
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        FILES_MATCHING PATTERN "*.hpp"
+    )
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/nodehammer/version.hpp"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/nodehammer"
+    )
+
+    install(EXPORT nodehammer-targets
+        FILE nodehammer-targets.cmake
+        NAMESPACE nodehammer::
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
+    )
+
+    include(CMakePackageConfigHelpers)
+    configure_package_config_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodehammer-config.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config.cmake"
+        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
+    )
+    # SameMinorVersion, not the usual SameMajorVersion: pre-1.0, the major
+    # version conveys nothing, and treating every 0.x as interchangeable would
+    # promise compatibility across exactly the releases where the API is
+    # expected to move. Revisit at 1.0.
+    write_basic_package_version_file(
+        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config-version.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMinorVersion
+    )
+    install(FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config-version.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
+    )
+endif()
 
 # Reads the manifest produced by conanfile.py's generate(), assembles
 # THIRD-PARTY-NOTICES.txt at configure time, and installs it + the staged
