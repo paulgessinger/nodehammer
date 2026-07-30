@@ -201,34 +201,53 @@ configure_file(
     @ONLY
 )
 
+# Dependency scope on the *archive*, which is a different question from scope on
+# the installed shared library (that one is uniformly PRIVATE — see
+# nh_add_core_library). The archive is consumed in-tree through internal headers,
+# so the test is simply: does an internal header include the dependency's headers
+# in a way an out-of-core target sees?
+#
+# Determined by moving the whole list to PRIVATE and rebuilding until it was
+# clean, three iterations — `fatal error` stops at the first bad include, so one
+# pass reports only the first offender per TU and reads as a much shorter list
+# than the truth.
 set(NH_CORE_DEPS
-    tomlplusplus::tomlplusplus
+    # src/config/config_ast.hpp, src/ir/render.hpp — `using ExtrasMap = nlohmann::json`
     nlohmann_json::nlohmann_json
+    # src/detail/glm_json.hpp, src/viewer/camera.hpp
     glm::glm
-    TinyGLTF::TinyGLTF
+    # src/detail/zstd_io.hpp
     zstd::libzstd_static
-    flatbuffers::flatbuffers
+    # src/ir/semantic.hpp, src/ir/render.hpp
     unordered_dense::unordered_dense
+    # src/ir/fb/{semantic,render}/flatbuffer.hpp — flatbuffers::Offset in signatures
+    flatbuffers::flatbuffers
 )
 
-# nlohmann stays PUBLIC here, and #41's "nlohmann can finally go PRIVATE" row is
-# satisfied by a different mechanism than the one that row anticipated.
+# Used only from .cpp files in the core, so nothing outside it needs them.
 #
-# Two reasons the dep-scope flip is not the lever it looks like. First, it would
-# change nothing: TinyGLTF::TinyGLTF lists nlohmann_json::nlohmann_json in its
-# own INTERFACE_LINK_LIBRARIES, so nlohmann reaches every in-tree target through
-# tinygltf whatever the core declares — verified by dropping it from this list
-# and rebuilding, which compiles clean. Second, it would be a misdescription:
-# src/ir/render.hpp says `using ExtrasMap = nlohmann::json;`, so nlohmann really
-# is part of the archive's interface as far as in-tree consumers are concerned,
-# and calling it PRIVATE would be a latent lie that only bites the day tinygltf
-# stops carrying it.
+# This is also what settles #41's "nlohmann can finally go PRIVATE" row, and it
+# settles it the other way. The row assumed nlohmann was over-declared; in fact
+# it is one of the few that is *correctly* PUBLIC, because ExtrasMap puts
+# nlohmann::json in an internal header's interface. What was over-declared was
+# tinygltf — and tinygltf is what made the question hard to answer, since it
+# lists nlohmann_json in its own INTERFACE_LINK_LIBRARIES and so handed nlohmann
+# to every in-tree target regardless of what this file said. With tinygltf
+# PRIVATE that confound is gone: nlohmann's PUBLIC entry is now load-bearing and
+# removing it fails the build, which is the property the row wanted to be able
+# to check.
 #
-# What the row actually wanted — nlohmann absent from the *installed* interface
-# — holds, and is enforced where it belongs: the shared variant takes every
-# dependency PRIVATE behind $<BUILD_INTERFACE:>, so the generated export has no
-# INTERFACE_LINK_LIBRARIES at all, and ci/shared_consumer builds with nothing
-# but nodehammer's own prefix on CMAKE_PREFIX_PATH.
+# The installed side was never affected either way: the shared variant takes
+# every dependency PRIVATE behind $<BUILD_INTERFACE:>, so the generated export
+# has no INTERFACE_LINK_LIBRARIES at all and ci/shared_consumer builds with
+# nothing but nodehammer's own prefix on CMAKE_PREFIX_PATH.
+set(NH_CORE_PRIVATE_DEPS
+    tomlplusplus::tomlplusplus
+    # tests/export/test_gltf_exporter.cpp includes <tiny_gltf.h> to read back what
+    # the exporter wrote, and declares the dependency itself — see tests/.
+    TinyGLTF::TinyGLTF
+)
+
 set(NH_CORE_DEFINES "")
 
 # Extra include directories for dependencies that ship variables instead of
@@ -262,7 +281,9 @@ set(NH_CORE_INCLUDE_DIRS "")
 # the TU so it cannot leak to neighbouring sources now that they share a target.
 if(NOT EMSCRIPTEN)
     list(APPEND NH_CORE_SOURCES src/lua/lua_config.cpp)
-    list(APPEND NH_CORE_DEPS lua::lua sol2::sol2)
+    # lua_config.hpp exposes only config::ConfigResult, so the interpreter and
+    # its binding stay inside the core's implementation.
+    list(APPEND NH_CORE_PRIVATE_DEPS lua::lua sol2::sol2)
     list(APPEND NH_CORE_DEFINES NH_WITH_LUA=1)
 endif()
 
@@ -328,6 +349,8 @@ endif()
 if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
     list(APPEND NH_CORE_SOURCES src/viewer/watched_filesystem_project_fs.cpp)
     find_package(watcher CONFIG REQUIRED)
+    # PUBLIC unlike miniz: watched_filesystem_project_fs.hpp and viewer/app.hpp
+    # both name wtr types, and the viewer libs include them.
     list(APPEND NH_CORE_DEPS watcher::watcher)
 endif()
 
@@ -344,7 +367,8 @@ if(NODEHAMMER_WITH_VIEWER)
         src/viewer/archive_export.cpp
     )
     find_package(miniz CONFIG REQUIRED)
-    list(APPEND NH_CORE_DEPS miniz::miniz)
+    # No header mentions miniz; ZipWorkingSet keeps it behind its .cpp.
+    list(APPEND NH_CORE_PRIVATE_DEPS miniz::miniz)
     list(APPEND NH_CORE_DEFINES NH_WITH_VIEWER=1)
 endif()
 
@@ -380,11 +404,12 @@ function(nh_add_core_library target type depScope)
     endif()
 
     if(depScope STREQUAL "PRIVATE")
-        foreach(dep IN LISTS NH_CORE_DEPS)
+        foreach(dep IN LISTS NH_CORE_DEPS NH_CORE_PRIVATE_DEPS)
             target_link_libraries(${target} PRIVATE "$<BUILD_INTERFACE:${dep}>")
         endforeach()
     else()
         target_link_libraries(${target} ${depScope} ${NH_CORE_DEPS})
+        target_link_libraries(${target} PRIVATE ${NH_CORE_PRIVATE_DEPS})
     endif()
 
     # Same scope split, and for a sharper reason than the deps. In-tree code

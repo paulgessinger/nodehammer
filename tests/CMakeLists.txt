@@ -50,11 +50,15 @@ endif()
 
 # ZipWorkingSet is compiled into nodehammer_lib whenever the viewer is on
 # (native and web), so gate its test on the viewer only.
+#
+# miniz is PRIVATE to the core — no internal header names it — but these tests
+# open the produced archives with miniz directly, so they declare it themselves.
 if(NODEHAMMER_WITH_VIEWER)
     target_sources(nodehammer_tests PRIVATE
         viewer/test_zip_working_set.cpp
         viewer/test_project_manifest.cpp
     )
+    target_link_libraries(nodehammer_tests PRIVATE miniz::miniz)
 endif()
 
 # WatchedFilesystemProjectFs (and its wtr.watcher dep) is native-only. The
@@ -77,6 +81,11 @@ target_compile_definitions(nodehammer_tests PRIVATE
 target_link_libraries(nodehammer_tests PRIVATE
     nodehammer_lib
     Catch2::Catch2WithMain
+    # export/test_gltf_exporter.cpp includes <tiny_gltf.h> directly, to read back
+    # what the exporter produced. tinygltf is PRIVATE to the core (nothing in an
+    # internal header names it), so the test declares it rather than inheriting
+    # it by accident.
+    TinyGLTF::TinyGLTF
 )
 
 if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
