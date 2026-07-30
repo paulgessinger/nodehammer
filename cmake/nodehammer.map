@@ -1,0 +1,46 @@
+/*
+ * Linker version script for the shared library (ELF only).
+ *
+ * Hidden visibility gets us most of the way, but not all of it: libstdc++
+ * declares `namespace std _GLIBCXX_VISIBILITY(default)`, which overrides
+ * -fvisibility=hidden for everything in std::. Template members defined
+ * out-of-line in the .tcc headers — std::_Hashtable::_M_insert_unique_node,
+ * std::_Rb_tree::_M_get_insert_unique_pos and friends — are not implicitly
+ * inline either, so -fvisibility-inlines-hidden does not reach them. They are
+ * emitted into our objects as weak symbols with default visibility, and
+ * --exclude-libs,ALL cannot help because they arrive from our own compilation
+ * rather than from a static archive.
+ *
+ * Measured on the first CI run of the shared-build check: 95 exported symbols,
+ * of which 1 was ours and 94 were std:: instantiations of exactly that kind.
+ * This script drops them, so the dynamic table is the public API and nothing
+ * else.
+ *
+ * This is not merely cosmetic. Exported vague-linkage instantiations
+ * participate in symbol interposition, which is the same class of hazard §10
+ * invokes for the Python extension — two extensions in one interpreter, built
+ * against different standard libraries, resolving each other's std:: internals.
+ *
+ * Anonymous (no version node name) on purpose: a named node would decorate
+ * every symbol with @@NODEHAMMER and add an ABS symbol for the node itself,
+ * neither of which we want when the goal is an export table that reads exactly
+ * like the API.
+ *
+ * Note what it deliberately does NOT do: `nodehammer::*` matches nested
+ * namespaces too, so an internal symbol wrongly marked NH_API still gets
+ * exported. That is ci/check_shared_exports.py's job, and the division is
+ * intentional — the linker removes what is not ours, the checker removes what
+ * is ours but should not be public. Verified against both.
+ *
+ * Comments here are C-style because GNU ld's version-script grammar has no
+ * line comments: a `//` is parsed as two stray `/` characters and the script
+ * fails with "syntax error in VERSION script".
+ */
+{
+  global:
+    extern "C++" {
+      nodehammer::*;
+    };
+  local:
+    *;
+};

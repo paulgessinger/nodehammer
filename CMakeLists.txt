@@ -461,10 +461,20 @@ if(NODEHAMMER_BUILD_SHARED)
     # equivalent of either flag (only per-archive -hidden-l), so on macOS the
     # dependencies' symbols do stay visible in the dylib. ci/check_shared_exports.py
     # is correspondingly Linux-only.
+    #
+    # The version script closes the remaining gap, which neither flag can:
+    # libstdc++ forces default visibility on namespace std, so std:: template
+    # instantiations emitted into our own objects stay exported regardless.
+    # cmake/nodehammer.map explains the measurement that motivated it.
     if(UNIX AND NOT APPLE)
         target_link_options(nodehammer_shared PRIVATE
             "LINKER:--exclude-libs,ALL"
             "LINKER:--no-undefined"
+            "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodehammer.map"
+        )
+        # Relink when the script changes; link options are not tracked as deps.
+        set_property(TARGET nodehammer_shared APPEND PROPERTY
+            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodehammer.map"
         )
     endif()
 endif()

@@ -120,7 +120,12 @@ def classify(symbol: str, internal: set[str]) -> str | None:
         return None
 
     if not name.startswith(TOP):
-        return "not in nodehammer:: (third-party or internal C symbol)"
+        # With cmake/nodehammer.map in force this should be unreachable: the
+        # version script keeps only `nodehammer::*`. Reaching it means the
+        # script was not applied, so say that rather than leaving someone to
+        # rediscover it — the symbol itself (a std:: instantiation, or a
+        # dependency --exclude-libs missed) is a symptom, not the cause.
+        return "not in nodehammer:: — the linker version script is not in effect"
 
     scope = scope_of(name)
 
@@ -166,6 +171,15 @@ SELF_TEST_CASES: list[tuple[str, bool]] = [
     ("ZSTD_compress", True),
     ("flatbuffers::ClassicLocale::instance_", True),
     ("manifold::Manifold::Boolean(manifold::Manifold const&)", True),
+    # The class the version script exists to remove. Real symbols from the
+    # first CI run, before cmake/nodehammer.map was added: libstdc++ forces
+    # default visibility on namespace std, so these survived -fvisibility=hidden
+    # and were emitted from our own objects. Kept as cases so that removing the
+    # version script fails here too, not only on the .so.
+    ("std::_Rb_tree<std::array<unsigned int, 2ul>, std::pair<std::array<unsigned int, 2ul> const, "
+     "unsigned int> >::_M_get_insert_unique_pos(std::array<unsigned int, 2ul> const&)", True),
+    ("std::__unicode::__v15_1_0::__width_edges", True),
+    ("typeinfo for std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>", True),
     # A namespace nobody has written yet: rule 1 cannot know it, rule 3 must.
     ("nodehammer::brandnew::Thing::f()", True),
 ]
