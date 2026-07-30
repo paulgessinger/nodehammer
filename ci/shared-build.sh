@@ -35,8 +35,14 @@ cmake --preset conan-release \
     -DCMAKE_C_COMPILER_LAUNCHER=ccache \
     -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
-echo "== build the shared library =="
-cmake --build "$build_dir" --target nodehammer_shared
+# Everything, not just --target nodehammer_shared. install() covers the CLI
+# executable unconditionally, so a shared-only build leaves cmake --install with
+# nothing to copy — which a developer's already-populated build tree hides and a
+# clean CI checkout does not. Building the lot also makes this job verify that
+# turning the option on does not disturb the ordinary targets, which is worth
+# more than the minutes it costs.
+echo "== build =="
+cmake --build "$build_dir"
 
 echo "== install =="
 rm -rf "$prefix"
