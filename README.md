@@ -184,6 +184,19 @@ Key CMake options:
 | `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | 🚧 links Geant4 only, no importer yet |
 | `NODEHAMMER_WITH_GEOMODEL` | GeoModel importer | 🚧 declared only |
 | `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary | ✅ |
+| `NODEHAMMER_BUILD_SHARED` | Also build and install `libnodehammer` + the public headers + a CMake package config | 🚧 packaging works; the API it exposes is still being written |
+
+With `NODEHAMMER_BUILD_SHARED=ON`, `cmake --install` adds the shared library,
+`include/nodehammer/`, and a package config, so a consumer needs only:
+
+```cmake
+find_package(nodehammer REQUIRED)
+target_link_libraries(app PRIVATE nodehammer::nodehammer)
+```
+
+No `find_dependency` for zstd, flatbuffers, manifold or the rest — the shared
+library absorbs them. `ci/shared-build.sh` runs the whole thing end to end and
+checks that the export table contains the public API and nothing else.
 
 ## Try it
 
