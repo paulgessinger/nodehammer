@@ -19,7 +19,7 @@ ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const
     ImportResult result;
 
     try {
-        auto raw = zstd_io::readBytesFromFile(path);
+        auto raw = detail::zstd_io::readBytesFromFile(path);
         auto scene = semanticSceneFromBytes(raw);
         scene.computeWorldTransforms();
         scene.computeOriginalPaths();
@@ -41,11 +41,11 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
         // `.zst` suffix on the filename signals zstd-compressed input —
         // same convention as the path-based reader, just decided from
         // the filename rather than the path.
-        const bool zst = zstd_io::hasZstdExtension(std::filesystem::path{filename});
+        const bool zst = detail::zstd_io::hasZstdExtension(std::filesystem::path{filename});
         std::vector<std::byte> decompressed;
         std::span<const std::byte> raw = bytes;
         if (zst) {
-            decompressed = zstd_io::decompress(bytes);
+            decompressed = detail::zstd_io::decompress(bytes);
             raw = std::span<const std::byte>{decompressed};
         }
         auto scene = semanticSceneFromBytes(raw);

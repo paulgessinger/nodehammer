@@ -229,7 +229,7 @@ void ArchiveProjectFs::addPath(const std::filesystem::path &path) {
     }
     std::vector<std::byte> contents;
     try {
-        contents = file_io::readFile(path);
+        contents = detail::file_io::readFile(path);
     } catch (const std::exception &e) {
         auto msg = std::string{"failed to read "} + path.string() + ": " + e.what();
         impl_->warning_msgs.push_back(msg);

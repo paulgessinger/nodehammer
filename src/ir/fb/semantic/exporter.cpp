@@ -22,7 +22,7 @@ SemanticFlatbufferExporter::write(const semantic::Scene &scene, const std::files
 
     try {
         auto bytes = semanticSceneToBytes(scene);
-        zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}));
+        detail::zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}));
     } catch (const std::exception &ex) {
         result.diags.error(
             codes::kErrExportWriteFailed,

@@ -355,7 +355,7 @@ void registerCmdViewer(CLI::App &app) {
 
             std::string config_key;
             if (!configPath.empty()) {
-                auto bytes = nodehammer::file_io::readFile(config_path);
+                auto bytes = nodehammer::detail::file_io::readFile(config_path);
                 config_key = config_path.filename().string();
                 bag->addBytes(config_key, std::span<const std::byte>{bytes});
             }
@@ -366,7 +366,7 @@ void registerCmdViewer(CLI::App &app) {
                 std::exit(1);
             }
             {
-                auto bytes = nodehammer::file_io::readFile(geometry_path);
+                auto bytes = nodehammer::detail::file_io::readFile(geometry_path);
                 bag->addBytes(geometry_key, std::span<const std::byte>{bytes});
             }
 

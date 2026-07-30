@@ -12,7 +12,7 @@
 
 #include <zstd.h>
 
-namespace nodehammer::zstd_io {
+namespace nodehammer::detail::zstd_io {
 
 /// Returns true if the path ends with ".zst" (case-insensitive).
 inline bool hasZstdExtension(const std::filesystem::path &path) {
@@ -55,15 +55,15 @@ inline void writeBytesToFile(const std::filesystem::path &path, std::span<const 
                              int level = 3) {
     if (hasZstdExtension(path)) {
         auto compressed = compress(data, level);
-        file_io::writeFile(path, compressed);
+        detail::file_io::writeFile(path, compressed);
         return;
     }
-    file_io::writeFile(path, data);
+    detail::file_io::writeFile(path, data);
 }
 
 /// Read a byte buffer from a file, decompressing if the path ends in .zst.
 inline std::vector<std::byte> readBytesFromFile(const std::filesystem::path &path) {
-    auto raw = file_io::readFile(path);
+    auto raw = detail::file_io::readFile(path);
     if (hasZstdExtension(path)) {
         return decompress(raw);
     }
@@ -88,4 +88,4 @@ inline std::string readJsonFromFile(const std::filesystem::path &path) {
     return {reinterpret_cast<const char *>(raw.data()), raw.size()};
 }
 
-} // namespace nodehammer::zstd_io
+} // namespace nodehammer::detail::zstd_io

@@ -38,7 +38,7 @@ TEST_CASE("NativeBagProjectFs writes drops through to disk", "[viewer][native_ba
 
     const auto on_disk = bag.storageDir() / "scene.toml";
     REQUIRE(std::filesystem::is_regular_file(on_disk));
-    auto disk_bytes = nodehammer::file_io::readFile(on_disk);
+    auto disk_bytes = nodehammer::detail::file_io::readFile(on_disk);
     REQUIRE(asString(std::span<const std::byte>{disk_bytes}) == "scene-bytes");
 }
 

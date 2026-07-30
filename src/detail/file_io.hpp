@@ -7,7 +7,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace nodehammer::file_io {
+namespace nodehammer::detail::file_io {
 
 /// Read a file into a byte vector (binary mode).
 inline std::vector<std::byte> readFile(const std::filesystem::path &path) {
@@ -31,4 +31,4 @@ inline void writeFile(const std::filesystem::path &path, std::span<const std::by
     f.write(reinterpret_cast<const char *>(data.data()), static_cast<std::streamsize>(data.size()));
 }
 
-} // namespace nodehammer::file_io
+} // namespace nodehammer::detail::file_io

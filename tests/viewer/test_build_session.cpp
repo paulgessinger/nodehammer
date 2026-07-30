@@ -54,7 +54,7 @@ ir::semantic::Scene makeMinimalScene() {
 
 std::vector<std::byte> minimalNhbZstBytes() {
     auto raw = semanticSceneToBytes(makeMinimalScene());
-    return zstd_io::compress(std::span<const std::byte>{raw});
+    return detail::zstd_io::compress(std::span<const std::byte>{raw});
 }
 
 std::vector<std::byte> stringBytes(std::string_view s) {

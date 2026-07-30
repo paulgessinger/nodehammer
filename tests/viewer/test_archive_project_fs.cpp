@@ -11,7 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 // miniz's zlib-compat aliases (`compress`, `uncompress`, …) would macro-clash
-// with nodehammer::zstd_io::compress used by the build-session harness below.
+// with nodehammer::detail::zstd_io::compress used by the build-session harness below.
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 #include <miniz.h>
 
@@ -111,7 +111,7 @@ std::vector<std::byte> minimalNhbZstBytes() {
     scene.sourceFile = "/test/input";
 
     auto raw = ir::semanticSceneToBytes(scene);
-    return zstd_io::compress(std::span<const std::byte>{raw});
+    return detail::zstd_io::compress(std::span<const std::byte>{raw});
 }
 
 /// RAII temp dir holding a seed archive on disk.
@@ -126,7 +126,7 @@ struct TempArchive {
         std::filesystem::create_directories(root);
         zip = root / "project.zip";
         auto blob = makeZip(entries);
-        nodehammer::file_io::writeFile(zip, blob);
+        nodehammer::detail::file_io::writeFile(zip, blob);
     }
     ~TempArchive() {
         std::error_code ec;
@@ -291,7 +291,7 @@ TEST_CASE("ArchiveProjectFs enters an error state on a bad archive",
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     auto bad = root / "not.zip";
-    nodehammer::file_io::writeFile(bad, asBytes("definitely not a zip"));
+    nodehammer::detail::file_io::writeFile(bad, asBytes("definitely not a zip"));
 
     ArchiveProjectFs fs{bad};
     REQUIRE(fs.status() == ProjectFsStatus::Error);
@@ -305,11 +305,11 @@ TEST_CASE("ArchiveProjectFs surfaces corrupted archive entries as errors",
           "[viewer][archive_project_fs]") {
     TempArchive ta{"corrupt", {{"scene.toml", "root = 1\n"}}};
 
-    auto bytes = nodehammer::file_io::readFile(ta.zip);
+    auto bytes = nodehammer::detail::file_io::readFile(ta.zip);
     corruptZipCrc(bytes);
 
     const auto corrupt_zip = ta.root / "corrupt.zip";
-    nodehammer::file_io::writeFile(corrupt_zip, bytes);
+    nodehammer::detail::file_io::writeFile(corrupt_zip, bytes);
 
     ArchiveProjectFs fs{corrupt_zip};
     REQUIRE(fs.status() == ProjectFsStatus::Ready);

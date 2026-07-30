@@ -140,7 +140,7 @@ bool writeBytesAtomic(const std::filesystem::path &target, std::span<const std::
     tmp += ".nhtmp";
 
     try {
-        file_io::writeFile(tmp, bytes);
+        detail::file_io::writeFile(tmp, bytes);
     } catch (const std::exception &e) {
         err = e.what();
         return false;

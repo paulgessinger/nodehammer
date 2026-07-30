@@ -409,9 +409,9 @@ TEST_CASE("FlatBuffer zstd bytes: nhb.zst roundtrip", "[ir][flatbuffer]") {
     const auto tmp = std::filesystem::temp_directory_path() /
                      std::filesystem::path{"nodehammer_flatbuffer_roundtrip_test_" +
                                            std::to_string(uniqueSuffix) + ".nhb.zst"};
-    nodehammer::zstd_io::writeBytesToFile(tmp, std::as_bytes(std::span{bytes}));
+    nodehammer::detail::zstd_io::writeBytesToFile(tmp, std::as_bytes(std::span{bytes}));
 
-    auto decoded = nodehammer::zstd_io::readBytesFromFile(tmp);
+    auto decoded = nodehammer::detail::zstd_io::readBytesFromFile(tmp);
     auto restored = semanticSceneFromBytes(decoded);
 
     std::error_code ec;
@@ -445,7 +445,7 @@ TEST_CASE("FlatBufferImporter::importFromBytes decompresses .nhb.zst bytes",
           "[ir][flatbuffer][bytes]") {
     auto scene = makeMinimalScene();
     auto raw = semanticSceneToBytes(scene);
-    auto compressed = nodehammer::zstd_io::compress(std::as_bytes(std::span{raw}));
+    auto compressed = nodehammer::detail::zstd_io::compress(std::as_bytes(std::span{raw}));
 
     auto result = FlatBufferImporter::importFromBytes("scene.nhb.zst",
                                                       std::span<const std::byte>{compressed});
@@ -464,7 +464,7 @@ TEST_CASE("FlatBufferImporter::importFromBytes matches path-based import",
     const auto tmp = std::filesystem::temp_directory_path() /
                      std::filesystem::path{"nodehammer_fb_bytes_path_eq_" +
                                            std::to_string(uniqueSuffix) + ".nhb"};
-    nodehammer::zstd_io::writeBytesToFile(tmp, std::as_bytes(std::span{raw}));
+    nodehammer::detail::zstd_io::writeBytesToFile(tmp, std::as_bytes(std::span{raw}));
 
     FlatBufferImporter imp;
     auto via_path = imp.import(tmp);

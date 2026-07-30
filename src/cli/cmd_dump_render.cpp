@@ -70,7 +70,7 @@ void registerCmdDumpRender(CLI::App &app) {
         std::string outPath;
         if (*outputOpt) {
             outputOpt->results(outPath);
-            nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
+            nodehammer::detail::zstd_io::writeJsonToFile(outPath, jsonStr);
         } else {
             std::println("{}", jsonStr);
         }

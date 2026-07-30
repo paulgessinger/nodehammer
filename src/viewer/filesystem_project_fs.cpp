@@ -216,7 +216,7 @@ ResolveResult FilesystemProjectFs::resolve(std::string_view key) const {
 
     std::vector<std::byte> bytes;
     try {
-        bytes = file_io::readFile(abs);
+        bytes = detail::file_io::readFile(abs);
     } catch (const std::exception &e) {
         return ResolveResult{ResolveStatus::Error, {}, std::string{key}, e.what()};
     }

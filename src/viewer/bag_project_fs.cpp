@@ -202,7 +202,7 @@ void BagProjectFs::addPath(const std::filesystem::path &path) {
     }
     std::vector<std::byte> contents;
     try {
-        contents = file_io::readFile(path);
+        contents = detail::file_io::readFile(path);
     } catch (const std::exception &e) {
         pushError(std::string{"failed to read "} + path.string() + ": " + e.what());
         impl_->errored = true;

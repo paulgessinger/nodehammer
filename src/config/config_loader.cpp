@@ -769,7 +769,7 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
     std::vector<std::byte> root_bytes;
     try {
         canonical = std::filesystem::canonical(path);
-        root_bytes = file_io::readFile(canonical);
+        root_bytes = detail::file_io::readFile(canonical);
     } catch (const std::exception &e) {
         diags.error(codes::kErrImportFileNotFound,
                     std::format("could not read config file: {}", e.what()), path.string());
@@ -792,7 +792,7 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
             return std::span<const std::byte>{it->second};
         }
         try {
-            auto bytes = file_io::readFile(canon_key);
+            auto bytes = detail::file_io::readFile(canon_key);
             auto [ins, _] = cache->emplace(std::move(canon_key), std::move(bytes));
             return std::span<const std::byte>{ins->second};
         } catch (...) {
