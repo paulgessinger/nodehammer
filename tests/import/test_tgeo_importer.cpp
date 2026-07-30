@@ -6,10 +6,10 @@
 
 #include <TGeoBBox.h>
 #include <TGeoCompositeShape.h>
+#include <TGeoManager.h>
 #include <TGeoMatrix.h>
 #include <TGeoTube.h>
-#include <ir::TGeoManager.h>
-#include <ir::TGeoVolume.h>
+#include <TGeoVolume.h>
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,7 +29,7 @@ TEST_CASE("TGeoImporter: formatName and supportedExtensions", "[import][tgeo]") 
 
 TEST_CASE("TGeoImporter: TGeoBBox -> BoxShape", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("testBox", "testBox");
+    auto *mgr = new TGeoManager("testBox", "testBox");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 10.0, 20.0, 30.0);
@@ -55,10 +55,10 @@ TEST_CASE("TGeoImporter: TGeoBBox -> BoxShape", "[import][tgeo]") {
 
 TEST_CASE("TGeoImporter: TGeoTube -> TubeShape", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("testTube", "testTube");
+    auto *mgr = new TGeoManager("testTube", "testTube");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
-    auto *top = new ir::TGeoVolume("world", new TGeoTube("tube", 5.0, 10.0, 25.0), med);
+    auto *top = new TGeoVolume("world", new TGeoTube("tube", 5.0, 10.0, 25.0), med);
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
@@ -81,7 +81,7 @@ TEST_CASE("TGeoImporter: TGeoTube -> TubeShape", "[import][tgeo]") {
 
 TEST_CASE("TGeoImporter: nested volumes -> correct parent-child hierarchy", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("nested", "nested");
+    auto *mgr = new TGeoManager("nested", "nested");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 500, 500, 500);
@@ -106,7 +106,7 @@ TEST_CASE("TGeoImporter: nested volumes -> correct parent-child hierarchy", "[im
 
 TEST_CASE("TGeoImporter: same TGeoVolume placed twice -> one LV, two nodes", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("reuse", "reuse");
+    auto *mgr = new TGeoManager("reuse", "reuse");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 500, 500, 500);
@@ -124,7 +124,7 @@ TEST_CASE("TGeoImporter: same TGeoVolume placed twice -> one LV, two nodes", "[i
 
 TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("bool", "bool");
+    auto *mgr = new TGeoManager("bool", "bool");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 500, 500, 500);
@@ -133,7 +133,7 @@ TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") 
     new TGeoBBox("boolBoxA", 10, 10, 10);
     new TGeoBBox("boolBoxB", 5, 5, 5);
     auto *comp = new TGeoCompositeShape("boolComp", "boolBoxA + boolBoxB");
-    auto *compVol = new ir::TGeoVolume("comp_vol", comp, med);
+    auto *compVol = new TGeoVolume("comp_vol", comp, med);
     top->AddNode(compVol, 1);
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
@@ -155,7 +155,7 @@ TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") 
 
 TEST_CASE("TGeoImporter: TGeoRotation -> localTransform rotation columns", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("rotTest", "rotTest");
+    auto *mgr = new TGeoManager("rotTest", "rotTest");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 500, 500, 500);
@@ -194,7 +194,7 @@ TEST_CASE("TGeoImporter: TGeoRotation -> localTransform rotation columns", "[imp
 TEST_CASE("TGeoImporter: TGeoCombiTrans -> localTransform rotation and translation",
           "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("combiTest", "combiTest");
+    auto *mgr = new TGeoManager("combiTest", "combiTest");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 500, 500, 500);
@@ -226,7 +226,7 @@ TEST_CASE("TGeoImporter: TGeoCombiTrans -> localTransform rotation and translati
 TEST_CASE("TGeoImporter: worldTransform composes parent rotation with child translation",
           "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("composeTest", "composeTest");
+    auto *mgr = new TGeoManager("composeTest", "composeTest");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 500, 500, 500);
@@ -256,7 +256,7 @@ TEST_CASE("TGeoImporter: worldTransform composes parent rotation with child tran
 
 TEST_CASE("TGeoImporter: root worldTransform is identity", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("identityTest", "identityTest");
+    auto *mgr = new TGeoManager("identityTest", "identityTest");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     auto *top = mgr->MakeBox("world", med, 100, 100, 100);
@@ -271,7 +271,7 @@ TEST_CASE("TGeoImporter: root worldTransform is identity", "[import][tgeo]") {
 
 TEST_CASE("TGeoImporter: sourceSystem is tgeo", "[import][tgeo]") {
     resetManager();
-    auto *mgr = new ir::TGeoManager("provTest", "provTest");
+    auto *mgr = new TGeoManager("provTest", "provTest");
     auto *mat = new TGeoMaterial("vacuum", 0, 0, 0);
     auto *med = new TGeoMedium("vacuum", 1, mat);
     mgr->SetTopVolume(mgr->MakeBox("world", med, 100, 100, 100));
