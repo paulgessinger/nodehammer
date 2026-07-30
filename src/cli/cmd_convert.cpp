@@ -4,10 +4,10 @@
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <detail/timing.hpp>
+#include <diagnostic_codes.hpp>
 #include <export_resolve.hpp>
 #include <filesystem>
 #include <format>
-#include <diagnostic_codes.hpp>
 #include <ir/render/exporter.hpp>
 #include <ir/semantic/importer.hpp>
 #include <print>
@@ -229,9 +229,9 @@ void registerCmdConvert(CLI::App &app) {
             int warnings = 0, errors = 0;
             for (const auto *dl : {&importResult.diags, &tessResult.diags, &expResult.diags}) {
                 for (const auto &d : dl->items()) {
-                    if (d.severity >= nodehammer::ir::DiagnosticSeverity::Error) {
+                    if (d.severity >= nodehammer::diagnostics::DiagnosticSeverity::Error) {
                         ++errors;
-                    } else if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning) {
+                    } else if (d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning) {
                         ++warnings;
                     }
                 }

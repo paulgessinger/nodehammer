@@ -15,6 +15,7 @@
 
 using namespace nodehammer;
 using namespace nodehammer::ir;
+using namespace nodehammer::diagnostics;
 using namespace nodehammer::tessellation;
 using namespace nodehammer::config;
 

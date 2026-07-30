@@ -5,7 +5,7 @@
 #include <diagnostic_codes.hpp>
 #include <ir/semantic/importer.hpp>
 
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 
 #include <print>
 #include <string>
@@ -13,15 +13,15 @@
 namespace nodehammer::cli {
 
 /// Print diagnostics to stderr with colored severity.
-inline void printDiags(const ir::DiagnosticList &diags) {
+inline void printDiags(const diagnostics::DiagnosticList &diags) {
     static detail::Console errCon{detail::ColorMode::Auto};
     for (const auto &d : diags.items()) {
         std::string_view color;
         std::string_view label;
-        if (d.severity >= ir::DiagnosticSeverity::Error) {
+        if (d.severity >= diagnostics::DiagnosticSeverity::Error) {
             color = "red";
             label = "error";
-        } else if (d.severity == ir::DiagnosticSeverity::Warning) {
+        } else if (d.severity == diagnostics::DiagnosticSeverity::Warning) {
             color = "yellow";
             label = "warn";
         } else {

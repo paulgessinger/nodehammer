@@ -2,7 +2,7 @@
 
 #include <ankerl/unordered_dense.h>
 #include <config/config_ast.hpp>
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/semantic.hpp>
 
 #include <vector>
@@ -14,7 +14,7 @@ namespace nodehammer::selection {
 struct SelectionResult {
     ankerl::unordered_dense::set<ir::semantic::NodeId> kept;
     ankerl::unordered_dense::set<ir::semantic::NodeId> dropped;
-    ir::DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 };
 
 // ── SelectionEngine ───────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ class SelectionEngine {
     ///
     /// If the root node is in the dropped set the scene is left unchanged and
     /// an NH0401 error is emitted.  Returns accumulated diagnostics.
-    ir::DiagnosticList prune(ir::semantic::Scene &scene) const;
+    diagnostics::DiagnosticList prune(ir::semantic::Scene &scene) const;
 
   private:
     std::vector<config::SelectionRule> rules_;

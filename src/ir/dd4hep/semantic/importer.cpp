@@ -1,5 +1,5 @@
-#include <ir/dd4hep/semantic/importer.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/dd4hep/semantic/importer.hpp>
 #include <ir/provenance.hpp>
 #include <ir/tgeo/semantic/importer.hpp>
 
@@ -26,7 +26,7 @@ namespace {
 // Walk the DD4hep DetElement tree and annotate the SemanticNodes
 // that were already created by the TGeo pass.
 void annotateDetElement(const dd4hep::DetElement &elem, semantic::Scene &scene,
-                        DiagnosticList &diags,
+                        diagnostics::DiagnosticList &diags,
                         const std::unordered_map<const TGeoNode *, semantic::NodeId> &nodeMap) {
     const TGeoNode *geoNode = elem.placement().ptr();
     auto it = nodeMap.find(geoNode);

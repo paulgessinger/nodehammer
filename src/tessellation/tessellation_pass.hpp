@@ -1,7 +1,7 @@
 #pragma once
 
 #include <config/config_ast.hpp>
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/render.hpp>
 #include <ir/semantic.hpp>
 
@@ -9,7 +9,7 @@ namespace nodehammer::tessellation {
 
 struct TessellationPassResult {
     ir::render::Scene scene;
-    ir::DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 };
 
 /// Lowers a semantic::Scene to a render::Scene.

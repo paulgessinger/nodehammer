@@ -1,7 +1,7 @@
 #pragma once
 
 #include <config/config_ast.hpp>
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/render.hpp>
 #include <ir/semantic.hpp>
 #include <tessellation/wedge_cut.hpp>
@@ -22,7 +22,7 @@ struct SceneBuildResult {
     /// `shared_ptr<const render::Scene>`. Keeping the producer's handle mutable
     /// was the one gap in that chain.
     std::shared_ptr<const ir::render::Scene> scene;
-    ir::DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 };
 
 /// Outcome of `prepareSceneForTessellation`. When `ok` is true, `config`
@@ -32,7 +32,7 @@ struct SceneBuildResult {
 struct ScenePrepResult {
     config::NHConfig config;
     ir::semantic::Scene scene;
-    ir::DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
     bool ok{false};
 };
 

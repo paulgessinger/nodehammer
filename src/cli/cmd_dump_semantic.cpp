@@ -8,7 +8,7 @@
 #include <detail/markup.hpp>
 #include <detail/overloaded.hpp>
 #include <diagnostic_codes.hpp>
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/semantic/exporter.hpp>
 #include <ir/semantic_json.hpp>

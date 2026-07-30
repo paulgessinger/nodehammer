@@ -66,9 +66,9 @@ void printSummary(const nodehammer::ir::ImportResult &result, std::string_view f
 
     int warnings = 0, errors = 0;
     for (const auto &d : result.diags.items()) {
-        if (d.severity >= nodehammer::ir::DiagnosticSeverity::Error) {
+        if (d.severity >= nodehammer::diagnostics::DiagnosticSeverity::Error) {
             ++errors;
-        } else if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning) {
+        } else if (d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning) {
             ++warnings;
         }
     }

@@ -145,19 +145,19 @@ void Notifications::cancelProgress(ProgressHandle handle) {
     t->dismissed = true;
 }
 
-void Notifications::diagnostic(const ir::Diagnostic &d) {
+void Notifications::diagnostic(const diagnostics::Diagnostic &d) {
     const auto msg = std::format("{}: {}", d.code, d.message);
     switch (d.severity) {
-    case ir::DiagnosticSeverity::Debug:
+    case diagnostics::DiagnosticSeverity::Debug:
         return;
-    case ir::DiagnosticSeverity::Info:
+    case diagnostics::DiagnosticSeverity::Info:
         info(msg);
         return;
-    case ir::DiagnosticSeverity::Warning:
+    case diagnostics::DiagnosticSeverity::Warning:
         warning(msg);
         return;
-    case ir::DiagnosticSeverity::Error:
-    case ir::DiagnosticSeverity::Fatal:
+    case diagnostics::DiagnosticSeverity::Error:
+    case diagnostics::DiagnosticSeverity::Fatal:
         error(msg);
         return;
     }
