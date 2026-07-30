@@ -16,8 +16,8 @@ int main() {
     // from one install and a library from another — the failure mode the
     // out-of-line accessor exists to make visible.
     if (linked != nodehammer::VERSION) {
-        std::println(stderr, "version mismatch: header says {}, library says {}", nodehammer::VERSION,
-                     linked);
+        std::println(stderr, "version mismatch: header says {}, library says {}",
+                     nodehammer::VERSION, linked);
         return 1;
     }
 

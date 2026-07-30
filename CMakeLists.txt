@@ -211,6 +211,24 @@ set(NH_CORE_DEPS
     unordered_dense::unordered_dense
 )
 
+# nlohmann stays PUBLIC here, and #41's "nlohmann can finally go PRIVATE" row is
+# satisfied by a different mechanism than the one that row anticipated.
+#
+# Two reasons the dep-scope flip is not the lever it looks like. First, it would
+# change nothing: TinyGLTF::TinyGLTF lists nlohmann_json::nlohmann_json in its
+# own INTERFACE_LINK_LIBRARIES, so nlohmann reaches every in-tree target through
+# tinygltf whatever the core declares — verified by dropping it from this list
+# and rebuilding, which compiles clean. Second, it would be a misdescription:
+# src/ir/render.hpp says `using ExtrasMap = nlohmann::json;`, so nlohmann really
+# is part of the archive's interface as far as in-tree consumers are concerned,
+# and calling it PRIVATE would be a latent lie that only bites the day tinygltf
+# stops carrying it.
+#
+# What the row actually wanted — nlohmann absent from the *installed* interface
+# — holds, and is enforced where it belongs: the shared variant takes every
+# dependency PRIVATE behind $<BUILD_INTERFACE:>, so the generated export has no
+# INTERFACE_LINK_LIBRARIES at all, and ci/shared_consumer builds with nothing
+# but nodehammer's own prefix on CMAKE_PREFIX_PATH.
 set(NH_CORE_DEFINES "")
 
 # ── Core library: optional pieces ─────────────────────────────────────────────

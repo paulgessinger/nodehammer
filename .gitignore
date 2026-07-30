@@ -18,3 +18,7 @@ CMakeUserPresets.json
 
 # Local perf/geometry analysis artifacts (screenshots, dumps)
 /analysis/
+
+# Python bytecode (ci/*.py imported by tooling)
+__pycache__/
+*.pyc
