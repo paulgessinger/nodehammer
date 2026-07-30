@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
+#include <ir/semantic.hpp>
+#include <tessellation/primitive_tessellator.hpp>
 
 #include <glm/glm.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::tessellation;
 
 static const TessellationParams kDefault;
 
@@ -34,7 +36,7 @@ static bool normalsAreUnitLength(const TessellationOutput &out) {
 
 TEST_CASE("PrimitiveTessellator: box has 24 vertices and 36 indices", "[tessellation][box]") {
     PrimitiveTessellator t;
-    BoxShape s{1.0, 1.0, 1.0};
+    ir::semantic::BoxShape s{1.0, 1.0, 1.0};
     auto out = t.tessellate(s, kDefault);
 
     REQUIRE(out.vertices.size() == 24);
@@ -44,21 +46,21 @@ TEST_CASE("PrimitiveTessellator: box has 24 vertices and 36 indices", "[tessella
 
 TEST_CASE("PrimitiveTessellator: box normals are unit length", "[tessellation][box]") {
     PrimitiveTessellator t;
-    BoxShape s{2.0, 3.0, 4.0};
+    ir::semantic::BoxShape s{2.0, 3.0, 4.0};
     auto out = t.tessellate(s, kDefault);
     REQUIRE(normalsAreUnitLength(out));
 }
 
 TEST_CASE("PrimitiveTessellator: box has no degenerate triangles", "[tessellation][box]") {
     PrimitiveTessellator t;
-    BoxShape s{1.0, 2.0, 0.5};
+    ir::semantic::BoxShape s{1.0, 2.0, 0.5};
     auto out = t.tessellate(s, kDefault);
     REQUIRE(hasNoDegenerateTriangles(out));
 }
 
 TEST_CASE("PrimitiveTessellator: box indices stay within vertex range", "[tessellation][box]") {
     PrimitiveTessellator t;
-    BoxShape s{1.0, 1.0, 1.0};
+    ir::semantic::BoxShape s{1.0, 1.0, 1.0};
     auto out = t.tessellate(s, kDefault);
     for (const auto idx : out.indices) {
         REQUIRE(idx < out.vertices.size());
@@ -70,7 +72,7 @@ TEST_CASE("PrimitiveTessellator: box indices stay within vertex range", "[tessel
 TEST_CASE("PrimitiveTessellator: tube vertex count for N segments (solid)",
           "[tessellation][tube]") {
     PrimitiveTessellator t;
-    TubeShape s{0.0, 1.0, 2.0}; // rMin=0 → solid tube
+    ir::semantic::TubeShape s{0.0, 1.0, 2.0}; // rMin=0 → solid tube
     TessellationParams p;
     p.maxSegmentsCircle = 8;
     auto out = t.tessellate(s, p);
@@ -86,7 +88,7 @@ TEST_CASE("PrimitiveTessellator: tube vertex count for N segments (solid)",
 
 TEST_CASE("PrimitiveTessellator: hollow tube has inner wall", "[tessellation][tube]") {
     PrimitiveTessellator t;
-    TubeShape s{0.5, 1.0, 2.0}; // hollow
+    ir::semantic::TubeShape s{0.5, 1.0, 2.0}; // hollow
     TessellationParams p;
     p.maxSegmentsCircle = 8;
     auto out = t.tessellate(s, p);
@@ -104,7 +106,7 @@ TEST_CASE("PrimitiveTessellator: hollow tube has inner wall", "[tessellation][tu
 TEST_CASE("PrimitiveTessellator: cone (solid apex) no degenerate triangles",
           "[tessellation][cone]") {
     PrimitiveTessellator t;
-    ConeShape s{0, 2.0, 0, 0, 3.0}; // solid apex at top
+    ir::semantic::ConeShape s{0, 2.0, 0, 0, 3.0}; // solid apex at top
     TessellationParams p;
     p.maxSegmentsCircle = 12;
     auto out = t.tessellate(s, p);
@@ -117,7 +119,7 @@ TEST_CASE("PrimitiveTessellator: cone (solid apex) no degenerate triangles",
 TEST_CASE("PrimitiveTessellator: torus vertex count matches double-parametric formula",
           "[tessellation][torus]") {
     PrimitiveTessellator t;
-    TorusShape s{0.0, 0.2, 1.0}; // rMin=0, rMax=0.2, rTor=1.0
+    ir::semantic::TorusShape s{0.0, 0.2, 1.0}; // rMin=0, rMax=0.2, rTor=1.0
     TessellationParams p;
     p.maxSegmentsCircle = 8;
     auto out = t.tessellate(s, p);
@@ -135,7 +137,7 @@ TEST_CASE("PrimitiveTessellator: torus vertex count matches double-parametric fo
 TEST_CASE("PrimitiveTessellator: TessellatedShape passes through triangles",
           "[tessellation][tessellated]") {
     PrimitiveTessellator t;
-    TessellatedShape s;
+    ir::semantic::TessellatedShape s;
     s.triangles.push_back({glm::dvec3{0, 0, 0}, glm::dvec3{1, 0, 0}, glm::dvec3{0, 1, 0}});
     s.triangles.push_back({glm::dvec3{0, 0, 0}, glm::dvec3{0, 1, 0}, glm::dvec3{0, 0, 1}});
 
@@ -151,7 +153,7 @@ TEST_CASE("PrimitiveTessellator: TessellatedShape passes through triangles",
 TEST_CASE("PrimitiveTessellator: UnknownShape produces empty mesh and error diagnostic",
           "[tessellation][unknown]") {
     PrimitiveTessellator t;
-    UnknownShape s{"MyCustomSolid"};
+    ir::semantic::UnknownShape s{"MyCustomSolid"};
     auto out = t.tessellate(s, kDefault);
 
     REQUIRE(out.vertices.empty());
@@ -165,16 +167,19 @@ TEST_CASE("PrimitiveTessellator: canTessellate returns false for boolean variant
           "[tessellation]") {
     PrimitiveTessellator t;
 
-    REQUIRE_FALSE(t.canTessellate(BooleanUnion{SemanticShapeId{1}, SemanticShapeId{2}}));
-    REQUIRE_FALSE(t.canTessellate(BooleanIntersection{SemanticShapeId{1}, SemanticShapeId{2}}));
-    REQUIRE_FALSE(t.canTessellate(BooleanSubtraction{SemanticShapeId{1}, SemanticShapeId{2}}));
+    REQUIRE_FALSE(t.canTessellate(
+        ir::semantic::BooleanUnion{ir::semantic::ShapeId{1}, ir::semantic::ShapeId{2}}));
+    REQUIRE_FALSE(t.canTessellate(
+        ir::semantic::BooleanIntersection{ir::semantic::ShapeId{1}, ir::semantic::ShapeId{2}}));
+    REQUIRE_FALSE(t.canTessellate(
+        ir::semantic::BooleanSubtraction{ir::semantic::ShapeId{1}, ir::semantic::ShapeId{2}}));
 }
 
 TEST_CASE("PrimitiveTessellator: canTessellate returns true for primitive variants",
           "[tessellation]") {
     PrimitiveTessellator t;
 
-    REQUIRE(t.canTessellate(BoxShape{1, 1, 1}));
-    REQUIRE(t.canTessellate(TubeShape{0, 1, 1}));
-    REQUIRE(t.canTessellate(UnknownShape{"foo"}));
+    REQUIRE(t.canTessellate(ir::semantic::BoxShape{1, 1, 1}));
+    REQUIRE(t.canTessellate(ir::semantic::TubeShape{0, 1, 1}));
+    REQUIRE(t.canTessellate(ir::semantic::UnknownShape{"foo"}));
 }

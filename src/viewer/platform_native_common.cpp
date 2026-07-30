@@ -1,12 +1,12 @@
 #include "platform_native_common.hpp"
 
-#include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/archive_project_fs.hpp>
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
-#include <nodehammer/viewer/native_bag_project_fs.hpp>
-#include <nodehammer/viewer/platform.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
-#include <nodehammer/viewer/watched_filesystem_project_fs.hpp>
+#include <viewer/app.hpp>
+#include <viewer/archive_project_fs.hpp>
+#include <viewer/filesystem_project_fs.hpp>
+#include <viewer/native_bag_project_fs.hpp>
+#include <viewer/platform.hpp>
+#include <viewer/project_fs.hpp>
+#include <viewer/watched_filesystem_project_fs.hpp>
 
 #ifdef NH_VIEWER_NATIVE_DIALOG
 #include <nfd.hpp>

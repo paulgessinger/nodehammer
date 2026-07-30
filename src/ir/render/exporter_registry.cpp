@@ -1,12 +1,12 @@
-#include <nodehammer/ir/gltf/render/exporter.hpp>
-#include <nodehammer/ir/obj/render/exporter.hpp>
-#include <nodehammer/ir/render/exporter.hpp>
+#include <ir/gltf/render/exporter.hpp>
+#include <ir/obj/render/exporter.hpp>
+#include <ir/render/exporter.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -65,4 +65,4 @@ RenderExporterRegistry RenderExporterRegistry::makeDefault() {
     return reg;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

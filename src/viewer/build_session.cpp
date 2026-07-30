@@ -1,6 +1,6 @@
-#include <nodehammer/viewer/build_session.hpp>
+#include <viewer/build_session.hpp>
 
-#include <nodehammer/ir/fb/semantic/importer.hpp>
+#include <ir/fb/semantic/importer.hpp>
 
 #include <algorithm>
 #include <cstddef>
@@ -200,9 +200,9 @@ void BuildSession::poll(ProjectFs *project) {
             auto buf = result.file.bytes;
             // Discover and enqueue nested includes for any TOML key.
             if (isTomlKey(key)) {
-                auto rels = ConfigLoader::peekIncludesFromBytes(buf.span());
+                auto rels = config::ConfigLoader::peekIncludesFromBytes(buf.span());
                 for (const auto &rel : rels) {
-                    auto abs = ConfigLoader::resolveIncludeKey(key, rel);
+                    auto abs = config::ConfigLoader::resolveIncludeKey(key, rel);
                     if (impl_->seen.insert(abs).second) {
                         impl_->work_queue.push_back(abs);
                     }
@@ -255,16 +255,17 @@ void BuildSession::poll(ProjectFs *project) {
         return it->second.span();
     };
 
-    auto cfg = ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
+    auto cfg =
+        config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
     for (const auto &d : cfg.diags.items()) {
-        if (d.severity < DiagnosticSeverity::Error) {
+        if (d.severity < ir::DiagnosticSeverity::Error) {
             pushWarning(d.message);
         }
     }
     if (cfg.diags.hasErrors()) {
         std::string first = "config parse failed";
         for (const auto &d : cfg.diags.items()) {
-            if (d.severity >= DiagnosticSeverity::Error) {
+            if (d.severity >= ir::DiagnosticSeverity::Error) {
                 first = d.message;
                 break;
             }
@@ -273,16 +274,16 @@ void BuildSession::poll(ProjectFs *project) {
         return;
     }
 
-    auto imp = FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
+    auto imp = ir::FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
     for (const auto &d : imp.diags.items()) {
-        if (d.severity < DiagnosticSeverity::Error) {
+        if (d.severity < ir::DiagnosticSeverity::Error) {
             pushWarning(d.message);
         }
     }
     if (imp.diags.hasErrors()) {
         std::string first = "geometry import failed";
         for (const auto &d : imp.diags.items()) {
-            if (d.severity >= DiagnosticSeverity::Error) {
+            if (d.severity >= ir::DiagnosticSeverity::Error) {
                 first = d.message;
                 break;
             }

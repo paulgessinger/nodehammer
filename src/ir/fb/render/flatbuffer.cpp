@@ -1,4 +1,4 @@
-#include <nodehammer/ir/fb/render/flatbuffer.hpp>
+#include <ir/fb/render/flatbuffer.hpp>
 
 #include <flatbuffers/flatbuffers.h>
 
@@ -8,17 +8,17 @@
 #include <stdexcept>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
 namespace fbr = fbs::render;
 
-// Whole-array memcpy fast path for vertices relies on nodehammer::Vertex having
+// Whole-array memcpy fast path for vertices relies on nodehammer::ir::Vertex having
 // the exact byte layout of fbr::Vertex (pos+normal, 6 contiguous floats). GLM's
 // default vec3 is 12 bytes; if a build ever forces aligned gentypes this assert
 // fires and the codec must switch to element-wise copies.
-static_assert(sizeof(Vertex) == sizeof(fbr::Vertex),
+static_assert(sizeof(render::Vertex) == sizeof(fbr::Vertex),
               "Vertex layout must match fbs::render::Vertex for the memcpy fast path");
 static_assert(sizeof(fbr::Vertex) == 24, "unexpected fbs::render::Vertex size");
 
@@ -58,7 +58,7 @@ flatbuffers::Offset<fbr::Provenance> serializeProvenance(flatbuffers::FlatBuffer
 }
 
 flatbuffers::Offset<fbr::MeshAsset> serializeMeshAsset(flatbuffers::FlatBufferBuilder &b,
-                                                       const MeshAsset &asset) {
+                                                       const render::MeshAsset &asset) {
     auto name = b.CreateString(asset.name);
     // Vertex layout matches fbr::Vertex (static_assert above), so the source
     // array is reinterpreted as fbs structs and copied wholesale.
@@ -91,7 +91,7 @@ flatbuffers::Offset<fbr::MeshAsset> serializeMeshAsset(flatbuffers::FlatBufferBu
 }
 
 flatbuffers::Offset<fbr::RenderMaterial> serializeMaterial(flatbuffers::FlatBufferBuilder &b,
-                                                           const RenderMaterial &mat) {
+                                                           const render::Material &mat) {
     auto name = b.CreateString(mat.name);
     auto alphaMode = b.CreateString(mat.alphaMode);
     const fbr::Vec4f baseColor = toVec4(mat.baseColorFactor);
@@ -136,7 +136,7 @@ flatbuffers::Offset<fbr::RenderMaterial> serializeMaterial(flatbuffers::FlatBuff
 }
 
 flatbuffers::Offset<fbr::RenderNode> serializeNode(flatbuffers::FlatBufferBuilder &b,
-                                                   const RenderNode &node) {
+                                                   const render::Node &node) {
     auto name = b.CreateString(node.name);
     std::vector<uint64_t> childIds;
     childIds.reserve(node.children.size());
@@ -195,7 +195,7 @@ Provenance deserializeProvenance(const fbr::Provenance *p) {
 } // namespace
 
 flatbuffers::Offset<fbr::RenderScene>
-renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const RenderScene &scene) {
+renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const render::Scene &scene) {
     std::vector<flatbuffers::Offset<fbr::RenderNode>> nodeOffsets;
     nodeOffsets.reserve(scene.nodes.size());
     for (const auto &[id, node] : scene.nodes) {
@@ -224,21 +224,21 @@ renderSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const RenderSce
     return sb.Finish();
 }
 
-RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
-    RenderScene scene;
-    scene.rootId = RenderNodeId{fb.root_id()};
+render::Scene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
+    render::Scene scene;
+    scene.rootId = render::NodeId{fb.root_id()};
 
     if (const auto *meshes = fb.mesh_assets(); meshes != nullptr) {
         for (const auto *m : *meshes) {
-            MeshAsset asset;
-            asset.id = MeshAssetId{m->id()};
+            render::MeshAsset asset;
+            asset.id = render::MeshAssetId{m->id()};
             if (m->name() != nullptr) {
                 asset.name = m->name()->str();
             }
             if (const auto *vs = m->vertices(); vs != nullptr) {
                 asset.vertices.resize(vs->size());
                 std::memcpy(asset.vertices.data(), vs->Data(),
-                            static_cast<size_t>(vs->size()) * sizeof(Vertex));
+                            static_cast<size_t>(vs->size()) * sizeof(render::Vertex));
             }
             if (const auto *is = m->indices(); is != nullptr) {
                 asset.indices.resize(is->size());
@@ -247,7 +247,7 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
             }
             asset.provenance = deserializeProvenance(m->provenance());
             if (const auto *sa = m->stack_average(); sa != nullptr) {
-                StackAverage avg;
+                render::StackAverage avg;
                 if (const auto *c = sa->avg_color_linear(); c != nullptr) {
                     avg.avgColorLinear = fromVec3(*c);
                 }
@@ -260,8 +260,8 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
 
     if (const auto *materials = fb.materials(); materials != nullptr) {
         for (const auto *m : *materials) {
-            RenderMaterial mat;
-            mat.id = RenderMaterialId{m->id()};
+            render::Material mat;
+            mat.id = render::MaterialId{m->id()};
             if (m->name() != nullptr) {
                 mat.name = m->name()->str();
             }
@@ -308,8 +308,8 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
 
     if (const auto *nodes = fb.nodes(); nodes != nullptr) {
         for (const auto *n : *nodes) {
-            RenderNode node;
-            node.id = RenderNodeId{n->id()};
+            render::Node node;
+            node.id = render::NodeId{n->id()};
             if (n->name() != nullptr) {
                 node.name = n->name()->str();
             }
@@ -320,29 +320,29 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
                 node.worldTransform = fromMat4(*wt);
             }
             if (n->parent_id() != 0) {
-                node.parentId = RenderNodeId{n->parent_id()};
+                node.parentId = render::NodeId{n->parent_id()};
             }
             if (const auto *ch = n->children(); ch != nullptr) {
                 node.children.reserve(ch->size());
                 for (const auto c : *ch) {
-                    node.children.push_back(RenderNodeId{c});
+                    node.children.push_back(render::NodeId{c});
                 }
             }
             if (const auto *bs = n->mesh_bindings(); bs != nullptr) {
                 node.meshBindings.reserve(bs->size());
                 for (const auto *bnd : *bs) {
-                    node.meshBindings.push_back(
-                        {MeshAssetId{bnd->mesh_id()}, RenderMaterialId{bnd->material_id()}});
+                    node.meshBindings.push_back({render::MeshAssetId{bnd->mesh_id()},
+                                                 render::MaterialId{bnd->material_id()}});
                 }
             }
             if (const auto *ps = n->lod_proxy_bindings(); ps != nullptr) {
                 node.lodProxyBindings.reserve(ps->size());
                 for (const auto *bnd : *ps) {
-                    node.lodProxyBindings.push_back(
-                        {MeshAssetId{bnd->mesh_id()}, RenderMaterialId{bnd->material_id()}});
+                    node.lodProxyBindings.push_back({render::MeshAssetId{bnd->mesh_id()},
+                                                     render::MaterialId{bnd->material_id()}});
                 }
             }
-            node.semanticNodeId = SemanticNodeId{n->semantic_node_id()};
+            node.semanticNodeId = semantic::NodeId{n->semantic_node_id()};
             scene.nodes.emplace(node.id, std::move(node));
         }
     }
@@ -352,7 +352,7 @@ RenderScene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
-std::vector<std::byte> renderSceneToBytes(const RenderScene &scene) {
+std::vector<std::byte> renderSceneToBytes(const render::Scene &scene) {
     flatbuffers::FlatBufferBuilder builder{1024};
     auto root = renderSceneToFlatBuffer(builder, scene);
     fbr::FinishRenderSceneBuffer(builder, root);
@@ -362,7 +362,7 @@ std::vector<std::byte> renderSceneToBytes(const RenderScene &scene) {
     return std::vector<std::byte>(span.begin(), span.end());
 }
 
-RenderScene renderSceneFromBytes(std::span<const std::byte> buf) {
+render::Scene renderSceneFromBytes(std::span<const std::byte> buf) {
     const auto *ptr = reinterpret_cast<const uint8_t *>(buf.data());
     flatbuffers::Verifier verifier{ptr, buf.size()};
     if (!fbr::VerifyRenderSceneBuffer(verifier)) {
@@ -372,4 +372,4 @@ RenderScene renderSceneFromBytes(std::span<const std::byte> buf) {
     return renderSceneFromFlatBuffer(*fb);
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

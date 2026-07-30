@@ -1,11 +1,11 @@
 #pragma once
 
 #include <CLI/CLI.hpp>
-#include <nodehammer/detail/markup.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
+#include <detail/markup.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/semantic/importer.hpp>
 
-#include <nodehammer/ir/diagnostics.hpp>
+#include <ir/diagnostics.hpp>
 
 #include <print>
 #include <string>
@@ -13,15 +13,15 @@
 namespace nodehammer::cli {
 
 /// Print diagnostics to stderr with colored severity.
-inline void printDiags(const DiagnosticList &diags) {
+inline void printDiags(const ir::DiagnosticList &diags) {
     static detail::Console errCon{detail::ColorMode::Auto};
     for (const auto &d : diags.items()) {
         std::string_view color;
         std::string_view label;
-        if (d.severity >= DiagnosticSeverity::Error) {
+        if (d.severity >= ir::DiagnosticSeverity::Error) {
             color = "red";
             label = "error";
-        } else if (d.severity == DiagnosticSeverity::Warning) {
+        } else if (d.severity == ir::DiagnosticSeverity::Warning) {
             color = "yellow";
             label = "warn";
         } else {
@@ -34,7 +34,7 @@ inline void printDiags(const DiagnosticList &diags) {
 
 /// Result of importOrExit: the import result plus the format name.
 struct ImportWithFormat {
-    ImportResult result;
+    ir::ImportResult result;
     std::string formatName;
 };
 
@@ -53,7 +53,7 @@ inline ImportWithFormat importOrExit(CLI::Option *inputOpt, CLI::Option *formatO
         std::exit(1);
     }
 
-    auto registry = ImporterRegistry::makeDefault();
+    auto registry = ir::ImporterRegistry::makeDefault();
     const auto *imp = registry.resolve(inputPath, inputFmt);
     if (imp == nullptr) {
         std::println(stderr, "[error] {} cannot determine input format for '{}'",

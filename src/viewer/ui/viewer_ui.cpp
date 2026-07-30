@@ -6,7 +6,7 @@
 #include "status_ui.hpp"
 #include "view_panel.hpp"
 
-#include <nodehammer/viewer/platform.hpp>
+#include <viewer/platform.hpp>
 
 #include <imgui.h>
 #include <imgui_internal.h>

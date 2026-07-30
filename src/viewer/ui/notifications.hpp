@@ -1,7 +1,7 @@
 #pragma once
 
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/log_sink.hpp>
+#include <ir/diagnostics.hpp>
+#include <viewer/log_sink.hpp>
 
 #include <chrono>
 #include <cstddef>
@@ -45,7 +45,7 @@ class Notifications : public LogSink {
     /// appropriate kind. The toast text is prefixed with the NH code
     /// (e.g. "NH0007: rule sets material = 'support' …"). Info/Warning/
     /// Error/Fatal map to info/warning/error toasts respectively.
-    void diagnostic(const Diagnostic &d);
+    void diagnostic(const ir::Diagnostic &d);
 
     /// Handle returned by `startProgress` and used to route subsequent
     /// `updateProgress` / `finishProgress` calls. 0 is reserved as "no

@@ -1,13 +1,13 @@
-#include <nodehammer/ir/fb/semantic/exporter.hpp>
+#include <ir/fb/semantic/exporter.hpp>
 
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
 
 #include <format>
 #include <span>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view SemanticFlatbufferExporter::formatName() const noexcept { return "nhb"; }
 
@@ -16,13 +16,13 @@ std::vector<std::string> SemanticFlatbufferExporter::supportedExtensions() const
 }
 
 SemanticExportResult
-SemanticFlatbufferExporter::write(const SemanticScene &scene, const std::filesystem::path &path,
+SemanticFlatbufferExporter::write(const semantic::Scene &scene, const std::filesystem::path &path,
                                   [[maybe_unused]] const SemanticExportConfig &config) const {
     SemanticExportResult result;
 
     try {
         auto bytes = semanticSceneToBytes(scene);
-        zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}));
+        detail::zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}));
     } catch (const std::exception &ex) {
         result.diags.error(
             codes::kErrExportWriteFailed,
@@ -33,4 +33,4 @@ SemanticFlatbufferExporter::write(const SemanticScene &scene, const std::filesys
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

@@ -1,8 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
 
 #include <filesystem>
 #include <set>
@@ -81,7 +81,7 @@ TEST_CASE("Fixture configs: load/validate outcome matches expectation", "[config
     const auto fixture = GENERATE(from_range(kFixtureCases));
     DYNAMIC_SECTION(fixture.name) {
         auto result =
-            nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs" / fixture.name);
+            nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs" / fixture.name);
 
         if (fixture.expect == Expect::LoadFails) {
             REQUIRE(result.diags.hasErrors());
@@ -89,7 +89,7 @@ TEST_CASE("Fixture configs: load/validate outcome matches expectation", "[config
         }
         REQUIRE_FALSE(result.diags.hasErrors());
 
-        auto validationDiags = nodehammer::ConfigValidator::validate(result.config);
+        auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
         if (fixture.expect == Expect::ValidateFails) {
             REQUIRE(validationDiags.hasErrors());
         } else {

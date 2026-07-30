@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
+#include <config/config_loader.hpp>
+#include <ir/diagnostic_codes.hpp>
 
 #include <cstring>
 #include <fstream>
@@ -15,7 +15,7 @@ static std::filesystem::path fixturesDir{NODEHAMMER_FIXTURES_DIR};
 // ── loadFromString: basic API ──────────────────────────────────────────────────
 
 TEST_CASE("ConfigLoader: loadFromString succeeds on empty config", "[config][loader]") {
-    auto result = nodehammer::ConfigLoader::loadFromString("# empty\n");
+    auto result = nodehammer::config::ConfigLoader::loadFromString("# empty\n");
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.config.materials.empty());
     REQUIRE(result.config.selection.empty());
@@ -24,16 +24,16 @@ TEST_CASE("ConfigLoader: loadFromString succeeds on empty config", "[config][loa
 TEST_CASE("ConfigLoader: invalid TOML syntax -> Error diagnostic with source position",
           "[config][loader]") {
     constexpr std::string_view bad = "[unclosed\nkey = 1\n";
-    auto result = nodehammer::ConfigLoader::loadFromString(bad, "test_input");
+    auto result = nodehammer::config::ConfigLoader::loadFromString(bad, "test_input");
     REQUIRE(result.diags.hasErrors());
     const auto &d = result.diags.items().front();
-    REQUIRE(d.severity == nodehammer::DiagnosticSeverity::Error);
+    REQUIRE(d.severity == nodehammer::ir::DiagnosticSeverity::Error);
     REQUIRE(d.context.find("test_input") != std::string::npos);
 }
 
 TEST_CASE("ConfigLoader: NHConfig is constructible from C++ without TOML", "[config][loader]") {
-    nodehammer::NHConfig cfg;
-    nodehammer::MaterialDef mat;
+    nodehammer::config::NHConfig cfg;
+    nodehammer::config::MaterialDef mat;
     mat.name = "steel";
     mat.metallic = 0.8f;
     mat.roughness = 0.2f;
@@ -45,7 +45,8 @@ TEST_CASE("ConfigLoader: NHConfig is constructible from C++ without TOML", "[con
 // ── loadFromFile: fixture files ───────────────────────────────────────────────
 
 TEST_CASE("ConfigLoader: minimal.toml loads without diagnostics", "[config][loader][fixtures]") {
-    auto result = nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/minimal.toml");
+    auto result =
+        nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs/minimal.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.config.materials.empty());
     REQUIRE(result.config.selection.empty());
@@ -54,7 +55,8 @@ TEST_CASE("ConfigLoader: minimal.toml loads without diagnostics", "[config][load
 }
 
 TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loader][fixtures]") {
-    auto result = nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/full_example.toml");
+    auto result =
+        nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs/full_example.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.diags.empty()); // clean fixture — no warnings
     const auto &cfg = result.config;
@@ -76,15 +78,16 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
 
     // Selection rules
     REQUIRE(cfg.selection.size() == 3);
-    REQUIRE(cfg.selection.at(0).action == nodehammer::SelectionAction::KeepIf);
+    REQUIRE(cfg.selection.at(0).action == nodehammer::config::SelectionAction::KeepIf);
     REQUIRE(cfg.selection.at(0).scope == "/World/Tracker/**");
-    REQUIRE(
-        std::holds_alternative<nodehammer::NameGlobPredicate>(cfg.selection.at(0).predicate.data));
+    REQUIRE(std::holds_alternative<nodehammer::config::NameGlobPredicate>(
+        cfg.selection.at(0).predicate.data));
 
-    REQUIRE(cfg.selection.at(1).action == nodehammer::SelectionAction::DropIf);
-    REQUIRE(std::holds_alternative<nodehammer::TagPredicate>(cfg.selection.at(1).predicate.data));
+    REQUIRE(cfg.selection.at(1).action == nodehammer::config::SelectionAction::DropIf);
+    REQUIRE(std::holds_alternative<nodehammer::config::TagPredicate>(
+        cfg.selection.at(1).predicate.data));
 
-    REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::AndPredicate>>(
+    REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::config::AndPredicate>>(
         cfg.selection.at(2).predicate.data));
 
     // Unified rules (populated from [[rules]])
@@ -111,7 +114,7 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
 }
 
 TEST_CASE("ConfigLoader: missing file -> Error diagnostic", "[config][loader]") {
-    auto result = nodehammer::ConfigLoader::loadFromFile("/nonexistent/path/config.toml");
+    auto result = nodehammer::config::ConfigLoader::loadFromFile("/nonexistent/path/config.toml");
     REQUIRE(result.diags.hasErrors());
 }
 
@@ -124,13 +127,14 @@ TEST_CASE("ConfigLoader: keep_if with path_glob parses correctly", "[config][loa
 type = "path_glob"
 pattern = "/world/Tracker/**"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.config.selection.size() == 1);
-    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::KeepIf);
+    REQUIRE(result.config.selection.at(0).action == nodehammer::config::SelectionAction::KeepIf);
     const auto &pred = result.config.selection.at(0).predicate;
-    REQUIRE(std::holds_alternative<nodehammer::PathGlobPredicate>(pred.data));
-    REQUIRE(std::get<nodehammer::PathGlobPredicate>(pred.data).pattern == "/world/Tracker/**");
+    REQUIRE(std::holds_alternative<nodehammer::config::PathGlobPredicate>(pred.data));
+    REQUIRE(std::get<nodehammer::config::PathGlobPredicate>(pred.data).pattern ==
+            "/world/Tracker/**");
 }
 
 TEST_CASE("ConfigLoader: drop_if with is_leaf parses correctly", "[config][loader]") {
@@ -139,10 +143,10 @@ TEST_CASE("ConfigLoader: drop_if with is_leaf parses correctly", "[config][loade
 [selection_rules.drop_if]
 type = "is_leaf"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
-    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::DropIf);
-    REQUIRE(std::holds_alternative<nodehammer::IsLeafPredicate>(
+    REQUIRE(result.config.selection.at(0).action == nodehammer::config::SelectionAction::DropIf);
+    REQUIRE(std::holds_alternative<nodehammer::config::IsLeafPredicate>(
         result.config.selection.at(0).predicate.data));
 }
 
@@ -154,9 +158,9 @@ type = "not"
 [selection_rules.keep_if.operand]
 type = "is_leaf"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
-    REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::NotPredicate>>(
+    REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::config::NotPredicate>>(
         result.config.selection.at(0).predicate.data));
 }
 
@@ -167,13 +171,14 @@ TEST_CASE("ConfigLoader: keep_if as string expression", "[config][loader]") {
 [[selection_rules]]
 keep_if = 'path ~= "/world/Tracker/**"'
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.config.selection.size() == 1);
-    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::KeepIf);
+    REQUIRE(result.config.selection.at(0).action == nodehammer::config::SelectionAction::KeepIf);
     const auto &pred = result.config.selection.at(0).predicate;
-    REQUIRE(std::holds_alternative<nodehammer::PathGlobPredicate>(pred.data));
-    REQUIRE(std::get<nodehammer::PathGlobPredicate>(pred.data).pattern == "/world/Tracker/**");
+    REQUIRE(std::holds_alternative<nodehammer::config::PathGlobPredicate>(pred.data));
+    REQUIRE(std::get<nodehammer::config::PathGlobPredicate>(pred.data).pattern ==
+            "/world/Tracker/**");
 }
 
 TEST_CASE("ConfigLoader: drop_if as string expression", "[config][loader]") {
@@ -181,10 +186,10 @@ TEST_CASE("ConfigLoader: drop_if as string expression", "[config][loader]") {
 [[selection_rules]]
 drop_if = 'name ~= "*"'
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
-    REQUIRE(result.config.selection.at(0).action == nodehammer::SelectionAction::DropIf);
-    REQUIRE(std::holds_alternative<nodehammer::NameGlobPredicate>(
+    REQUIRE(result.config.selection.at(0).action == nodehammer::config::SelectionAction::DropIf);
+    REQUIRE(std::holds_alternative<nodehammer::config::NameGlobPredicate>(
         result.config.selection.at(0).predicate.data));
 }
 
@@ -193,10 +198,10 @@ TEST_CASE("ConfigLoader: keep_if compound expression", "[config][loader]") {
 [[selection_rules]]
 keep_if = 'tag.sensitive == "true" && any(path ~= "**/A/**", path ~= "**/B/**")'
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     const auto &pred = result.config.selection.at(0).predicate;
-    REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::AndPredicate>>(pred.data));
+    REQUIRE(std::holds_alternative<std::shared_ptr<nodehammer::config::AndPredicate>>(pred.data));
 }
 
 TEST_CASE("ConfigLoader: keep_if invalid expression -> Error", "[config][loader]") {
@@ -204,7 +209,7 @@ TEST_CASE("ConfigLoader: keep_if invalid expression -> Error", "[config][loader]
 [[selection_rules]]
 keep_if = 'unknown_keyword'
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
 }
 
@@ -214,11 +219,11 @@ TEST_CASE("ConfigLoader: rules match as string expression", "[config][loader]") 
 material = "steel"
 match = 'tag.sensitive == "true"'
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.config.rules.at(0).match.has_value());
-    REQUIRE(
-        std::holds_alternative<nodehammer::TagPredicate>(result.config.rules.at(0).match->data));
+    REQUIRE(std::holds_alternative<nodehammer::config::TagPredicate>(
+        result.config.rules.at(0).match->data));
 }
 
 TEST_CASE("ConfigLoader: rules match invalid expression -> Error", "[config][loader]") {
@@ -227,7 +232,7 @@ TEST_CASE("ConfigLoader: rules match invalid expression -> Error", "[config][loa
 material = "steel"
 match = 'bad expression @@'
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
 }
 
@@ -237,7 +242,7 @@ TEST_CASE("ConfigLoader: unknown predicate type -> Error", "[config][loader]") {
 [selection_rules.keep_if]
 type = "not_a_real_type"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
 }
 
@@ -246,7 +251,7 @@ TEST_CASE("ConfigLoader: rule missing keep_if or drop_if -> Error", "[config][lo
 [[selection_rules]]
 closure = "none"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
 }
 
@@ -257,7 +262,7 @@ TEST_CASE("ConfigLoader: unknown fallback -> Error", "[config][loader]") {
 max_segments_circle = 32
 fallback = "explode"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
 }
 
@@ -268,11 +273,11 @@ TEST_CASE("ConfigLoader: unknown top-level key -> Warning", "[config][loader]") 
 [tessellation_rulesx]
 max_segments_circle = 32
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors()); // still succeeds
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning &&
             d.code == nodehammer::codes::kWarnConfigUnknownKey &&
             d.message.find("tessellation_rulesx") != std::string::npos) {
             found = true;
@@ -287,11 +292,11 @@ TEST_CASE("ConfigLoader: unknown key in material table -> Warning", "[config][lo
 metallick = 0.8
 roughness = 0.2
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning &&
             d.message.find("metallick") != std::string::npos) {
             found = true;
         }
@@ -307,11 +312,11 @@ TEST_CASE("ConfigLoader: unknown key in rules.tessellation -> Warning", "[config
 xmax_segments_circle = 32
 fallback = "skip"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning &&
             d.message.find("xmax_segments_circle") != std::string::npos) {
             found = true;
         }
@@ -327,11 +332,11 @@ scop = "/World/**"
 [selection_rules.keep_if]
 type = "is_leaf"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning &&
             d.message.find("scop") != std::string::npos) {
             found = true;
         }
@@ -347,7 +352,7 @@ TEST_CASE("ConfigLoader: gltf-only key under [export.obj] -> Error", "[config][l
 [export.obj]
 multi_scene = true
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
@@ -366,10 +371,10 @@ TEST_CASE("ConfigLoader: gltf-only key under [export.gltf] -> no error", "[confi
 multi_scene = true
 scene_name_separator = " > "
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
-    const auto &gltfCfg =
-        std::get<nodehammer::GltfExportFormatConfig>(result.config.exportFormats.at("gltf"));
+    const auto &gltfCfg = std::get<nodehammer::config::GltfExportFormatConfig>(
+        result.config.exportFormats.at("gltf"));
     REQUIRE(gltfCfg.multiScene == true);
     REQUIRE(gltfCfg.sceneNameSeparator == " > ");
 }
@@ -379,10 +384,10 @@ TEST_CASE("ConfigLoader: gltf-only key under [export.glb] -> no error", "[config
 [export.glb]
 multi_scene = true
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     const auto &glbCfg =
-        std::get<nodehammer::GltfExportFormatConfig>(result.config.exportFormats.at("glb"));
+        std::get<nodehammer::config::GltfExportFormatConfig>(result.config.exportFormats.at("glb"));
     REQUIRE(glbCfg.multiScene == true);
 }
 
@@ -395,7 +400,7 @@ TEST_CASE("ConfigLoader: bake_unit_scale under [export.obj] -> Error", "[config]
 [export.obj]
 bake_unit_scale = false
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
@@ -415,7 +420,7 @@ TEST_CASE("ConfigLoader: bake_unit_scale = true under [export.obj] -> Error", "[
 [export.obj]
 bake_unit_scale = true
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
 }
 
@@ -428,7 +433,7 @@ TEST_CASE("ConfigLoader: a misplaced export key is reported exactly once", "[con
 bake_unit_scale = false
 multi_scene = true
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
     std::size_t unknownKeyWarnings = 0;
     for (const auto &d : result.diags.items()) {
@@ -445,10 +450,10 @@ TEST_CASE("ConfigLoader: bake_unit_scale under [export.gltf] -> parsed", "[confi
 [export.gltf]
 bake_unit_scale = true
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
-    const auto &gltfCfg =
-        std::get<nodehammer::GltfExportFormatConfig>(result.config.exportFormats.at("gltf"));
+    const auto &gltfCfg = std::get<nodehammer::config::GltfExportFormatConfig>(
+        result.config.exportFormats.at("gltf"));
     REQUIRE(gltfCfg.bakeUnitScale == true);
 }
 
@@ -457,7 +462,7 @@ TEST_CASE("ConfigLoader: scene_name_separator under [export.obj] -> Error", "[co
 [export.obj]
 scene_name_separator = " / "
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
@@ -480,7 +485,7 @@ roughness = 0.2
 max_segments_circle = 32
 fallback = "skip"
 )";
-    auto result = nodehammer::ConfigLoader::loadFromString(toml);
+    auto result = nodehammer::config::ConfigLoader::loadFromString(toml);
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.diags.empty());
 }
@@ -489,7 +494,7 @@ fallback = "skip"
 
 TEST_CASE("ConfigLoader: basic include merges materials and rules", "[config][loader][include]") {
     auto result =
-        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
+        nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
     const auto &cfg = result.config;
 
@@ -516,7 +521,7 @@ TEST_CASE("ConfigLoader: basic include merges materials and rules", "[config][lo
 
 TEST_CASE("ConfigLoader: nested includes", "[config][loader][include]") {
     auto result =
-        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_nested.toml");
+        nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs/include_nested.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
     const auto &cfg = result.config;
 
@@ -541,7 +546,7 @@ TEST_CASE("ConfigLoader: nested includes", "[config][loader][include]") {
 
 TEST_CASE("ConfigLoader: circular include -> Error", "[config][loader][include]") {
     auto result =
-        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_cycle.toml");
+        nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs/include_cycle.toml");
     REQUIRE(result.diags.hasErrors());
     bool foundCycle = false;
     for (const auto &d : result.diags.items()) {
@@ -557,8 +562,8 @@ TEST_CASE("ConfigLoader: circular include -> Error", "[config][loader][include]"
 // exists for — and used to be rejected outright, because "already seen
 // anywhere" and "already on the current path" were the same set.
 TEST_CASE("ConfigLoader: diamond include is not circular", "[config][loader][include]") {
-    auto result =
-        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_diamond.toml");
+    auto result = nodehammer::config::ConfigLoader::loadFromFile(fixturesDir /
+                                                                 "configs/include_diamond.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
 
     // The shared base is merged exactly once: merging it per branch would
@@ -577,14 +582,14 @@ TEST_CASE("ConfigLoader: diamond include is not circular", "[config][loader][inc
 }
 
 TEST_CASE("ConfigLoader: include non-existent file -> Error", "[config][loader][include]") {
-    auto result =
-        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_bad_path.toml");
+    auto result = nodehammer::config::ConfigLoader::loadFromFile(fixturesDir /
+                                                                 "configs/include_bad_path.toml");
     REQUIRE(result.diags.hasErrors());
 }
 
 TEST_CASE("ConfigLoader: parent overrides included scalar", "[config][loader][include]") {
     auto result =
-        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
+        nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
     // hoist_orphans = true in main file; not set in includes → true
     REQUIRE(result.config.hoistOrphans);
@@ -592,7 +597,7 @@ TEST_CASE("ConfigLoader: parent overrides included scalar", "[config][loader][in
 
 TEST_CASE("ConfigLoader: included rules come before parent rules", "[config][loader][include]") {
     auto result =
-        nodehammer::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
+        nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs/include_basic.toml");
     REQUIRE_FALSE(result.diags.hasErrors());
     const auto &rules = result.config.rules;
     // includes/rules.toml rules come first (match path ~= "**/Tracker/**", then fallback tess),
@@ -621,8 +626,8 @@ std::vector<std::byte> readFileBytes(const std::filesystem::path &path) {
 // Build a fetcher that reads from disk relative to a base directory.
 // Used to give parseAndMerge equivalent semantics to loadFromFile so the
 // equivalence test below is meaningful.
-nodehammer::IncludeFetcher fsFetcher(const std::filesystem::path &base,
-                                     std::vector<std::vector<std::byte>> &owned) {
+nodehammer::config::IncludeFetcher fsFetcher(const std::filesystem::path &base,
+                                             std::vector<std::vector<std::byte>> &owned) {
     return [base, &owned](std::string_view abs_key) -> std::optional<std::span<const std::byte>> {
         auto path = base / std::filesystem::path{abs_key};
         std::ifstream in{path, std::ios::binary};
@@ -644,7 +649,7 @@ nodehammer::IncludeFetcher fsFetcher(const std::filesystem::path &base,
 TEST_CASE("ConfigLoader: peekIncludesFromBytes returns top-level includes",
           "[config][loader][include][bytes]") {
     auto bytes = readFileBytes(fixturesDir / "configs/include_basic.toml");
-    auto includes = nodehammer::ConfigLoader::peekIncludesFromBytes(bytes);
+    auto includes = nodehammer::config::ConfigLoader::peekIncludesFromBytes(bytes);
     REQUIRE(includes.size() == 2);
     REQUIRE(includes[0] == "includes/materials.toml");
     REQUIRE(includes[1] == "includes/rules.toml");
@@ -653,13 +658,13 @@ TEST_CASE("ConfigLoader: peekIncludesFromBytes returns top-level includes",
 TEST_CASE("ConfigLoader: peekIncludesFromBytes returns empty when no include key",
           "[config][loader][include][bytes]") {
     auto bytes = readFileBytes(fixturesDir / "configs/minimal.toml");
-    auto includes = nodehammer::ConfigLoader::peekIncludesFromBytes(bytes);
+    auto includes = nodehammer::config::ConfigLoader::peekIncludesFromBytes(bytes);
     REQUIRE(includes.empty());
 }
 
 TEST_CASE("ConfigLoader: resolveIncludeKey computes relative paths against parent",
           "[config][loader][include]") {
-    using L = nodehammer::ConfigLoader;
+    using L = nodehammer::config::ConfigLoader;
     REQUIRE(L::resolveIncludeKey("scene.toml", "common.toml") == "common.toml");
     REQUIRE(L::resolveIncludeKey("scene.toml", "subdir/common.toml") == "subdir/common.toml");
     REQUIRE(L::resolveIncludeKey("subdir/scene.toml", "common.toml") == "subdir/common.toml");
@@ -670,12 +675,12 @@ TEST_CASE("ConfigLoader: resolveIncludeKey computes relative paths against paren
 TEST_CASE("ConfigLoader: parseAndMerge matches loadFromFile for include_basic",
           "[config][loader][include][bytes]") {
     auto path = fixturesDir / "configs/include_basic.toml";
-    auto via_path = nodehammer::ConfigLoader::loadFromFile(path);
+    auto via_path = nodehammer::config::ConfigLoader::loadFromFile(path);
 
     auto bytes = readFileBytes(path);
     std::vector<std::vector<std::byte>> owned;
-    auto via_bytes = nodehammer::ConfigLoader::parseAndMerge(bytes, "include_basic.toml",
-                                                             fsFetcher(path.parent_path(), owned));
+    auto via_bytes = nodehammer::config::ConfigLoader::parseAndMerge(
+        bytes, "include_basic.toml", fsFetcher(path.parent_path(), owned));
 
     REQUIRE_FALSE(via_path.diags.hasErrors());
     REQUIRE_FALSE(via_bytes.diags.hasErrors());
@@ -687,12 +692,12 @@ TEST_CASE("ConfigLoader: parseAndMerge matches loadFromFile for include_basic",
 TEST_CASE("ConfigLoader: parseAndMerge matches loadFromFile for nested includes",
           "[config][loader][include][bytes]") {
     auto path = fixturesDir / "configs/include_nested.toml";
-    auto via_path = nodehammer::ConfigLoader::loadFromFile(path);
+    auto via_path = nodehammer::config::ConfigLoader::loadFromFile(path);
 
     auto bytes = readFileBytes(path);
     std::vector<std::vector<std::byte>> owned;
-    auto via_bytes = nodehammer::ConfigLoader::parseAndMerge(bytes, "include_nested.toml",
-                                                             fsFetcher(path.parent_path(), owned));
+    auto via_bytes = nodehammer::config::ConfigLoader::parseAndMerge(
+        bytes, "include_nested.toml", fsFetcher(path.parent_path(), owned));
 
     REQUIRE_FALSE(via_path.diags.hasErrors());
     REQUIRE_FALSE(via_bytes.diags.hasErrors());
@@ -706,7 +711,7 @@ TEST_CASE("ConfigLoader: parseAndMerge surfaces missing include as error",
     std::vector<std::byte> bytes(root_toml.size());
     std::memcpy(bytes.data(), root_toml.data(), root_toml.size());
 
-    auto result = nodehammer::ConfigLoader::parseAndMerge(
+    auto result = nodehammer::config::ConfigLoader::parseAndMerge(
         bytes, "root.toml",
         [](std::string_view) -> std::optional<std::span<const std::byte>> { return std::nullopt; });
     REQUIRE(result.diags.hasErrors());
@@ -740,7 +745,7 @@ TEST_CASE("ConfigLoader: parseAndMerge detects cycles via key equality",
         return std::nullopt;
     };
 
-    auto result = nodehammer::ConfigLoader::parseAndMerge(a_bytes, "a.toml", fetcher);
+    auto result = nodehammer::config::ConfigLoader::parseAndMerge(a_bytes, "a.toml", fetcher);
     REQUIRE(result.diags.hasErrors());
     bool foundCycle = false;
     for (const auto &d : result.diags.items()) {

@@ -1,35 +1,36 @@
-#include <nodehammer/scene_build.hpp>
+#include <scene_build.hpp>
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_validator.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
-#include <nodehammer/selection/selector.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/semantic/importer.hpp>
+#include <selection/selector.hpp>
+#include <tessellation/build_pipeline.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
 
-namespace nodehammer {
+namespace nodehammer::pipeline {
 
-ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene,
-                                                      std::optional<WedgeCutParams> wedgeCut) {
+ScenePrepResult
+prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Scene scene,
+                                      std::optional<tessellation::WedgeCutParams> wedgeCut) {
     ScenePrepResult prep;
     prep.config = std::move(config);
     prep.scene = std::move(scene);
 
-    auto validDiags = ConfigValidator::validate(prep.config);
+    auto validDiags = config::ConfigValidator::validate(prep.config);
     prep.diags.append(validDiags);
     if (validDiags.hasErrors()) {
         return prep;
     }
 
     if (!prep.config.selection.empty()) {
-        SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
+        selection::SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
         auto selDiags = sel.prune(prep.scene);
         prep.diags.append(selDiags);
         if (selDiags.hasErrors()) {
@@ -46,7 +47,7 @@ ScenePrepResult prepareSceneForTessellationFromInputs(NHConfig config, SemanticS
     // Azimuthal wedge cut runs after dedup so cut shapes that share an
     // identical local-frame cut stay instanced (mirrors the convert CLI).
     if (wedgeCut) {
-        (void)applyWedgeCut(prep.scene, *wedgeCut);
+        (void)tessellation::applyWedgeCut(prep.scene, *wedgeCut);
     }
 
     prep.ok = true;
@@ -63,9 +64,9 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
         return result;
     }
 
-    NHConfig cfg;
+    config::NHConfig cfg;
     if (!config_path.empty()) {
-        auto loaded = ConfigLoader::loadFromFile(config_path);
+        auto loaded = config::ConfigLoader::loadFromFile(config_path);
         result.diags.append(loaded.diags);
         if (loaded.diags.hasErrors()) {
             return result;
@@ -73,7 +74,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
         cfg = std::move(loaded.config);
     }
 
-    const auto importerRegistry = ImporterRegistry::makeDefault();
+    const auto importerRegistry = ir::ImporterRegistry::makeDefault();
     const auto *importer = importerRegistry.resolve(geometry_path);
     if (importer == nullptr) {
         result.diags.error(codes::kErrImportFormatUnknown,
@@ -93,9 +94,10 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     // longer a hand-copied 4th sequence. `buildSceneFromPaths` applies no wedge
     // (nullopt), and prep now runs with a deferred wedge like every other site
     // (invariant #1). A single unbounded slice finishes in one drive loop.
-    BuildPipeline pipe;
-    pipe.start(std::make_shared<const NHConfig>(std::move(cfg)),
-               std::make_shared<const SemanticScene>(std::move(importResult.scene)), std::nullopt);
+    tessellation::BuildPipeline pipe;
+    pipe.start(std::make_shared<const config::NHConfig>(std::move(cfg)),
+               std::make_shared<const ir::semantic::Scene>(std::move(importResult.scene)),
+               std::nullopt);
     while (!pipe.advance(std::numeric_limits<std::uint64_t>::max())) {
     }
     SceneBuildResult built = pipe.take();
@@ -104,4 +106,4 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::pipeline

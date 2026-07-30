@@ -1,4 +1,4 @@
-#include <nodehammer/viewer/app.hpp>
+#include <viewer/app.hpp>
 
 #include "ao_denoise_pass.hpp"
 #include "ao_pass.hpp"
@@ -21,21 +21,21 @@
 #include "ui/perf_history.hpp"
 #include "ui/viewer_ui.hpp"
 
-#include <nodehammer/viewer/archive_export.hpp>
-#include <nodehammer/viewer/archive_project_fs.hpp>
-#include <nodehammer/viewer/backend_caps.hpp>
-#include <nodehammer/viewer/platform.hpp>
-#include <nodehammer/viewer/png_export.hpp>
-#include <nodehammer/viewer/project_manifest.hpp>
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/archive_export.hpp>
+#include <viewer/archive_project_fs.hpp>
+#include <viewer/backend_caps.hpp>
+#include <viewer/platform.hpp>
+#include <viewer/png_export.hpp>
+#include <viewer/project_manifest.hpp>
+#include <viewer/render_quality.hpp>
 
-#include <nodehammer/ir/render.hpp>
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/viewer/app_state.hpp>
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/dynamic_render_scale.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
+#include <ir/render.hpp>
+#include <scene_build.hpp>
+#include <viewer/app_state.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/camera.hpp>
+#include <viewer/dynamic_render_scale.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -162,8 +162,8 @@ struct App::Impl {
     // shader cut while dragging), `cut_scene` is the watertight Boolean-cut bake
     // (shown once the angle settles). They never apply both cuts at the same time
     // (that z-fights the shader's discard plane against the Boolean cut faces).
-    std::shared_ptr<const RenderScene> scene;
-    std::shared_ptr<const RenderScene> cut_scene;
+    std::shared_ptr<const ir::render::Scene> scene;
+    std::shared_ptr<const ir::render::Scene> cut_scene;
     std::unique_ptr<ProjectFs> project_;
     /// Platform impl: native vs web. Constructed by App's ctor body
     /// after this Impl is in place, so the impl can hold a back-pointer
@@ -719,13 +719,13 @@ void App::Impl::onInit() {
     build_controller_.configure(&notifications,
                                 BuildController::Callbacks{
                                     .on_base_scene_ready =
-                                        [this](std::shared_ptr<const RenderScene> s) {
+                                        [this](std::shared_ptr<const ir::render::Scene> s) {
                                             scene = std::move(s);
                                             scene_uploaded = false;
                                             camera_framed = false;
                                         },
                                     .on_cut_scene_ready =
-                                        [this](std::shared_ptr<const RenderScene> s) {
+                                        [this](std::shared_ptr<const ir::render::Scene> s) {
                                             cut_scene = std::move(s);
                                             cut_uploaded = false;
                                         },
@@ -2842,7 +2842,7 @@ void App::Impl::onCleanup() {
     sg_shutdown();
 }
 
-void App::setScene(std::shared_ptr<const RenderScene> scene) {
+void App::setScene(std::shared_ptr<const ir::render::Scene> scene) {
     impl_->scene = std::move(scene);
     impl_->scene_uploaded = false;
     impl_->camera_framed = false;

@@ -1,13 +1,13 @@
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/json/semantic/importer.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/json/semantic/importer.hpp>
+#include <ir/semantic_json.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <format>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view JsonImporter::formatName() const noexcept { return "json"; }
 
@@ -17,9 +17,9 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
     ImportResult result;
 
     try {
-        auto jsonStr = zstd_io::readJsonFromFile(path);
+        auto jsonStr = detail::zstd_io::readJsonFromFile(path);
         auto j = nlohmann::json::parse(jsonStr);
-        result.scene = j.get<SemanticScene>();
+        result.scene = j.get<semantic::Scene>();
         result.scene.computeWorldTransforms();
         result.scene.computeOriginalPaths();
     } catch (const std::exception &ex) {
@@ -30,4 +30,4 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

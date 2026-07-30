@@ -1,8 +1,8 @@
-#include <nodehammer/viewer/platform.hpp>
+#include <viewer/platform.hpp>
 
 #include "platform_native_common.hpp"
 
-#include <nodehammer/viewer/app.hpp>
+#include <viewer/app.hpp>
 
 #include <sokol_app.h>
 

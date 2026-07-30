@@ -1,17 +1,17 @@
-#include <nodehammer/viewer/archive_project_fs.hpp>
+#include <viewer/archive_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <detail/file_io.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/semantic.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/project_fs.hpp>
+#include <viewer/zip_working_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
 // miniz's zlib-compat aliases (`compress`, `uncompress`, …) would macro-clash
-// with nodehammer::zstd_io::compress used by the build-session harness below.
+// with nodehammer::detail::zstd_io::compress used by the build-session harness below.
 #define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 #include <miniz.h>
 
@@ -93,15 +93,15 @@ const DirNode *findChild(std::span<const DirNode> children, std::string_view nam
 /// A minimal valid `.nhb.zst` geometry payload for the build-session harness.
 std::vector<std::byte> minimalNhbZstBytes() {
     using namespace nodehammer;
-    SemanticScene scene;
+    ir::semantic::Scene scene;
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};
+    scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
     auto lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    ir::semantic::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;
@@ -110,8 +110,8 @@ std::vector<std::byte> minimalNhbZstBytes() {
     scene.rootId = nodeId;
     scene.sourceFile = "/test/input";
 
-    auto raw = semanticSceneToBytes(scene);
-    return zstd_io::compress(std::span<const std::byte>{raw});
+    auto raw = ir::semanticSceneToBytes(scene);
+    return detail::zstd_io::compress(std::span<const std::byte>{raw});
 }
 
 /// RAII temp dir holding a seed archive on disk.
@@ -126,7 +126,7 @@ struct TempArchive {
         std::filesystem::create_directories(root);
         zip = root / "project.zip";
         auto blob = makeZip(entries);
-        nodehammer::file_io::writeFile(zip, blob);
+        nodehammer::detail::file_io::writeFile(zip, blob);
     }
     ~TempArchive() {
         std::error_code ec;
@@ -291,7 +291,7 @@ TEST_CASE("ArchiveProjectFs enters an error state on a bad archive",
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     auto bad = root / "not.zip";
-    nodehammer::file_io::writeFile(bad, asBytes("definitely not a zip"));
+    nodehammer::detail::file_io::writeFile(bad, asBytes("definitely not a zip"));
 
     ArchiveProjectFs fs{bad};
     REQUIRE(fs.status() == ProjectFsStatus::Error);
@@ -305,11 +305,11 @@ TEST_CASE("ArchiveProjectFs surfaces corrupted archive entries as errors",
           "[viewer][archive_project_fs]") {
     TempArchive ta{"corrupt", {{"scene.toml", "root = 1\n"}}};
 
-    auto bytes = nodehammer::file_io::readFile(ta.zip);
+    auto bytes = nodehammer::detail::file_io::readFile(ta.zip);
     corruptZipCrc(bytes);
 
     const auto corrupt_zip = ta.root / "corrupt.zip";
-    nodehammer::file_io::writeFile(corrupt_zip, bytes);
+    nodehammer::detail::file_io::writeFile(corrupt_zip, bytes);
 
     ArchiveProjectFs fs{corrupt_zip};
     REQUIRE(fs.status() == ProjectFsStatus::Ready);

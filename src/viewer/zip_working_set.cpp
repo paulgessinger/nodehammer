@@ -1,6 +1,6 @@
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <viewer/zip_working_set.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
+#include <detail/file_io.hpp>
 
 #include <miniz.h>
 
@@ -117,7 +117,7 @@ ZipWorkingSet ZipWorkingSet::openFromBytes(std::span<const std::byte> bytes) {
 
 ZipWorkingSet ZipWorkingSet::openFromFile(const std::filesystem::path &path) {
     // Throws std::runtime_error on open failure, matching file_io's contract.
-    std::vector<std::byte> bytes = file_io::readFile(path);
+    std::vector<std::byte> bytes = detail::file_io::readFile(path);
     return openFromBytes(bytes);
 }
 

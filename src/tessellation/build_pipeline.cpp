@@ -1,14 +1,14 @@
-#include <nodehammer/tessellation/build_pipeline.hpp>
+#include <tessellation/build_pipeline.hpp>
 
-#include <nodehammer/tessellation/tessellation_job.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <tessellation/tessellation_job.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <memory>
 #include <optional>
 #include <utility>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 // The pipeline body is the canonical lift of the web-cooperative state machine
 // (formerly CooperativeBackend::poll): a Queued → Preparing → (Cutting?) →
@@ -23,15 +23,15 @@ struct BuildPipeline::Impl {
     // first Preparing advance (never in start()), so the caller's pristine
     // scene is never mutated (invariant #5) and the copy runs off the caller's
     // hot path (native: on the worker thread; cooperative: after a paint).
-    std::shared_ptr<const NHConfig> preset_config;
-    std::shared_ptr<const SemanticScene> preset_scene;
+    std::shared_ptr<const config::NHConfig> preset_config;
+    std::shared_ptr<const ir::semantic::Scene> preset_scene;
     std::optional<WedgeCutParams> wedge_cut;
 
-    ScenePrepResult prep;
+    pipeline::ScenePrepResult prep;
     WedgeCutJob wedge_job;
     TessellationJob tess_job;
 
-    SceneBuildResult result;
+    pipeline::SceneBuildResult result;
 
     void reset() {
         phase = Phase::Idle;
@@ -50,8 +50,8 @@ BuildPipeline::~BuildPipeline() = default;
 BuildPipeline::BuildPipeline(BuildPipeline &&) noexcept = default;
 BuildPipeline &BuildPipeline::operator=(BuildPipeline &&) noexcept = default;
 
-void BuildPipeline::start(std::shared_ptr<const NHConfig> config,
-                          std::shared_ptr<const SemanticScene> scene,
+void BuildPipeline::start(std::shared_ptr<const config::NHConfig> config,
+                          std::shared_ptr<const ir::semantic::Scene> scene,
                           std::optional<WedgeCutParams> wedgeCut) {
     impl_->preset_config = std::move(config);
     impl_->preset_scene = std::move(scene);
@@ -79,8 +79,8 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         // Deferred-wedge prep (invariant #1): the wedge is always run as a
         // separate WedgeCutJob below, never inline in prep. Prep copies its
         // inputs by value, so the pristine scene stays untouched (invariant #5).
-        s.prep =
-            prepareSceneForTessellationFromInputs(*s.preset_config, *s.preset_scene, std::nullopt);
+        s.prep = pipeline::prepareSceneForTessellationFromInputs(*s.preset_config, *s.preset_scene,
+                                                                 std::nullopt);
         s.preset_config.reset();
         s.preset_scene.reset();
         if (!s.prep.ok) {
@@ -126,7 +126,7 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         if (tess.diags.hasErrors()) {
             s.result.scene = nullptr;
         } else {
-            s.result.scene = std::make_shared<RenderScene>(std::move(tess.scene));
+            s.result.scene = std::make_shared<ir::render::Scene>(std::move(tess.scene));
         }
         s.result.diags = std::move(s.prep.diags);
         s.prep = {};
@@ -137,8 +137,8 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
     return false;
 }
 
-SceneBuildResult BuildPipeline::take() {
-    SceneBuildResult out = std::move(impl_->result);
+pipeline::SceneBuildResult BuildPipeline::take() {
+    pipeline::SceneBuildResult out = std::move(impl_->result);
     impl_->reset();
     return out;
 }
@@ -154,4 +154,4 @@ std::size_t BuildPipeline::wedgeCutProcessed() const {
     return impl_->wedge_job.processedPlacements();
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

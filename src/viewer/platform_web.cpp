@@ -1,8 +1,8 @@
-#include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/archive_project_fs.hpp>
-#include <nodehammer/viewer/platform.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <viewer/app.hpp>
+#include <viewer/archive_project_fs.hpp>
+#include <viewer/platform.hpp>
+#include <viewer/project_fs.hpp>
+#include <viewer/zip_working_set.hpp>
 
 #include <emscripten/emscripten.h>
 #include <sokol_app.h>

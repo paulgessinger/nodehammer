@@ -1,12 +1,12 @@
-#include <nodehammer/detail/overloaded.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/selection/predicate.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
-#include <nodehammer/tessellation/tessellation_job.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <detail/overloaded.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <selection/predicate.hpp>
+#include <tessellation/primitive_tessellator.hpp>
+#include <tessellation/tessellation_job.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
-#include <nodehammer/tessellation/boolean_tessellator.hpp>
+#include <tessellation/boolean_tessellator.hpp>
 
 #include <glm/gtc/matrix_inverse.hpp>
 
@@ -26,7 +26,7 @@
 #include <print>
 #include <queue>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 namespace {
 
@@ -67,18 +67,18 @@ bool matrixLess(const glm::dmat4 &a, const glm::dmat4 &b) {
 // (recursive closure construction), so doing it per node × per rule × per resolver
 // shows up prominently in profiles — we compile once per lower() call instead.
 struct CompiledRule {
-    const Rule *rule{nullptr};
-    std::optional<Predicate> match; // nullopt ⇔ rule->match is nullopt (match-all)
+    const config::Rule *rule{nullptr};
+    std::optional<selection::Predicate> match; // nullopt ⇔ rule->match is nullopt (match-all)
 };
 
-std::vector<CompiledRule> compileRulePredicates(const std::vector<Rule> &rules) {
+std::vector<CompiledRule> compileRulePredicates(const std::vector<config::Rule> &rules) {
     std::vector<CompiledRule> out;
     out.reserve(rules.size());
     for (const auto &r : rules) {
         CompiledRule cr;
         cr.rule = &r;
         if (r.match.has_value()) {
-            cr.match = compilePredicate(*r.match);
+            cr.match = selection::compilePredicate(*r.match);
         }
         out.push_back(std::move(cr));
     }
@@ -86,7 +86,7 @@ std::vector<CompiledRule> compileRulePredicates(const std::vector<Rule> &rules) 
 }
 
 // Does a rule's match predicate apply to the given node?
-bool ruleMatches(const CompiledRule &cr, const NodeView &view) {
+bool ruleMatches(const CompiledRule &cr, const selection::NodeView &view) {
     if (cr.match.has_value()) {
         return (*cr.match)(view);
     }
@@ -106,12 +106,12 @@ struct ResolvedTessellation {
     // Only acted on when mergeDescendants is also true.
     bool averageMaterialStack{false};
     int maxSegmentsCircle{64};
-    BooleanFallback fallback{BooleanFallback::Skip};
+    config::BooleanFallback fallback{config::BooleanFallback::Skip};
 };
 
 struct MergeDescendantSignature {
-    SemanticShapeId shapeId;
-    SemanticMaterialId sourceMaterialId;
+    ir::semantic::ShapeId shapeId;
+    ir::semantic::MaterialId sourceMaterialId;
     std::string materialKey;
     glm::dmat4 toMergeLocal{1.0};
     int maxSegmentsCircle{64};
@@ -124,7 +124,7 @@ struct MergeDescendantSignature {
 };
 
 struct MergeCacheKey {
-    BooleanFallback fallback{BooleanFallback::Skip};
+    config::BooleanFallback fallback{config::BooleanFallback::Skip};
     // Resolved on the merge_descendants node itself (not its descendants): it
     // changes the merged mesh — interior faces are dropped only when set — so a
     // reused prototype must match on it or an enabled node could keep its
@@ -159,23 +159,24 @@ struct MergeCacheKeyHash {
 // plus any coarse LOD proxy (hull) bindings. Both are reused verbatim by every
 // instance sharing the prototype (see mergeCache).
 struct MergeResult {
-    std::vector<MeshBinding> detail;
-    std::vector<MeshBinding> proxy;
+    std::vector<ir::render::MeshBinding> detail;
+    std::vector<ir::render::MeshBinding> proxy;
 };
 
 struct MergeDescendant {
-    SemanticNodeId nodeId;
+    ir::semantic::NodeId nodeId;
     glm::dmat4 toMergeLocal{1.0};
     int maxSegmentsCircle{64};
 };
 
 struct PrototypeDescendantSignature {
-    SemanticShapeId shapeId;
-    SemanticMaterialId sourceMaterialId;
+    ir::semantic::ShapeId shapeId;
+    ir::semantic::MaterialId sourceMaterialId;
     glm::dmat4 toMergeLocal{1.0};
 };
 
-bool collectPrototypeLeafDescendants(const SemanticScene &scene, SemanticLogVolId rootLv,
+bool collectPrototypeLeafDescendants(const ir::semantic::Scene &scene,
+                                     ir::semantic::LogVolId rootLv,
                                      std::vector<PrototypeDescendantSignature> &out) {
     if (!scene.logVols.contains(rootLv)) {
         return false;
@@ -185,7 +186,7 @@ bool collectPrototypeLeafDescendants(const SemanticScene &scene, SemanticLogVolI
         return false;
     }
 
-    std::queue<std::pair<SemanticLogVolId, glm::dmat4>> q;
+    std::queue<std::pair<ir::semantic::LogVolId, glm::dmat4>> q;
     for (const auto &daughter : root.daughters) {
         q.push({daughter.logVolId, daughter.localTransform});
     }
@@ -242,7 +243,7 @@ void sortMergeDescendants(std::vector<MergeDescendantSignature> &descendants) {
 
 using ShapeMaterialKey = std::pair<uint64_t, uint64_t>;
 
-bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv,
+bool tryUsePrototypeMergeKey(const ir::semantic::Scene &scene, ir::semantic::LogVolId rootLv,
                              MergeCacheKey &mergeKey) {
     std::vector<PrototypeDescendantSignature> prototypeDescendants;
     if (!collectPrototypeLeafDescendants(scene, rootLv, prototypeDescendants) ||
@@ -307,8 +308,9 @@ bool tryUsePrototypeMergeKey(const SemanticScene &scene, SemanticLogVolId rootLv
 // field), then apply config defaults, then hardcoded defaults for anything
 // still unset.
 ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
-                                         const Rule::Tessellation &defaults, const NodeView &view) {
-    Rule::Tessellation merged;
+                                         const config::Rule::Tessellation &defaults,
+                                         const selection::NodeView &view) {
+    config::Rule::Tessellation merged;
     for (const auto &cr : rules) {
         if (!cr.rule->tessellation.has_value()) {
             continue;
@@ -347,14 +349,16 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
             merged.averageMaterialStack.value_or(defaults.averageMaterialStack.value_or(false)),
         .maxSegmentsCircle =
             merged.maxSegmentsCircle.value_or(defaults.maxSegmentsCircle.value_or(64)),
-        .fallback = merged.fallback.value_or(defaults.fallback.value_or(BooleanFallback::Skip)),
+        .fallback =
+            merged.fallback.value_or(defaults.fallback.value_or(config::BooleanFallback::Skip)),
     };
 }
 
 // Return the material name from the last matching rule that has one, or nullptr.
 // This is consistent with tessellation resolution (last-match-wins per field)
 // and means later includes / parent configs can override earlier ones.
-const std::string *resolveMaterial(const std::vector<CompiledRule> &rules, const NodeView &view) {
+const std::string *resolveMaterial(const std::vector<CompiledRule> &rules,
+                                   const selection::NodeView &view) {
     const std::string *result = nullptr;
     for (const auto &cr : rules) {
         if (!cr.rule->material.has_value()) {
@@ -427,7 +431,7 @@ SnappedPoint snapPoint(const glm::vec3 &p) {
 // A back-reference to one triangle: which material group's index buffer, and
 // the index of its first corner (indices[triBase], [triBase+1], [triBase+2]).
 struct TriRef {
-    RenderMaterialId group;
+    ir::render::MaterialId group;
     size_t triBase;
 };
 
@@ -455,7 +459,7 @@ struct TriKeyHash {
 // suggestion: the node's original source path minus its own final segment (i.e.
 // the parent structure that holds the stack, e.g. ".../ECalBarrel"), falling
 // back to the node name when no path is recorded.
-inline std::string candidateStructureLabel(const SemanticNode &node) {
+inline std::string candidateStructureLabel(const ir::semantic::Node &node) {
     const std::string &p = node.originalPath;
     if (!p.empty()) {
         const auto slash = p.find_last_of('/');
@@ -525,7 +529,7 @@ size_t removeCoincidentInteriorFaces(MatGroupMap &groups, bool apply = true) {
     // normals, mark both for removal. Collect (group, triBase) pairs first —
     // we mutate index buffers afterwards so the flatten pass above stays
     // valid throughout.
-    ankerl::unordered_dense::map<RenderMaterialId, ankerl::unordered_dense::set<size_t>>
+    ankerl::unordered_dense::map<ir::render::MaterialId, ankerl::unordered_dense::set<size_t>>
         toRemoveByGroup;
 
     auto geometricNormal = [&groups](const TriRef &ref) -> glm::vec3 {
@@ -587,8 +591,9 @@ size_t removeCoincidentInteriorFaces(MatGroupMap &groups, bool apply = true) {
 
 // Resolve extras from the first matching rule that has them, falling back to
 // config-level defaults.
-RenderExtrasMap resolveExtras(const std::vector<CompiledRule> &rules,
-                              const std::optional<ExtrasMap> &defaults, const NodeView &view) {
+ir::render::ExtrasMap resolveExtras(const std::vector<CompiledRule> &rules,
+                                    const std::optional<config::ExtrasMap> &defaults,
+                                    const selection::NodeView &view) {
     for (const auto &cr : rules) {
         if (!cr.rule->extras.has_value()) {
             continue;
@@ -603,9 +608,10 @@ RenderExtrasMap resolveExtras(const std::vector<CompiledRule> &rules,
     return {};
 }
 
-// Build a default grey RenderMaterial from a SourceMaterial.
-RenderMaterial makeDefaultMaterial(RenderScene &rs, const SourceMaterial &src) {
-    RenderMaterial mat;
+// Build a default grey render::Material from a SourceMaterial.
+ir::render::Material makeDefaultMaterial(ir::render::Scene &rs,
+                                         const ir::semantic::SourceMaterial &src) {
+    ir::render::Material mat;
     mat.id = rs.nextMaterialId();
     mat.name = src.name;
     if (src.color.has_value()) {
@@ -617,17 +623,18 @@ RenderMaterial makeDefaultMaterial(RenderScene &rs, const SourceMaterial &src) {
 // Axis-aligned bounding box proxy for boolean fallback=BBox.
 /// Collect all primitive leaf vertices from a (possibly nested) boolean shape,
 /// compute their AABB, and return a tessellated box of that size.
-TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData, const SemanticScene &scene,
-                                 PrimitiveTessellator &tess, const TessellationParams &params) {
+TessellationOutput makeBBoxProxy(const ir::semantic::ShapeVariant &shapeData,
+                                 const ir::semantic::Scene &scene, PrimitiveTessellator &tess,
+                                 const TessellationParams &params) {
     glm::dvec3 bboxMin{std::numeric_limits<double>::max()};
     glm::dvec3 bboxMax{-std::numeric_limits<double>::max()};
 
     // BFS over the boolean tree, tessellating primitive leaves to find extents.
-    std::queue<std::pair<SemanticShapeId, glm::dmat4>> q;
+    std::queue<std::pair<ir::semantic::ShapeId, glm::dmat4>> q;
 
     auto enqueue = [&](const auto &s) {
         using T = std::decay_t<decltype(s)>;
-        if constexpr (is_boolean_shape_v<T>) {
+        if constexpr (ir::semantic::is_boolean_shape_v<T>) {
             q.push({s.left, glm::dmat4{1.0}});
             q.push({s.right, s.rightTransform});
         }
@@ -644,7 +651,7 @@ TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData, const Se
         bool isBool = std::visit(
             [&](const auto &s) {
                 using T = std::decay_t<decltype(s)>;
-                if constexpr (is_boolean_shape_v<T>) {
+                if constexpr (ir::semantic::is_boolean_shape_v<T>) {
                     q.push({s.left, xform});
                     q.push({s.right, xform * s.rightTransform});
                     return true;
@@ -664,18 +671,18 @@ TessellationOutput makeBBoxProxy(const SemanticShapeVariant &shapeData, const Se
 
     if (bboxMin.x > bboxMax.x) {
         // No vertices found — unit box fallback.
-        return tess.tessellate(BoxShape{1.0, 1.0, 1.0}, params);
+        return tess.tessellate(ir::semantic::BoxShape{1.0, 1.0, 1.0}, params);
     }
 
     glm::dvec3 half = (bboxMax - bboxMin) * 0.5;
-    return tess.tessellate(BoxShape{half.x, half.y, half.z}, params);
+    return tess.tessellate(ir::semantic::BoxShape{half.x, half.y, half.z}, params);
 }
 
 } // namespace
 
 // ── TessellationPass ──────────────────────────────────────────────────────────
 
-TessellationPass::TessellationPass(const NHConfig &config) : config_(config) {}
+TessellationPass::TessellationPass(const config::NHConfig &config) : config_(config) {}
 
 // ── TessellationJob ──────────────────────────────────────────────────────────
 //
@@ -684,8 +691,8 @@ TessellationPass::TessellationPass(const NHConfig &config) : config_(config) {}
 // `lower` is now a thin run-to-completion driver around a `TessellationJob`.
 
 struct TessellationJob::Impl {
-    const NHConfig *config{nullptr};
-    const SemanticScene *scene{nullptr};
+    const config::NHConfig *config{nullptr};
+    const ir::semantic::Scene *scene{nullptr};
     /// True when the scene carries the wedge-cut marker logVol, i.e. an
     /// azimuthal cut was applied upstream. An empty merge_descendants result is
     /// then an expected consequence of the cut, not a selection/config error.
@@ -696,16 +703,17 @@ struct TessellationJob::Impl {
     std::vector<CompiledRule> compiledRules;
     PrimitiveTessellator tess;
 
-    std::optional<RenderMaterialId> bboxProxyMatId;
+    std::optional<ir::render::MaterialId> bboxProxyMatId;
 
-    ankerl::unordered_dense::map<SemanticMaterialId, RenderMaterialId> defaultMatCache;
-    ankerl::unordered_dense::map<std::string, RenderMaterialId> namedMatCache;
-    ankerl::unordered_dense::map<SemanticShapeId, ankerl::unordered_dense::map<int, MeshAssetId>>
+    ankerl::unordered_dense::map<ir::semantic::MaterialId, ir::render::MaterialId> defaultMatCache;
+    ankerl::unordered_dense::map<std::string, ir::render::MaterialId> namedMatCache;
+    ankerl::unordered_dense::map<ir::semantic::ShapeId,
+                                 ankerl::unordered_dense::map<int, ir::render::MeshAssetId>>
         meshCache;
     ankerl::unordered_dense::map<MergeCacheKey, MergeResult, MergeCacheKeyHash> mergeCache;
-    ankerl::unordered_dense::map<SemanticNodeId, RenderNodeId> nodeMap;
+    ankerl::unordered_dense::map<ir::semantic::NodeId, ir::render::NodeId> nodeMap;
 
-    std::queue<SemanticNodeId> q;
+    std::queue<ir::semantic::NodeId> q;
 
     bool started{false};
     bool done{false};
@@ -745,7 +753,7 @@ struct TessellationJob::Impl {
     std::map<std::string, std::pair<size_t, size_t>> coincidentCandidatesByParent;
     ankerl::unordered_dense::map<MergeCacheKey, size_t, MergeCacheKeyHash> dropCandidateByKey;
 
-    NodeView makeNodeView(const SemanticNode &node) const {
+    selection::NodeView makeNodeView(const ir::semantic::Node &node) const {
         std::string_view matName;
         if (scene->logVols.contains(node.logVolId)) {
             const auto &lv = scene->logVols.at(node.logVolId);
@@ -756,9 +764,9 @@ struct TessellationJob::Impl {
         return {node.name, node.originalPath, matName, node.children.empty(), &node.tags};
     }
 
-    RenderMaterialId getBBoxProxyMaterial() {
+    ir::render::MaterialId getBBoxProxyMaterial() {
         if (!bboxProxyMatId) {
-            RenderMaterial rm;
+            ir::render::Material rm;
             rm.id = result.scene.nextMaterialId();
             rm.name = "bbox_proxy";
             rm.baseColorFactor = glm::vec4{0.9f, 0.1f, 0.1f, 1.0f};
@@ -770,25 +778,29 @@ struct TessellationJob::Impl {
         return *bboxProxyMatId;
     }
 
-    RenderMaterialId resolveRenderMaterial(SemanticMaterialId srcMatId, const SemanticNode &node);
+    ir::render::MaterialId resolveRenderMaterial(ir::semantic::MaterialId srcMatId,
+                                                 const ir::semantic::Node &node);
 
     // Process one outer-BFS iteration. Returns false if the queue became
     // empty (no more nodes to process) OR if the pass has already aborted
     // due to an error. After the queue drains, `done` is set.
     //
-    // stepOneNode() builds the RenderNode and resolves the tessellation rule,
+    // stepOneNode() builds the render::Node and resolves the tessellation rule,
     // then dispatches the geometry work to one of these branch helpers. Each
     // finalizes `rn` into the render scene and returns the same bool contract
     // as stepOneNode (false only on a fallback=fail abort).
     bool stepOneNode();
-    bool tessellateMergeDescendants(const SemanticNode &semNode, RenderNode &rn, RenderNodeId rnId,
-                                    const ResolvedTessellation &rule);
-    bool tessellateBooleanNode(const SemanticNode &semNode, const SemanticLogicalVolume &lv,
-                               const SemanticShape &shape, RenderNode &rn, RenderNodeId rnId,
-                               const ResolvedTessellation &rule, const TessellationParams &params);
-    bool tessellatePrimitiveNode(const SemanticNode &semNode, const SemanticLogicalVolume &lv,
-                                 const SemanticShape &shape, RenderNode &rn, RenderNodeId rnId,
-                                 const TessellationParams &params);
+    bool tessellateMergeDescendants(const ir::semantic::Node &semNode, ir::render::Node &rn,
+                                    ir::render::NodeId rnId, const ResolvedTessellation &rule);
+    bool tessellateBooleanNode(const ir::semantic::Node &semNode,
+                               const ir::semantic::LogicalVolume &lv,
+                               const ir::semantic::Shape &shape, ir::render::Node &rn,
+                               ir::render::NodeId rnId, const ResolvedTessellation &rule,
+                               const TessellationParams &params);
+    bool tessellatePrimitiveNode(const ir::semantic::Node &semNode,
+                                 const ir::semantic::LogicalVolume &lv,
+                                 const ir::semantic::Shape &shape, ir::render::Node &rn,
+                                 ir::render::NodeId rnId, const TessellationParams &params);
 
     // Count the number of nodes that the outer BFS in `stepOneNode`
     // will actually process. Mirrors that loop's children-skip rules so
@@ -808,7 +820,7 @@ struct TessellationJob::Impl {
             return 0;
         }
         size_t n = 0;
-        std::queue<SemanticNodeId> qq;
+        std::queue<ir::semantic::NodeId> qq;
         qq.push(scene->rootId);
         while (!qq.empty()) {
             const auto id = qq.front();
@@ -818,7 +830,7 @@ struct TessellationJob::Impl {
             }
             ++n;
             const auto &node = scene->nodes.at(id);
-            NodeView nv = makeNodeView(node);
+            selection::NodeView nv = makeNodeView(node);
             const auto rule = resolveTessellation(compiledRules, config->tessellationDefaults, nv);
             if (rule.mergeDescendants) {
                 continue;
@@ -831,12 +843,13 @@ struct TessellationJob::Impl {
     }
 };
 
-RenderMaterialId TessellationJob::Impl::resolveRenderMaterial(SemanticMaterialId srcMatId,
-                                                              const SemanticNode &node) {
+ir::render::MaterialId
+TessellationJob::Impl::resolveRenderMaterial(ir::semantic::MaterialId srcMatId,
+                                             const ir::semantic::Node &node) {
     const auto &srcMat = scene->materials.at(srcMatId);
-    NodeView view = makeNodeView(node);
+    selection::NodeView view = makeNodeView(node);
     const std::string *matName = resolveMaterial(compiledRules, view);
-    RenderMaterialId rmId;
+    ir::render::MaterialId rmId;
     if (matName != nullptr) {
         auto cit = namedMatCache.find(*matName);
         if (cit != namedMatCache.end()) {
@@ -844,7 +857,7 @@ RenderMaterialId TessellationJob::Impl::resolveRenderMaterial(SemanticMaterialId
         } else {
             for (const auto &md : config->materials) {
                 if (md.name == *matName) {
-                    RenderMaterial rm;
+                    ir::render::Material rm;
                     rm.id = result.scene.nextMaterialId();
                     rm.name = md.name;
                     rm.baseColorFactor =
@@ -853,9 +866,9 @@ RenderMaterialId TessellationJob::Impl::resolveRenderMaterial(SemanticMaterialId
                     rm.roughnessFactor = md.roughness;
                     rm.emissiveFactor = glm::vec3{md.emissive.r, md.emissive.g, md.emissive.b};
                     rm.doubleSided = md.doubleSided;
-                    rm.alphaMode = md.alphaMode == AlphaMode::Blend  ? "BLEND"
-                                   : md.alphaMode == AlphaMode::Mask ? "MASK"
-                                                                     : "OPAQUE";
+                    rm.alphaMode = md.alphaMode == config::AlphaMode::Blend  ? "BLEND"
+                                   : md.alphaMode == config::AlphaMode::Mask ? "MASK"
+                                                                             : "OPAQUE";
                     rm.alphaCutoff = md.alphaCutoff;
                     rm.ior = md.ior;
                     rm.transmissionFactor = md.transmission;
@@ -904,11 +917,11 @@ bool TessellationJob::Impl::stepOneNode() {
     }
     processedNodes.fetch_add(1, std::memory_order_relaxed);
 
-    const SemanticNode &semNode = scene->nodes.at(semId);
+    const ir::semantic::Node &semNode = scene->nodes.at(semId);
 
-    // ── Create RenderNode ──────────────────────────────────────────────────
-    const RenderNodeId rnId = result.scene.nextNodeId();
-    RenderNode rn;
+    // ── Create render::Node ──────────────────────────────────────────────────
+    const ir::render::NodeId rnId = result.scene.nextNodeId();
+    ir::render::Node rn;
     rn.id = rnId;
     rn.name = semNode.name;
     rn.localTransform = glm::mat4(semNode.localTransform);
@@ -916,14 +929,14 @@ bool TessellationJob::Impl::stepOneNode() {
     rn.semanticNodeId = semId;
 
     if (semNode.parentId.has_value() && nodeMap.contains(*semNode.parentId)) {
-        const RenderNodeId parentRnId = nodeMap.at(*semNode.parentId);
+        const ir::render::NodeId parentRnId = nodeMap.at(*semNode.parentId);
         rn.parentId = parentRnId;
         result.scene.nodes.at(parentRnId).children.push_back(rnId);
     }
 
     // ── Resolve extras from unified rules ──────────────────────────────────
     {
-        NodeView ev = makeNodeView(semNode);
+        selection::NodeView ev = makeNodeView(semNode);
         rn.extras = resolveExtras(compiledRules, config->extrasDefaults, ev);
     }
 
@@ -933,7 +946,7 @@ bool TessellationJob::Impl::stepOneNode() {
     }
 
     // ── Resolve tessellation rule ──────────────────────────────────────────
-    NodeView nv = makeNodeView(semNode);
+    selection::NodeView nv = makeNodeView(semNode);
     const auto rule = resolveTessellation(compiledRules, config->tessellationDefaults, nv);
     TessellationParams params;
     params.maxSegmentsCircle = rule.maxSegmentsCircle;
@@ -962,7 +975,7 @@ bool TessellationJob::Impl::stepOneNode() {
         }
         return true;
     }
-    const SemanticLogicalVolume &lv = scene->logVols.at(semNode.logVolId);
+    const ir::semantic::LogicalVolume &lv = scene->logVols.at(semNode.logVolId);
     if (!scene->shapes.contains(lv.shapeId)) {
         result.scene.nodes[rnId] = rn;
         for (const auto childId : semNode.children) {
@@ -970,16 +983,17 @@ bool TessellationJob::Impl::stepOneNode() {
         }
         return true;
     }
-    const SemanticShape &shape = scene->shapes.at(lv.shapeId);
+    const ir::semantic::Shape &shape = scene->shapes.at(lv.shapeId);
 
-    if (isBooleanShape(shape.data)) {
+    if (ir::semantic::isBooleanShape(shape.data)) {
         return tessellateBooleanNode(semNode, lv, shape, rn, rnId, rule, params);
     }
     return tessellatePrimitiveNode(semNode, lv, shape, rn, rnId, params);
 }
 
-bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNode, RenderNode &rn,
-                                                       RenderNodeId rnId,
+bool TessellationJob::Impl::tessellateMergeDescendants(const ir::semantic::Node &semNode,
+                                                       ir::render::Node &rn,
+                                                       ir::render::NodeId rnId,
                                                        const ResolvedTessellation &rule) {
     MergeCacheKey mergeKey;
     mergeKey.fallback = rule.fallback;
@@ -1004,7 +1018,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         if (!scene->nodes.contains(descId)) {
             continue;
         }
-        const SemanticNode &descNode = scene->nodes.at(descId);
+        const ir::semantic::Node &descNode = scene->nodes.at(descId);
 
         for (const auto gcId : descNode.children) {
             if (scene->nodes.contains(gcId)) {
@@ -1016,12 +1030,12 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         if (!scene->logVols.contains(descNode.logVolId)) {
             continue;
         }
-        const SemanticLogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
+        const ir::semantic::LogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
         if (!scene->shapes.contains(descLv.shapeId)) {
             continue;
         }
 
-        NodeView descView = makeNodeView(descNode);
+        selection::NodeView descView = makeNodeView(descNode);
         const std::string *matName = resolveMaterial(compiledRules, descView);
         const std::string materialKey = matName != nullptr
                                             ? "config:" + *matName
@@ -1059,10 +1073,10 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
 
     // Per-material accumulation buffers.
     struct MatGroup {
-        std::vector<Vertex> verts;
+        std::vector<ir::render::Vertex> verts;
         std::vector<uint32_t> indices;
     };
-    std::map<RenderMaterialId, MatGroup> groups;
+    std::map<ir::render::MaterialId, MatGroup> groups;
 
     // Per-descendant slab thickness (min bounding-box dimension in merge-local
     // space), collected to derive the stack's characteristic band width for the
@@ -1084,11 +1098,11 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
 
     for (const auto &mergeDesc : mergeDescendants) {
         const auto descId = mergeDesc.nodeId;
-        const SemanticNode &descNode = scene->nodes.at(descId);
+        const ir::semantic::Node &descNode = scene->nodes.at(descId);
         if (!scene->logVols.contains(descNode.logVolId)) {
             continue;
         }
-        const SemanticLogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
+        const ir::semantic::LogicalVolume &descLv = scene->logVols.at(descNode.logVolId);
         if (!scene->shapes.contains(descLv.shapeId)) {
             continue;
         }
@@ -1097,10 +1111,10 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         TessellationParams descParams;
         descParams.maxSegmentsCircle = mergeDesc.maxSegmentsCircle;
 
-        const SemanticShape &descShape = scene->shapes.at(descLv.shapeId);
-        const bool descIsBoolean = isBooleanShape(descShape.data);
+        const ir::semantic::Shape &descShape = scene->shapes.at(descLv.shapeId);
+        const bool descIsBoolean = ir::semantic::isBooleanShape(descShape.data);
         auto &descSegMap = meshCache[descLv.shapeId];
-        MeshAssetId descMid;
+        ir::render::MeshAssetId descMid;
         bool isBBoxProxy = false;
         if (!descSegMap.contains(descParams.maxSegmentsCircle)) {
             TessellationOutput tessOut;
@@ -1117,7 +1131,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
                 // descendant) is not a failure: it falls through to the
                 // empty-vertices skip below and contributes nothing.
                 switch (rule.fallback) {
-                case BooleanFallback::Fail:
+                case config::BooleanFallback::Fail:
                     result.diags.error(
                         codes::kErrTessBooleanFail,
                         std::format("boolean shape on node '{}' cannot be tessellated "
@@ -1126,12 +1140,12 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
                         descNode.name);
                     done = true;
                     return false;
-                case BooleanFallback::BBox:
+                case config::BooleanFallback::BBox:
                     tessOut = makeBBoxProxy(descShape.data, *scene, tess, descParams);
                     result.diags.append(tessOut.diags);
                     isBBoxProxy = true;
                     break;
-                case BooleanFallback::Skip:
+                case config::BooleanFallback::Skip:
                 default:
                     continue;
                 }
@@ -1139,7 +1153,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
             if (tessOut.vertices.empty()) {
                 continue;
             }
-            MeshAsset ma;
+            ir::render::MeshAsset ma;
             ma.id = result.scene.nextMeshId();
             ma.name = descLv.name;
             ma.vertices = std::move(tessOut.vertices);
@@ -1156,14 +1170,15 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         if (!result.scene.meshAssets.contains(descMid)) {
             continue;
         }
-        const MeshAsset &srcMesh = result.scene.meshAssets.at(descMid);
+        const ir::render::MeshAsset &srcMesh = result.scene.meshAssets.at(descMid);
         if (srcMesh.vertices.empty()) {
             continue;
         }
 
         // Resolve material — use red proxy for bbox fallbacks.
-        RenderMaterialId rmId = isBBoxProxy ? getBBoxProxyMaterial()
-                                            : resolveRenderMaterial(descLv.materialId, descNode);
+        ir::render::MaterialId rmId = isBBoxProxy
+                                          ? getBBoxProxyMaterial()
+                                          : resolveRenderMaterial(descLv.materialId, descNode);
 
         // Transform vertices into merge node's local frame
         const glm::mat4 toLocal = glm::mat4(mergeDesc.toMergeLocal);
@@ -1174,7 +1189,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         glm::vec3 slabMin{std::numeric_limits<float>::max()};
         glm::vec3 slabMax{std::numeric_limits<float>::lowest()};
         for (const auto &v : srcMesh.vertices) {
-            Vertex tv;
+            ir::render::Vertex tv;
             tv.position = glm::vec3(toLocal * glm::vec4(v.position, 1.0f));
             tv.normal = glm::normalize(normalMat * v.normal);
             slabMin = glm::min(slabMin, tv.position);
@@ -1267,7 +1282,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     // touch (e.g. the tracker) independently of merge_descendants. Computed
     // after drop_coincident_faces so removed interior faces don't skew the area
     // weighting.
-    std::optional<StackAverage> stackAverage;
+    std::optional<ir::render::StackAverage> stackAverage;
     if (rule.averageMaterialStack) {
         // Hull geometry is taken from this scene's (possibly cut) merged groups,
         // so the proxy follows the cut silhouette; the average *color*, by
@@ -1290,8 +1305,8 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
             std::nth_element(slabThicknesses.begin(),
                              slabThicknesses.begin() + static_cast<std::ptrdiff_t>(pIdx),
                              slabThicknesses.end());
-            stackAverage =
-                StackAverage{stackWeightedColor / stackTotalWeight, slabThicknesses[pIdx]};
+            stackAverage = ir::render::StackAverage{stackWeightedColor / stackTotalWeight,
+                                                    slabThicknesses[pIdx]};
         }
 
         // Coarse LOD proxy: the convex hull of the whole stack, painted with
@@ -1302,23 +1317,23 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
         if (stackAverage.has_value()) {
             const TessellationOutput hullMesh = convexHull(hullPoints);
             if (!hullMesh.vertices.empty()) {
-                RenderMaterial pm;
+                ir::render::Material pm;
                 pm.id = result.scene.nextMaterialId();
                 pm.name = semNode.name + "_lod";
                 pm.baseColorFactor = glm::vec4(stackAverage->avgColorLinear, 1.0f);
                 pm.metallicFactor = 0.0f;
                 pm.roughnessFactor = 1.0f; // matte: the average is already flat
-                const RenderMaterialId pmId = pm.id;
+                const ir::render::MaterialId pmId = pm.id;
                 result.scene.materials[pmId] = std::move(pm);
 
-                MeshAsset pmesh;
+                ir::render::MeshAsset pmesh;
                 pmesh.id = result.scene.nextMeshId();
                 pmesh.name = semNode.name + "_lod_hull";
                 pmesh.vertices = hullMesh.vertices;
                 pmesh.indices = hullMesh.indices;
                 pmesh.provenance.sourceSystem = "tessellation_pass";
                 pmesh.provenance.sourceName = semNode.name;
-                const MeshAssetId pmeshId = pmesh.id;
+                const ir::render::MeshAssetId pmeshId = pmesh.id;
                 result.scene.meshAssets[pmeshId] = std::move(pmesh);
 
                 rn.lodProxyBindings.push_back({pmeshId, pmId});
@@ -1328,8 +1343,8 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
 
     // Create one MeshAsset per material group → one MeshBinding each.
     for (auto &[rmId, grp] : groups) {
-        MeshAssetId mid = result.scene.nextMeshId();
-        MeshAsset ma;
+        ir::render::MeshAssetId mid = result.scene.nextMeshId();
+        ir::render::MeshAsset ma;
         ma.id = mid;
         ma.name = semNode.name + "_merged";
         ma.vertices = std::move(grp.verts);
@@ -1348,10 +1363,10 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const SemanticNode &semNo
     return true;
 }
 
-bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
-                                                  const SemanticLogicalVolume &lv,
-                                                  const SemanticShape &shape, RenderNode &rn,
-                                                  RenderNodeId rnId,
+bool TessellationJob::Impl::tessellateBooleanNode(const ir::semantic::Node &semNode,
+                                                  const ir::semantic::LogicalVolume &lv,
+                                                  const ir::semantic::Shape &shape,
+                                                  ir::render::Node &rn, ir::render::NodeId rnId,
                                                   const ResolvedTessellation &rule,
                                                   const TessellationParams &params) {
     // Check the mesh cache first — same shapeId + segments → same mesh.
@@ -1359,9 +1374,9 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
     // that succeeded but removed the solid entirely (e.g. a placement fully
     // inside an angle-cut wedge): a valid empty result, cached so instances
     // sharing the shape are not re-evaluated.
-    constexpr MeshAssetId kFullyRemoved{0};
+    constexpr ir::render::MeshAssetId kFullyRemoved{0};
     auto &boolSegMap = meshCache[lv.shapeId];
-    MeshAssetId boolMid;
+    ir::render::MeshAssetId boolMid;
     bool boolCacheHit = boolSegMap.contains(params.maxSegmentsCircle);
     bool fullyRemoved = false;
     if (boolCacheHit) {
@@ -1372,7 +1387,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
         result.diags.append(boolOut.diags);
         if (!boolOut.vertices.empty()) {
             boolMid = result.scene.nextMeshId();
-            MeshAsset ma;
+            ir::render::MeshAsset ma;
             ma.id = boolMid;
             ma.name = lv.name + "_boolean";
             ma.vertices = std::move(boolOut.vertices);
@@ -1397,7 +1412,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
         return true;
     }
     if (boolCacheHit) {
-        RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
+        ir::render::MaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
         rn.meshBindings.push_back({boolMid, rmId});
         result.scene.nodes[rnId] = std::move(rn);
         for (const auto childId : semNode.children) {
@@ -1407,7 +1422,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
     }
     // Manifold failed or produced empty output — fall through to fallback.
     switch (rule.fallback) {
-    case BooleanFallback::Fail:
+    case config::BooleanFallback::Fail:
         result.diags.error(
             codes::kErrTessBooleanFail,
             std::format("boolean shape on node '{}' cannot be tessellated (fallback=fail)",
@@ -1415,15 +1430,15 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
             semNode.name);
         done = true;
         return false;
-    case BooleanFallback::BBox: {
+    case config::BooleanFallback::BBox: {
         result.diags.warn(codes::kWarnTessBooleanBbox,
                           std::format("boolean shape on node '{}' replaced with bounding-box proxy",
                                       semNode.name),
                           semNode.name);
         auto bboxOut = makeBBoxProxy(shape.data, *scene, tess, params);
         result.diags.append(bboxOut.diags);
-        MeshAssetId mid = result.scene.nextMeshId();
-        MeshAsset ma;
+        ir::render::MeshAssetId mid = result.scene.nextMeshId();
+        ir::render::MeshAsset ma;
         ma.id = mid;
         ma.name = semNode.name + "_bbox";
         ma.vertices = std::move(bboxOut.vertices);
@@ -1435,7 +1450,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
         rn.meshBindings.push_back({mid, getBBoxProxyMaterial()});
         break;
     }
-    case BooleanFallback::Skip:
+    case config::BooleanFallback::Skip:
     default:
         result.diags.warn(
             codes::kWarnTessBooleanSkipped,
@@ -1450,18 +1465,18 @@ bool TessellationJob::Impl::tessellateBooleanNode(const SemanticNode &semNode,
     return true;
 }
 
-bool TessellationJob::Impl::tessellatePrimitiveNode(const SemanticNode &semNode,
-                                                    const SemanticLogicalVolume &lv,
-                                                    const SemanticShape &shape, RenderNode &rn,
-                                                    RenderNodeId rnId,
+bool TessellationJob::Impl::tessellatePrimitiveNode(const ir::semantic::Node &semNode,
+                                                    const ir::semantic::LogicalVolume &lv,
+                                                    const ir::semantic::Shape &shape,
+                                                    ir::render::Node &rn, ir::render::NodeId rnId,
                                                     const TessellationParams &params) {
     // ── Tessellate primitive shape ─────────────────────────────────────────
-    MeshAssetId mid;
+    ir::render::MeshAssetId mid;
     auto &segMap = meshCache[lv.shapeId];
     if (!segMap.contains(params.maxSegmentsCircle)) {
         auto tessOut = tess.tessellate(shape.data, params);
         result.diags.append(tessOut.diags);
-        MeshAsset ma;
+        ir::render::MeshAsset ma;
         ma.id = result.scene.nextMeshId();
         ma.name = lv.name;
         ma.vertices = std::move(tessOut.vertices);
@@ -1476,7 +1491,7 @@ bool TessellationJob::Impl::tessellatePrimitiveNode(const SemanticNode &semNode,
     }
 
     // ── Resolve material ───────────────────────────────────────────────────
-    RenderMaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
+    ir::render::MaterialId rmId = resolveRenderMaterial(lv.materialId, semNode);
 
     // Only bind mesh if tessellation produced geometry (UnknownShape may be empty)
     if (result.scene.meshAssets.contains(mid) &&
@@ -1498,7 +1513,7 @@ TessellationJob::~TessellationJob() = default;
 TessellationJob::TessellationJob(TessellationJob &&) noexcept = default;
 TessellationJob &TessellationJob::operator=(TessellationJob &&) noexcept = default;
 
-void TessellationJob::start(const NHConfig &config, const SemanticScene &scene) {
+void TessellationJob::start(const config::NHConfig &config, const ir::semantic::Scene &scene) {
     // std::atomic members make Impl non-copyable; replace the unique_ptr
     // wholesale to reset the job between runs.
     impl_ = std::make_unique<Impl>();
@@ -1646,7 +1661,7 @@ size_t TessellationJob::processedNodes() const {
 
 // ── TessellationPass::lower (run-to-completion shim) ─────────────────────────
 
-TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const {
+TessellationPassResult TessellationPass::lower(const ir::semantic::Scene &scene) const {
     TessellationJob job;
     job.start(config_, scene);
     while (!job.advance(std::numeric_limits<uint64_t>::max())) {
@@ -1657,4 +1672,4 @@ TessellationPassResult TessellationPass::lower(const SemanticScene &scene) const
     return job.take();
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

@@ -1,9 +1,9 @@
-#include <nodehammer/viewer/archive_export.hpp>
+#include <viewer/archive_export.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/viewer/archive_project_fs.hpp>
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <detail/file_io.hpp>
+#include <viewer/archive_project_fs.hpp>
+#include <viewer/filesystem_project_fs.hpp>
+#include <viewer/zip_working_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 

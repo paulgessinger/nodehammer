@@ -1,49 +1,54 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <tessellation/primitive_tessellator.hpp>
+#include <tessellation/tessellation_pass.hpp>
 
 #include <limits>
 #include <map>
 #include <set>
 
 #include <glm/gtc/matrix_transform.hpp>
+#include <ir/semantic_json.hpp>
 #include <nlohmann/json.hpp>
-#include <nodehammer/ir/semantic_json.hpp>
-#include <nodehammer/tessellation/boolean_tessellator.hpp>
+#include <tessellation/boolean_tessellator.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::tessellation;
+using namespace nodehammer::config;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-static SemanticScene makeSingleBoxScene() { return SyntheticSceneBuilder::buildSingleBox(); }
+static ir::semantic::Scene makeSingleBoxScene() { return SyntheticSceneBuilder::buildSingleBox(); }
 
-static SemanticScene makeNestedBoxScene() { return SyntheticSceneBuilder::buildNestedBoxes(); }
+static ir::semantic::Scene makeNestedBoxScene() {
+    return SyntheticSceneBuilder::buildNestedBoxes();
+}
 
 // Build a scene with a single BooleanUnion node.
-static SemanticScene makeBooleanScene() {
-    SemanticScene scene;
+static ir::semantic::Scene makeBooleanScene() {
+    ir::semantic::Scene scene;
 
-    SemanticMaterialId matId = scene.nextMaterialId();
+    ir::semantic::MaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
 
     // Left and right child shapes
-    SemanticShapeId leftId = scene.nextShapeId();
-    scene.shapes[leftId] = {leftId, BoxShape{1, 1, 1}};
+    ir::semantic::ShapeId leftId = scene.nextShapeId();
+    scene.shapes[leftId] = {leftId, ir::semantic::BoxShape{1, 1, 1}};
 
-    SemanticShapeId rightId = scene.nextShapeId();
-    scene.shapes[rightId] = {rightId, BoxShape{0.5, 0.5, 0.5}};
+    ir::semantic::ShapeId rightId = scene.nextShapeId();
+    scene.shapes[rightId] = {rightId, ir::semantic::BoxShape{0.5, 0.5, 0.5}};
 
     // Boolean union shape
-    SemanticShapeId boolId = scene.nextShapeId();
-    scene.shapes[boolId] = {boolId, BooleanUnion{leftId, rightId}};
+    ir::semantic::ShapeId boolId = scene.nextShapeId();
+    scene.shapes[boolId] = {boolId, ir::semantic::BooleanUnion{leftId, rightId}};
 
-    SemanticLogVolId lvId = scene.nextLogVolId();
+    ir::semantic::LogVolId lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "world_lv", boolId, matId};
 
-    SemanticNodeId rootId = scene.nextNodeId();
-    SemanticNode root;
+    ir::semantic::NodeId rootId = scene.nextNodeId();
+    ir::semantic::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = lvId;
@@ -55,20 +60,20 @@ static SemanticScene makeBooleanScene() {
 }
 
 // Build a scene with an UnknownShape node.
-static SemanticScene makeUnknownShapeScene() {
-    SemanticScene scene;
+static ir::semantic::Scene makeUnknownShapeScene() {
+    ir::semantic::Scene scene;
 
-    SemanticMaterialId matId = scene.nextMaterialId();
+    ir::semantic::MaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
 
-    SemanticShapeId shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, UnknownShape{"CustomSolid"}};
+    ir::semantic::ShapeId shapeId = scene.nextShapeId();
+    scene.shapes[shapeId] = {shapeId, ir::semantic::UnknownShape{"CustomSolid"}};
 
-    SemanticLogVolId lvId = scene.nextLogVolId();
+    ir::semantic::LogVolId lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "world_lv", shapeId, matId};
 
-    SemanticNodeId rootId = scene.nextNodeId();
-    SemanticNode root;
+    ir::semantic::NodeId rootId = scene.nextNodeId();
+    ir::semantic::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = lvId;
@@ -157,7 +162,7 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
 
 TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendant layout",
           "[tessellation][pass]") {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -167,11 +172,11 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
     scene.materials[kaptonMat] = {kaptonMat, "Kapton", std::nullopt, 0.0};
 
     const auto rootShape = scene.nextShapeId();
-    scene.shapes[rootShape] = {rootShape, BoxShape{10.0, 10.0, 10.0}};
+    scene.shapes[rootShape] = {rootShape, ir::semantic::BoxShape{10.0, 10.0, 10.0}};
     const auto diskShape = scene.nextShapeId();
-    scene.shapes[diskShape] = {diskShape, BoxShape{1.0, 1.0, 0.01}};
+    scene.shapes[diskShape] = {diskShape, ir::semantic::BoxShape{1.0, 1.0, 0.01}};
     const auto layerShape = scene.nextShapeId();
-    scene.shapes[layerShape] = {layerShape, BoxShape{0.5, 0.5, 0.01}};
+    scene.shapes[layerShape] = {layerShape, ir::semantic::BoxShape{0.5, 0.5, 0.01}};
 
     const auto rootLv = scene.nextLogVolId();
     scene.logVols[rootLv] = {rootLv, "root_lv", rootShape, vacuumMat};
@@ -182,10 +187,10 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
     const auto kaptonLv = scene.nextLogVolId();
     scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
 
-    auto addNode = [&](std::string name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
-                       double z) {
+    auto addNode = [&](std::string name, ir::semantic::LogVolId lv,
+                       std::optional<ir::semantic::NodeId> parent, double z) {
         const auto id = scene.nextNodeId();
-        SemanticNode node;
+        ir::semantic::Node node;
         node.id = id;
         node.name = std::move(name);
         node.logVolId = lv;
@@ -241,7 +246,7 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
     auto result = pass.lower(scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    auto findRenderNode = [&](std::string_view name) -> const RenderNode * {
+    auto findRenderNode = [&](std::string_view name) -> const ir::render::Node * {
         for (const auto &[_, node] : result.scene.nodes) {
             if (node.name == name) {
                 return &node;
@@ -250,7 +255,7 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
         return nullptr;
     };
 
-    auto localCenterZ = [&](const RenderNode &node, std::string_view materialName) {
+    auto localCenterZ = [&](const ir::render::Node &node, std::string_view materialName) {
         for (const auto &binding : node.meshBindings) {
             const auto &mat = result.scene.materials.at(binding.materialId);
             if (mat.name != materialName) {
@@ -277,7 +282,7 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
 
 TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identity",
           "[tessellation][pass]") {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -287,11 +292,11 @@ TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identi
     scene.materials[kaptonMat] = {kaptonMat, "Kapton", std::nullopt, 0.0};
 
     const auto rootShape = scene.nextShapeId();
-    scene.shapes[rootShape] = {rootShape, BoxShape{10.0, 10.0, 10.0}};
+    scene.shapes[rootShape] = {rootShape, ir::semantic::BoxShape{10.0, 10.0, 10.0}};
     const auto diskShape = scene.nextShapeId();
-    scene.shapes[diskShape] = {diskShape, BoxShape{1.0, 1.0, 0.01}};
+    scene.shapes[diskShape] = {diskShape, ir::semantic::BoxShape{1.0, 1.0, 0.01}};
     const auto layerShape = scene.nextShapeId();
-    scene.shapes[layerShape] = {layerShape, BoxShape{0.5, 0.5, 0.01}};
+    scene.shapes[layerShape] = {layerShape, ir::semantic::BoxShape{0.5, 0.5, 0.01}};
 
     const auto rootLv = scene.nextLogVolId();
     scene.logVols[rootLv] = {rootLv, "root_lv", rootShape, vacuumMat};
@@ -302,10 +307,10 @@ TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identi
     const auto kaptonLv = scene.nextLogVolId();
     scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
 
-    auto addNode = [&](std::string name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
-                       double z) {
+    auto addNode = [&](std::string name, ir::semantic::LogVolId lv,
+                       std::optional<ir::semantic::NodeId> parent, double z) {
         const auto id = scene.nextNodeId();
-        SemanticNode node;
+        ir::semantic::Node node;
         node.id = id;
         node.name = std::move(name);
         node.logVolId = lv;
@@ -366,7 +371,7 @@ TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identi
 
 TEST_CASE("TessellationPass: merge_descendants cache can use source daughter prototypes",
           "[tessellation][pass]") {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -376,11 +381,11 @@ TEST_CASE("TessellationPass: merge_descendants cache can use source daughter pro
     scene.materials[kaptonMat] = {kaptonMat, "Kapton", std::nullopt, 0.0};
 
     const auto rootShape = scene.nextShapeId();
-    scene.shapes[rootShape] = {rootShape, BoxShape{10.0, 10.0, 10.0}};
+    scene.shapes[rootShape] = {rootShape, ir::semantic::BoxShape{10.0, 10.0, 10.0}};
     const auto diskShape = scene.nextShapeId();
-    scene.shapes[diskShape] = {diskShape, BoxShape{1.0, 1.0, 0.01}};
+    scene.shapes[diskShape] = {diskShape, ir::semantic::BoxShape{1.0, 1.0, 0.01}};
     const auto layerShape = scene.nextShapeId();
-    scene.shapes[layerShape] = {layerShape, BoxShape{0.5, 0.5, 0.01}};
+    scene.shapes[layerShape] = {layerShape, ir::semantic::BoxShape{0.5, 0.5, 0.01}};
 
     const auto rootLv = scene.nextLogVolId();
     scene.logVols[rootLv] = {rootLv, "root_lv", rootShape, vacuumMat};
@@ -399,10 +404,10 @@ TEST_CASE("TessellationPass: merge_descendants cache can use source daughter pro
         vacuumMat,
         {{"silicon", siliconLv, siliconPlacement}, {"kapton", kaptonLv, kaptonPlacement}}};
 
-    auto addNode = [&](std::string name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
-                       double z) {
+    auto addNode = [&](std::string name, ir::semantic::LogVolId lv,
+                       std::optional<ir::semantic::NodeId> parent, double z) {
         const auto id = scene.nextNodeId();
-        SemanticNode node;
+        ir::semantic::Node node;
         node.id = id;
         node.name = std::move(name);
         node.logVolId = lv;
@@ -467,9 +472,9 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
           "[tessellation][boolean]") {
     // Reproduces the ODD CarbonFiber support shape: a solid partial-phi tube
     // used as a boolean operand.
-    SemanticScene scene;
+    ir::semantic::Scene scene;
     auto shapeId = scene.nextShapeId();
-    TubeShape tube;
+    ir::semantic::TubeShape tube;
     tube.rMin = 0.0;
     tube.rMax = 0.2;
     tube.dz = 12.8;
@@ -479,7 +484,7 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
 
     // Create a boolean subtraction: tube - smaller tube (arbitrary, just to exercise the path)
     auto rightId = scene.nextShapeId();
-    TubeShape smallTube;
+    ir::semantic::TubeShape smallTube;
     smallTube.rMin = 0.0;
     smallTube.rMax = 0.05;
     smallTube.dz = 5.0;
@@ -488,7 +493,7 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
     scene.shapes[rightId] = {rightId, smallTube};
 
     auto boolId = scene.nextShapeId();
-    scene.shapes[boolId] = {boolId, BooleanSubtraction{shapeId, rightId}};
+    scene.shapes[boolId] = {boolId, ir::semantic::BooleanSubtraction{shapeId, rightId}};
 
     PrimitiveTessellator tess;
     TessellationParams params;
@@ -510,16 +515,18 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
 
 TEST_CASE("BooleanTessellator: full-phi tube subtraction produces geometry",
           "[tessellation][boolean]") {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
     auto outerId = scene.nextShapeId();
-    scene.shapes[outerId] = {outerId, TubeShape{3.9, 4.0, 94.16, 0.0, 2.0 * std::numbers::pi}};
+    scene.shapes[outerId] = {outerId,
+                             ir::semantic::TubeShape{3.9, 4.0, 94.16, 0.0, 2.0 * std::numbers::pi}};
 
     auto innerId = scene.nextShapeId();
-    scene.shapes[innerId] = {innerId, TubeShape{3.9, 4.0, 91.52, 0.0, 2.0 * std::numbers::pi}};
+    scene.shapes[innerId] = {innerId,
+                             ir::semantic::TubeShape{3.9, 4.0, 91.52, 0.0, 2.0 * std::numbers::pi}};
 
     auto boolId = scene.nextShapeId();
-    scene.shapes[boolId] = {boolId, BooleanSubtraction{outerId, innerId}};
+    scene.shapes[boolId] = {boolId, ir::semantic::BooleanSubtraction{outerId, innerId}};
 
     PrimitiveTessellator tess;
     TessellationParams params;
@@ -587,19 +594,21 @@ TEST_CASE("BooleanTessellator: ODD CarbonFoam Trd minus tube union reproducer",
     })";
 
     auto j = nlohmann::json::parse(kSceneJson);
-    SemanticScene scene = j.get<SemanticScene>();
+    ir::semantic::Scene scene = j.get<ir::semantic::Scene>();
 
     // Verify shapes loaded correctly.
-    REQUIRE(scene.shapes.contains(SemanticShapeId{80}));
-    REQUIRE(std::holds_alternative<BooleanSubtraction>(scene.shapes.at(SemanticShapeId{80}).data));
-    REQUIRE(std::holds_alternative<TrdShape>(scene.shapes.at(SemanticShapeId{76}).data));
+    REQUIRE(scene.shapes.contains(ir::semantic::ShapeId{80}));
+    REQUIRE(std::holds_alternative<ir::semantic::BooleanSubtraction>(
+        scene.shapes.at(ir::semantic::ShapeId{80}).data));
+    REQUIRE(std::holds_alternative<ir::semantic::TrdShape>(
+        scene.shapes.at(ir::semantic::ShapeId{76}).data));
 
     PrimitiveTessellator tess;
     TessellationParams params;
     params.maxSegmentsCircle = 48;
 
-    auto result =
-        tessellateBooleanShape(scene.shapes.at(SemanticShapeId{80}).data, scene, tess, params);
+    auto result = tessellateBooleanShape(scene.shapes.at(ir::semantic::ShapeId{80}).data, scene,
+                                         tess, params);
 
     for (const auto &d : result.diags.items()) {
         UNSCOPED_INFO(std::format("[{}] {}", d.code, d.message));
@@ -626,7 +635,7 @@ TEST_CASE("Trd tessellation produces manifold-compatible mesh", "[tessellation][
     TessellationParams params;
     params.maxSegmentsCircle = 48;
 
-    TrdShape trd{0.6000000000000001, 0.1, 52.225, 52.225, 0.2};
+    ir::semantic::TrdShape trd{0.6000000000000001, 0.1, 52.225, 52.225, 0.2};
     auto out = tess.tessellate(trd, params);
     REQUIRE_FALSE(out.vertices.empty());
 
@@ -657,7 +666,7 @@ TEST_CASE("TessellationPass: UnknownShape emits error diagnostic", "[tessellatio
 TEST_CASE("TessellationPass: empty scene produces empty result", "[tessellation][pass]") {
     NHConfig cfg;
     TessellationPass pass{cfg};
-    SemanticScene empty;
+    ir::semantic::Scene empty;
     auto result = pass.lower(empty);
 
     REQUIRE(result.scene.nodes.empty());

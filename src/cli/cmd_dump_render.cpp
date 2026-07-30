@@ -1,15 +1,15 @@
 #include "cli_common.hpp"
 
 #include <CLI/CLI.hpp>
+#include <config/config_ast.hpp>
+#include <config/config_loader.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/render_json.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
 #include <nlohmann/json.hpp>
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/render_json.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
 #include <print>
 #include <string>
+#include <tessellation/tessellation_pass.hpp>
 
 void registerCmdDumpRender(CLI::App &app) {
     auto *sub = app.add_subcommand("dump-render", "Dump the render IR of a geometry as JSON");
@@ -24,11 +24,11 @@ void registerCmdDumpRender(CLI::App &app) {
 
     sub->callback([=] {
         // ── Load config ────────────────────────────────────────────────────────
-        nodehammer::NHConfig cfg;
+        nodehammer::config::NHConfig cfg;
         if (*configOpt) {
             std::string cfgPath;
             configOpt->results(cfgPath);
-            auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
+            auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
             nodehammer::cli::printDiags(loaded.diags);
             if (loaded.diags.hasErrors()) {
                 return;
@@ -37,9 +37,9 @@ void registerCmdDumpRender(CLI::App &app) {
         }
 
         // ── Import scene ───────────────────────────────────────────────────────
-        nodehammer::SemanticScene semScene;
+        nodehammer::ir::semantic::Scene semScene;
         if (syntheticBoxOpt->count()) {
-            semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
+            semScene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
         } else if (*inputOpt) {
             auto [importResult, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
             nodehammer::cli::printDiags(importResult.diags);
@@ -60,7 +60,7 @@ void registerCmdDumpRender(CLI::App &app) {
         }
 
         // ── Tessellate ─────────────────────────────────────────────────────────
-        nodehammer::TessellationPass pass{cfg};
+        nodehammer::tessellation::TessellationPass pass{cfg};
         auto passResult = pass.lower(semScene);
         nodehammer::cli::printDiags(passResult.diags);
 
@@ -70,7 +70,7 @@ void registerCmdDumpRender(CLI::App &app) {
         std::string outPath;
         if (*outputOpt) {
             outputOpt->results(outPath);
-            nodehammer::zstd_io::writeJsonToFile(outPath, jsonStr);
+            nodehammer::detail::zstd_io::writeJsonToFile(outPath, jsonStr);
         } else {
             std::println("{}", jsonStr);
         }

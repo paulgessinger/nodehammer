@@ -1,13 +1,13 @@
-#include <nodehammer/ir/fb/semantic/importer.hpp>
+#include <ir/fb/semantic/importer.hpp>
 
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
 
 #include <format>
 #include <span>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view FlatBufferImporter::formatName() const noexcept { return "flatbuffer"; }
 
@@ -19,7 +19,7 @@ ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const
     ImportResult result;
 
     try {
-        auto raw = zstd_io::readBytesFromFile(path);
+        auto raw = detail::zstd_io::readBytesFromFile(path);
         auto scene = semanticSceneFromBytes(raw);
         scene.computeWorldTransforms();
         scene.computeOriginalPaths();
@@ -41,11 +41,11 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
         // `.zst` suffix on the filename signals zstd-compressed input —
         // same convention as the path-based reader, just decided from
         // the filename rather than the path.
-        const bool zst = zstd_io::hasZstdExtension(std::filesystem::path{filename});
+        const bool zst = detail::zstd_io::hasZstdExtension(std::filesystem::path{filename});
         std::vector<std::byte> decompressed;
         std::span<const std::byte> raw = bytes;
         if (zst) {
-            decompressed = zstd_io::decompress(bytes);
+            decompressed = detail::zstd_io::decompress(bytes);
             raw = std::span<const std::byte>{decompressed};
         }
         auto scene = semanticSceneFromBytes(raw);
@@ -60,4 +60,4 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

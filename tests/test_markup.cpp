@@ -2,7 +2,7 @@
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/detail/markup.hpp>
+#include <detail/markup.hpp>
 
 using nodehammer::detail::ColorMode;
 using nodehammer::detail::Console;

@@ -2,9 +2,9 @@
 
 #include "../ibl.hpp"
 #include "../scene_renderer.hpp"
-#include <nodehammer/viewer/backend_caps.hpp>
-#include <nodehammer/viewer/camera.hpp>
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/backend_caps.hpp>
+#include <viewer/camera.hpp>
+#include <viewer/render_quality.hpp>
 
 #include <glm/geometric.hpp>
 #include <glm/gtc/constants.hpp>

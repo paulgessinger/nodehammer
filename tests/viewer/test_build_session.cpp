@@ -1,11 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/detail/zstd_io.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
-#include <nodehammer/viewer/build_session.hpp>
+#include <detail/file_io.hpp>
+#include <detail/zstd_io.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/semantic.hpp>
+#include <viewer/bag_project_fs.hpp>
+#include <viewer/build_session.hpp>
 
 #include <cstddef>
 #include <cstring>
@@ -17,19 +17,21 @@
 #include <vector>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
 using nodehammer::viewer::BagProjectFs;
 using nodehammer::viewer::BuildPhase;
 using nodehammer::viewer::BuildSession;
+using nodehammer::viewer::CapturingLogSink;
 
 namespace {
 
 constexpr int kPollBudget = 100;
 
-SemanticScene makeMinimalScene() {
-    SemanticScene scene;
+ir::semantic::Scene makeMinimalScene() {
+    ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};
+    scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
 
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
@@ -38,7 +40,7 @@ SemanticScene makeMinimalScene() {
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
 
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    ir::semantic::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;
@@ -52,7 +54,7 @@ SemanticScene makeMinimalScene() {
 
 std::vector<std::byte> minimalNhbZstBytes() {
     auto raw = semanticSceneToBytes(makeMinimalScene());
-    return zstd_io::compress(std::span<const std::byte>{raw});
+    return detail::zstd_io::compress(std::span<const std::byte>{raw});
 }
 
 std::vector<std::byte> stringBytes(std::string_view s) {

@@ -10,7 +10,7 @@ commit-by-commit implementation order, not an implementation record.
 ## Status
 
 Implemented. The `prep → wedge → tessellate` sequence now lives once in the core
-`BuildPipeline` (`include/nodehammer/tessellation/build_pipeline.hpp`,
+`BuildPipeline` (`src/tessellation/build_pipeline.hpp`,
 `src/tessellation/build_pipeline.cpp`); the four former copies are thin adapters
 over it — native (`scene_build_job_native.cpp`), web-cooperative
 (`scene_build_job_web.cpp`, ~130 → ~20 lines), web-worker
@@ -31,10 +31,10 @@ four sites. The *primitives* are already shared; only the *sequencing* is copied
 
 - **Prep** — [`prepareSceneForTessellationFromInputs`](../src/scene_build.cpp)
   (`src/scene_build.cpp:17`): validate → select → dedup, with an optional inline wedge.
-- **Wedge** — cooperative [`WedgeCutJob`](../include/nodehammer/tessellation/wedge_cut.hpp)
+- **Wedge** — cooperative [`WedgeCutJob`](../src/tessellation/wedge_cut.hpp)
   (`wedge_cut.hpp:79`), or the drive-to-completion `applyWedgeCut` shim.
 - **Tessellate** — cooperative
-  [`TessellationJob`](../include/nodehammer/tessellation/tessellation_job.hpp)
+  [`TessellationJob`](../src/tessellation/tessellation_job.hpp)
   (`tessellation_job.hpp:19`), or the one-shot `TessellationPass::lower`.
 
 The four copies of the *sequence*:
@@ -83,7 +83,7 @@ Lift the `CooperativeBackend` state machine into the **core library**. It depend
 
 New files:
 
-- `include/nodehammer/tessellation/build_pipeline.hpp`
+- `src/tessellation/build_pipeline.hpp`
 - `src/tessellation/build_pipeline.cpp`
 
 ### Interface

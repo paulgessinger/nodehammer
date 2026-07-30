@@ -3,12 +3,12 @@
 #include "scene_build_job.hpp"
 #include "ui/notifications.hpp"
 
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/ir/render.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
-#include <nodehammer/viewer/build_session.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
+#include <config/config_ast.hpp>
+#include <ir/render.hpp>
+#include <ir/semantic.hpp>
+#include <tessellation/wedge_cut.hpp>
+#include <viewer/build_session.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <chrono>
 #include <cstdint>
@@ -25,7 +25,7 @@ namespace nodehammer::viewer {
 /// bookkeeping — all pulled out of `App::Impl`. It rides on the Stage-7
 /// `SceneBuildJob`/`BuildPipeline` rework.
 ///
-/// GPU work stays in the App: the controller only produces CPU `RenderScene`s
+/// GPU work stays in the App: the controller only produces CPU `render::Scene`s
 /// and reports them through callbacks (base scene, cut scene, and a
 /// "build starting" hook so the App can drop the resident cut bake). The App
 /// still owns `scene`/`cut_scene`, the GPU uploads, and the camera framing.
@@ -43,9 +43,9 @@ class BuildController {
 
     struct Callbacks {
         /// A fresh uncut base scene finished tessellating → upload + frame it.
-        std::function<void(std::shared_ptr<const RenderScene>)> on_base_scene_ready;
+        std::function<void(std::shared_ptr<const ir::render::Scene>)> on_base_scene_ready;
         /// A Boolean-cut bake finished → upload it into the cut renderer.
-        std::function<void(std::shared_ptr<const RenderScene>)> on_cut_scene_ready;
+        std::function<void(std::shared_ptr<const ir::render::Scene>)> on_cut_scene_ready;
         /// A new project build is starting → invalidate the resident cut bake
         /// (drop `cut_scene`, its upload flag, and clear the cut renderer).
         std::function<void()> on_project_build_starting;
@@ -85,9 +85,9 @@ class BuildController {
     [[nodiscard]] float cutBuiltEndDeg() const { return cut_built_end_deg_; }
 
   private:
-    void startBuild(std::shared_ptr<const NHConfig> config,
-                    std::shared_ptr<const SemanticScene> scene, std::string config_label,
-                    std::string geometry_label, std::optional<WedgeCutParams> wedge,
+    void startBuild(std::shared_ptr<const config::NHConfig> config,
+                    std::shared_ptr<const ir::semantic::Scene> scene, std::string config_label,
+                    std::string geometry_label, std::optional<tessellation::WedgeCutParams> wedge,
                     const AngleCut &cut);
     void updateProgress();
 
@@ -102,8 +102,8 @@ class BuildController {
     // Pristine (pre-cut) build inputs, cached on each fresh session build so
     // toggling / re-aiming the cut re-derives from uncut geometry without
     // re-walking the project.
-    std::shared_ptr<const NHConfig> pristine_config_;
-    std::shared_ptr<const SemanticScene> pristine_scene_;
+    std::shared_ptr<const config::NHConfig> pristine_config_;
+    std::shared_ptr<const ir::semantic::Scene> pristine_scene_;
     std::string pristine_config_label_;
     std::string pristine_geometry_label_;
     /// Input hash of the last base scene we successfully tessellated. When a

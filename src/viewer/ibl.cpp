@@ -1,6 +1,6 @@
 #include "ibl.hpp"
 
-#include <nodehammer/viewer/backend_caps.hpp>
+#include <viewer/backend_caps.hpp>
 
 #include <array>
 #include <cstring>

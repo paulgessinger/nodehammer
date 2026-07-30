@@ -2,10 +2,10 @@
 
 #include "../gpu_pass_timer.hpp"
 
-#include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/platform.hpp>
-#include <nodehammer/viewer/png_export.hpp>
-#include <nodehammer/viewer/render_quality.hpp>
+#include <viewer/config.hpp>
+#include <viewer/platform.hpp>
+#include <viewer/png_export.hpp>
+#include <viewer/render_quality.hpp>
 
 #include <cstdint>
 #include <functional>

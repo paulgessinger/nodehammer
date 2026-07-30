@@ -1,9 +1,9 @@
-#include <nodehammer/config/color_parse.hpp>
+#include <config/color_parse.hpp>
 
 #include <cmath>
 #include <cstddef>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 namespace {
 
@@ -62,4 +62,4 @@ std::optional<Color> parseHexColor(std::string_view hex) {
     return c;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::config

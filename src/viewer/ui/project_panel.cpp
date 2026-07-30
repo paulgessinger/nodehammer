@@ -1,6 +1,6 @@
 #include "project_panel.hpp"
 
-#include <nodehammer/viewer/project_fs.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <imgui.h>
 #include <imgui_internal.h>

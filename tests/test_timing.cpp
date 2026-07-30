@@ -2,7 +2,7 @@
 #include <thread>
 
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/detail/timing.hpp>
+#include <detail/timing.hpp>
 
 using namespace std::chrono_literals;
 using nodehammer::detail::formatDuration;

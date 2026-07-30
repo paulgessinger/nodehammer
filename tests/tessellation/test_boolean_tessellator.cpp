@@ -1,15 +1,17 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/tessellation/boolean_tessellator.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
+#include <ir/diagnostics.hpp>
+#include <ir/semantic.hpp>
+#include <tessellation/boolean_tessellator.hpp>
+#include <tessellation/primitive_tessellator.hpp>
 
 #include <manifold/manifold.h>
 
 #include <numbers>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::tessellation;
 
 namespace {
 const TessellationParams kDefault;
@@ -24,13 +26,13 @@ constexpr double kPi = std::numbers::pi;
 TEST_CASE("boolean tessellator: full hollow pgon is manifold",
           "[tessellation][boolean][manifold]") {
     PrimitiveTessellator tess;
-    PgonShape pgon;
+    ir::semantic::PgonShape pgon;
     pgon.phiStart = 0.0;
     pgon.phiDelta = 2.0 * kPi;
     pgon.nSides = 16;
     pgon.sections = {{-12.0, 31.5, 147.0}, {12.0, 31.5, 147.0}}; // {z, rMin, rMax}
 
-    auto mesh = tess.tessellate(SemanticShapeVariant{pgon}, kDefault);
+    auto mesh = tess.tessellate(ir::semantic::ShapeVariant{pgon}, kDefault);
     REQUIRE_FALSE(mesh.vertices.empty());
 
     DiagnosticList diags;
@@ -46,13 +48,13 @@ TEST_CASE("boolean tessellator: full hollow pgon is manifold",
 TEST_CASE("boolean tessellator: large full hollow pgon is manifold",
           "[tessellation][boolean][manifold]") {
     PrimitiveTessellator tess;
-    PgonShape pgon;
+    ir::semantic::PgonShape pgon;
     pgon.phiStart = 0.0;
     pgon.phiDelta = 2.0 * kPi;
     pgon.nSides = 16;
     pgon.sections = {{-345.0, 160.0, 343.6}, {345.0, 160.0, 343.6}};
 
-    auto mesh = tess.tessellate(SemanticShapeVariant{pgon}, kDefault);
+    auto mesh = tess.tessellate(ir::semantic::ShapeVariant{pgon}, kDefault);
     DiagnosticList diags;
     auto m = meshToManifold(mesh, diags, "pgon_large");
     REQUIRE(m.has_value());
@@ -66,14 +68,15 @@ TEST_CASE("boolean tessellator: large full hollow pgon is manifold",
 // the wedge construction would instead clear the -x/-y quadrant.
 TEST_CASE("boolean tessellator: partial tube subtraction clears the named sector",
           "[tessellation][boolean][manifold]") {
-    SemanticScene scene;
-    const SemanticShapeId boxId = scene.nextShapeId();
-    scene.shapes[boxId] = {boxId, BoxShape{4.0, 4.0, 1.0}};
-    const SemanticShapeId wedgeId = scene.nextShapeId();
+    ir::semantic::Scene scene;
+    const ir::semantic::ShapeId boxId = scene.nextShapeId();
+    scene.shapes[boxId] = {boxId, ir::semantic::BoxShape{4.0, 4.0, 1.0}};
+    const ir::semantic::ShapeId wedgeId = scene.nextShapeId();
     // rMin=0, rMax oversized to fully clear the box corner, sector [0°,90°].
-    scene.shapes[wedgeId] = {wedgeId, TubeShape{0.0, 20.0, 5.0, 0.0, kPi / 2.0}};
-    const SemanticShapeId cutId = scene.nextShapeId();
-    scene.shapes[cutId] = {cutId, BooleanSubtraction{boxId, wedgeId, glm::dmat4{1.0}}};
+    scene.shapes[wedgeId] = {wedgeId, ir::semantic::TubeShape{0.0, 20.0, 5.0, 0.0, kPi / 2.0}};
+    const ir::semantic::ShapeId cutId = scene.nextShapeId();
+    scene.shapes[cutId] = {cutId,
+                           ir::semantic::BooleanSubtraction{boxId, wedgeId, glm::dmat4{1.0}}};
 
     PrimitiveTessellator tess;
     auto out = tessellateBooleanShape(scene.shapes.at(cutId).data, scene, tess, kDefault);

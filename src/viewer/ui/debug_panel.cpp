@@ -5,7 +5,7 @@
 #include "notifications.hpp"
 #include "perf_history.hpp"
 
-#include <nodehammer/viewer/platform.hpp>
+#include <viewer/platform.hpp>
 
 #include <imgui.h>
 #include <implot.h>

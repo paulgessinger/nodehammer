@@ -39,8 +39,8 @@ four large clusters remain inline in these two methods.
 ## The pattern to follow (already in the codebase)
 
 Extract each concern as an **owned controller member type** — exactly how
-[`Camera`](../include/nodehammer/viewer/camera.hpp),
-[`BuildSession`](../include/nodehammer/viewer/build_session.hpp), and
+[`Camera`](../src/viewer/camera.hpp),
+[`BuildSession`](../src/viewer/build_session.hpp), and
 `Notifications` already live as members that `App::Impl` constructs and drives.
 
 Effects a controller does not own are injected as `std::function` callbacks,
@@ -48,7 +48,7 @@ mirroring the `UiActions` inversion in
 [`ui/ui_context.hpp`](../src/viewer/ui/ui_context.hpp) (`ui_context.hpp:34-53`),
 where panels invoke intent and the App owns the implementation. Tunables stay in
 the existing data-only structs
-([`RenderQualitySettings`](../include/nodehammer/viewer/render_quality.hpp),
+([`RenderQualitySettings`](../src/viewer/render_quality.hpp),
 `IblSettings`, `PngExportSettings`).
 
 This is a **mechanical move-state-plus-methods refactor, not a redesign**: no
@@ -160,7 +160,7 @@ class PngExporter {
 
 The `ImageReadback` GPU seam ([`png_export_readback.hpp`](../src/viewer/png_export_readback.hpp)
 `:30`) and the pure `downscaleBoxRgba8`/`encodePngRgba8` functions
-([`png_export.hpp`](../include/nodehammer/viewer/png_export.hpp)) stay as-is; the exporter
+([`png_export.hpp`](../src/viewer/png_export.hpp)) stay as-is; the exporter
 just orchestrates them. GPU + Platform → run-verified only.
 
 ### 6i — `BuildController`  *(do last — rides on Stage 7's `SceneBuildJob`)*
@@ -173,7 +173,7 @@ result to base vs cut scene, manage `build_progress_handle`/`build_error`), and 
 project/build pipeline including the `start_build` lambda (walk → resolve → build → the
 `pending_cut_rebuild` re-aim path).
 
-**Interface:** wraps [`BuildSession`](../include/nodehammer/viewer/build_session.hpp) +
+**Interface:** wraps [`BuildSession`](../src/viewer/build_session.hpp) +
 [`SceneBuildJob`](../src/viewer/scene_build_job.hpp) + `ProjectFs::generation()`. Emits
 outcomes via callbacks the App binds to its scene/upload state:
 

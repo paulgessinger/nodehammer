@@ -2,8 +2,8 @@
 
 #include "scene_build_job_internal.hpp"
 
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
+#include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
 
 #include <atomic>
 #include <cstdint>
@@ -32,7 +32,7 @@ struct SceneBuildJob::Impl {
     // while running; the main thread only samples the progress counters (the
     // same tolerated cross-thread read the previous inline jobs had) and the
     // atomic phase mirror above.
-    ::nodehammer::BuildPipeline pipe;
+    ::nodehammer::tessellation::BuildPipeline pipe;
 
     // Diagnostic labels for the pre-build log. The byte-driven build job
     // doesn't have real filesystem paths — these are just whatever the
@@ -45,9 +45,9 @@ struct SceneBuildJob::Impl {
     // `start` (main thread) just refcounts; the worker hands them to the
     // pipeline, which takes the deep copy prep consumes on its first advance —
     // on this worker thread, off the main loop.
-    std::shared_ptr<const ::nodehammer::NHConfig> preset_config;
-    std::shared_ptr<const ::nodehammer::SemanticScene> preset_scene;
-    std::optional<::nodehammer::WedgeCutParams> wedge_cut;
+    std::shared_ptr<const ::nodehammer::config::NHConfig> preset_config;
+    std::shared_ptr<const ::nodehammer::ir::semantic::Scene> preset_scene;
+    std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut;
 };
 
 namespace {
@@ -69,10 +69,10 @@ SceneBuildJob::~SceneBuildJob() {
     }
 }
 
-void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-                          std::shared_ptr<const ::nodehammer::SemanticScene> scene,
+void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
+                          std::shared_ptr<const ::nodehammer::ir::semantic::Scene> scene,
                           std::string config_label, std::string geometry_label,
-                          std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
+                          std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) {
     impl_->config_label = std::move(config_label);
     impl_->geometry_label = std::move(geometry_label);
     impl_->preset_config = std::move(config);
@@ -119,12 +119,12 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
     return true;
 }
 
-::nodehammer::SceneBuildResult SceneBuildJob::take() {
+::nodehammer::pipeline::SceneBuildResult SceneBuildJob::take() {
     // Only reached after poll() observed `done` and joined the worker, so
     // draining the pipeline here — which resets its nested wedge/tess jobs —
     // runs single-threaded and cannot race with the worker or the progress
     // getters that sample those jobs while the build is Running.
-    ::nodehammer::SceneBuildResult out = impl_->pipe.take();
+    ::nodehammer::pipeline::SceneBuildResult out = impl_->pipe.take();
     impl_->state = Impl::State::Idle;
     impl_->config_label.clear();
     impl_->geometry_label.clear();

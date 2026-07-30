@@ -1,11 +1,11 @@
 #include <CLI/CLI.hpp>
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/viewer/app.hpp>
-#include <nodehammer/viewer/archive_project_fs.hpp>
-#include <nodehammer/viewer/bag_project_fs.hpp>
-#include <nodehammer/viewer/config.hpp>
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
-#include <nodehammer/viewer/watched_filesystem_project_fs.hpp>
+#include <detail/file_io.hpp>
+#include <viewer/app.hpp>
+#include <viewer/archive_project_fs.hpp>
+#include <viewer/bag_project_fs.hpp>
+#include <viewer/config.hpp>
+#include <viewer/filesystem_project_fs.hpp>
+#include <viewer/watched_filesystem_project_fs.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -355,7 +355,7 @@ void registerCmdViewer(CLI::App &app) {
 
             std::string config_key;
             if (!configPath.empty()) {
-                auto bytes = nodehammer::file_io::readFile(config_path);
+                auto bytes = nodehammer::detail::file_io::readFile(config_path);
                 config_key = config_path.filename().string();
                 bag->addBytes(config_key, std::span<const std::byte>{bytes});
             }
@@ -366,7 +366,7 @@ void registerCmdViewer(CLI::App &app) {
                 std::exit(1);
             }
             {
-                auto bytes = nodehammer::file_io::readFile(geometry_path);
+                auto bytes = nodehammer::detail::file_io::readFile(geometry_path);
                 bag->addBytes(geometry_key, std::span<const std::byte>{bytes});
             }
 

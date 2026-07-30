@@ -1,7 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/semantic/exporter.hpp>
+#include <ir/semantic/exporter.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
 
 TEST_CASE("SemanticExporterRegistry resolves by extension", "[export][semantic]") {
     const auto reg = SemanticExporterRegistry::makeDefault();

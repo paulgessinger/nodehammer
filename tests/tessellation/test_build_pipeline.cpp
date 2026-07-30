@@ -12,11 +12,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <algorithm>
 #include <cstdint>
@@ -27,13 +27,17 @@
 #include <vector>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::pipeline;
+using namespace nodehammer::tessellation;
+using namespace nodehammer::config;
 
 namespace {
 
 constexpr std::uint64_t kSpin = std::numeric_limits<std::uint64_t>::max();
 
-// A structural fingerprint of a RenderScene that is stable under different
-// RenderNodeId/MeshAssetId allocation order but captures node topology, mesh
+// A structural fingerprint of a render::Scene that is stable under different
+// render::NodeId/MeshAssetId allocation order but captures node topology, mesh
 // geometry, and the node→mesh mapping — enough to assert two scenes are "the
 // same build".
 struct SceneFingerprint {
@@ -50,7 +54,7 @@ struct SceneFingerprint {
     bool operator==(const SceneFingerprint &) const = default;
 };
 
-SceneFingerprint fingerprint(const RenderScene &sc) {
+SceneFingerprint fingerprint(const ir::render::Scene &sc) {
     SceneFingerprint fp;
     fp.nodeCount = sc.nodes.size();
     fp.meshCount = sc.meshAssets.size();
@@ -71,7 +75,8 @@ std::shared_ptr<const NHConfig> emptyConfig() { return std::make_shared<const NH
 
 // The pre-refactor synchronous reference: prep (with an inline wedge, matching
 // the old buildSceneFromPaths / convert ordering) then a one-shot lower().
-RenderScene referenceBuild(const SemanticScene &scene, std::optional<WedgeCutParams> wedge) {
+ir::render::Scene referenceBuild(const ir::semantic::Scene &scene,
+                                 std::optional<WedgeCutParams> wedge) {
     ScenePrepResult prep = prepareSceneForTessellationFromInputs(NHConfig{}, scene, wedge);
     REQUIRE(prep.ok);
     TessellationPass pass{prep.config};
@@ -81,10 +86,10 @@ RenderScene referenceBuild(const SemanticScene &scene, std::optional<WedgeCutPar
 }
 
 // Drive a fresh pipeline to completion with the given per-slice budget.
-SceneBuildResult drivePipeline(const SemanticScene &scene, std::optional<WedgeCutParams> wedge,
-                               std::uint64_t budget) {
+SceneBuildResult drivePipeline(const ir::semantic::Scene &scene,
+                               std::optional<WedgeCutParams> wedge, std::uint64_t budget) {
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const SemanticScene>(scene), wedge);
+    pipe.start(emptyConfig(), std::make_shared<const ir::semantic::Scene>(scene), wedge);
     while (!pipe.advance(budget)) {
     }
     return pipe.take();
@@ -93,19 +98,19 @@ SceneBuildResult drivePipeline(const SemanticScene &scene, std::optional<WedgeCu
 } // namespace
 
 TEST_CASE("BuildPipeline: drive-to-completion parity with one-shot lower", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
 
     SceneBuildResult built = drivePipeline(scene, std::nullopt, kSpin);
     REQUIRE_FALSE(built.diags.hasErrors());
     REQUIRE(built.scene != nullptr);
 
-    const RenderScene reference = referenceBuild(scene, std::nullopt);
+    const ir::render::Scene reference = referenceBuild(scene, std::nullopt);
     REQUIRE(fingerprint(*built.scene) == fingerprint(reference));
 }
 
 TEST_CASE("BuildPipeline: wedge parity with the pre-refactor synchronous path",
           "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const WedgeCutParams wedge{.startDeg = 0.0, .endDeg = 90.0, .margin = 2.0};
 
     SceneBuildResult built = drivePipeline(scene, wedge, kSpin);
@@ -115,16 +120,16 @@ TEST_CASE("BuildPipeline: wedge parity with the pre-refactor synchronous path",
     // Reference applies the wedge inline in prep; the pipeline defers it to a
     // WedgeCutJob. wedge_cut.hpp documents applyWedgeCut as a thin shim over
     // WedgeCutJob, so the geometry must match.
-    const RenderScene reference = referenceBuild(scene, wedge);
+    const ir::render::Scene reference = referenceBuild(scene, wedge);
     REQUIRE(fingerprint(*built.scene) == fingerprint(reference));
 }
 
 TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
 
     // A tiny budget forces many advance() iterations.
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const SemanticScene>(scene), std::nullopt);
+    pipe.start(emptyConfig(), std::make_shared<const ir::semantic::Scene>(scene), std::nullopt);
     int falses = 0;
     while (!pipe.advance(1 /* ns */)) {
         ++falses;
@@ -138,17 +143,17 @@ TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pip
     // false returns before completion.
     REQUIRE(falses >= 2);
 
-    const RenderScene reference = referenceBuild(scene, std::nullopt);
+    const ir::render::Scene reference = referenceBuild(scene, std::nullopt);
     REQUIRE(fingerprint(*sliced.scene) == fingerprint(reference));
 }
 
 TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const WedgeCutParams wedge{.startDeg = 0.0, .endDeg = 90.0, .margin = 2.0};
 
     BuildPipeline pipe;
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Idle);
-    pipe.start(emptyConfig(), std::make_shared<const SemanticScene>(scene), wedge);
+    pipe.start(emptyConfig(), std::make_shared<const ir::semantic::Scene>(scene), wedge);
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Queued);
 
     // Counters are 0 before their phases run.
@@ -204,7 +209,7 @@ TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
 TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pipeline]") {
     // A rule referencing an undefined material fails ConfigValidator, so prep
     // returns !ok and the pipeline lands on the failure branch.
-    SemanticScene scene = SyntheticSceneBuilder::buildSingleBox();
+    ir::semantic::Scene scene = SyntheticSceneBuilder::buildSingleBox();
     NHConfig cfg;
     Rule rule;
     rule.material = "does_not_exist";
@@ -212,7 +217,7 @@ TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pip
 
     BuildPipeline pipe;
     pipe.start(std::make_shared<const NHConfig>(std::move(cfg)),
-               std::make_shared<const SemanticScene>(std::move(scene)), std::nullopt);
+               std::make_shared<const ir::semantic::Scene>(std::move(scene)), std::nullopt);
     while (!pipe.advance(kSpin)) {
     }
     SceneBuildResult r = pipe.take();
@@ -221,8 +226,8 @@ TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pip
 }
 
 TEST_CASE("BuildPipeline: degenerate and absent wedge skip Cutting", "[build_pipeline]") {
-    const SemanticScene scene = SyntheticSceneBuilder::buildNestedBoxes();
-    const RenderScene reference = referenceBuild(scene, std::nullopt);
+    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::render::Scene reference = referenceBuild(scene, std::nullopt);
 
     SECTION("absent wedge") {
         SceneBuildResult r = drivePipeline(scene, std::nullopt, kSpin);

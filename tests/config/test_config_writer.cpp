@@ -1,9 +1,10 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_writer.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_writer.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::config;
 
 // ── Helper: round-trip through TOML ─────────────────────────────────────────
 

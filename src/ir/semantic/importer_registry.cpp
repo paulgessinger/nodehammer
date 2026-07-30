@@ -1,13 +1,13 @@
-#include <nodehammer/ir/fb/semantic/importer.hpp>
-#include <nodehammer/ir/json/semantic/importer.hpp>
-#include <nodehammer/ir/semantic/importer.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
+#include <ir/fb/semantic/importer.hpp>
+#include <ir/json/semantic/importer.hpp>
+#include <ir/semantic/importer.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
 
 #ifdef NH_WITH_TGEO
-#include <nodehammer/ir/tgeo/semantic/importer.hpp>
+#include <ir/tgeo/semantic/importer.hpp>
 #endif
 #ifdef NH_WITH_DD4HEP
-#include <nodehammer/ir/dd4hep/semantic/importer.hpp>
+#include <ir/dd4hep/semantic/importer.hpp>
 #endif
 
 #include <algorithm>
@@ -15,7 +15,7 @@
 #include <fstream>
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -124,4 +124,4 @@ ImporterRegistry ImporterRegistry::makeDefault() {
     return reg;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

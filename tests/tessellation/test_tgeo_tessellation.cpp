@@ -1,16 +1,16 @@
 // Integration tests: TGeo shape → dispatchTGeoShape → PrimitiveTessellator.
 // Each test builds a TGeoManager programmatically, dispatches the shape to our
-// internal SemanticShapeVariant, tessellates it, and writes an OBJ file that
+// internal semantic::ShapeVariant, tessellates it, and writes an OBJ file that
 // can be opened in Blender or MeshLab for visual inspection.
 //
 // OBJ files are written to NODEHAMMER_TESS_OBJ_DIR (set by CMake).
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostics.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/tgeo/semantic/shape_dispatch.hpp>
-#include <nodehammer/tessellation/primitive_tessellator.hpp>
+#include <ir/diagnostics.hpp>
+#include <ir/semantic.hpp>
+#include <ir/tgeo/semantic/shape_dispatch.hpp>
+#include <tessellation/primitive_tessellator.hpp>
 
 #include <TGeoBBox.h>
 #include <TGeoCone.h>
@@ -30,6 +30,8 @@
 #include <glm/glm.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::tessellation;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,12 +49,12 @@ struct DispatchResult {
 
 static DispatchResult dispatchAndTessellate(const TGeoShape *shape, const std::string &objName,
                                             const TessellationParams &params = {}) {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
     DiagnosticList diags;
-    const SemanticShapeId shapeId = dispatchTGeoShape(shape, scene, diags);
+    const ir::semantic::ShapeId shapeId = dispatchTGeoShape(shape, scene, diags);
 
     PrimitiveTessellator tess;
-    const SemanticShapeVariant &variant = scene.shapes.at(shapeId).data;
+    const ir::semantic::ShapeVariant &variant = scene.shapes.at(shapeId).data;
     TessellationOutput out = tess.tessellate(variant, params);
     test::writeObjToDir(out, objName);
     return {std::move(out), std::move(diags)};

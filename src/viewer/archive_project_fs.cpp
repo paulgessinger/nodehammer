@@ -1,8 +1,8 @@
-#include <nodehammer/viewer/archive_project_fs.hpp>
+#include <viewer/archive_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/viewer/archive_export.hpp>
-#include <nodehammer/viewer/zip_working_set.hpp>
+#include <detail/file_io.hpp>
+#include <viewer/archive_export.hpp>
+#include <viewer/zip_working_set.hpp>
 
 #include <cstring>
 #include <exception>
@@ -229,7 +229,7 @@ void ArchiveProjectFs::addPath(const std::filesystem::path &path) {
     }
     std::vector<std::byte> contents;
     try {
-        contents = file_io::readFile(path);
+        contents = detail::file_io::readFile(path);
     } catch (const std::exception &e) {
         auto msg = std::string{"failed to read "} + path.string() + ": " + e.what();
         impl_->warning_msgs.push_back(msg);

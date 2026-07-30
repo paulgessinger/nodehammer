@@ -1,14 +1,14 @@
-#include <nodehammer/ir/semantic/exporter.hpp>
+#include <ir/semantic/exporter.hpp>
 
-#include <nodehammer/ir/fb/semantic/exporter.hpp>
-#include <nodehammer/ir/json/semantic/exporter.hpp>
+#include <ir/fb/semantic/exporter.hpp>
+#include <ir/json/semantic/exporter.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <span>
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -87,4 +87,4 @@ SemanticExporterRegistry SemanticExporterRegistry::makeDefault() {
     return reg;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

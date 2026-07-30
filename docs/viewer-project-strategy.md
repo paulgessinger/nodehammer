@@ -2,7 +2,7 @@
 
 This document describes the target interaction model for the viewer's project
 system, and connects that model to the existing
-[`ProjectFs`](../include/nodehammer/viewer/project_fs.hpp) abstraction —
+[`ProjectFs`](../src/viewer/project_fs.hpp) abstraction —
 including which capabilities exist today, which need additions to (or
 simplifications of) the base interface, and which are best expressed as new
 concrete backends or decorators.
@@ -123,7 +123,7 @@ consumed via the same interface — no API churn at the App boundary.
 - [`App::setProject`](../src/viewer/app.cpp) clears root keys + session state
   and accepts any new `unique_ptr<ProjectFs>`. This is where every mode
   transition lands.
-- [`BuildSession`](../include/nodehammer/viewer/build_session.hpp) reads
+- [`BuildSession`](../src/viewer/build_session.hpp) reads
   `generation()` and re-walks on bump or `force_walk`. Any mutation that
   bumps `generation()` (write-through to disk, watcher reload, archive
   remount) already flows through the existing rebuild path.
@@ -131,7 +131,7 @@ consumed via the same interface — no API churn at the App boundary.
   pipeline regardless of whether a scene is loaded, so file additions and
   edits drive a rebuild even after the first scene renders.
 - A platform persistent-text primitive is in place:
-  [`Platform::loadPersistentText` / `savePersistentText`](../include/nodehammer/viewer/platform.hpp)
+  [`Platform::loadPersistentText` / `savePersistentText`](../src/viewer/platform.hpp)
   store small TOML/ini blobs under the config dir on native
   (`sago::getConfigHome()/nodehammer/<key>`) and in browser
   `localStorage` on web. [`app_state.{hpp,cpp}`](../src/viewer/app_state.cpp)
@@ -691,7 +691,7 @@ without an editor sitting on top of churning APIs.
 2. ✅ **Introduce `ByteBuffer` and drop the filesystem byte cache** —
    landed. `ByteBuffer` (wrapping `shared_ptr<const vector<byte>>`,
    exposing `span()`/`size()`/`empty()`) lives at
-   [`include/nodehammer/viewer/byte_buffer.hpp`](../include/nodehammer/viewer/byte_buffer.hpp);
+   [`src/viewer/byte_buffer.hpp`](../src/viewer/byte_buffer.hpp);
    only public construction is from a `vector<std::byte>`, after which
    it's a copyable handle (refcount bump) — no `shared_ptr` is exposed
    on the API. `OpenedFile::bytes` carries it. `FilesystemProjectFs`
@@ -706,7 +706,7 @@ without an editor sitting on top of churning APIs.
    needs reinventing.
 3. ✅ **`NativeBagProjectFs` (storage dir + write-through `add`)** —
    landed as a thin wrapper around an inner
-   [`FilesystemProjectFs`](../include/nodehammer/viewer/filesystem_project_fs.hpp)
+   [`FilesystemProjectFs`](../src/viewer/filesystem_project_fs.hpp)
    pointed at a process-owned `temp_directory_path()` subdirectory
    (created in ctor, best-effort `remove_all` in dtor). Reads delegate
    straight through to the inner FS — no separate byte cache, per the
@@ -754,7 +754,7 @@ without an editor sitting on top of churning APIs.
    debounce/coalesce logic deterministically testable without threads;
    one `[.]`-tagged integration test exercises the real FSEvents path.
 5. ✅ **`ZipWorkingSet` helper (§6.5)** — landed. miniz-backed
-   ([`zip_working_set.{hpp,cpp}`](../include/nodehammer/viewer/zip_working_set.hpp)):
+   ([`zip_working_set.{hpp,cpp}`](../src/viewer/zip_working_set.hpp)):
    `openFromBytes`/`openFromFile` parse the central directory into memory,
    `read(key)` decompresses lazily and caches as a `ByteBuffer`,
    `writeEntry`/`removeEntry` maintain an override+tombstone overlay,
@@ -765,7 +765,7 @@ without an editor sitting on top of churning APIs.
    `miniz/3.0.2`, viewer-gated on **both** native and web (step 8's web
    bag reuses it), unlike the native-only watcher. Tested directly.
 6. ✅ **`ArchiveProjectFs` (native)** — landed
-   ([`archive_project_fs.{hpp,cpp}`](../include/nodehammer/viewer/archive_project_fs.hpp)).
+   ([`archive_project_fs.{hpp,cpp}`](../src/viewer/archive_project_fs.hpp)).
    Wraps a `ZipWorkingSet` bound to a path; `resolve` reads from the
    working set (no basename fallback — archive keys are full paths),
    `list(dir)` synthesizes a `DirNode` tree with a per-dir cache keyed to
@@ -779,7 +779,7 @@ without an editor sitting on top of churning APIs.
    *Deferred*: `Save as archive…` (that's step 7).
 7. ✅ **"Create archive from scene" — cross-platform archive promotion** —
    landed
-   ([`archive_export.{hpp,cpp}`](../include/nodehammer/viewer/archive_export.hpp)).
+   ([`archive_export.{hpp,cpp}`](../src/viewer/archive_export.hpp)).
    Instead of a one-shot save, the project is *promoted* into a live,
    unbound `ArchiveProjectFs` seeded with `buildArchiveWorkingSet` (the
    **build closure** — root config + transitive includes + geometry — for

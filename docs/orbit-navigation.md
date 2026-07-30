@@ -32,7 +32,7 @@ Tips:
 
 The model lives in two files:
 
-- [`include/nodehammer/viewer/camera.hpp`](../include/nodehammer/viewer/camera.hpp) — the `Camera` struct and its mutators.
+- [`src/viewer/camera.hpp`](../src/viewer/camera.hpp) — the `Camera` struct and its mutators.
 - [`src/viewer/camera.cpp`](../src/viewer/camera.cpp) — the math.
 
 Input is mapped onto the camera in
@@ -195,7 +195,7 @@ event, so the timing gap is the only signal available.)
 ## Auto-orbit
 
 A presentation mode that spins the camera on its own. Config in
-[`config.hpp`](../include/nodehammer/viewer/config.hpp):
+[`config.hpp`](../src/viewer/config.hpp):
 
 | Setting                | Default | Meaning |
 |------------------------|---------|---------|

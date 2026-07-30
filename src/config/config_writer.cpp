@@ -1,12 +1,12 @@
-#include <nodehammer/config/config_enums.hpp>
-#include <nodehammer/config/config_writer.hpp>
-#include <nodehammer/detail/overloaded.hpp>
+#include <config/config_enums.hpp>
+#include <config/config_writer.hpp>
+#include <detail/overloaded.hpp>
 
 #include <toml++/toml.hpp>
 
 #include <sstream>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 using detail::overloaded;
 
@@ -326,4 +326,4 @@ std::string configToToml(const NHConfig &cfg) {
     return os.str();
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::config

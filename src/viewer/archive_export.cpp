@@ -1,7 +1,7 @@
-#include <nodehammer/viewer/archive_export.hpp>
+#include <viewer/archive_export.hpp>
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/viewer/project_fs.hpp>
+#include <config/config_loader.hpp>
+#include <viewer/project_fs.hpp>
 
 #include <algorithm>
 #include <deque>
@@ -12,7 +12,7 @@
 #include <vector>
 
 #ifndef __EMSCRIPTEN__
-#include <nodehammer/detail/file_io.hpp>
+#include <detail/file_io.hpp>
 
 #include <cstring>
 #include <exception>
@@ -105,8 +105,8 @@ void collectClosure(const ProjectFs &fs, ZipWorkingSet &ws, std::string_view con
         if (!bytes || !isTomlKey(key)) {
             continue;
         }
-        for (const auto &rel : ConfigLoader::peekIncludesFromBytes(bytes->span())) {
-            auto abs = ConfigLoader::resolveIncludeKey(key, rel);
+        for (const auto &rel : config::ConfigLoader::peekIncludesFromBytes(bytes->span())) {
+            auto abs = config::ConfigLoader::resolveIncludeKey(key, rel);
             if (seen.insert(abs).second) {
                 queue.push_back(std::move(abs));
             }
@@ -140,7 +140,7 @@ bool writeBytesAtomic(const std::filesystem::path &target, std::span<const std::
     tmp += ".nhtmp";
 
     try {
-        file_io::writeFile(tmp, bytes);
+        detail::file_io::writeFile(tmp, bytes);
     } catch (const std::exception &e) {
         err = e.what();
         return false;

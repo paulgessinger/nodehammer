@@ -9,15 +9,15 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/ir/fb/render/flatbuffer.hpp>
-#include <nodehammer/ir/fb/semantic/flatbuffer.hpp>
-#include <nodehammer/ir/fb/semantic/importer.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/tessellation_job.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <config/config_loader.hpp>
+#include <ir/fb/render/flatbuffer.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/fb/semantic/importer.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <scene_build.hpp>
+#include <tessellation/tessellation_job.hpp>
+#include <tessellation/tessellation_pass.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <cstddef>
 #include <limits>
@@ -26,6 +26,10 @@
 #include <vector>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::pipeline;
+using namespace nodehammer::tessellation;
+using namespace nodehammer::config;
 
 namespace {
 

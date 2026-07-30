@@ -2,8 +2,8 @@
 
 #include "scene_build_job.hpp"
 
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <scene_build.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -27,12 +27,12 @@ class IWebBackend {
   public:
     virtual ~IWebBackend() = default;
 
-    virtual void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-                       std::shared_ptr<const ::nodehammer::SemanticScene> scene,
+    virtual void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
+                       std::shared_ptr<const ::nodehammer::ir::semantic::Scene> scene,
                        std::string config_label, std::string geometry_label,
-                       std::optional<::nodehammer::WedgeCutParams> wedge_cut) = 0;
+                       std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) = 0;
     virtual bool poll(std::uint64_t budget_ns) = 0;
-    [[nodiscard]] virtual ::nodehammer::SceneBuildResult take() = 0;
+    [[nodiscard]] virtual ::nodehammer::pipeline::SceneBuildResult take() = 0;
 
     [[nodiscard]] virtual std::size_t tessellationTotal() const = 0;
     [[nodiscard]] virtual std::size_t tessellationProcessed() const = 0;

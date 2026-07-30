@@ -7,10 +7,10 @@
 //
 // Exit code is non-zero on any pipeline-stage error; diagnostics go to stderr.
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/export_resolve.hpp>
-#include <nodehammer/ir/render/exporter.hpp>
-#include <nodehammer/scene_build.hpp>
+#include <config/config_loader.hpp>
+#include <export_resolve.hpp>
+#include <ir/render/exporter.hpp>
+#include <scene_build.hpp>
 
 #include <filesystem>
 #include <iostream>
@@ -18,11 +18,11 @@
 
 namespace {
 
-void printDiags(const nodehammer::DiagnosticList &diags) {
+void printDiags(const nodehammer::ir::DiagnosticList &diags) {
     for (const auto &d : diags.items()) {
-        const char *sev = d.severity >= nodehammer::DiagnosticSeverity::Error     ? "error"
-                          : d.severity == nodehammer::DiagnosticSeverity::Warning ? "warning"
-                                                                                  : "info";
+        const char *sev = d.severity >= nodehammer::ir::DiagnosticSeverity::Error     ? "error"
+                          : d.severity == nodehammer::ir::DiagnosticSeverity::Warning ? "warning"
+                                                                                      : "info";
         std::println(std::cerr, "[{}] {} {}", sev, d.code, d.message);
     }
 }
@@ -40,14 +40,14 @@ int main(int argc, char **argv) {
     const std::filesystem::path input_path = argv[2];
     const std::filesystem::path output_path = argv[3];
 
-    auto built = nodehammer::buildSceneFromPaths(config_path, input_path);
+    auto built = nodehammer::pipeline::buildSceneFromPaths(config_path, input_path);
     printDiags(built.diags);
     if (!built.scene) {
         std::println(std::cerr, "bench: scene build failed");
         return 1;
     }
 
-    const auto registry = nodehammer::RenderExporterRegistry::makeDefault();
+    const auto registry = nodehammer::ir::RenderExporterRegistry::makeDefault();
     const auto *exp = registry.resolve(output_path.string(), {});
     if (exp == nullptr) {
         std::println(std::cerr, "bench: cannot determine output format for '{}'",
@@ -62,8 +62,8 @@ int main(int argc, char **argv) {
     // twice. Without this the bench silently ignored `[export.*]` and exported
     // at the format defaults — a different scale from `convert` on the same
     // config.
-    const auto reloaded = nodehammer::ConfigLoader::loadFromFile(config_path);
-    const auto ecfg = nodehammer::resolveExportConfig(reloaded.config, output_path);
+    const auto reloaded = nodehammer::config::ConfigLoader::loadFromFile(config_path);
+    const auto ecfg = nodehammer::pipeline::resolveExportConfig(reloaded.config, output_path);
 
     auto expResult = exp->write(*built.scene, output_path.string(), ecfg);
     printDiags(expResult.diags);

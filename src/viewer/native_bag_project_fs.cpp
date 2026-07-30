@@ -1,7 +1,7 @@
-#include <nodehammer/viewer/native_bag_project_fs.hpp>
+#include <viewer/native_bag_project_fs.hpp>
 
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/viewer/filesystem_project_fs.hpp>
+#include <detail/file_io.hpp>
+#include <viewer/filesystem_project_fs.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -246,7 +246,7 @@ void NativeBagProjectFs::addBytes(std::string_view filename, std::span<const std
 
     const auto target = impl_->storage_dir / std::filesystem::path{filename};
     try {
-        file_io::writeFile(target, bytes);
+        detail::file_io::writeFile(target, bytes);
     } catch (const std::exception &e) {
         pushError(std::string{"failed to write "} + target.string() + ": " + e.what());
         impl_->errored = true;
@@ -267,7 +267,7 @@ void NativeBagProjectFs::addPath(const std::filesystem::path &path) {
     }
     std::vector<std::byte> contents;
     try {
-        contents = file_io::readFile(path);
+        contents = detail::file_io::readFile(path);
     } catch (const std::exception &e) {
         pushError(std::string{"failed to read "} + path.string() + ": " + e.what());
         impl_->errored = true;

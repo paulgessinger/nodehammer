@@ -22,12 +22,12 @@
 // so re-aiming the wedge cut (same scene, new angle) doesn't re-deserialize:
 // the caller passes the bytes only when the epoch changes.
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/ir/fb/render/flatbuffer.hpp>
-#include <nodehammer/ir/fb/semantic/importer.hpp>
-#include <nodehammer/scene_build.hpp>
-#include <nodehammer/tessellation/build_pipeline.hpp>
-#include <nodehammer/tessellation/wedge_cut.hpp>
+#include <config/config_loader.hpp>
+#include <ir/fb/render/flatbuffer.hpp>
+#include <ir/fb/semantic/importer.hpp>
+#include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
+#include <tessellation/wedge_cut.hpp>
 
 #include <emscripten/emscripten.h>
 
@@ -45,6 +45,10 @@
 namespace {
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::pipeline;
+using namespace nodehammer::tessellation;
+using namespace nodehammer::config;
 
 // Phase codes posted to the main thread; the JS side maps them to labels.
 // Ordered to mirror BuildPipeline::Phase (Preparing/Cutting/Tessellating/Finalizing).
@@ -111,7 +115,7 @@ void reportError(const DiagnosticList &diags, const char *fallback) {
 struct ComputeCache {
     bool valid{false};
     std::uint32_t epoch{0};
-    SemanticScene scene;
+    ir::semantic::Scene scene;
     NHConfig config;
 };
 
@@ -178,7 +182,7 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
     // *non-owning* aliasing shared_ptrs over the cache — the pipeline never takes
     // ownership of the cached scene/config (invariant #5).
     auto cfg = std::shared_ptr<const NHConfig>(std::shared_ptr<void>{}, &c.config);
-    auto scn = std::shared_ptr<const SemanticScene>(std::shared_ptr<void>{}, &c.scene);
+    auto scn = std::shared_ptr<const ir::semantic::Scene>(std::shared_ptr<void>{}, &c.scene);
 
     nh_compute_emit_progress(kPreparing, 0, 0);
     BuildPipeline pipe;

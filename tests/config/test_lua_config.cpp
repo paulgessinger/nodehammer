@@ -1,9 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/config_writer.hpp>
-#include <nodehammer/lua/lua_config.hpp>
+#include <config/config_loader.hpp>
+#include <config/config_writer.hpp>
+#include <lua/lua_config.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -14,6 +14,9 @@
 #include <variant>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::lua;
+using namespace nodehammer::config;
 
 namespace {
 

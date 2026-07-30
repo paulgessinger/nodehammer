@@ -1,8 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/semantic.hpp>
-#include <nodehammer/ir/tgeo/semantic/importer.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/semantic.hpp>
+#include <ir/tgeo/semantic/importer.hpp>
 
 #include <TGeoBBox.h>
 #include <TGeoCompositeShape.h>
@@ -22,7 +22,7 @@ static void resetManager() {
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("TGeoImporter: formatName and supportedExtensions", "[import][tgeo]") {
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     REQUIRE(imp.formatName() == "tgeo");
     REQUIRE(imp.supportedExtensions() == std::vector<std::string>{".root"});
 }
@@ -36,14 +36,14 @@ TEST_CASE("TGeoImporter: TGeoBBox -> BoxShape", "[import][tgeo]") {
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
 
     bool found = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::BoxShape>(s.data)) {
-            const auto &bs = std::get<nodehammer::BoxShape>(s.data);
+        if (std::holds_alternative<nodehammer::ir::semantic::BoxShape>(s.data)) {
+            const auto &bs = std::get<nodehammer::ir::semantic::BoxShape>(s.data);
             REQUIRE(bs.dx == Catch::Approx(10.0));
             REQUIRE(bs.dy == Catch::Approx(20.0));
             REQUIRE(bs.dz == Catch::Approx(30.0));
@@ -62,14 +62,14 @@ TEST_CASE("TGeoImporter: TGeoTube -> TubeShape", "[import][tgeo]") {
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
 
     bool found = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::TubeShape>(s.data)) {
-            const auto &ts = std::get<nodehammer::TubeShape>(s.data);
+        if (std::holds_alternative<nodehammer::ir::semantic::TubeShape>(s.data)) {
+            const auto &ts = std::get<nodehammer::ir::semantic::TubeShape>(s.data);
             REQUIRE(ts.rMin == Catch::Approx(5.0));
             REQUIRE(ts.rMax == Catch::Approx(10.0));
             REQUIRE(ts.dz == Catch::Approx(25.0));
@@ -90,7 +90,7 @@ TEST_CASE("TGeoImporter: nested volumes -> correct parent-child hierarchy", "[im
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.scene.nodes.size() == 2);
@@ -116,7 +116,7 @@ TEST_CASE("TGeoImporter: same TGeoVolume placed twice -> one LV, two nodes", "[i
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     REQUIRE(result.scene.nodes.size() == 3);   // world + 2 placements
     REQUIRE(result.scene.logVols.size() == 2); // world LV + brick LV (deduplicated)
@@ -138,14 +138,14 @@ TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") 
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
 
     bool hasBool = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::BooleanUnion>(s.data)) {
+        if (std::holds_alternative<nodehammer::ir::semantic::BooleanUnion>(s.data)) {
             hasBool = true;
-            const auto &bu = std::get<nodehammer::BooleanUnion>(s.data);
+            const auto &bu = std::get<nodehammer::ir::semantic::BooleanUnion>(s.data);
             REQUIRE(result.scene.shapes.contains(bu.left));
             REQUIRE(result.scene.shapes.contains(bu.right));
         }
@@ -166,7 +166,7 @@ TEST_CASE("TGeoImporter: TGeoRotation -> localTransform rotation columns", "[imp
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
 
@@ -204,7 +204,7 @@ TEST_CASE("TGeoImporter: TGeoCombiTrans -> localTransform rotation and translati
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
 
@@ -239,7 +239,7 @@ TEST_CASE("TGeoImporter: worldTransform composes parent rotation with child tran
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.scene.nodes.size() == 3);
@@ -263,7 +263,7 @@ TEST_CASE("TGeoImporter: root worldTransform is identity", "[import][tgeo]") {
     mgr->SetTopVolume(top);
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     const auto &root = result.scene.nodes.at(result.scene.rootId);
     REQUIRE(root.worldTransform == glm::dmat4{1.0});
@@ -277,7 +277,7 @@ TEST_CASE("TGeoImporter: sourceSystem is tgeo", "[import][tgeo]") {
     mgr->SetTopVolume(mgr->MakeBox("world", med, 100, 100, 100));
     mgr->CloseGeometry();
 
-    nodehammer::TGeoImporter imp;
+    nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     const auto &root = result.scene.nodes.at(result.scene.rootId);
     REQUIRE(root.sourceSystem == "tgeo");

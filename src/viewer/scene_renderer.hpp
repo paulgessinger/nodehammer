@@ -1,21 +1,21 @@
 #pragma once
 
-#include <nodehammer/viewer/config.hpp>
+#include <viewer/config.hpp>
 
 #include <glm/glm.hpp>
 #include <memory>
 #include <sokol_gfx.h>
 
-namespace nodehammer {
-struct RenderScene;
-} // namespace nodehammer
+namespace nodehammer::ir::render {
+struct Scene;
+} // namespace nodehammer::ir::render
 
 namespace nodehammer::viewer {
 
 struct Camera;
 struct IblBakeData;
 
-/// GPU-side renderer for nodehammer's tessellated RenderScene IR using
+/// GPU-side renderer for nodehammer's tessellated render::Scene IR using
 /// sokol_gfx. Per-mesh-asset static vertex/index buffers, draws grouped by
 /// (mesh, material) with hardware instancing for the per-node world matrix.
 /// Lambertian shading; PBR comes later.
@@ -48,7 +48,7 @@ class SceneRenderer {
     /// scene state. The renderer keeps `scene` alive until the upload
     /// completes (so the caller's shared_ptr can be released immediately).
     /// Pair with `advanceUpload`.
-    void beginUpload(std::shared_ptr<const RenderScene> scene);
+    void beginUpload(std::shared_ptr<const ir::render::Scene> scene);
 
     /// Make progress on a chunked upload started by `beginUpload`. Spends
     /// up to `budget_ns` creating per-mesh GPU buffers and finalises the
@@ -74,7 +74,7 @@ class SceneRenderer {
     struct RenderFlags {
         bool wireframe{false};
         /// Tri-state cull control. `Auto` picks per-group cull from
-        /// `RenderMaterial::doubleSided`; the two `Force*` variants are
+        /// `render::Material::doubleSided`; the two `Force*` variants are
         /// debug overrides that ignore the material flag globally.
         CullOverride cull{CullOverride::Auto};
         bool angle_cut{false};

@@ -1,8 +1,8 @@
-#include <nodehammer/ir/semantic_json.hpp>
+#include <ir/semantic_json.hpp>
 
 #include <numbers>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // ── Provenance / degradation ───────────────────────────────────────────────────
 
@@ -31,6 +31,10 @@ void from_json(const nlohmann::json &j, Provenance &p) {
     }
     j.at("degradation").get_to(p.degradation);
 }
+
+} // namespace nodehammer::ir
+
+namespace nodehammer::ir::semantic {
 
 // ── Shapes → JSON ──────────────────────────────────────────────────────────────
 
@@ -137,14 +141,14 @@ void to_json(nlohmann::json &j, const BooleanSubtraction &s) {
     dmat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
 }
 
-void to_json(nlohmann::json &j, const SemanticShape &s) {
+void to_json(nlohmann::json &j, const Shape &s) {
     std::visit([&j](const auto &v) { to_json(j, v); }, s.data);
     j["id"] = s.id;
 }
 
 // ── Shapes ← JSON ──────────────────────────────────────────────────────────────
 
-SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
+ShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
     const auto type = j.at("type").get<std::string>();
     if (type == "box") {
         return BoxShape{j.at("dx"), j.at("dy"), j.at("dz")};
@@ -272,7 +276,7 @@ SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
     return UnknownShape{type};
 }
 
-void from_json(const nlohmann::json &j, SemanticShape &s) {
+void from_json(const nlohmann::json &j, Shape &s) {
     j.at("id").get_to(s.id);
     s.data = shapeVariantFromJson(j);
 }
@@ -295,25 +299,25 @@ void from_json(const nlohmann::json &j, SourceMaterial &m) {
     }
 }
 
-void to_json(nlohmann::json &j, const SemanticDaughterPlacement &d) {
+void to_json(nlohmann::json &j, const DaughterPlacement &d) {
     j = {{"name", d.name}, {"logVolId", d.logVolId}};
     dmat4ToJson(j, "locRot", "locTrl", d.localTransform);
 }
 
-void from_json(const nlohmann::json &j, SemanticDaughterPlacement &d) {
+void from_json(const nlohmann::json &j, DaughterPlacement &d) {
     j.at("name").get_to(d.name);
     j.at("logVolId").get_to(d.logVolId);
     dmat4FromJson(j, "locRot", "locTrl", d.localTransform);
 }
 
-void to_json(nlohmann::json &j, const SemanticLogicalVolume &lv) {
+void to_json(nlohmann::json &j, const LogicalVolume &lv) {
     j = {{"id", lv.id}, {"name", lv.name}, {"shapeId", lv.shapeId}, {"materialId", lv.materialId}};
     if (!lv.daughters.empty()) {
         j["daughters"] = lv.daughters;
     }
 }
 
-void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv) {
+void from_json(const nlohmann::json &j, LogicalVolume &lv) {
     j.at("id").get_to(lv.id);
     j.at("name").get_to(lv.name);
     j.at("shapeId").get_to(lv.shapeId);
@@ -323,7 +327,7 @@ void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv) {
     }
 }
 
-void to_json(nlohmann::json &j, const SemanticNode &n) {
+void to_json(nlohmann::json &j, const Node &n) {
     j = {{"id", n.id}, {"name", n.name}, {"logVolId", n.logVolId}};
     dmat4ToJson(j, "locRot", "locTrl", n.localTransform);
     if (!n.children.empty()) {
@@ -343,7 +347,7 @@ void to_json(nlohmann::json &j, const SemanticNode &n) {
     }
 }
 
-void from_json(const nlohmann::json &j, SemanticNode &n) {
+void from_json(const nlohmann::json &j, Node &n) {
     j.at("id").get_to(n.id);
     j.at("name").get_to(n.name);
     j.at("logVolId").get_to(n.logVolId);
@@ -361,29 +365,29 @@ void from_json(const nlohmann::json &j, SemanticNode &n) {
         j.at("degradation").get_to(n.degradation);
     }
     if (j.contains("parentId")) {
-        n.parentId = j.at("parentId").get<SemanticNodeId>();
+        n.parentId = j.at("parentId").get<NodeId>();
     }
     // worldTransform and originalPath are recomputed after loading.
 }
 
 // ── Scene ───────────────────────────────────────────────────────────────────────
 
-void from_json(const nlohmann::json &j, SemanticScene &sc) {
+void from_json(const nlohmann::json &j, Scene &sc) {
     const auto &c = j.at("content");
     c.at("rootId").get_to(sc.rootId);
     if (c.contains("sourceFile")) {
         c.at("sourceFile").get_to(sc.sourceFile);
     }
     for (const auto &jn : c.at("nodes")) {
-        SemanticNode n = jn.get<SemanticNode>();
+        Node n = jn.get<Node>();
         sc.nodes[n.id] = std::move(n);
     }
     for (const auto &jlv : c.at("logVols")) {
-        SemanticLogicalVolume lv = jlv.get<SemanticLogicalVolume>();
+        LogicalVolume lv = jlv.get<LogicalVolume>();
         sc.logVols[lv.id] = std::move(lv);
     }
     for (const auto &js : c.at("shapes")) {
-        SemanticShape s = js.get<SemanticShape>();
+        Shape s = js.get<Shape>();
         sc.shapes[s.id] = std::move(s);
     }
     for (const auto &jm : c.at("materials")) {
@@ -392,7 +396,7 @@ void from_json(const nlohmann::json &j, SemanticScene &sc) {
     }
 }
 
-void to_json(nlohmann::json &j, const SemanticScene &sc) {
+void to_json(nlohmann::json &j, const Scene &sc) {
     auto nodes = nlohmann::json::array();
     for (const auto &[id, n] : sc.nodes) {
         nodes.push_back(n);
@@ -429,4 +433,4 @@ void to_json(nlohmann::json &j, const SemanticScene &sc) {
     }
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir::semantic

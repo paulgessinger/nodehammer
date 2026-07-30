@@ -1,49 +1,52 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/selection/selector.hpp>
+#include <ir/diagnostic_codes.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <selection/selector.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <unordered_set>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::config;
+using namespace nodehammer::selection;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 // Build a 3-level scene: root("world") → mid("tracker") → leaf("sensor")
 static auto makeThreeLevelScene() {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
-    SemanticShapeId shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, BoxShape{10, 10, 10}};
+    ir::semantic::ShapeId shapeId = scene.nextShapeId();
+    scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{10, 10, 10}};
 
-    SemanticMaterialId matId = scene.nextMaterialId();
+    ir::semantic::MaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
 
     auto makeLv = [&](const std::string &name) {
-        SemanticLogVolId id = scene.nextLogVolId();
+        ir::semantic::LogVolId id = scene.nextLogVolId();
         scene.logVols[id] = {id, name, shapeId, matId};
         return id;
     };
 
-    SemanticLogVolId worldLv = makeLv("world_lv");
-    SemanticLogVolId trackerLv = makeLv("tracker_lv");
-    SemanticLogVolId sensorLv = makeLv("sensor_lv");
+    ir::semantic::LogVolId worldLv = makeLv("world_lv");
+    ir::semantic::LogVolId trackerLv = makeLv("tracker_lv");
+    ir::semantic::LogVolId sensorLv = makeLv("sensor_lv");
 
-    SemanticNodeId rootId = scene.nextNodeId();
-    SemanticNodeId trackerId = scene.nextNodeId();
-    SemanticNodeId sensorId = scene.nextNodeId();
+    ir::semantic::NodeId rootId = scene.nextNodeId();
+    ir::semantic::NodeId trackerId = scene.nextNodeId();
+    ir::semantic::NodeId sensorId = scene.nextNodeId();
 
-    SemanticNode root;
+    ir::semantic::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = worldLv;
     root.children = {trackerId};
     scene.nodes[rootId] = root;
 
-    SemanticNode tracker;
+    ir::semantic::Node tracker;
     tracker.id = trackerId;
     tracker.name = "tracker";
     tracker.logVolId = trackerLv;
@@ -51,7 +54,7 @@ static auto makeThreeLevelScene() {
     tracker.children = {sensorId};
     scene.nodes[trackerId] = tracker;
 
-    SemanticNode sensor;
+    ir::semantic::Node sensor;
     sensor.id = sensorId;
     sensor.name = "sensor";
     sensor.logVolId = sensorLv;
@@ -63,8 +66,8 @@ static auto makeThreeLevelScene() {
     scene.computeOriginalPaths();
 
     struct Result {
-        SemanticScene scene;
-        SemanticNodeId rootId, trackerId, sensorId;
+        ir::semantic::Scene scene;
+        ir::semantic::NodeId rootId, trackerId, sensorId;
     };
     return Result{std::move(scene), rootId, trackerId, sensorId};
 }
@@ -308,7 +311,7 @@ TEST_CASE("SelectionEngine: prune produces structurally sound scene", "[selectio
     eng.prune(scene);
 
     // BFS from root should reach all remaining nodes.
-    std::unordered_set<SemanticNodeId> visited;
+    std::unordered_set<ir::semantic::NodeId> visited;
     scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == scene.nodes.size());
 }
@@ -338,8 +341,8 @@ TEST_CASE("SelectionEngine: node unreachable from root is excluded from evaluati
 
     // Insert an orphan node that exists in scene.nodes but is not reachable
     // from root via any children list.
-    SemanticNodeId orphanId = scene.nextNodeId();
-    SemanticNode orphan;
+    ir::semantic::NodeId orphanId = scene.nextNodeId();
+    ir::semantic::Node orphan;
     orphan.id = orphanId;
     orphan.name = "orphan";
     orphan.logVolId = scene.nodes.at(rootId).logVolId; // reuse existing logVol
@@ -417,28 +420,28 @@ TEST_CASE("SelectionEngine: scope restricts which nodes a rule evaluates",
 
 // ── Hoist helpers ─────────────────────────────────────────────────────────────
 
-// Build a minimal SemanticScene with given names and double-precision
+// Build a minimal semantic::Scene with given names and double-precision
 // translation-only local transforms. Returns node IDs in insertion order.
 // Parent chain: nodes[0] is root, nodes[i] is parent of nodes[i+1].
-static SemanticScene
+static ir::semantic::Scene
 makeLinearScene(const std::vector<std::string> &names,
                 const std::vector<glm::dvec3> &translations) // local translation per node
 {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
-    SemanticShapeId shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, BoxShape{1, 1, 1}};
-    SemanticMaterialId matId = scene.nextMaterialId();
+    ir::semantic::ShapeId shapeId = scene.nextShapeId();
+    scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{1, 1, 1}};
+    ir::semantic::MaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
-    SemanticLogVolId lvId = scene.nextLogVolId();
+    ir::semantic::LogVolId lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "lv", shapeId, matId};
 
-    std::vector<SemanticNodeId> ids;
+    std::vector<ir::semantic::NodeId> ids;
     ids.reserve(names.size());
     for (std::size_t i = 0; i < names.size(); ++i) {
-        SemanticNodeId id = scene.nextNodeId();
+        ir::semantic::NodeId id = scene.nextNodeId();
         ids.push_back(id);
-        SemanticNode node;
+        ir::semantic::Node node;
         node.id = id;
         node.name = names[i];
         node.logVolId = lvId;
@@ -464,7 +467,7 @@ TEST_CASE("SelectionEngine hoist: orphan re-parented to nearest kept ancestor",
     // After hoist: C.parentId = A, C.localTransform = translate(8,0,0)
     auto scene =
         makeLinearScene({"root", "A", "B", "C"}, {{0, 0, 0}, {10, 0, 0}, {5, 0, 0}, {3, 0, 0}});
-    SemanticNodeId aId, bId, cId;
+    ir::semantic::NodeId aId, bId, cId;
     for (const auto &[id, n] : scene.nodes) {
         if (n.name == "A")
             aId = id;
@@ -512,7 +515,7 @@ TEST_CASE("SelectionEngine hoist: no kept ancestor falls back to root",
     // world(B) = (8,0,0). After hoist: B.parentId = root, localTransform = translate(8,0,0)
     auto scene = makeLinearScene({"root", "A", "B"}, {{0, 0, 0}, {5, 0, 0}, {3, 0, 0}});
     auto rootId = scene.rootId;
-    SemanticNodeId aId, bId;
+    ir::semantic::NodeId aId, bId;
     for (const auto &[id, n] : scene.nodes) {
         if (n.name == "A")
             aId = id;
@@ -551,7 +554,7 @@ TEST_CASE("SelectionEngine hoist: subtree of hoisted node is preserved",
     auto scene =
         makeLinearScene({"root", "A", "B", "C"}, {{0, 0, 0}, {5, 0, 0}, {3, 0, 0}, {2, 0, 0}});
     auto rootId = scene.rootId;
-    SemanticNodeId aId, bId, cId;
+    ir::semantic::NodeId aId, bId, cId;
     for (const auto &[id, n] : scene.nodes) {
         if (n.name == "A")
             aId = id;

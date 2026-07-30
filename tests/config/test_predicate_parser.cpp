@@ -1,7 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
-#include <nodehammer/config/predicate_parser.hpp>
+#include <config/predicate_parser.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::config;
 
 // ── Helper: assert parse succeeds and return the expression ──────────────────
 

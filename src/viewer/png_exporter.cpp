@@ -1,6 +1,6 @@
 #include "png_exporter.hpp"
 
-#include <nodehammer/viewer/platform.hpp>
+#include <viewer/platform.hpp>
 
 #include <sokol_gfx.h>
 #include <sokol_glue.h>

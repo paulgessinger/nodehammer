@@ -1,6 +1,6 @@
 #include "build_controller.hpp"
 
-#include <nodehammer/ir/diagnostics.hpp>
+#include <ir/diagnostics.hpp>
 
 #include <chrono>
 #include <cstdio>
@@ -49,10 +49,11 @@ void BuildController::reset() {
     error_.clear();
 }
 
-void BuildController::startBuild(std::shared_ptr<const NHConfig> config,
-                                 std::shared_ptr<const SemanticScene> scene,
+void BuildController::startBuild(std::shared_ptr<const config::NHConfig> config,
+                                 std::shared_ptr<const ir::semantic::Scene> scene,
                                  std::string config_label, std::string geometry_label,
-                                 std::optional<WedgeCutParams> wedge, const AngleCut &cut) {
+                                 std::optional<tessellation::WedgeCutParams> wedge,
+                                 const AngleCut &cut) {
     start_time_ = std::chrono::steady_clock::now();
     building_cut_ = wedge.has_value();
     if (building_cut_) {
@@ -148,7 +149,7 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
             // the first one for the persistent status-bar message.
             error_ = "scene build failed";
             for (const auto &d : built.diags.items()) {
-                if (d.severity >= DiagnosticSeverity::Error) {
+                if (d.severity >= ir::DiagnosticSeverity::Error) {
                     error_ = d.message;
                     break;
                 }
@@ -183,9 +184,9 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
                 } else {
                     // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
                     pristine_config_ =
-                        std::make_shared<const NHConfig>(std::move(inputs->config.config));
-                    pristine_scene_ =
-                        std::make_shared<const SemanticScene>(std::move(inputs->import.scene));
+                        std::make_shared<const config::NHConfig>(std::move(inputs->config.config));
+                    pristine_scene_ = std::make_shared<const ir::semantic::Scene>(
+                        std::move(inputs->import.scene));
                     pristine_config_label_ = std::move(inputs->config_key);
                     pristine_geometry_label_ = std::move(inputs->geometry_key);
                     // Promoted to last_built_input_hash_ once this base build
@@ -215,7 +216,8 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
         pending_cut_rebuild_ = false;
         if (cut.enabled && !cut_fresh) {
             startBuild(pristine_config_, pristine_scene_, pristine_config_label_,
-                       pristine_geometry_label_, WedgeCutParams{cut.start_deg, cut.end_deg}, cut);
+                       pristine_geometry_label_,
+                       tessellation::WedgeCutParams{cut.start_deg, cut.end_deg}, cut);
         }
     }
 }

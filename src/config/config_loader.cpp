@@ -1,10 +1,10 @@
-#include <nodehammer/config/color_parse.hpp>
-#include <nodehammer/config/config_enums.hpp>
-#include <nodehammer/config/config_keys.hpp>
-#include <nodehammer/config/config_loader.hpp>
-#include <nodehammer/config/predicate_parser.hpp>
-#include <nodehammer/detail/file_io.hpp>
-#include <nodehammer/ir/diagnostic_codes.hpp>
+#include <config/color_parse.hpp>
+#include <config/config_enums.hpp>
+#include <config/config_keys.hpp>
+#include <config/config_loader.hpp>
+#include <config/predicate_parser.hpp>
+#include <detail/file_io.hpp>
+#include <ir/diagnostic_codes.hpp>
 
 #include <toml++/toml.hpp>
 
@@ -15,7 +15,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 namespace {
 
@@ -78,7 +78,7 @@ void mergeToml(toml::table &dst, const toml::table &src) {
 ///     which would not terminate, so it is an error.
 void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
                               const IncludeFetcher &fetcher, std::set<std::string> &merged,
-                              std::set<std::string> onPath, DiagnosticList &diags) {
+                              std::set<std::string> onPath, ir::DiagnosticList &diags) {
     const auto *includeNode = tbl.get("include");
     if (includeNode == nullptr) {
         return;
@@ -151,7 +151,7 @@ void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
 
 template <typename Range>
 void warnUnknownKeysImpl(const toml::table &tbl, const Range &known, std::string_view context,
-                         DiagnosticList &diags) {
+                         ir::DiagnosticList &diags) {
     for (const auto &[key, _] : tbl) {
         bool found = false;
         for (auto k : known) {
@@ -171,23 +171,23 @@ void warnUnknownKeysImpl(const toml::table &tbl, const Range &known, std::string
 // converts to this span). This is the path the section parsers use so their
 // valid-key set stays identical to the writer's and the Lua front-end's.
 void warnUnknownKeys(const toml::table &tbl, std::span<const std::string_view> known,
-                     std::string_view context, DiagnosticList &diags) {
+                     std::string_view context, ir::DiagnosticList &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
 }
 
 // Overload for the export section, whose valid keys depend on the format and are
 // assembled into a vector at parse time.
 void warnUnknownKeys(const toml::table &tbl, const std::vector<std::string_view> &known,
-                     std::string_view context, DiagnosticList &diags) {
+                     std::string_view context, ir::DiagnosticList &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
 }
 
 // ── Predicate parser (recursive) ─────────────────────────────────────────────
 
-std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticList &diags,
+std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, ir::DiagnosticList &diags,
                                             std::string_view context);
 
-std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticList &diags,
+std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, ir::DiagnosticList &diags,
                                             std::string_view context) {
     auto typeOpt = tbl["type"].value<std::string>();
     if (!typeOpt) {
@@ -294,7 +294,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
 // ── Section parsers ───────────────────────────────────────────────────────────
 
 /// [materials.<name>] — the table key is the material name.
-void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
+void parseMaterials(const toml::table &root, NHConfig &cfg, ir::DiagnosticList &diags) {
     const auto *matsTable = root["materials"].as_table();
     if (matsTable == nullptr) {
         return;
@@ -387,7 +387,7 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, DiagnosticList &diag
 }
 
 /// [[selection_rules]] — action determined by presence of keep_if or drop_if key.
-void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
+void parseSelectionRules(const toml::table &root, NHConfig &cfg, ir::DiagnosticList &diags) {
     const auto *arr = root["selection_rules"].as_array();
     if (arr == nullptr) {
         return;
@@ -511,7 +511,7 @@ nlohmann::json tomlToJson(const toml::node &node) {
 ExtrasMap parseExtras(const toml::table &tbl) { return tomlToJson(tbl); }
 
 /// [[rules]] — unified rule with optional material, tessellation, and extras.
-void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
+void parseRules(const toml::table &root, NHConfig &cfg, ir::DiagnosticList &diags) {
     const auto *arr = root["rules"].as_array();
     if (arr == nullptr) {
         return;
@@ -615,7 +615,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
 // ── Top-level parse driver ────────────────────────────────────────────────────
 
 ConfigResult parseTable(const toml::table &tbl) {
-    DiagnosticList diags;
+    ir::DiagnosticList diags;
     NHConfig cfg;
 
     warnUnknownKeys(tbl, keys::kTopLevelKeys, "<top-level>", diags);
@@ -759,7 +759,7 @@ ConfigResult parseTable(const toml::table &tbl) {
 // ── ConfigLoader ──────────────────────────────────────────────────────────────
 
 ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
-    DiagnosticList diags;
+    ir::DiagnosticList diags;
 
     // Read the root file and stage its bytes for `parseAndMerge`. The
     // canonical path doubles as the root key — using canonical form
@@ -769,7 +769,7 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
     std::vector<std::byte> root_bytes;
     try {
         canonical = std::filesystem::canonical(path);
-        root_bytes = file_io::readFile(canonical);
+        root_bytes = detail::file_io::readFile(canonical);
     } catch (const std::exception &e) {
         diags.error(codes::kErrImportFileNotFound,
                     std::format("could not read config file: {}", e.what()), path.string());
@@ -792,7 +792,7 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
             return std::span<const std::byte>{it->second};
         }
         try {
-            auto bytes = file_io::readFile(canon_key);
+            auto bytes = detail::file_io::readFile(canon_key);
             auto [ins, _] = cache->emplace(std::move(canon_key), std::move(bytes));
             return std::span<const std::byte>{ins->second};
         } catch (...) {
@@ -836,7 +836,7 @@ std::string ConfigLoader::resolveIncludeKey(std::string_view parent_key, std::st
 
 ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
                                          std::string_view root_key, IncludeFetcher fetcher) {
-    DiagnosticList diags;
+    ir::DiagnosticList diags;
     try {
         auto tbl = toml::parse(
             std::string_view{reinterpret_cast<const char *>(root_bytes.data()), root_bytes.size()},
@@ -861,7 +861,7 @@ ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
 }
 
 ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName) {
-    DiagnosticList diags;
+    ir::DiagnosticList diags;
     try {
         auto tbl = toml::parse(content, sourceName);
         return parseTable(tbl);
@@ -873,4 +873,4 @@ ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_
     return ConfigResult{{}, std::move(diags)};
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::config

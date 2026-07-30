@@ -6,22 +6,23 @@
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
-#include <nodehammer/config/config_ast.hpp>
-#include <nodehammer/ir/gltf/render/exporter.hpp>
-#include <nodehammer/ir/obj/render/exporter.hpp>
-#include <nodehammer/ir/synthetic/semantic/importer.hpp>
-#include <nodehammer/tessellation/tessellation_pass.hpp>
+#include <config/config_ast.hpp>
+#include <ir/gltf/render/exporter.hpp>
+#include <ir/obj/render/exporter.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
+#include <tessellation/tessellation_pass.hpp>
 
 #include <filesystem>
 #include <fstream>
 
 namespace {
 
-// Build a RenderScene from a synthetic single-box scene with a default config.
-nodehammer::RenderScene buildBoxRenderScene() {
-    nodehammer::SemanticScene semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
-    nodehammer::NHConfig cfg;
-    nodehammer::TessellationPass pass{cfg};
+// Build a render::Scene from a synthetic single-box scene with a default config.
+nodehammer::ir::render::Scene buildBoxRenderScene() {
+    nodehammer::ir::semantic::Scene semScene =
+        nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
+    nodehammer::config::NHConfig cfg;
+    nodehammer::tessellation::TessellationPass pass{cfg};
     return pass.lower(semScene).scene;
 }
 
@@ -35,9 +36,9 @@ std::filesystem::path tmpPath(const std::string &name) {
 TEST_CASE("GltfExporter: single box -> GLB magic bytes", "[export][gltf]") {
     const auto out = tmpPath("box.glb");
 
-    nodehammer::GltfExporter exp;
-    nodehammer::ExportConfig cfg;
-    cfg.format = nodehammer::ExportConfig::Format::GLB;
+    nodehammer::ir::GltfExporter exp;
+    nodehammer::ir::ExportConfig cfg;
+    cfg.format = nodehammer::ir::ExportConfig::Format::GLB;
 
     auto result = exp.write(buildBoxRenderScene(), out, cfg);
     CHECK_FALSE(result.diags.hasErrors());
@@ -58,9 +59,9 @@ TEST_CASE("GltfExporter: single box -> node/mesh/material counts", "[export][glt
     const auto out = tmpPath("box_counts.glb");
     const auto scene = buildBoxRenderScene();
 
-    nodehammer::GltfExporter exp;
-    nodehammer::ExportConfig cfg;
-    cfg.format = nodehammer::ExportConfig::Format::GLB;
+    nodehammer::ir::GltfExporter exp;
+    nodehammer::ir::ExportConfig cfg;
+    cfg.format = nodehammer::ir::ExportConfig::Format::GLB;
     (void)exp.write(scene, out, cfg);
 
     tinygltf::TinyGLTF reader;
@@ -78,9 +79,9 @@ TEST_CASE("GltfExporter: single box -> node/mesh/material counts", "[export][glt
 TEST_CASE("GltfExporter: accessor byte offsets are 4-byte aligned", "[export][gltf]") {
     const auto out = tmpPath("box_align.glb");
 
-    nodehammer::GltfExporter exp;
-    nodehammer::ExportConfig cfg;
-    cfg.format = nodehammer::ExportConfig::Format::GLB;
+    nodehammer::ir::GltfExporter exp;
+    nodehammer::ir::ExportConfig cfg;
+    cfg.format = nodehammer::ir::ExportConfig::Format::GLB;
     (void)exp.write(buildBoxRenderScene(), out, cfg);
 
     tinygltf::TinyGLTF reader;
@@ -102,24 +103,25 @@ TEST_CASE("GltfExporter: PBR material round-trip", "[export][gltf]") {
     const auto out = tmpPath("box_mat.glb");
 
     // Build scene with a specific material colour
-    nodehammer::SemanticScene semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
-    nodehammer::NHConfig cfg;
-    nodehammer::MaterialDef md;
+    nodehammer::ir::semantic::Scene semScene =
+        nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
+    nodehammer::config::NHConfig cfg;
+    nodehammer::config::MaterialDef md;
     md.name = "red";
     md.baseColor = {1.0f, 0.0f, 0.0f, 1.0f};
     md.metallic = 0.2f;
     md.roughness = 0.8f;
     cfg.materials.push_back(md);
-    nodehammer::Rule mr;
+    nodehammer::config::Rule mr;
     mr.material = "red";
     cfg.rules.push_back(mr);
 
-    nodehammer::TessellationPass pass{cfg};
+    nodehammer::tessellation::TessellationPass pass{cfg};
     const auto renderScene = pass.lower(semScene).scene;
 
-    nodehammer::GltfExporter exp;
-    nodehammer::ExportConfig ecfg;
-    ecfg.format = nodehammer::ExportConfig::Format::GLB;
+    nodehammer::ir::GltfExporter exp;
+    nodehammer::ir::ExportConfig ecfg;
+    ecfg.format = nodehammer::ir::ExportConfig::Format::GLB;
     (void)exp.write(renderScene, out, ecfg);
 
     tinygltf::TinyGLTF reader;
@@ -140,9 +142,9 @@ TEST_CASE("GltfExporter: PBR material round-trip", "[export][gltf]") {
 TEST_CASE("GltfExporter: write as GLTF (text)", "[export][gltf]") {
     const auto out = tmpPath("box.gltf");
 
-    nodehammer::GltfExporter exp;
-    nodehammer::ExportConfig cfg;
-    cfg.format = nodehammer::ExportConfig::Format::GLTF;
+    nodehammer::ir::GltfExporter exp;
+    nodehammer::ir::ExportConfig cfg;
+    cfg.format = nodehammer::ir::ExportConfig::Format::GLTF;
 
     auto result = exp.write(buildBoxRenderScene(), out, cfg);
     CHECK_FALSE(result.diags.hasErrors());
@@ -163,8 +165,8 @@ TEST_CASE("ObjExporter: single box -> OBJ + MTL files exist", "[export][obj]") {
     const auto out = tmpPath("box.obj");
     const auto mtl = tmpPath("box.mtl");
 
-    nodehammer::ObjExporter exp;
-    nodehammer::ExportConfig cfg;
+    nodehammer::ir::ObjExporter exp;
+    nodehammer::ir::ExportConfig cfg;
     cfg.bakeUnitScale = true;
 
     auto result = exp.write(buildBoxRenderScene(), out, cfg);
