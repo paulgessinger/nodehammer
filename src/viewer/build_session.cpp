@@ -258,14 +258,14 @@ void BuildSession::poll(ProjectFs *project) {
     auto cfg =
         config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
     for (const auto &d : cfg.diags.items()) {
-        if (d.severity < ir::DiagnosticSeverity::Error) {
+        if (d.severity < diagnostics::DiagnosticSeverity::Error) {
             pushWarning(d.message);
         }
     }
     if (cfg.diags.hasErrors()) {
         std::string first = "config parse failed";
         for (const auto &d : cfg.diags.items()) {
-            if (d.severity >= ir::DiagnosticSeverity::Error) {
+            if (d.severity >= diagnostics::DiagnosticSeverity::Error) {
                 first = d.message;
                 break;
             }
@@ -276,14 +276,14 @@ void BuildSession::poll(ProjectFs *project) {
 
     auto imp = ir::FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
     for (const auto &d : imp.diags.items()) {
-        if (d.severity < ir::DiagnosticSeverity::Error) {
+        if (d.severity < diagnostics::DiagnosticSeverity::Error) {
             pushWarning(d.message);
         }
     }
     if (imp.diags.hasErrors()) {
         std::string first = "geometry import failed";
         for (const auto &d : imp.diags.items()) {
-            if (d.severity >= ir::DiagnosticSeverity::Error) {
+            if (d.severity >= diagnostics::DiagnosticSeverity::Error) {
                 first = d.message;
                 break;
             }

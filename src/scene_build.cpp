@@ -2,7 +2,7 @@
 
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/semantic/importer.hpp>
 #include <selection/selector.hpp>
 #include <tessellation/build_pipeline.hpp>

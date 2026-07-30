@@ -1,5 +1,5 @@
 #include <detail/zstd_io.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/json/semantic/importer.hpp>
 #include <ir/semantic_json.hpp>
 

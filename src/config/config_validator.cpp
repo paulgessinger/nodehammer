@@ -1,13 +1,13 @@
 #include <config/config_validator.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 
 #include <format>
 #include <unordered_set>
 
 namespace nodehammer::config {
 
-ir::DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
-    ir::DiagnosticList diags;
+diagnostics::DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
+    diagnostics::DiagnosticList diags;
 
     // Build set of defined material names for reference checking.
     std::unordered_set<std::string> definedMaterials;

@@ -1,5 +1,5 @@
 #include <detail/overloaded.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <tessellation/primitive_tessellator.hpp>
 
 #include <glm/glm.hpp>

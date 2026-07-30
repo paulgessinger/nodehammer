@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/semantic.hpp>
 
 class TGeoShape;
@@ -14,6 +14,6 @@ namespace nodehammer::ir {
 /// the returned shape's provenance (via UnknownShape.originalType), and still
 /// returns a valid ID — nodes are never silently omitted.
 [[nodiscard]] semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, semantic::Scene &scene,
-                                                  DiagnosticList &diags);
+                                                  diagnostics::DiagnosticList &diags);
 
 } // namespace nodehammer::ir

@@ -1,4 +1,4 @@
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/provenance.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 
@@ -139,7 +139,7 @@ semantic::Scene SyntheticSceneBuilder::buildBooleanSubtraction() {
 
 ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     semantic::Scene scene;
-    DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = semantic::Shape{shapeId, semantic::UnknownShape{"SyntheticUnknown"}};

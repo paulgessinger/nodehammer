@@ -1,7 +1,7 @@
 #pragma once
 
 #include <config/config_ast.hpp>
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -18,7 +18,7 @@ namespace nodehammer::config {
 /// the config can be used. On a fatal parse error, config is default-initialized.
 struct ConfigResult {
     NHConfig config;
-    ir::DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 };
 
 /// Synchronous byte fetcher used by `parseAndMerge` to look up the bytes

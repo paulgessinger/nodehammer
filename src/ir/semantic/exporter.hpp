@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/semantic.hpp>
 
 #include <filesystem>
@@ -14,7 +14,7 @@ namespace nodehammer::ir {
 struct SemanticExportConfig {};
 
 struct SemanticExportResult {
-    DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 };
 
 /// Pure interface for semantic scene exporters (JSON/NHB/...).

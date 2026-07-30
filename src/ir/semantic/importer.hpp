@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/semantic.hpp>
 
 #include <filesystem>
@@ -15,7 +15,7 @@ namespace nodehammer::ir {
 /// scene may be populated even when diags.hasErrors() is true.
 struct ImportResult {
     semantic::Scene scene;
-    DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 };
 
 /// Pure interface for all geometry importers.

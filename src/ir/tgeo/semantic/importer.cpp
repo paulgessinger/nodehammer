@@ -1,4 +1,4 @@
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/provenance.hpp>
 #include <ir/tgeo/semantic/importer.hpp>
 #include <ir/tgeo/semantic/shape_dispatch.hpp>
@@ -32,7 +32,7 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 
 struct ImportState {
     semantic::Scene &scene;
-    DiagnosticList &diags;
+    diagnostics::DiagnosticList &diags;
     std::unordered_map<const TGeoVolume *, semantic::LogVolId> lvCache;
     std::unordered_map<const TGeoShape *, semantic::ShapeId> shapeCache;
     std::unordered_map<const TGeoMaterial *, semantic::MaterialId> matCache;

@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <config/config_ast.hpp>
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/semantic.hpp>
 #include <tessellation/tessellation_pass.hpp>
 #include <tessellation/wedge_cut.hpp>

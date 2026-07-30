@@ -1,4 +1,4 @@
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/tgeo/semantic/shape_dispatch.hpp>
 
 #include <TGeoBBox.h>
@@ -35,7 +35,7 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 } // namespace
 
 semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, semantic::Scene &scene,
-                                    DiagnosticList &diags) {
+                                    diagnostics::DiagnosticList &diags) {
     semantic::ShapeVariant variant;
 
     // ── Composite (boolean) ───────────────────────────────────────────────────

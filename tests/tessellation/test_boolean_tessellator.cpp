@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/semantic.hpp>
 #include <tessellation/boolean_tessellator.hpp>
 #include <tessellation/primitive_tessellator.hpp>
@@ -11,6 +11,7 @@
 
 using namespace nodehammer;
 using namespace nodehammer::ir;
+using namespace nodehammer::diagnostics;
 using namespace nodehammer::tessellation;
 
 namespace {

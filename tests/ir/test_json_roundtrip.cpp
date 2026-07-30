@@ -1,6 +1,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/render_json.hpp>
 #include <ir/semantic_json.hpp>
 
@@ -98,7 +98,7 @@ TEST_CASE("to_json: UnknownShape serialization", "[ir][json]") {
 }
 
 TEST_CASE("DiagnosticList: hasFatal and hasErrors", "[ir][diagnostics]") {
-    nodehammer::ir::DiagnosticList list;
+    nodehammer::diagnostics::DiagnosticList list;
     REQUIRE_FALSE(list.hasFatal());
     REQUIRE_FALSE(list.hasErrors());
 

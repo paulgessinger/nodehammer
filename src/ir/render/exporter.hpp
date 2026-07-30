@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ir/diagnostics.hpp>
+#include <diagnostics.hpp>
 #include <ir/render.hpp>
 
 #include <filesystem>
@@ -90,7 +90,7 @@ struct ExportConfig {
 // ── ExportResult ──────────────────────────────────────────────────────────────
 
 struct ExportResult {
-    DiagnosticList diags;
+    diagnostics::DiagnosticList diags;
 };
 
 // ── IRenderExporter ───────────────────────────────────────────────────────────

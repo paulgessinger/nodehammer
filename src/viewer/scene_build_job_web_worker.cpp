@@ -4,7 +4,7 @@
 #include "scene_build_job_web_backend.hpp"
 
 #include <config/config_writer.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/fb/render/flatbuffer.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 #include <scene_build.hpp>
