@@ -1,5 +1,5 @@
 #include <config/config_validator.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 
 #include <format>
 #include <unordered_set>

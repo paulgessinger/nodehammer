@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 #include <tessellation/primitive_tessellator.hpp>
 #include <tessellation/tessellation_pass.hpp>

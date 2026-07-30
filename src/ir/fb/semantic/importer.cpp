@@ -1,7 +1,7 @@
 #include <ir/fb/semantic/importer.hpp>
 
 #include <detail/zstd_io.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 
 #include <format>

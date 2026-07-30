@@ -7,7 +7,7 @@
 #include <export_resolve.hpp>
 #include <filesystem>
 #include <format>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/render/exporter.hpp>
 #include <ir/semantic/importer.hpp>
 #include <print>

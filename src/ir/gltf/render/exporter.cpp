@@ -20,7 +20,7 @@
 
 #include <ir/gltf/render/exporter.hpp>
 
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <set>
 
 #include <glm/glm.hpp>

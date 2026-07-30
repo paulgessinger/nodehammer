@@ -4,7 +4,7 @@
 #include <config/config_loader.hpp>
 #include <config/predicate_parser.hpp>
 #include <detail/file_io.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 
 #include <toml++/toml.hpp>
 

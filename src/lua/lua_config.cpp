@@ -5,7 +5,7 @@
 #include <config/config_enums.hpp>
 #include <config/config_keys.hpp>
 #include <config/predicate_parser.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 
 #include <sol/sol.hpp>
 

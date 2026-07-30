@@ -1,4 +1,4 @@
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/provenance.hpp>
 #include <ir/tgeo/semantic/importer.hpp>
 #include <ir/tgeo/semantic/shape_dispatch.hpp>

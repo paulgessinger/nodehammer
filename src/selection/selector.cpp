@@ -1,4 +1,4 @@
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <selection/predicate.hpp>
 #include <selection/selector.hpp>
 

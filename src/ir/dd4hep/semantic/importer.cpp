@@ -1,5 +1,5 @@
 #include <ir/dd4hep/semantic/importer.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/provenance.hpp>
 #include <ir/tgeo/semantic/importer.hpp>
 

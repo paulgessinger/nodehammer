@@ -1,4 +1,4 @@
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <tessellation/boolean_tessellator.hpp>
 
 #include <manifold/manifold.h>

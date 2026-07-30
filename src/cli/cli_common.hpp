@@ -2,7 +2,7 @@
 
 #include <CLI/CLI.hpp>
 #include <detail/markup.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/semantic/importer.hpp>
 
 #include <ir/diagnostics.hpp>

@@ -1,7 +1,7 @@
 #include <ir/json/semantic/exporter.hpp>
 
 #include <detail/zstd_io.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/semantic_json.hpp>
 
 #include <nlohmann/json.hpp>

@@ -7,7 +7,7 @@
 #include <config/config_validator.hpp>
 #include <detail/markup.hpp>
 #include <detail/overloaded.hpp>
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/diagnostics.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/semantic/exporter.hpp>

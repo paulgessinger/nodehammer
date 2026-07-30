@@ -1,4 +1,4 @@
-#include <ir/diagnostic_codes.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/provenance.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 
