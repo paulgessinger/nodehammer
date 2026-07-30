@@ -231,6 +231,11 @@ set(NH_CORE_DEPS
 # but nodehammer's own prefix on CMAKE_PREFIX_PATH.
 set(NH_CORE_DEFINES "")
 
+# Extra include directories for dependencies that ship variables instead of
+# imported targets — Geant4 is the only one today. Everything else propagates
+# its includes through the link.
+set(NH_CORE_INCLUDE_DIRS "")
+
 # ── Core library: optional pieces ─────────────────────────────────────────────
 # Everything below appends to the three lists above, so it reaches both the
 # static and the shared variant. find_package() calls stay here rather than
@@ -281,7 +286,11 @@ endif()
 
 if(NODEHAMMER_WITH_GEANT4)
     find_package(Geant4 REQUIRED)
+    # Geant4 exports plain variables rather than imported targets, so unlike
+    # every other backend its include directories do not ride along with the
+    # link and have to be named separately.
     list(APPEND NH_CORE_DEPS ${Geant4_LIBRARIES})
+    list(APPEND NH_CORE_INCLUDE_DIRS ${Geant4_INCLUDE_DIRS})
     list(APPEND NH_CORE_DEFINES NH_WITH_GEANT4=1)
 endif()
 
@@ -366,6 +375,9 @@ function(nh_add_core_library target type depScope)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
+    if(NH_CORE_INCLUDE_DIRS)
+        target_include_directories(${target} SYSTEM ${depScope} ${NH_CORE_INCLUDE_DIRS})
+    endif()
 
     if(depScope STREQUAL "PRIVATE")
         foreach(dep IN LISTS NH_CORE_DEPS)
