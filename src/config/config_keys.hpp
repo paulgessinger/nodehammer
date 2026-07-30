@@ -13,7 +13,7 @@
 // three — the *set of valid keys per section* lives here as the single source of
 // truth. Each front-end validates unknown keys against these lists, so a typo or
 // a missing key surfaces as a diagnostic on both paths rather than silently.
-namespace nodehammer::keys {
+namespace nodehammer::config::keys {
 
 // ── Top-level sections ───────────────────────────────────────────────────────
 inline constexpr std::string_view kHoistOrphans = "hoist_orphans";
@@ -122,4 +122,4 @@ inline constexpr ExportKeyDef kExportKeys[] = {
            std::find(kd.formats.begin(), kd.formats.end(), fmt) != kd.formats.end();
 }
 
-} // namespace nodehammer::keys
+} // namespace nodehammer::config::keys
