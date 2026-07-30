@@ -159,6 +159,7 @@ add_library(nodehammer_lib STATIC
     src/detail/markup.cpp
     src/scene_build.cpp
     src/export_resolve.cpp
+    src/version.cpp
     src/viewer/app_state.cpp
     src/viewer/camera.cpp
     # Headless, GPU-free viewer controller: the adaptive render-scale state
@@ -208,7 +209,14 @@ target_link_libraries(nodehammer_lib PUBLIC
 add_dependencies(nodehammer_lib flatbuffers_generate)
 target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_FBS_GENERATED_DIR})
 
+# NH_STATIC collapses NH_API to nothing (include/nodehammer/api.hpp). PUBLIC so
+# every in-tree consumer — CLI, lua, viewer, tests — inherits it and no target
+# has to remember; without it they would see the dllimport spelling on Windows
+# and fail to link against the archive.
+target_compile_definitions(nodehammer_lib PUBLIC NH_STATIC)
+
 nodehammer_set_compiler_options(nodehammer_lib)
+nodehammer_set_visibility(nodehammer_lib)
 
 # ── CLI library ────────────────────────────────────────────────────────────────
 # Subcommand dispatchers + CLI11 glue. Native-only: the wasm viewer ships

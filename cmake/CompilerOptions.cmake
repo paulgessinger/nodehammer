@@ -50,6 +50,38 @@ function(nodehammer_set_compiler_options target)
     endif()
 endfunction()
 
+# Compile a library target so that nothing is exported unless it says so with
+# NH_API (include/nodehammer/api.hpp).
+#
+# Applied to *both* core variants, which is the counter-intuitive half. For the
+# shared library the reason is obvious — it is what makes the installed export
+# table equal the public API. For the static library there is no export table
+# at all, and the reason is the Python extension: it links the archive into a
+# .so, and every default-visible object in that archive becomes an exported
+# symbol of the extension module, where it can collide with another extension
+# in the same interpreter (the concrete case being a second module that also
+# links lua statically). Compiling the archive hidden means the extension
+# exports only its own entry point.
+#
+# VISIBILITY_INLINES_HIDDEN additionally drops inline member functions, which
+# is most of what a header-heavy C++ library would otherwise emit.
+#
+# Skipped under Emscripten. There is no shared object in the wasm build — every
+# target is a statically linked executable whose exports are named explicitly
+# via -sEXPORTED_FUNCTIONS / EMSCRIPTEN_KEEPALIVE — so hidden visibility buys
+# nothing there while adding a way for those exports to go missing under the
+# Release build's -flto + --closure link.
+function(nodehammer_set_visibility target)
+    if(EMSCRIPTEN)
+        return()
+    endif()
+    set_target_properties(${target} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        C_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+    )
+endfunction()
+
 # Apply link options that Emscripten executables need to run under node:
 # NODERAWFS exposes the host filesystem (so fixture paths resolve), EXIT_RUNTIME
 # makes the process return the C++ exit code, and ALLOW_MEMORY_GROWTH avoids
