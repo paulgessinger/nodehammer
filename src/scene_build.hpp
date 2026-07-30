@@ -19,9 +19,9 @@ struct SceneBuildResult {
     /// Const because the scene is shared, never owned exclusively: the viewer
     /// hands the same pointer to `SceneRenderer::beginUpload` while holding it
     /// as the resident scene, and every downstream consumer already spells it
-    /// `shared_ptr<const RenderScene>`. Keeping the producer's handle mutable
+    /// `shared_ptr<const render::Scene>`. Keeping the producer's handle mutable
     /// was the one gap in that chain.
-    std::shared_ptr<const ir::RenderScene> scene;
+    std::shared_ptr<const ir::render::Scene> scene;
     ir::DiagnosticList diags;
 };
 
@@ -31,7 +31,7 @@ struct SceneBuildResult {
 /// stage.
 struct ScenePrepResult {
     config::NHConfig config;
-    ir::SemanticScene scene;
+    ir::semantic::Scene scene;
     ir::DiagnosticList diags;
     bool ok{false};
 };
@@ -41,7 +41,7 @@ struct ScenePrepResult {
 /// (so `include = [...]` is resolved against the config's parent dir),
 /// imports the geometry through the default `ImporterRegistry`, then
 /// validates / selects / dedups / tessellates and returns the
-/// `RenderScene`. Mirrors the `convert` CLI pipeline minus the export
+/// `render::Scene`. Mirrors the `convert` CLI pipeline minus the export
 /// stage and CLI surface.
 SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
                                      const std::filesystem::path &geometry_path);
@@ -57,7 +57,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 /// (matching the `convert --angle-cut` pipeline ordering), so the scene
 /// handed to tessellation already carries the Boolean-cut shapes.
 ScenePrepResult prepareSceneForTessellationFromInputs(
-    config::NHConfig config, ir::SemanticScene scene,
+    config::NHConfig config, ir::semantic::Scene scene,
     std::optional<tessellation::WedgeCutParams> wedgeCut = std::nullopt);
 
 } // namespace nodehammer::pipeline

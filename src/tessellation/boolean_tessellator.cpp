@@ -150,7 +150,7 @@ manifold::mat3x4 toManifoldTransform(const glm::dmat4 &m) {
 
 /// Try to create a Manifold from a primitive shape using Manifold's built-in
 /// constructors. Returns nullopt for shapes Manifold doesn't natively support.
-std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::SemanticShapeVariant &shape,
+std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::semantic::ShapeVariant &shape,
                                                          const TessellationParams &params) {
     using detail::overloaded;
     using MaybeManifold = std::optional<manifold::Manifold>;
@@ -159,12 +159,12 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::SemanticShape
     return std::visit(
         overloaded{
             // Box → Cube
-            [](const ir::BoxShape &box) -> MaybeManifold {
+            [](const ir::semantic::BoxShape &box) -> MaybeManifold {
                 return manifold::Manifold::Cube({box.dx * 2, box.dy * 2, box.dz * 2}, true);
             },
 
             // Tube → Cylinder (with optional hollow / partial-phi clipping)
-            [&](const ir::TubeShape &tube) -> MaybeManifold {
+            [&](const ir::semantic::TubeShape &tube) -> MaybeManifold {
                 const bool fullPhi = std::abs(tube.phiDelta - 2.0 * std::numbers::pi) < 1e-6 &&
                                      std::abs(tube.phiStart) < 1e-6;
                 if (fullPhi && tube.rMin < 1e-9) {
@@ -238,7 +238,7 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::SemanticShape
             },
 
             // Cone (full phi, rMin1=0, rMin2=0) → Cylinder with different radii
-            [&](const ir::ConeShape &cone) -> MaybeManifold {
+            [&](const ir::semantic::ConeShape &cone) -> MaybeManifold {
                 const bool fullPhi = std::abs(cone.phiDelta - 2.0 * std::numbers::pi) < 1e-6 &&
                                      std::abs(cone.phiStart) < 1e-6;
                 if (fullPhi && cone.rMin1 < 1e-9 && cone.rMin2 < 1e-9) {
@@ -249,7 +249,7 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::SemanticShape
             },
 
             // Trd → hull of 8 vertices (guaranteed watertight)
-            [](const ir::TrdShape &trd) -> MaybeManifold {
+            [](const ir::semantic::TrdShape &trd) -> MaybeManifold {
                 std::vector<manifold::vec3> pts = {
                     {-trd.dx1, -trd.dy1, -trd.dz}, {trd.dx1, -trd.dy1, -trd.dz},
                     {trd.dx1, trd.dy1, -trd.dz},   {-trd.dx1, trd.dy1, -trd.dz},
@@ -270,8 +270,8 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::SemanticShape
 /// Recursively resolve a shape ID to a Manifold.
 /// For primitives: tries Manifold built-in, falls back to tessellator.
 /// For booleans: recurses into operands.
-std::optional<manifold::Manifold> resolveAndTessellate(ir::SemanticShapeId shapeId,
-                                                       const ir::SemanticScene &scene,
+std::optional<manifold::Manifold> resolveAndTessellate(ir::semantic::ShapeId shapeId,
+                                                       const ir::semantic::Scene &scene,
                                                        const ITessellator &tessellator,
                                                        const TessellationParams &params,
                                                        ir::DiagnosticList &diags, int depth) {
@@ -308,11 +308,11 @@ std::optional<manifold::Manifold> resolveAndTessellate(ir::SemanticShapeId shape
         }
 
         using T = std::decay_t<decltype(boolShape)>;
-        if constexpr (std::is_same_v<T, ir::BooleanUnion>) {
+        if constexpr (std::is_same_v<T, ir::semantic::BooleanUnion>) {
             return *left + *right;
-        } else if constexpr (std::is_same_v<T, ir::BooleanSubtraction>) {
+        } else if constexpr (std::is_same_v<T, ir::semantic::BooleanSubtraction>) {
             return *left - *right;
-        } else if constexpr (std::is_same_v<T, ir::BooleanIntersection>) {
+        } else if constexpr (std::is_same_v<T, ir::semantic::BooleanIntersection>) {
             return *left ^ *right;
         }
     };
@@ -321,9 +321,9 @@ std::optional<manifold::Manifold> resolveAndTessellate(ir::SemanticShapeId shape
         using detail::overloaded;
         auto boolResult = std::visit(
             overloaded{
-                [&](const ir::BooleanUnion &s) { return handleBoolean(s); },
-                [&](const ir::BooleanSubtraction &s) { return handleBoolean(s); },
-                [&](const ir::BooleanIntersection &s) { return handleBoolean(s); },
+                [&](const ir::semantic::BooleanUnion &s) { return handleBoolean(s); },
+                [&](const ir::semantic::BooleanSubtraction &s) { return handleBoolean(s); },
+                [&](const ir::semantic::BooleanIntersection &s) { return handleBoolean(s); },
                 [](const auto &) -> std::optional<manifold::Manifold> { return std::nullopt; },
             },
             shapeData);
@@ -367,8 +367,8 @@ TessellationOutput convexHull(const std::vector<glm::vec3> &points) {
     return manifoldToMesh(hull);
 }
 
-TessellationOutput tessellateBooleanShape(const ir::SemanticShapeVariant &shape,
-                                          const ir::SemanticScene &scene,
+TessellationOutput tessellateBooleanShape(const ir::semantic::ShapeVariant &shape,
+                                          const ir::semantic::Scene &scene,
                                           const ITessellator &primitiveTessellator,
                                           const TessellationParams &params) {
     TessellationOutput result;
@@ -397,11 +397,11 @@ TessellationOutput tessellateBooleanShape(const ir::SemanticShapeVariant &shape,
         try {
             manifold::Manifold combined;
             using T = std::decay_t<decltype(boolShape)>;
-            if constexpr (std::is_same_v<T, ir::BooleanUnion>) {
+            if constexpr (std::is_same_v<T, ir::semantic::BooleanUnion>) {
                 combined = *left + *right;
-            } else if constexpr (std::is_same_v<T, ir::BooleanSubtraction>) {
+            } else if constexpr (std::is_same_v<T, ir::semantic::BooleanSubtraction>) {
                 combined = *left - *right;
-            } else if constexpr (std::is_same_v<T, ir::BooleanIntersection>) {
+            } else if constexpr (std::is_same_v<T, ir::semantic::BooleanIntersection>) {
                 combined = *left ^ *right;
             }
 
@@ -426,13 +426,14 @@ TessellationOutput tessellateBooleanShape(const ir::SemanticShapeVariant &shape,
     };
 
     using detail::overloaded;
-    return std::visit(overloaded{
-                          [&](const ir::BooleanUnion &s) { return processBoolean(s); },
-                          [&](const ir::BooleanSubtraction &s) { return processBoolean(s); },
-                          [&](const ir::BooleanIntersection &s) { return processBoolean(s); },
-                          [&](const auto &) -> TessellationOutput { return result; },
-                      },
-                      shape);
+    return std::visit(
+        overloaded{
+            [&](const ir::semantic::BooleanUnion &s) { return processBoolean(s); },
+            [&](const ir::semantic::BooleanSubtraction &s) { return processBoolean(s); },
+            [&](const ir::semantic::BooleanIntersection &s) { return processBoolean(s); },
+            [&](const auto &) -> TessellationOutput { return result; },
+        },
+        shape);
 }
 
 } // namespace nodehammer::tessellation

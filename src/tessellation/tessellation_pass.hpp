@@ -8,14 +8,14 @@
 namespace nodehammer::tessellation {
 
 struct TessellationPassResult {
-    ir::RenderScene scene;
+    ir::render::Scene scene;
     ir::DiagnosticList diags;
 };
 
-/// Lowers a SemanticScene to a RenderScene.
+/// Lowers a semantic::Scene to a render::Scene.
 ///
-/// For each reachable SemanticNode (BFS from root):
-///   1. Creates a corresponding RenderNode (preserving hierarchy and transforms).
+/// For each reachable semantic::Node (BFS from root):
+///   1. Creates a corresponding render::Node (preserving hierarchy and transforms).
 ///   2. Tessellates the node's shape using the first matching Rule with tessellation settings
 ///      (or defaults if none match).
 ///   3. Assigns material from the first matching Rule with a material name, falling back to a
@@ -31,7 +31,7 @@ class TessellationPass {
   public:
     explicit TessellationPass(const config::NHConfig &config);
 
-    [[nodiscard]] TessellationPassResult lower(const ir::SemanticScene &scene) const;
+    [[nodiscard]] TessellationPassResult lower(const ir::semantic::Scene &scene) const;
 
   private:
     const config::NHConfig &config_;

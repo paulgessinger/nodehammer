@@ -7,22 +7,22 @@
 
 namespace nodehammer::ir {
 
-/// Builds pre-defined synthetic SemanticScene fixtures for testing
+/// Builds pre-defined synthetic semantic::Scene fixtures for testing
 /// and for use as the "synthetic" importer format.
 class SyntheticSceneBuilder {
   public:
     /// A single box (10×10×10 mm half-lengths) with aluminum material.
-    [[nodiscard]] static SemanticScene buildSingleBox();
+    [[nodiscard]] static semantic::Scene buildSingleBox();
 
     /// World box containing one child box translated 100 mm along Z.
     /// Useful for testing parent-child transform accumulation.
-    [[nodiscard]] static SemanticScene buildNestedBoxes();
+    [[nodiscard]] static semantic::Scene buildNestedBoxes();
 
     /// World box with an inner tube (rMin=0, rMax=5, dz=10).
-    [[nodiscard]] static SemanticScene buildTubeInBox();
+    [[nodiscard]] static semantic::Scene buildTubeInBox();
 
     /// World box with a BooleanSubtraction child shape.
-    [[nodiscard]] static SemanticScene buildBooleanSubtraction();
+    [[nodiscard]] static semantic::Scene buildBooleanSubtraction();
 
     /// Scene with one node whose shape is UnknownShape.
     /// Sets DegradationBit::UnknownShape on the node's provenance and emits

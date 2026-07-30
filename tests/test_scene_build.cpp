@@ -16,31 +16,31 @@ namespace {
 
 // A minimal scene: a root box at the origin plus one wide box straddling the
 // +x axis, so a [0°,90°] wedge cut turns it into a Boolean subtraction.
-SemanticScene makeStraddlingScene() {
-    SemanticScene scene;
-    const SemanticMaterialId mat = scene.nextMaterialId();
+ir::semantic::Scene makeStraddlingScene() {
+    ir::semantic::Scene scene;
+    const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
 
-    const SemanticShapeId rootShape = scene.nextShapeId();
-    scene.shapes[rootShape] = {rootShape, BoxShape{20, 20, 20}};
-    const SemanticShapeId boxShape = scene.nextShapeId();
-    scene.shapes[boxShape] = {boxShape, BoxShape{2, 1, 1}};
+    const ir::semantic::ShapeId rootShape = scene.nextShapeId();
+    scene.shapes[rootShape] = {rootShape, ir::semantic::BoxShape{20, 20, 20}};
+    const ir::semantic::ShapeId boxShape = scene.nextShapeId();
+    scene.shapes[boxShape] = {boxShape, ir::semantic::BoxShape{2, 1, 1}};
 
-    const SemanticLogVolId rootLv = scene.nextLogVolId();
+    const ir::semantic::LogVolId rootLv = scene.nextLogVolId();
     scene.logVols[rootLv] = {rootLv, "root_lv", rootShape, mat};
-    const SemanticLogVolId boxLv = scene.nextLogVolId();
+    const ir::semantic::LogVolId boxLv = scene.nextLogVolId();
     scene.logVols[boxLv] = {boxLv, "box_lv", boxShape, mat};
 
-    const SemanticNodeId root = scene.nextNodeId();
-    SemanticNode rootNode;
+    const ir::semantic::NodeId root = scene.nextNodeId();
+    ir::semantic::Node rootNode;
     rootNode.id = root;
     rootNode.name = "root";
     rootNode.logVolId = rootLv;
     scene.nodes[root] = rootNode;
     scene.rootId = root;
 
-    const SemanticNodeId box = scene.nextNodeId();
-    SemanticNode boxNode;
+    const ir::semantic::NodeId box = scene.nextNodeId();
+    ir::semantic::Node boxNode;
     boxNode.id = box;
     boxNode.name = "straddle";
     boxNode.logVolId = boxLv;
@@ -53,10 +53,10 @@ SemanticScene makeStraddlingScene() {
     return scene;
 }
 
-bool hasBooleanSubtraction(const SemanticScene &scene) {
+bool hasBooleanSubtraction(const ir::semantic::Scene &scene) {
     for (const auto &[id, shape] : scene.shapes) {
         (void)id;
-        if (std::holds_alternative<BooleanSubtraction>(shape.data)) {
+        if (std::holds_alternative<ir::semantic::BooleanSubtraction>(shape.data)) {
             return true;
         }
     }

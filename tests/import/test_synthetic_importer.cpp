@@ -23,8 +23,8 @@ TEST_CASE("SyntheticSceneBuilder: buildSingleBox -- geometry correct", "[import]
 
     const auto &lv = scene.logVols.at(rootNode.logVolId);
     const auto &shape = scene.shapes.at(lv.shapeId);
-    REQUIRE(std::holds_alternative<nodehammer::ir::BoxShape>(shape.data));
-    REQUIRE(std::get<nodehammer::ir::BoxShape>(shape.data).dx == Catch::Approx(10.0));
+    REQUIRE(std::holds_alternative<nodehammer::ir::semantic::BoxShape>(shape.data));
+    REQUIRE(std::get<nodehammer::ir::semantic::BoxShape>(shape.data).dx == Catch::Approx(10.0));
 
     const auto &mat = scene.materials.at(lv.materialId);
     REQUIRE(mat.name == "aluminum");
@@ -50,7 +50,7 @@ TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes -- all nodes reachable from r
           "[import][synthetic]") {
     auto scene = nodehammer::ir::SyntheticSceneBuilder::buildNestedBoxes();
 
-    std::unordered_set<nodehammer::ir::SemanticNodeId> visited;
+    std::unordered_set<nodehammer::ir::semantic::NodeId> visited;
     scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == scene.nodes.size());
 }
@@ -82,9 +82,9 @@ TEST_CASE("SyntheticSceneBuilder: buildBooleanSubtraction -- boolean shape prese
 
     bool hasBool = false;
     for (const auto &[id, shape] : scene.shapes) {
-        if (std::holds_alternative<nodehammer::ir::BooleanSubtraction>(shape.data)) {
+        if (std::holds_alternative<nodehammer::ir::semantic::BooleanSubtraction>(shape.data)) {
             hasBool = true;
-            const auto &bs = std::get<nodehammer::ir::BooleanSubtraction>(shape.data);
+            const auto &bs = std::get<nodehammer::ir::semantic::BooleanSubtraction>(shape.data);
             REQUIRE(scene.shapes.contains(bs.left));
             REQUIRE(scene.shapes.contains(bs.right));
         }

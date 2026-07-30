@@ -68,8 +68,8 @@ tinygltf::Value jsonToGltfValue(const nlohmann::json &j) {
     return {};
 }
 
-/// Convert RenderExtrasMap (nlohmann::json) to a tinygltf::Value for extras.
-tinygltf::Value extrasToValue(const RenderExtrasMap &extras) { return jsonToGltfValue(extras); }
+/// Convert render::ExtrasMap (nlohmann::json) to a tinygltf::Value for extras.
+tinygltf::Value extrasToValue(const render::ExtrasMap &extras) { return jsonToGltfValue(extras); }
 
 } // namespace
 
@@ -77,7 +77,7 @@ std::string_view GltfExporter::formatName() const noexcept { return "gltf"; }
 
 std::vector<std::string> GltfExporter::supportedExtensions() const { return {".glb", ".gltf"}; }
 
-ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem::path &path,
+ExportResult GltfExporter::write(const render::Scene &scene, const std::filesystem::path &path,
                                  const ExportConfig &config) const {
     ExportResult result;
 
@@ -129,7 +129,7 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
 
     // ── Materials ─────────────────────────────────────────────────────────────
 
-    std::unordered_map<RenderMaterialId, int> matIdx;
+    std::unordered_map<render::MaterialId, int> matIdx;
     for (const auto &[id, mat] : scene.materials) {
         tinygltf::Material gm;
         gm.name = mat.name;
@@ -209,7 +209,7 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
     struct MeshAccs {
         int pos, norm, idx;
     };
-    std::unordered_map<MeshAssetId, MeshAccs> meshAccs;
+    std::unordered_map<render::MeshAssetId, MeshAccs> meshAccs;
 
     const bool bake = config.bakeUnitScale;
     const auto s = static_cast<float>(config.unitScale);
@@ -220,8 +220,8 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         }
 
         // When baking, scale vertex positions into the target unit system.
-        std::vector<Vertex> scaledVerts;
-        const std::vector<Vertex> &verts = bake ? scaledVerts : ma.vertices;
+        std::vector<render::Vertex> scaledVerts;
+        const std::vector<render::Vertex> &verts = bake ? scaledVerts : ma.vertices;
         if (bake) {
             scaledVerts.reserve(ma.vertices.size());
             for (const auto &v : ma.vertices) {
@@ -231,13 +231,13 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
 
         // Vertex buffer view (interleaved POSITION + NORMAL)
         alignTo4();
-        const std::size_t vtxOff = appendRaw(verts.data(), verts.size() * sizeof(Vertex));
+        const std::size_t vtxOff = appendRaw(verts.data(), verts.size() * sizeof(render::Vertex));
 
         tinygltf::BufferView vtxBV;
         vtxBV.buffer = 0;
         vtxBV.byteOffset = vtxOff;
-        vtxBV.byteLength = verts.size() * sizeof(Vertex);
-        vtxBV.byteStride = sizeof(Vertex);
+        vtxBV.byteLength = verts.size() * sizeof(render::Vertex);
+        vtxBV.byteStride = sizeof(render::Vertex);
         vtxBV.target = TINYGLTF_TARGET_ARRAY_BUFFER;
         const int vtxBVIdx = static_cast<int>(model.bufferViews.size());
         model.bufferViews.push_back(vtxBV);
@@ -266,7 +266,7 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         // POSITION accessor
         tinygltf::Accessor posAcc;
         posAcc.bufferView = vtxBVIdx;
-        posAcc.byteOffset = offsetof(Vertex, position);
+        posAcc.byteOffset = offsetof(render::Vertex, position);
         posAcc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
         posAcc.type = TINYGLTF_TYPE_VEC3;
         posAcc.count = ma.vertices.size();
@@ -280,7 +280,7 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         // NORMAL accessor
         tinygltf::Accessor normAcc;
         normAcc.bufferView = vtxBVIdx;
-        normAcc.byteOffset = offsetof(Vertex, normal);
+        normAcc.byteOffset = offsetof(render::Vertex, normal);
         normAcc.componentType = TINYGLTF_COMPONENT_TYPE_FLOAT;
         normAcc.type = TINYGLTF_TYPE_VEC3;
         normAcc.count = ma.vertices.size();
@@ -300,13 +300,13 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
         meshAccs[id] = {posAccIdx, normAccIdx, idxAccIdx};
     }
 
-    // ── glTF meshes — one per unique (MeshAssetId, RenderMaterialId) ──────────
+    // ── glTF meshes — one per unique (MeshAssetId, render::MaterialId) ──────────
     // This lets nodes with the same (mesh, material) share a single glTF mesh.
 
     using MeshKey = std::pair<uint64_t, uint64_t>;
     std::map<MeshKey, int> meshKeyToGltf;
 
-    auto getOrCreateGltfMesh = [&](const MeshBinding &binding) -> int {
+    auto getOrCreateGltfMesh = [&](const render::MeshBinding &binding) -> int {
         const MeshKey key{binding.meshId.value, binding.materialId.value};
         auto it = meshKeyToGltf.find(key);
         if (it != meshKeyToGltf.end()) {
@@ -341,13 +341,13 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
 
     // ── Nodes — BFS from root, assigning glTF node indices ────────────────────
 
-    std::unordered_map<RenderNodeId, int> nodeIdx;
+    std::unordered_map<render::NodeId, int> nodeIdx;
 
     if (scene.nodes.contains(scene.rootId)) {
-        std::queue<RenderNodeId> q;
+        std::queue<render::NodeId> q;
         q.push(scene.rootId);
         while (!q.empty()) {
-            const RenderNodeId nid = q.front();
+            const render::NodeId nid = q.front();
             q.pop();
             if (!scene.nodes.contains(nid) || nodeIdx.contains(nid)) {
                 continue;
@@ -437,11 +437,11 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
     if (config.gltf.multiScene) {
         // Build name path for each render node by walking parent chain.
         const auto &sep = config.gltf.sceneNameSeparator;
-        std::unordered_map<RenderNodeId, std::string> namePaths;
+        std::unordered_map<render::NodeId, std::string> namePaths;
 
         // BFS to build paths (parents before children).
         {
-            std::queue<RenderNodeId> pq;
+            std::queue<render::NodeId> pq;
             if (scene.nodes.contains(scene.rootId)) {
                 pq.push(scene.rootId);
             }

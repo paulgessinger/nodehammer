@@ -4,7 +4,7 @@
 
 namespace nodehammer::ir {
 
-/// Writes a RenderScene to Wavefront OBJ + MTL.
+/// Writes a render::Scene to Wavefront OBJ + MTL.
 ///
 /// Vertex positions are transformed to world space using each node's worldTransform.
 /// Normals are transformed with the inverse-transpose of the worldTransform.
@@ -14,7 +14,7 @@ class ObjExporter final : public IRenderExporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
-    [[nodiscard]] ExportResult write(const RenderScene &scene, const std::filesystem::path &path,
+    [[nodiscard]] ExportResult write(const render::Scene &scene, const std::filesystem::path &path,
                                      const ExportConfig &config) const override;
 };
 

@@ -42,8 +42,8 @@ TEST_CASE("TGeoImporter: TGeoBBox -> BoxShape", "[import][tgeo]") {
 
     bool found = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::ir::BoxShape>(s.data)) {
-            const auto &bs = std::get<nodehammer::ir::BoxShape>(s.data);
+        if (std::holds_alternative<nodehammer::ir::semantic::BoxShape>(s.data)) {
+            const auto &bs = std::get<nodehammer::ir::semantic::BoxShape>(s.data);
             REQUIRE(bs.dx == Catch::Approx(10.0));
             REQUIRE(bs.dy == Catch::Approx(20.0));
             REQUIRE(bs.dz == Catch::Approx(30.0));
@@ -68,8 +68,8 @@ TEST_CASE("TGeoImporter: TGeoTube -> TubeShape", "[import][tgeo]") {
 
     bool found = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::ir::TubeShape>(s.data)) {
-            const auto &ts = std::get<nodehammer::ir::TubeShape>(s.data);
+        if (std::holds_alternative<nodehammer::ir::semantic::TubeShape>(s.data)) {
+            const auto &ts = std::get<nodehammer::ir::semantic::TubeShape>(s.data);
             REQUIRE(ts.rMin == Catch::Approx(5.0));
             REQUIRE(ts.rMax == Catch::Approx(10.0));
             REQUIRE(ts.dz == Catch::Approx(25.0));
@@ -143,9 +143,9 @@ TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") 
 
     bool hasBool = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::ir::BooleanUnion>(s.data)) {
+        if (std::holds_alternative<nodehammer::ir::semantic::BooleanUnion>(s.data)) {
             hasBool = true;
-            const auto &bu = std::get<nodehammer::ir::BooleanUnion>(s.data);
+            const auto &bu = std::get<nodehammer::ir::semantic::BooleanUnion>(s.data);
             REQUIRE(result.scene.shapes.contains(bu.left));
             REQUIRE(result.scene.shapes.contains(bu.right));
         }

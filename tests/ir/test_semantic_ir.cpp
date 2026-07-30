@@ -2,11 +2,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ir/semantic_json.hpp>
 
-TEST_CASE("SemanticScene: construction and node lookup by ID", "[ir][semantic]") {
-    nodehammer::ir::SemanticScene scene;
+TEST_CASE("semantic::Scene: construction and node lookup by ID", "[ir][semantic]") {
+    nodehammer::ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, nodehammer::ir::BoxShape{5.0, 5.0, 5.0}};
+    scene.shapes[shapeId] = {shapeId, nodehammer::ir::semantic::BoxShape{5.0, 5.0, 5.0}};
 
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "iron", std::nullopt, 7.87};
@@ -15,7 +15,7 @@ TEST_CASE("SemanticScene: construction and node lookup by ID", "[ir][semantic]")
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
 
     auto nodeId = scene.nextNodeId();
-    nodehammer::ir::SemanticNode node;
+    nodehammer::ir::semantic::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;
@@ -31,8 +31,8 @@ TEST_CASE("SemanticScene: construction and node lookup by ID", "[ir][semantic]")
 
 TEST_CASE("StrongId: different Tag types are incompatible at compile time", "[ir][semantic]") {
     // These should not compile if mixed — verified by static_assert
-    nodehammer::ir::SemanticNodeId a{1};
-    nodehammer::ir::SemanticLogVolId b{1};
+    nodehammer::ir::semantic::NodeId a{1};
+    nodehammer::ir::semantic::LogVolId b{1};
     // Uncomment to verify compile-time error:
     // bool bad = (a == b);  // should not compile
 
@@ -40,28 +40,28 @@ TEST_CASE("StrongId: different Tag types are incompatible at compile time", "[ir
     REQUIRE(a.value == b.value);
 
     // Self-comparison works
-    nodehammer::ir::SemanticNodeId c{1};
+    nodehammer::ir::semantic::NodeId c{1};
     REQUIRE(a == c);
 
-    nodehammer::ir::SemanticNodeId d{2};
+    nodehammer::ir::semantic::NodeId d{2};
     REQUIRE(a != d);
 }
 
-TEST_CASE("SemanticScene: computeWorldTransforms BFS", "[ir][semantic]") {
-    nodehammer::ir::SemanticScene scene;
+TEST_CASE("semantic::Scene: computeWorldTransforms BFS", "[ir][semantic]") {
+    nodehammer::ir::semantic::Scene scene;
 
     auto makeNode = [&](std::string name, glm::dmat4 local,
-                        std::optional<nodehammer::ir::SemanticNodeId> parent) {
+                        std::optional<nodehammer::ir::semantic::NodeId> parent) {
         // Dummy shape + logvol per node (minimal)
         auto shapeId = scene.nextShapeId();
-        scene.shapes[shapeId] = {shapeId, nodehammer::ir::BoxShape{1, 1, 1}};
+        scene.shapes[shapeId] = {shapeId, nodehammer::ir::semantic::BoxShape{1, 1, 1}};
         auto matId = scene.nextMaterialId();
         scene.materials[matId] = {matId, "mat", std::nullopt, 1.0};
         auto lvId = scene.nextLogVolId();
         scene.logVols[lvId] = {lvId, name + "LV", shapeId, matId};
 
         auto id = scene.nextNodeId();
-        nodehammer::ir::SemanticNode n;
+        nodehammer::ir::semantic::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = lvId;
@@ -92,12 +92,12 @@ TEST_CASE("SemanticScene: computeWorldTransforms BFS", "[ir][semantic]") {
     REQUIRE(childWorld[3].y == Catch::Approx(0.0));
 }
 
-TEST_CASE("SemanticScene: logical-volume dedup respects source daughter placements",
+TEST_CASE("semantic::Scene: logical-volume dedup respects source daughter placements",
           "[ir][semantic]") {
-    nodehammer::ir::SemanticScene scene;
+    nodehammer::ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, nodehammer::ir::BoxShape{1, 1, 1}};
+    scene.shapes[shapeId] = {shapeId, nodehammer::ir::semantic::BoxShape{1, 1, 1}};
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "mat", std::nullopt, 1.0};
 
@@ -118,12 +118,12 @@ TEST_CASE("SemanticScene: logical-volume dedup respects source daughter placemen
     REQUIRE(scene.logVols.size() == 3);
 }
 
-TEST_CASE("SemanticScene: logical-volume dedup canonicalizes daughter references",
+TEST_CASE("semantic::Scene: logical-volume dedup canonicalizes daughter references",
           "[ir][semantic]") {
-    nodehammer::ir::SemanticScene scene;
+    nodehammer::ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, nodehammer::ir::BoxShape{1, 1, 1}};
+    scene.shapes[shapeId] = {shapeId, nodehammer::ir::semantic::BoxShape{1, 1, 1}};
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "mat", std::nullopt, 1.0};
 
@@ -143,7 +143,7 @@ TEST_CASE("SemanticScene: logical-volume dedup canonicalizes daughter references
         parentB, "parentB", shapeId, matId, {{"childB", childB, childPlacement}}};
 
     auto nodeB = scene.nextNodeId();
-    nodehammer::ir::SemanticNode node;
+    nodehammer::ir::semantic::Node node;
     node.id = nodeB;
     node.name = "nodeB";
     node.logVolId = parentB;
@@ -159,26 +159,26 @@ TEST_CASE("SemanticScene: logical-volume dedup canonicalizes daughter references
     REQUIRE(scene.nodes.at(nodeB).logVolId == parentA);
 }
 
-TEST_CASE("SemanticScene JSON: logical volumes omit empty daughters", "[ir][semantic]") {
-    nodehammer::ir::SemanticLogicalVolume lv{nodehammer::ir::SemanticLogVolId{1}, "lv",
-                                             nodehammer::ir::SemanticShapeId{2},
-                                             nodehammer::ir::SemanticMaterialId{3}};
+TEST_CASE("semantic::Scene JSON: logical volumes omit empty daughters", "[ir][semantic]") {
+    nodehammer::ir::semantic::LogicalVolume lv{nodehammer::ir::semantic::LogVolId{1}, "lv",
+                                               nodehammer::ir::semantic::ShapeId{2},
+                                               nodehammer::ir::semantic::MaterialId{3}};
 
     nlohmann::json j = lv;
     // Empty daughters should be omitted from JSON output
     REQUIRE_FALSE(j.contains("daughters"));
 
     // Round-trip: missing daughters should deserialize to empty vector
-    auto lv2 = j.get<nodehammer::ir::SemanticLogicalVolume>();
+    auto lv2 = j.get<nodehammer::ir::semantic::LogicalVolume>();
     REQUIRE(lv2.daughters.empty());
 }
 
-TEST_CASE("SemanticScene: visitBFS terminates on a cycle", "[ir][semantic]") {
-    nodehammer::ir::SemanticScene scene;
+TEST_CASE("semantic::Scene: visitBFS terminates on a cycle", "[ir][semantic]") {
+    nodehammer::ir::semantic::Scene scene;
 
     auto makeNode = [&](std::string name) {
         auto id = scene.nextNodeId();
-        nodehammer::ir::SemanticNode n;
+        nodehammer::ir::semantic::Node n;
         n.id = id;
         n.name = std::move(name);
         scene.nodes[id] = n;
@@ -193,7 +193,7 @@ TEST_CASE("SemanticScene: visitBFS terminates on a cycle", "[ir][semantic]") {
     scene.nodes[rootId].children.push_back(childId);
     scene.nodes[childId].children.push_back(rootId);
 
-    std::vector<nodehammer::ir::SemanticNodeId> visited;
+    std::vector<nodehammer::ir::semantic::NodeId> visited;
     scene.visitBFS([&](const auto &node) { visited.push_back(node.id); });
 
     REQUIRE(visited.size() == 2);
@@ -201,11 +201,11 @@ TEST_CASE("SemanticScene: visitBFS terminates on a cycle", "[ir][semantic]") {
     REQUIRE(visited.at(1) == childId);
 }
 
-TEST_CASE("SemanticScene: visitBFS skips a dangling child id", "[ir][semantic]") {
-    nodehammer::ir::SemanticScene scene;
+TEST_CASE("semantic::Scene: visitBFS skips a dangling child id", "[ir][semantic]") {
+    nodehammer::ir::semantic::Scene scene;
 
     auto rootId = scene.nextNodeId();
-    nodehammer::ir::SemanticNode root;
+    nodehammer::ir::semantic::Node root;
     root.id = rootId;
     root.name = "root";
     scene.nodes[rootId] = root;
@@ -213,22 +213,22 @@ TEST_CASE("SemanticScene: visitBFS skips a dangling child id", "[ir][semantic]")
 
     // Child id that was never inserted into `nodes` — e.g. left behind by a
     // partial prune. Must be skipped rather than throwing from nodes.at().
-    scene.nodes[rootId].children.push_back(nodehammer::ir::SemanticNodeId{9999});
+    scene.nodes[rootId].children.push_back(nodehammer::ir::semantic::NodeId{9999});
 
-    std::vector<nodehammer::ir::SemanticNodeId> visited;
+    std::vector<nodehammer::ir::semantic::NodeId> visited;
     REQUIRE_NOTHROW(scene.visitBFS([&](const auto &node) { visited.push_back(node.id); }));
     REQUIRE(visited.size() == 1);
     REQUIRE(visited.at(0) == rootId);
 }
 
-TEST_CASE("SemanticScene: visitBFS on a scene whose root is absent", "[ir][semantic]") {
-    nodehammer::ir::SemanticScene scene;
+TEST_CASE("semantic::Scene: visitBFS on a scene whose root is absent", "[ir][semantic]") {
+    nodehammer::ir::semantic::Scene scene;
 
     auto orphanId = scene.nextNodeId();
-    nodehammer::ir::SemanticNode orphan;
+    nodehammer::ir::semantic::Node orphan;
     orphan.id = orphanId;
     scene.nodes[orphanId] = orphan;
-    scene.rootId = nodehammer::ir::SemanticNodeId{4242}; // never inserted
+    scene.rootId = nodehammer::ir::semantic::NodeId{4242}; // never inserted
 
     int calls = 0;
     REQUIRE_NOTHROW(scene.visitBFS([&](const auto &) { ++calls; }));

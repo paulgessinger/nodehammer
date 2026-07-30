@@ -20,11 +20,11 @@ using Catch::Approx;
 namespace {
 
 /// Build a minimal scene with one root node, one logVol, one box shape, one material.
-SemanticScene makeMinimalScene() {
-    SemanticScene scene;
+ir::semantic::Scene makeMinimalScene() {
+    ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};
+    scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
 
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
@@ -33,7 +33,7 @@ SemanticScene makeMinimalScene() {
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
 
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    ir::semantic::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;
@@ -71,8 +71,8 @@ TEST_CASE("FlatBuffer roundtrip: minimal scene", "[ir][flatbuffer]") {
     // Check shape (box)
     const auto &origShape = original.shapes.begin()->second;
     const auto &resShape = restored.shapes.at(origShape.id);
-    const auto *origBox = std::get_if<BoxShape>(&origShape.data);
-    const auto *resBox = std::get_if<BoxShape>(&resShape.data);
+    const auto *origBox = std::get_if<ir::semantic::BoxShape>(&origShape.data);
+    const auto *resBox = std::get_if<ir::semantic::BoxShape>(&resShape.data);
     REQUIRE(origBox != nullptr);
     REQUIRE(resBox != nullptr);
     REQUIRE(resBox->dx == Approx(origBox->dx));
@@ -89,11 +89,11 @@ TEST_CASE("FlatBuffer roundtrip: minimal scene", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "air", std::nullopt, 0.001};
 
-    auto addShape = [&](SemanticShapeVariant data) {
+    auto addShape = [&](ir::semantic::ShapeVariant data) {
         auto id = scene.nextShapeId();
         scene.shapes[id] = {id, std::move(data)};
         auto lvId = scene.nextLogVolId();
@@ -101,29 +101,29 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
         return id;
     };
 
-    addShape(BoxShape{1.0, 2.0, 3.0});
-    addShape(TubeShape{5.0, 10.0, 20.0, 0.1, 3.0});
-    addShape(ConeShape{1.0, 5.0, 2.0, 8.0, 15.0, 0.0, 2.0 * std::numbers::pi});
-    addShape(TrdShape{1.0, 2.0, 3.0, 4.0, 5.0});
-    addShape(ParaShape{1.0, 2.0, 3.0, 0.1, 0.2, 0.3});
+    addShape(ir::semantic::BoxShape{1.0, 2.0, 3.0});
+    addShape(ir::semantic::TubeShape{5.0, 10.0, 20.0, 0.1, 3.0});
+    addShape(ir::semantic::ConeShape{1.0, 5.0, 2.0, 8.0, 15.0, 0.0, 2.0 * std::numbers::pi});
+    addShape(ir::semantic::TrdShape{1.0, 2.0, 3.0, 4.0, 5.0});
+    addShape(ir::semantic::ParaShape{1.0, 2.0, 3.0, 0.1, 0.2, 0.3});
 
-    PconShape pcon;
+    ir::semantic::PconShape pcon;
     pcon.phiStart = 0.5;
     pcon.phiDelta = 3.0;
     pcon.sections = {{-10.0, 1.0, 5.0}, {0.0, 2.0, 6.0}, {10.0, 1.0, 5.0}};
     addShape(pcon);
 
-    PgonShape pgon;
+    ir::semantic::PgonShape pgon;
     pgon.phiStart = 0.0;
     pgon.phiDelta = 2.0 * std::numbers::pi;
     pgon.nSides = 6;
     pgon.sections = {{-5.0, 1.0, 3.0}, {5.0, 1.0, 3.0}};
     addShape(pgon);
 
-    addShape(TorusShape{1.0, 3.0, 10.0, 0.0, 2.0 * std::numbers::pi});
+    addShape(ir::semantic::TorusShape{1.0, 3.0, 10.0, 0.0, 2.0 * std::numbers::pi});
 
-    TessellatedShape tess;
-    TessellatedShape::Triangle tri;
+    ir::semantic::TessellatedShape tess;
+    ir::semantic::TessellatedShape::Triangle tri;
     tri.vertices[0] = {0.0, 0.0, 0.0};
     tri.vertices[1] = {1.0, 0.0, 0.0};
     tri.vertices[2] = {0.0, 1.0, 0.0};
@@ -131,22 +131,22 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
     addShape(tess);
 
     // Boolean shapes: need two operand shapes first
-    auto leftId = addShape(BoxShape{1.0, 1.0, 1.0});
-    auto rightId = addShape(BoxShape{0.5, 0.5, 0.5});
+    auto leftId = addShape(ir::semantic::BoxShape{1.0, 1.0, 1.0});
+    auto rightId = addShape(ir::semantic::BoxShape{0.5, 0.5, 0.5});
     glm::dmat4 boolTransform{1.0};
     boolTransform[3] = glm::dvec4{1.0, 2.0, 3.0, 1.0};
 
-    addShape(BooleanUnion{leftId, rightId, boolTransform});
-    addShape(BooleanIntersection{leftId, rightId, glm::dmat4{1.0}});
-    addShape(BooleanSubtraction{leftId, rightId, boolTransform});
+    addShape(ir::semantic::BooleanUnion{leftId, rightId, boolTransform});
+    addShape(ir::semantic::BooleanIntersection{leftId, rightId, glm::dmat4{1.0}});
+    addShape(ir::semantic::BooleanSubtraction{leftId, rightId, boolTransform});
 
-    addShape(UnknownShape{"TGeoArb8"});
+    addShape(ir::semantic::UnknownShape{"TGeoArb8"});
 
     // Minimal node to make it a valid scene
     auto lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "rootLv", scene.shapes.begin()->first, matId};
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    ir::semantic::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;
@@ -165,8 +165,8 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
         REQUIRE(origShape.data.index() == resShape.data.index());
 
         // Spot-check a few shapes
-        if (const auto *origTube = std::get_if<TubeShape>(&origShape.data)) {
-            const auto *resTube = std::get_if<TubeShape>(&resShape.data);
+        if (const auto *origTube = std::get_if<ir::semantic::TubeShape>(&origShape.data)) {
+            const auto *resTube = std::get_if<ir::semantic::TubeShape>(&resShape.data);
             REQUIRE(resTube != nullptr);
             REQUIRE(resTube->rMin == Approx(origTube->rMin));
             REQUIRE(resTube->rMax == Approx(origTube->rMax));
@@ -174,8 +174,8 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
             REQUIRE(resTube->phiStart == Approx(origTube->phiStart));
             REQUIRE(resTube->phiDelta == Approx(origTube->phiDelta));
         }
-        if (const auto *origPcon = std::get_if<PconShape>(&origShape.data)) {
-            const auto *resPcon = std::get_if<PconShape>(&resShape.data);
+        if (const auto *origPcon = std::get_if<ir::semantic::PconShape>(&origShape.data)) {
+            const auto *resPcon = std::get_if<ir::semantic::PconShape>(&resShape.data);
             REQUIRE(resPcon != nullptr);
             REQUIRE(resPcon->sections.size() == origPcon->sections.size());
             for (std::size_t i = 0; i < origPcon->sections.size(); ++i) {
@@ -184,8 +184,8 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
                 REQUIRE(resPcon->sections[i].rMax == Approx(origPcon->sections[i].rMax));
             }
         }
-        if (const auto *origBoolU = std::get_if<BooleanUnion>(&origShape.data)) {
-            const auto *resBoolU = std::get_if<BooleanUnion>(&resShape.data);
+        if (const auto *origBoolU = std::get_if<ir::semantic::BooleanUnion>(&origShape.data)) {
+            const auto *resBoolU = std::get_if<ir::semantic::BooleanUnion>(&resShape.data);
             REQUIRE(resBoolU != nullptr);
             REQUIRE(resBoolU->left == origBoolU->left);
             REQUIRE(resBoolU->right == origBoolU->right);
@@ -194,15 +194,15 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
             REQUIRE(resBoolU->rightTransform[3][1] == Approx(2.0));
             REQUIRE(resBoolU->rightTransform[3][2] == Approx(3.0));
         }
-        if (std::get_if<BooleanIntersection>(&origShape.data) != nullptr) {
-            const auto *resBoolI = std::get_if<BooleanIntersection>(&resShape.data);
+        if (std::get_if<ir::semantic::BooleanIntersection>(&origShape.data) != nullptr) {
+            const auto *resBoolI = std::get_if<ir::semantic::BooleanIntersection>(&resShape.data);
             REQUIRE(resBoolI != nullptr);
             // Identity transform: check diagonal
             REQUIRE(resBoolI->rightTransform[0][0] == Approx(1.0));
             REQUIRE(resBoolI->rightTransform[3][0] == Approx(0.0));
         }
-        if (const auto *origUnk = std::get_if<UnknownShape>(&origShape.data)) {
-            const auto *resUnk = std::get_if<UnknownShape>(&resShape.data);
+        if (const auto *origUnk = std::get_if<ir::semantic::UnknownShape>(&origShape.data)) {
+            const auto *resUnk = std::get_if<ir::semantic::UnknownShape>(&resShape.data);
             REQUIRE(resUnk != nullptr);
             REQUIRE(resUnk->originalType == origUnk->originalType);
         }
@@ -210,10 +210,10 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer]") {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, BoxShape{1.0, 1.0, 1.0}};
+    scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{1.0, 1.0, 1.0}};
 
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
@@ -223,7 +223,7 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
 
     // Root
     auto rootId = scene.nextNodeId();
-    SemanticNode root;
+    ir::semantic::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = lvId;
@@ -244,20 +244,20 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
     childTransform[1][1] = std::cos(angle);
 
     auto childId = scene.nextNodeId();
-    SemanticNode child;
+    ir::semantic::Node child;
     child.id = childId;
     child.name = "sensor_0";
     child.logVolId = lvId;
     child.localTransform = childTransform;
     child.parentId = rootId;
     child.degradation.bits =
-        decltype(child.degradation.bits)(0b0101); // UnknownShape + TransformApprox
+        decltype(child.degradation.bits)(0b0101); // ir::semantic::UnknownShape + TransformApprox
     scene.nodes[childId] = child;
     scene.nodes[rootId].children.push_back(childId);
 
     // Grandchild with identity transform
     auto grandchildId = scene.nextNodeId();
-    SemanticNode grandchild;
+    ir::semantic::Node grandchild;
     grandchild.id = grandchildId;
     grandchild.name = "pixel_0";
     grandchild.logVolId = lvId;
@@ -273,7 +273,7 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
     REQUIRE(restored.nodes.size() == 3);
     REQUIRE(restored.sourceFile == "/test/detector.xml");
 
-    auto findNodeIdByName = [&](std::string_view name) -> std::optional<SemanticNodeId> {
+    auto findNodeIdByName = [&](std::string_view name) -> std::optional<ir::semantic::NodeId> {
         for (const auto &[id, node] : restored.nodes) {
             if (node.name == name) {
                 return id;
@@ -341,10 +341,11 @@ TEST_CASE("FlatBuffer: file identifier check", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffer]") {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, TubeShape{0.0, 5.0, 10.0, 0.0, 2.0 * std::numbers::pi}};
+    scene.shapes[shapeId] = {shapeId,
+                             ir::semantic::TubeShape{0.0, 5.0, 10.0, 0.0, 2.0 * std::numbers::pi}};
 
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "silicon", glm::vec3{0.3f, 0.3f, 0.8f}, 2.33};
@@ -364,7 +365,7 @@ TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffe
         {{.name = "sensor_phys", .logVolId = childLvId, .localTransform = placement}}};
 
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    ir::semantic::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = parentLvId;

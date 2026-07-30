@@ -4,7 +4,7 @@
 
 namespace nodehammer::ir {
 
-/// Writes a RenderScene to glTF 2.0 (`.gltf`) or binary GLB (`.glb`).
+/// Writes a render::Scene to glTF 2.0 (`.gltf`) or binary GLB (`.glb`).
 ///
 /// Geometry is stored with interleaved POSITION+NORMAL attributes.
 /// MeshAssets are deduplicated: the same asset referenced by multiple nodes
@@ -13,7 +13,7 @@ class GltfExporter final : public IRenderExporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
-    [[nodiscard]] ExportResult write(const RenderScene &scene, const std::filesystem::path &path,
+    [[nodiscard]] ExportResult write(const render::Scene &scene, const std::filesystem::path &path,
                                      const ExportConfig &config) const override;
 };
 

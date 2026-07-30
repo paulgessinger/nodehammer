@@ -13,7 +13,7 @@ struct TessellationParams {
 };
 
 struct TessellationOutput {
-    std::vector<ir::Vertex> vertices;
+    std::vector<ir::render::Vertex> vertices;
     std::vector<uint32_t> indices;
     ir::DiagnosticList diags;
     /// Whether the producing operation completed. False marks a genuine failure
@@ -32,10 +32,10 @@ class ITessellator {
     /// Returns true if this tessellator can produce geometry for the given shape.
     /// BooleanShape variants return false (require Manifold, Phase 2).
     [[nodiscard]] virtual bool
-    canTessellate(const ir::SemanticShapeVariant &shape) const noexcept = 0;
+    canTessellate(const ir::semantic::ShapeVariant &shape) const noexcept = 0;
 
     /// Tessellate the shape. Called only when canTessellate() returns true.
-    [[nodiscard]] virtual TessellationOutput tessellate(const ir::SemanticShapeVariant &shape,
+    [[nodiscard]] virtual TessellationOutput tessellate(const ir::semantic::ShapeVariant &shape,
                                                         const TessellationParams &params) const = 0;
 };
 

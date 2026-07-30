@@ -14,15 +14,15 @@ using Catch::Approx;
 
 namespace {
 
-MeshAsset makeMesh(MeshAssetId id, const char *name) {
-    MeshAsset m;
+ir::render::MeshAsset makeMesh(ir::render::MeshAssetId id, const char *name) {
+    ir::render::MeshAsset m;
     m.id = id;
     m.name = name;
     m.vertices = {
-        Vertex{glm::vec3{0.f, 0.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}},
-        Vertex{glm::vec3{1.f, 0.f, 0.f}, glm::vec3{0.f, 1.f, 0.f}},
-        Vertex{glm::vec3{0.f, 1.f, 0.f}, glm::vec3{1.f, 0.f, 0.f}},
-        Vertex{glm::vec3{1.f, 1.f, 2.f}, glm::vec3{0.577f, 0.577f, 0.577f}},
+        ir::render::Vertex{glm::vec3{0.f, 0.f, 0.f}, glm::vec3{0.f, 0.f, 1.f}},
+        ir::render::Vertex{glm::vec3{1.f, 0.f, 0.f}, glm::vec3{0.f, 1.f, 0.f}},
+        ir::render::Vertex{glm::vec3{0.f, 1.f, 0.f}, glm::vec3{1.f, 0.f, 0.f}},
+        ir::render::Vertex{glm::vec3{1.f, 1.f, 2.f}, glm::vec3{0.577f, 0.577f, 0.577f}},
     };
     m.indices = {0, 1, 2, 1, 3, 2};
     m.provenance.sourceSystem = "tessellator";
@@ -33,10 +33,10 @@ MeshAsset makeMesh(MeshAssetId id, const char *name) {
     return m;
 }
 
-/// A RenderScene with two meshes, a fully-populated material, a bare material,
+/// A render::Scene with two meshes, a fully-populated material, a bare material,
 /// and a 3-node hierarchy carrying transforms / bindings / semantic refs.
-RenderScene makeScene() {
-    RenderScene scene;
+ir::render::Scene makeScene() {
+    ir::render::Scene scene;
 
     const auto meshA = scene.nextMeshId();
     const auto meshB = scene.nextMeshId();
@@ -44,12 +44,13 @@ RenderScene makeScene() {
     scene.meshAssets[meshB] = makeMesh(meshB, "tubeMesh");
     // meshB carries a stack-average prefilter hint; meshA leaves it nullopt so
     // the round-trip covers both the present and absent paths.
-    scene.meshAssets[meshB].stackAverage = StackAverage{glm::vec3{0.12f, 0.34f, 0.56f}, 0.75f};
+    scene.meshAssets[meshB].stackAverage =
+        ir::render::StackAverage{glm::vec3{0.12f, 0.34f, 0.56f}, 0.75f};
 
     // Material 1: every optional KHR field set.
     const auto matFull = scene.nextMaterialId();
     {
-        RenderMaterial m;
+        ir::render::Material m;
         m.id = matFull;
         m.name = "glassy";
         m.baseColorFactor = {0.1f, 0.2f, 0.3f, 0.4f};
@@ -72,7 +73,7 @@ RenderScene makeScene() {
     // Material 2: all optionals left unset (defaults).
     const auto matBare = scene.nextMaterialId();
     {
-        RenderMaterial m;
+        ir::render::Material m;
         m.id = matBare;
         m.name = "plain";
         scene.materials[matBare] = m;
@@ -82,16 +83,16 @@ RenderScene makeScene() {
     const auto rootId = scene.nextNodeId();
     scene.rootId = rootId;
     {
-        RenderNode n;
+        ir::render::Node n;
         n.id = rootId;
         n.name = "root";
-        n.semanticNodeId = SemanticNodeId{42};
+        n.semanticNodeId = ir::semantic::NodeId{42};
         scene.nodes[rootId] = n;
     }
     // Child with non-identity transforms + two mesh bindings.
     const auto childId = scene.nextNodeId();
     {
-        RenderNode n;
+        ir::render::Node n;
         n.id = childId;
         n.name = "child";
         n.localTransform = glm::mat4{1.f};
@@ -100,25 +101,25 @@ RenderScene makeScene() {
         n.worldTransform = n.localTransform;
         n.parentId = rootId;
         n.meshBindings = {
-            MeshBinding{meshA, matFull},
-            MeshBinding{meshB, matBare},
+            ir::render::MeshBinding{meshA, matFull},
+            ir::render::MeshBinding{meshB, matBare},
         };
         // A coarse hull LOD proxy — must survive the round-trip or hull LOD is a
         // no-op in WASM (proxies cross the worker→viewer boundary as bytes).
-        n.lodProxyBindings = {MeshBinding{meshB, matBare}};
-        n.semanticNodeId = SemanticNodeId{43};
+        n.lodProxyBindings = {ir::render::MeshBinding{meshB, matBare}};
+        n.semanticNodeId = ir::semantic::NodeId{43};
         scene.nodes[childId] = n;
         scene.nodes[rootId].children.push_back(childId);
     }
     // Grandchild, identity transform, single binding.
     const auto grandId = scene.nextNodeId();
     {
-        RenderNode n;
+        ir::render::Node n;
         n.id = grandId;
         n.name = "grand";
         n.parentId = childId;
-        n.meshBindings = {MeshBinding{meshA, matBare}};
-        n.semanticNodeId = SemanticNodeId{44};
+        n.meshBindings = {ir::render::MeshBinding{meshA, matBare}};
+        n.semanticNodeId = ir::semantic::NodeId{44};
         scene.nodes[grandId] = n;
         scene.nodes[childId].children.push_back(grandId);
     }
@@ -183,8 +184,8 @@ TEST_CASE("Render FlatBuffer roundtrip: material optionals set and unset",
 
     REQUIRE(restored.materials.size() == original.materials.size());
 
-    const RenderMaterial *full = nullptr;
-    const RenderMaterial *bare = nullptr;
+    const ir::render::Material *full = nullptr;
+    const ir::render::Material *bare = nullptr;
     for (const auto &[id, mat] : restored.materials) {
         if (mat.name == "glassy") {
             full = &mat;
@@ -243,7 +244,7 @@ TEST_CASE("Render FlatBuffer roundtrip: hierarchy, transforms, bindings",
 
     REQUIRE(restored.nodes.size() == 3);
 
-    auto byName = [&](std::string_view name) -> const RenderNode * {
+    auto byName = [&](std::string_view name) -> const ir::render::Node * {
         for (const auto &[id, n] : restored.nodes) {
             if (n.name == name) {
                 return &n;
@@ -263,7 +264,7 @@ TEST_CASE("Render FlatBuffer roundtrip: hierarchy, transforms, bindings",
     REQUIRE_FALSE(root->parentId.has_value());
     REQUIRE(root->children.size() == 1);
     REQUIRE(root->children[0] == child->id);
-    REQUIRE(root->semanticNodeId == SemanticNodeId{42});
+    REQUIRE(root->semanticNodeId == ir::semantic::NodeId{42});
     REQUIRE(restored.rootId == root->id);
 
     // Child: parent link, transforms (column-major fidelity), two bindings.
@@ -283,7 +284,7 @@ TEST_CASE("Render FlatBuffer roundtrip: hierarchy, transforms, bindings",
     REQUIRE(child->lodProxyBindings[0].materialId.value != 0);
     // Nodes without proxies stay empty (default field absent in the buffer).
     REQUIRE(grand->lodProxyBindings.empty());
-    REQUIRE(child->semanticNodeId == SemanticNodeId{43});
+    REQUIRE(child->semanticNodeId == ir::semantic::NodeId{43});
 
     // Grandchild: identity transform, parent link, single binding.
     REQUIRE(grand->parentId.has_value());

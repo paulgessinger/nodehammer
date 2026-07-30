@@ -1,12 +1,12 @@
 #include <ir/render_json.hpp>
 
-// The Render codec serializes glm vectors/matrices (glm_json), the SemanticNodeId
+// The Render codec serializes glm vectors/matrices (glm_json), the semantic::NodeId
 // back-reference and Provenance (both from the Semantic IR's codec). Pulling these
 // in here — rather than in render.hpp — is exactly what keeps the header lean.
 #include <detail/glm_json.hpp>
 #include <ir/semantic_json.hpp>
 
-namespace nodehammer::ir {
+namespace nodehammer::ir::render {
 
 void to_json(nlohmann::json &j, const Vertex &v) {
     j = {
@@ -25,7 +25,7 @@ void to_json(nlohmann::json &j, const MeshAsset &a) {
     };
 }
 
-void to_json(nlohmann::json &j, const RenderMaterial &m) {
+void to_json(nlohmann::json &j, const Material &m) {
     j = {
         {"id", m.id},
         {"name", m.name},
@@ -41,7 +41,7 @@ void to_json(nlohmann::json &j, const MeshBinding &b) {
     j = {{"meshId", b.meshId}, {"materialId", b.materialId}};
 }
 
-void to_json(nlohmann::json &j, const RenderNode &n) {
+void to_json(nlohmann::json &j, const Node &n) {
     j = {
         {"id", n.id},
         {"name", n.name},
@@ -57,7 +57,7 @@ void to_json(nlohmann::json &j, const RenderNode &n) {
         j["extras"] = n.extras;
 }
 
-void to_json(nlohmann::json &j, const RenderScene &sc) {
+void to_json(nlohmann::json &j, const Scene &sc) {
     auto nodes = nlohmann::json::array();
     for (const auto &[id, n] : sc.nodes)
         nodes.push_back(n);
@@ -78,4 +78,4 @@ void to_json(nlohmann::json &j, const RenderScene &sc) {
     };
 }
 
-} // namespace nodehammer::ir
+} // namespace nodehammer::ir::render

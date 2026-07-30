@@ -34,7 +34,7 @@ namespace {
 class CooperativeBackend final : public IWebBackend {
   public:
     void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
-               std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+               std::shared_ptr<const ::nodehammer::ir::semantic::Scene> scene,
                std::string config_label, std::string geometry_label,
                std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) override {
         logPreBuild(config_label, geometry_label);
@@ -76,7 +76,7 @@ struct SceneBuildJob::Impl {
     // fatal worker failure mid-build can be replayed on the cooperative backend
     // without the App ever knowing.
     std::shared_ptr<const ::nodehammer::config::NHConfig> saved_config;
-    std::shared_ptr<const ::nodehammer::ir::SemanticScene> saved_scene;
+    std::shared_ptr<const ::nodehammer::ir::semantic::Scene> saved_scene;
     std::string saved_config_label;
     std::string saved_geometry_label;
     std::optional<::nodehammer::tessellation::WedgeCutParams> saved_wedge;
@@ -94,7 +94,7 @@ SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
 SceneBuildJob::~SceneBuildJob() = default;
 
 void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
-                          std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+                          std::shared_ptr<const ::nodehammer::ir::semantic::Scene> scene,
                           std::string config_label, std::string geometry_label,
                           std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) {
     if (impl_->using_worker) {

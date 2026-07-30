@@ -20,6 +20,8 @@
 namespace nodehammer::ir {
 
 // ── Strong ID types ───────────────────────────────────────────────────────────
+// `StrongId` itself stays in `ir`: both IRs mint ids from it, so parking it in
+// either `ir::semantic` or `ir::render` would make one depend on the other.
 
 template <typename Tag> struct StrongId {
     uint64_t value{0};
@@ -28,17 +30,21 @@ template <typename Tag> struct StrongId {
     constexpr bool operator<(const StrongId &o) const noexcept { return value < o.value; }
 };
 
-struct SemanticNodeTag {};
-struct SemanticLogVolTag {};
-struct SemanticShapeTag {};
-struct SemanticMaterialTag {};
-
-using SemanticNodeId = StrongId<SemanticNodeTag>;
-using SemanticLogVolId = StrongId<SemanticLogVolTag>;
-using SemanticShapeId = StrongId<SemanticShapeTag>;
-using SemanticMaterialId = StrongId<SemanticMaterialTag>;
-
 } // namespace nodehammer::ir
+
+namespace nodehammer::ir::semantic {
+
+struct NodeTag {};
+struct LogVolTag {};
+struct ShapeTag {};
+struct MaterialTag {};
+
+using NodeId = StrongId<NodeTag>;
+using LogVolId = StrongId<LogVolTag>;
+using ShapeId = StrongId<ShapeTag>;
+using MaterialId = StrongId<MaterialTag>;
+
+} // namespace nodehammer::ir::semantic
 
 // Hash support for StrongId
 template <typename Tag> struct std::hash<nodehammer::ir::StrongId<Tag>> {
@@ -47,10 +53,10 @@ template <typename Tag> struct std::hash<nodehammer::ir::StrongId<Tag>> {
     }
 };
 
-namespace nodehammer::ir {
+namespace nodehammer::ir::semantic {
 
 // ── Shape types ───────────────────────────────────────────────────────────────
-// All shape types must be complete before SemanticShapeVariant is instantiated.
+// All shape types must be complete before semantic::ShapeVariant is instantiated.
 
 struct BoxShape {
     double dx{0};
@@ -135,29 +141,28 @@ struct UnknownShape {
     std::string originalType; ///< Class name from the source system
 };
 
-/// Boolean composition shapes — operands reference shapes already registered in SemanticScene.
+/// Boolean composition shapes — operands reference shapes already registered in semantic::Scene.
 struct BooleanUnion {
-    SemanticShapeId left;
-    SemanticShapeId right;
+    ShapeId left;
+    ShapeId right;
     glm::dmat4 rightTransform{1.0}; ///< Transform applied to right operand
 };
 
 struct BooleanIntersection {
-    SemanticShapeId left;
-    SemanticShapeId right;
+    ShapeId left;
+    ShapeId right;
     glm::dmat4 rightTransform{1.0};
 };
 
 struct BooleanSubtraction {
-    SemanticShapeId left;
-    SemanticShapeId right;
+    ShapeId left;
+    ShapeId right;
     glm::dmat4 rightTransform{1.0};
 };
 
-using SemanticShapeVariant =
-    std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape, PgonShape,
-                 TorusShape, TessellatedShape, BooleanUnion, BooleanIntersection,
-                 BooleanSubtraction, UnknownShape>;
+using ShapeVariant = std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape,
+                                  PgonShape, TorusShape, TessellatedShape, BooleanUnion,
+                                  BooleanIntersection, BooleanSubtraction, UnknownShape>;
 
 /// The boolean/CSG shape variants. These reference other shapes and must be
 /// routed to the boolean tessellator; the primitive tessellator rejects them.
@@ -168,21 +173,21 @@ inline constexpr bool is_boolean_shape_v =
     std::is_same_v<T, BooleanUnion> || std::is_same_v<T, BooleanIntersection> ||
     std::is_same_v<T, BooleanSubtraction>;
 
-[[nodiscard]] inline bool isBooleanShape(const SemanticShapeVariant &shape) noexcept {
+[[nodiscard]] inline bool isBooleanShape(const ShapeVariant &shape) noexcept {
     return std::holds_alternative<BooleanUnion>(shape) ||
            std::holds_alternative<BooleanIntersection>(shape) ||
            std::holds_alternative<BooleanSubtraction>(shape);
 }
 
-struct SemanticShape {
-    SemanticShapeId id;
-    SemanticShapeVariant data;
+struct Shape {
+    ShapeId id;
+    ShapeVariant data;
 };
 
 // ── Material ──────────────────────────────────────────────────────────────────
 
 struct SourceMaterial {
-    SemanticMaterialId id;
+    MaterialId id;
     std::string name;
     std::optional<glm::vec3> color; ///< Linear RGB, [0,1]; optional
     double density{0};              ///< g/cm³
@@ -190,42 +195,41 @@ struct SourceMaterial {
 
 // ── Logical Volume ────────────────────────────────────────────────────────────
 
-struct SemanticDaughterPlacement {
+struct DaughterPlacement {
     std::string name;
-    SemanticLogVolId logVolId;
+    LogVolId logVolId;
     glm::dmat4 localTransform{1.0};
 };
 
-struct SemanticLogicalVolume {
-    SemanticLogicalVolume() = default;
+struct LogicalVolume {
+    LogicalVolume() = default;
 
-    SemanticLogicalVolume(SemanticLogVolId id_, std::string name_, SemanticShapeId shapeId_,
-                          SemanticMaterialId materialId_,
-                          std::vector<SemanticDaughterPlacement> daughters_ = {})
+    LogicalVolume(LogVolId id_, std::string name_, ShapeId shapeId_, MaterialId materialId_,
+                  std::vector<DaughterPlacement> daughters_ = {})
         : id(id_), name(std::move(name_)), shapeId(shapeId_), materialId(materialId_),
           daughters(std::move(daughters_)) {}
 
-    SemanticLogVolId id;
+    LogVolId id;
     std::string name;
-    SemanticShapeId shapeId;
-    SemanticMaterialId materialId;
+    ShapeId shapeId;
+    MaterialId materialId;
     /// Optional source-level daughter placements. Backends with prototype volume
     /// structure (e.g. TGeo/DD4hep) populate this; flattened importers may leave it empty.
-    std::vector<SemanticDaughterPlacement> daughters;
+    std::vector<DaughterPlacement> daughters;
 };
 
 // ── Node ──────────────────────────────────────────────────────────────────────
 
-struct SemanticNode {
-    SemanticNodeId id;
+struct Node {
+    NodeId id;
     std::string name;
-    SemanticLogVolId logVolId;
+    LogVolId logVolId;
 
     glm::dmat4 localTransform{1.0}; ///< Relative to parent
     glm::dmat4 worldTransform{1.0}; ///< Set by computeWorldTransforms()
 
-    std::optional<SemanticNodeId> parentId;
-    std::vector<SemanticNodeId> children;
+    std::optional<NodeId> parentId;
+    std::vector<NodeId> children;
 
     /// Full path in the original source tree, e.g. "/world/ODD/PixelBarrel/sensor_0".
     /// Set by computeOriginalPaths() before selection; preserved across hoisting.
@@ -240,16 +244,16 @@ struct SemanticNode {
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
-class SemanticScene {
+class Scene {
   public:
-    SemanticNodeId rootId;
+    NodeId rootId;
     std::string sourceFile; ///< Input file path (set by importer)
 
     // Flat maps indexed by ID
-    ankerl::unordered_dense::map<SemanticNodeId, SemanticNode> nodes;
-    ankerl::unordered_dense::map<SemanticLogVolId, SemanticLogicalVolume> logVols;
-    ankerl::unordered_dense::map<SemanticShapeId, SemanticShape> shapes;
-    ankerl::unordered_dense::map<SemanticMaterialId, SourceMaterial> materials;
+    ankerl::unordered_dense::map<NodeId, Node> nodes;
+    ankerl::unordered_dense::map<LogVolId, LogicalVolume> logVols;
+    ankerl::unordered_dense::map<ShapeId, Shape> shapes;
+    ankerl::unordered_dense::map<MaterialId, SourceMaterial> materials;
 
     /// Reseed the ID allocation counters so that nextXxxId() returns values
     /// greater than every ID currently present in the maps. Deserializing
@@ -279,7 +283,7 @@ class SemanticScene {
     /// Returns the number of materials removed.
     std::size_t deduplicateMaterials();
 
-    /// BFS traversal from root; calls fn(const SemanticNode &) for every reachable node.
+    /// BFS traversal from root; calls fn(const semantic::Node &) for every reachable node.
     /// Guards on both a missing id and a repeat visit, so a dangling child id is
     /// skipped rather than throwing from inside the traversal and a cycle
     /// terminates rather than looping forever. Matches the guards in
@@ -288,9 +292,9 @@ class SemanticScene {
         if (nodes.empty() || !nodes.contains(rootId)) {
             return;
         }
-        std::unordered_set<SemanticNodeId> seen;
+        std::unordered_set<NodeId> seen;
         seen.reserve(nodes.size());
-        std::queue<SemanticNodeId> q;
+        std::queue<NodeId> q;
         q.push(rootId);
         while (!q.empty()) {
             const auto id = q.front();
@@ -307,10 +311,10 @@ class SemanticScene {
     }
 
     // ID allocation
-    SemanticNodeId nextNodeId() { return SemanticNodeId{nextNodeId_++}; }
-    SemanticLogVolId nextLogVolId() { return SemanticLogVolId{nextLogVolId_++}; }
-    SemanticShapeId nextShapeId() { return SemanticShapeId{nextShapeId_++}; }
-    SemanticMaterialId nextMaterialId() { return SemanticMaterialId{nextMaterialId_++}; }
+    NodeId nextNodeId() { return NodeId{nextNodeId_++}; }
+    LogVolId nextLogVolId() { return LogVolId{nextLogVolId_++}; }
+    ShapeId nextShapeId() { return ShapeId{nextShapeId_++}; }
+    MaterialId nextMaterialId() { return MaterialId{nextMaterialId_++}; }
 
   private:
     uint64_t nextNodeId_{1};
@@ -319,4 +323,4 @@ class SemanticScene {
     uint64_t nextMaterialId_{1};
 };
 
-} // namespace nodehammer::ir
+} // namespace nodehammer::ir::semantic

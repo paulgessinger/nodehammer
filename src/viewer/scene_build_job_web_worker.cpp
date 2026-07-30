@@ -151,7 +151,7 @@ namespace {
 class WorkerBackend final : public IWebBackend {
   public:
     void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
-               std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+               std::shared_ptr<const ::nodehammer::ir::semantic::Scene> scene,
                std::string config_label, std::string geometry_label,
                std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) override {
         logPreBuild(config_label, geometry_label);
@@ -232,7 +232,7 @@ class WorkerBackend final : public IWebBackend {
                     reinterpret_cast<const std::byte *>(static_cast<uintptr_t>(ptr));
                 auto rendered = ::nodehammer::ir::renderSceneFromBytes(std::span{bytes, len});
                 result_.scene =
-                    std::make_shared<::nodehammer::ir::RenderScene>(std::move(rendered));
+                    std::make_shared<::nodehammer::ir::render::Scene>(std::move(rendered));
             } catch (const std::exception &ex) {
                 result_.scene = nullptr;
                 result_.diags.error(::nodehammer::codes::kErrComputeWorker,
@@ -305,7 +305,7 @@ class WorkerBackend final : public IWebBackend {
 
     // Pristine-scene cache (main-thread side): identity + serialized bytes so a
     // re-aim reuses them instead of re-serializing.
-    const ::nodehammer::ir::SemanticScene *last_scene_{nullptr};
+    const ::nodehammer::ir::semantic::Scene *last_scene_{nullptr};
     std::uint32_t epoch_{0};
     std::vector<std::byte> scene_bytes_;
     std::string config_toml_;

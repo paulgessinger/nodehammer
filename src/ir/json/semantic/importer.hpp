@@ -7,7 +7,7 @@
 
 namespace nodehammer::ir {
 
-/// ISemanticImporter that reads a previously-dumped SemanticScene JSON file.
+/// ISemanticImporter that reads a previously-dumped semantic::Scene JSON file.
 /// Format name: "json"   Extension: ".json"
 class JsonImporter final : public ISemanticImporter {
   public:

@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace nodehammer::ir {
+namespace nodehammer::ir::semantic {
 
 namespace {
 
@@ -16,11 +16,11 @@ namespace {
 // that came from the same source parameters, not approximate equality.
 
 struct ShapeHash {
-    std::size_t operator()(const SemanticShapeVariant &v) const;
+    std::size_t operator()(const ShapeVariant &v) const;
 };
 
 struct ShapeEqual {
-    bool operator()(const SemanticShapeVariant &a, const SemanticShapeVariant &b) const;
+    bool operator()(const ShapeVariant &a, const ShapeVariant &b) const;
 };
 
 // Hash helpers
@@ -34,7 +34,7 @@ inline std::size_t hashDouble(double d) {
 
 inline std::size_t hashInt(int i) { return std::hash<int>{}(i); }
 
-inline std::size_t hashId(SemanticShapeId id) { return std::hash<uint64_t>{}(id.value); }
+inline std::size_t hashId(ShapeId id) { return std::hash<uint64_t>{}(id.value); }
 
 inline std::size_t hashMat(const glm::dmat4 &m) {
     std::size_t h = 0;
@@ -74,7 +74,7 @@ inline bool sectionsEqual(const auto &a, const auto &b) {
     return true;
 }
 
-std::size_t ShapeHash::operator()(const SemanticShapeVariant &v) const {
+std::size_t ShapeHash::operator()(const ShapeVariant &v) const {
     std::size_t h = std::hash<std::size_t>{}(v.index());
     return hashCombine(
         h, std::visit(
@@ -158,7 +158,7 @@ inline bool deq(double a, double b) {
     return std::bit_cast<uint64_t>(a) == std::bit_cast<uint64_t>(b);
 }
 
-bool ShapeEqual::operator()(const SemanticShapeVariant &a, const SemanticShapeVariant &b) const {
+bool ShapeEqual::operator()(const ShapeVariant &a, const ShapeVariant &b) const {
     return std::visit(
         detail::overloaded{
             // Same-type cases:
@@ -224,7 +224,7 @@ bool ShapeEqual::operator()(const SemanticShapeVariant &a, const SemanticShapeVa
 
 } // namespace
 
-void SemanticScene::reseedIdCounters() {
+void Scene::reseedIdCounters() {
     auto maxKey = [](const auto &map, uint64_t seed) {
         for (const auto &[id, _] : map) {
             seed = std::max(seed, id.value);
@@ -237,12 +237,12 @@ void SemanticScene::reseedIdCounters() {
     nextMaterialId_ = maxKey(materials, nextMaterialId_ - 1) + 1;
 }
 
-void SemanticScene::computeWorldTransforms() {
+void Scene::computeWorldTransforms() {
     if (nodes.empty() || !nodes.contains(rootId)) {
         return;
     }
     nodes.at(rootId).worldTransform = nodes.at(rootId).localTransform;
-    visitBFS([this](const SemanticNode &node) {
+    visitBFS([this](const Node &node) {
         for (const auto childId : node.children) {
             // Skip rather than throw on a dangling child id, matching visitBFS.
             const auto it = nodes.find(childId);
@@ -254,12 +254,12 @@ void SemanticScene::computeWorldTransforms() {
     });
 }
 
-void SemanticScene::computeOriginalPaths() {
+void Scene::computeOriginalPaths() {
     if (nodes.empty() || !nodes.contains(rootId)) {
         return;
     }
     nodes.at(rootId).originalPath = "/" + nodes.at(rootId).name;
-    visitBFS([this](const SemanticNode &node) {
+    visitBFS([this](const Node &node) {
         for (const auto childId : node.children) {
             // Skip rather than throw on a dangling child id, matching visitBFS.
             const auto it = nodes.find(childId);
@@ -271,7 +271,7 @@ void SemanticScene::computeOriginalPaths() {
     });
 }
 
-std::size_t SemanticScene::deduplicateShapes() {
+std::size_t Scene::deduplicateShapes() {
     const std::size_t before = shapes.size();
     if (before <= 1) {
         return 0;
@@ -282,19 +282,19 @@ std::size_t SemanticScene::deduplicateShapes() {
     // (parents reference children with lower IDs because dispatchTGeoShape
     // creates operands before the composite).
     // Build value → canonical ID map, processing shapes in order.
-    std::unordered_map<SemanticShapeVariant, SemanticShapeId, ShapeHash, ShapeEqual> canonical;
-    std::unordered_map<SemanticShapeId, SemanticShapeId> remap;
+    std::unordered_map<ShapeVariant, ShapeId, ShapeHash, ShapeEqual> canonical;
+    std::unordered_map<ShapeId, ShapeId> remap;
 
     // Collect and sort shape IDs for deterministic processing order
-    std::vector<SemanticShapeId> orderedIds;
+    std::vector<ShapeId> orderedIds;
     orderedIds.reserve(shapes.size());
     for (const auto &[id, _] : shapes) {
         orderedIds.push_back(id);
     }
     std::sort(orderedIds.begin(), orderedIds.end(),
-              [](SemanticShapeId a, SemanticShapeId b) { return a.value < b.value; });
+              [](ShapeId a, ShapeId b) { return a.value < b.value; });
 
-    for (const SemanticShapeId id : orderedIds) {
+    for (const ShapeId id : orderedIds) {
         auto &shape = shapes.at(id);
 
         // Rewrite boolean operand references to canonical IDs
@@ -339,7 +339,7 @@ std::size_t SemanticScene::deduplicateShapes() {
     return before - shapes.size();
 }
 
-std::size_t SemanticScene::deduplicateLogVols() {
+std::size_t Scene::deduplicateLogVols() {
     const std::size_t before = logVols.size();
     if (before <= 1) {
         return 0;
@@ -379,13 +379,13 @@ std::size_t SemanticScene::deduplicateLogVols() {
         }
     };
 
-    std::unordered_map<Key, SemanticLogVolId, KeyHash> canonical;
-    std::unordered_map<SemanticLogVolId, SemanticLogVolId> remap;
+    std::unordered_map<Key, LogVolId, KeyHash> canonical;
+    std::unordered_map<LogVolId, LogVolId> remap;
 
     enum class VisitState { Visiting, Done };
-    std::unordered_map<SemanticLogVolId, VisitState> states;
+    std::unordered_map<LogVolId, VisitState> states;
 
-    auto canonicalize = [&](auto &&self, SemanticLogVolId id) -> SemanticLogVolId {
+    auto canonicalize = [&](auto &&self, LogVolId id) -> LogVolId {
         if (auto it = remap.find(id); it != remap.end()) {
             return it->second;
         }
@@ -418,7 +418,7 @@ std::size_t SemanticScene::deduplicateLogVols() {
         return inserted ? id : it->second;
     };
 
-    std::vector<SemanticLogVolId> ids;
+    std::vector<LogVolId> ids;
     ids.reserve(logVols.size());
     for (const auto &[id, _] : logVols) {
         ids.push_back(id);
@@ -455,7 +455,7 @@ std::size_t SemanticScene::deduplicateLogVols() {
     return before - logVols.size();
 }
 
-std::size_t SemanticScene::deduplicateMaterials() {
+std::size_t Scene::deduplicateMaterials() {
     const std::size_t before = materials.size();
     if (before <= 1) {
         return 0;
@@ -498,11 +498,11 @@ std::size_t SemanticScene::deduplicateMaterials() {
         return k;
     };
 
-    std::unordered_map<MatKey, SemanticMaterialId, MatKeyHash> canonical;
-    std::unordered_map<SemanticMaterialId, SemanticMaterialId> remap;
+    std::unordered_map<MatKey, MaterialId, MatKeyHash> canonical;
+    std::unordered_map<MaterialId, MaterialId> remap;
 
     // Process in ID order for determinism
-    std::vector<SemanticMaterialId> ids;
+    std::vector<MaterialId> ids;
     ids.reserve(materials.size());
     for (const auto &[id, _] : materials) {
         ids.push_back(id);
@@ -537,4 +537,4 @@ std::size_t SemanticScene::deduplicateMaterials() {
     return before - materials.size();
 }
 
-} // namespace nodehammer::ir
+} // namespace nodehammer::ir::semantic

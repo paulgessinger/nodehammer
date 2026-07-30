@@ -46,7 +46,7 @@ struct SceneBuildJob::Impl {
     // pipeline, which takes the deep copy prep consumes on its first advance —
     // on this worker thread, off the main loop.
     std::shared_ptr<const ::nodehammer::config::NHConfig> preset_config;
-    std::shared_ptr<const ::nodehammer::ir::SemanticScene> preset_scene;
+    std::shared_ptr<const ::nodehammer::ir::semantic::Scene> preset_scene;
     std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut;
 };
 
@@ -70,7 +70,7 @@ SceneBuildJob::~SceneBuildJob() {
 }
 
 void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
-                          std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+                          std::shared_ptr<const ::nodehammer::ir::semantic::Scene> scene,
                           std::string config_label, std::string geometry_label,
                           std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) {
     impl_->config_label = std::move(config_label);

@@ -50,7 +50,7 @@ void BuildController::reset() {
 }
 
 void BuildController::startBuild(std::shared_ptr<const config::NHConfig> config,
-                                 std::shared_ptr<const ir::SemanticScene> scene,
+                                 std::shared_ptr<const ir::semantic::Scene> scene,
                                  std::string config_label, std::string geometry_label,
                                  std::optional<tessellation::WedgeCutParams> wedge,
                                  const AngleCut &cut) {
@@ -185,8 +185,8 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
                     // Cache pristine (uncut) inputs so cut bakes re-derive cleanly.
                     pristine_config_ =
                         std::make_shared<const config::NHConfig>(std::move(inputs->config.config));
-                    pristine_scene_ =
-                        std::make_shared<const ir::SemanticScene>(std::move(inputs->import.scene));
+                    pristine_scene_ = std::make_shared<const ir::semantic::Scene>(
+                        std::move(inputs->import.scene));
                     pristine_config_label_ = std::move(inputs->config_key);
                     pristine_geometry_label_ = std::move(inputs->geometry_key);
                     // Promoted to last_built_input_hash_ once this base build

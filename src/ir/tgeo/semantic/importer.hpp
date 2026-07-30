@@ -12,15 +12,15 @@ class TGeoVolume;
 
 namespace nodehammer::ir {
 
-/// Extended import result that also carries the TGeoNode → SemanticNodeId mapping
+/// Extended import result that also carries the TGeoNode → semantic::NodeId mapping
 /// built during tree traversal. Used by DD4hep to annotate nodes in a second pass.
 struct TGeoTraversalResult {
     ImportResult result;
-    std::unordered_map<const TGeoNode *, SemanticNodeId> nodeMap;
-    std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvMap;
+    std::unordered_map<const TGeoNode *, semantic::NodeId> nodeMap;
+    std::unordered_map<const TGeoVolume *, semantic::LogVolId> lvMap;
 };
 
-/// Walk a TGeoManager and produce a SemanticScene plus the node mapping.
+/// Walk a TGeoManager and produce a semantic::Scene plus the node mapping.
 /// Does not modify gGeoManager.
 [[nodiscard]] TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile);
 

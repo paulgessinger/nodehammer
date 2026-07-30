@@ -12,7 +12,7 @@
 namespace nodehammer::selection {
 
 // ── NodeView ──────────────────────────────────────────────────────────────────
-// Lightweight projection of a SemanticNode used by all predicates.
+// Lightweight projection of a semantic::Node used by all predicates.
 // All string_view members point into the scene or a stable paths map — do not
 // store a NodeView beyond the scope where those allocations are live.
 

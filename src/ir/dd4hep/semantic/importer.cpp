@@ -25,8 +25,9 @@ namespace {
 
 // Walk the DD4hep DetElement tree and annotate the SemanticNodes
 // that were already created by the TGeo pass.
-void annotateDetElement(const dd4hep::DetElement &elem, SemanticScene &scene, DiagnosticList &diags,
-                        const std::unordered_map<const TGeoNode *, SemanticNodeId> &nodeMap) {
+void annotateDetElement(const dd4hep::DetElement &elem, semantic::Scene &scene,
+                        DiagnosticList &diags,
+                        const std::unordered_map<const TGeoNode *, semantic::NodeId> &nodeMap) {
     const TGeoNode *geoNode = elem.placement().ptr();
     auto it = nodeMap.find(geoNode);
     if (it == nodeMap.end()) {
@@ -35,7 +36,7 @@ void annotateDetElement(const dd4hep::DetElement &elem, SemanticScene &scene, Di
         return;
     }
 
-    SemanticNode &sn = scene.nodes[it->second];
+    semantic::Node &sn = scene.nodes[it->second];
 
     // Override name and sourceSystem with the richer DD4hep information.
     sn.name = elem.name();
@@ -59,16 +60,16 @@ void annotateDetElement(const dd4hep::DetElement &elem, SemanticScene &scene, Di
 // Tag sensitivity on all nodes by checking DD4hep volume metadata.
 // This catches sensitive volumes that have no corresponding DetElement.
 //
-// We work via lvMap (TGeoVolume* → SemanticLogVolId) rather than nodeMap
-// (TGeoNode* → SemanticNodeId) because multiple SemanticNodes can originate
+// We work via lvMap (TGeoVolume* → semantic::LogVolId) rather than nodeMap
+// (TGeoNode* → semantic::NodeId) because multiple SemanticNodes can originate
 // from the same TGeoNode when a parent volume is placed more than once.
 // The nodeMap only stores the last such mapping, so iterating it would miss
 // most placements.  The lvMap is 1:1 and lets us tag every node whose
 // logical volume is sensitive.
-void tagSensitiveVolumes(SemanticScene &scene,
-                         const std::unordered_map<const TGeoVolume *, SemanticLogVolId> &lvMap) {
+void tagSensitiveVolumes(semantic::Scene &scene,
+                         const std::unordered_map<const TGeoVolume *, semantic::LogVolId> &lvMap) {
     // Step 1: collect the set of sensitive logVolIds.
-    std::unordered_set<SemanticLogVolId> sensitiveLogVols;
+    std::unordered_set<semantic::LogVolId> sensitiveLogVols;
     for (const auto &[vol, logVolId] : lvMap) {
         if (vol == nullptr) {
             continue;
@@ -113,7 +114,7 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
         return result;
     }
 
-    // Pass 1: full TGeo tree traversal — every node gets a SemanticNode.
+    // Pass 1: full TGeo tree traversal — every node gets a semantic::Node.
     auto tr = traverseTGeoManager(&detOwner->manager(), path.string());
 
     // Pass 2: tag sensitivity on all volumes using DD4hep metadata.

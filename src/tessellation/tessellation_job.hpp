@@ -8,7 +8,7 @@
 namespace nodehammer::tessellation {
 
 /// Cooperative, iterator-driven version of `TessellationPass::lower`. The
-/// pass walks every reachable `SemanticNode` once; this class lets the
+/// pass walks every reachable `semantic::Node` once; this class lets the
 /// caller spread that walk across multiple `advance()` calls so the main
 /// thread (web build) stays responsive while a large scene tessellates.
 ///
@@ -27,7 +27,7 @@ class TessellationJob {
 
     /// Initialise the job. Compiles rule predicates and seeds the BFS
     /// queue with the scene root.
-    void start(const config::NHConfig &config, const ir::SemanticScene &scene);
+    void start(const config::NHConfig &config, const ir::semantic::Scene &scene);
 
     /// Process pending semantic nodes for up to `budget_ns` of wall-clock
     /// time. The atomic unit is one outer-BFS iteration (one semantic

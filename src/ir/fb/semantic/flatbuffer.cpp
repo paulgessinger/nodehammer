@@ -184,32 +184,32 @@ struct ShapeOffsetResult {
 
 ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                                         TransformPoolBuild &transformPool,
-                                        const SemanticShapeVariant &data) {
+                                        const semantic::ShapeVariant &data) {
     return std::visit(
         detail::overloaded{
-            [&](const BoxShape &s) -> ShapeOffsetResult {
+            [&](const semantic::BoxShape &s) -> ShapeOffsetResult {
                 auto o = fbs::CreateBoxShape(builder, s.dx, s.dy, s.dz);
                 return {fbs::ShapeData_BoxShape, o.Union()};
             },
-            [&](const TubeShape &s) -> ShapeOffsetResult {
+            [&](const semantic::TubeShape &s) -> ShapeOffsetResult {
                 auto o =
                     fbs::CreateTubeShape(builder, s.rMin, s.rMax, s.dz, s.phiStart, s.phiDelta);
                 return {fbs::ShapeData_TubeShape, o.Union()};
             },
-            [&](const ConeShape &s) -> ShapeOffsetResult {
+            [&](const semantic::ConeShape &s) -> ShapeOffsetResult {
                 auto o = fbs::CreateConeShape(builder, s.rMin1, s.rMax1, s.rMin2, s.rMax2, s.dz,
                                               s.phiStart, s.phiDelta);
                 return {fbs::ShapeData_ConeShape, o.Union()};
             },
-            [&](const TrdShape &s) -> ShapeOffsetResult {
+            [&](const semantic::TrdShape &s) -> ShapeOffsetResult {
                 auto o = fbs::CreateTrdShape(builder, s.dx1, s.dx2, s.dy1, s.dy2, s.dz);
                 return {fbs::ShapeData_TrdShape, o.Union()};
             },
-            [&](const ParaShape &s) -> ShapeOffsetResult {
+            [&](const semantic::ParaShape &s) -> ShapeOffsetResult {
                 auto o = fbs::CreateParaShape(builder, s.dx, s.dy, s.dz, s.alpha, s.theta, s.phi);
                 return {fbs::ShapeData_ParaShape, o.Union()};
             },
-            [&](const PconShape &s) -> ShapeOffsetResult {
+            [&](const semantic::PconShape &s) -> ShapeOffsetResult {
                 std::vector<fbs::Section> secs;
                 secs.reserve(s.sections.size());
                 for (const auto &sec : s.sections) {
@@ -219,7 +219,7 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                                               builder.CreateVectorOfStructs(secs));
                 return {fbs::ShapeData_PconShape, o.Union()};
             },
-            [&](const PgonShape &s) -> ShapeOffsetResult {
+            [&](const semantic::PgonShape &s) -> ShapeOffsetResult {
                 std::vector<fbs::Section> secs;
                 secs.reserve(s.sections.size());
                 for (const auto &sec : s.sections) {
@@ -229,12 +229,12 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                                               builder.CreateVectorOfStructs(secs));
                 return {fbs::ShapeData_PgonShape, o.Union()};
             },
-            [&](const TorusShape &s) -> ShapeOffsetResult {
+            [&](const semantic::TorusShape &s) -> ShapeOffsetResult {
                 auto o =
                     fbs::CreateTorusShape(builder, s.rMin, s.rMax, s.rTor, s.phiStart, s.phiDelta);
                 return {fbs::ShapeData_TorusShape, o.Union()};
             },
-            [&](const TessellatedShape &s) -> ShapeOffsetResult {
+            [&](const semantic::TessellatedShape &s) -> ShapeOffsetResult {
                 std::vector<fbs::Triangle> tris;
                 tris.reserve(s.triangles.size());
                 for (const auto &tri : s.triangles) {
@@ -246,27 +246,27 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                 auto o = fbs::CreateTessellatedShape(builder, builder.CreateVectorOfStructs(tris));
                 return {fbs::ShapeData_TessellatedShape, o.Union()};
             },
-            [&](const BooleanUnion &s) -> ShapeOffsetResult {
+            [&](const semantic::BooleanUnion &s) -> ShapeOffsetResult {
                 auto o = fbs::CreateBooleanUnion(builder, toU32Checked(s.left.value, "shape id"),
                                                  toU32Checked(s.right.value, "shape id"),
                                                  transformPool.internTransform(s.rightTransform));
                 return {fbs::ShapeData_BooleanUnion, o.Union()};
             },
-            [&](const BooleanIntersection &s) -> ShapeOffsetResult {
+            [&](const semantic::BooleanIntersection &s) -> ShapeOffsetResult {
                 auto o =
                     fbs::CreateBooleanIntersection(builder, toU32Checked(s.left.value, "shape id"),
                                                    toU32Checked(s.right.value, "shape id"),
                                                    transformPool.internTransform(s.rightTransform));
                 return {fbs::ShapeData_BooleanIntersection, o.Union()};
             },
-            [&](const BooleanSubtraction &s) -> ShapeOffsetResult {
+            [&](const semantic::BooleanSubtraction &s) -> ShapeOffsetResult {
                 auto o =
                     fbs::CreateBooleanSubtraction(builder, toU32Checked(s.left.value, "shape id"),
                                                   toU32Checked(s.right.value, "shape id"),
                                                   transformPool.internTransform(s.rightTransform));
                 return {fbs::ShapeData_BooleanSubtraction, o.Union()};
             },
-            [&](const UnknownShape &s) -> ShapeOffsetResult {
+            [&](const semantic::UnknownShape &s) -> ShapeOffsetResult {
                 auto o =
                     fbs::CreateUnknownShape(builder, builder.CreateSharedString(s.originalType));
                 return {fbs::ShapeData_UnknownShape, o.Union()};
@@ -277,36 +277,36 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
 
 // ── Shape deserialization ───────────────────────────────────────────────────
 
-SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *data,
-                                             const flatbuffers::Vector<double> *poolRots,
-                                             const flatbuffers::Vector<double> *poolTrls,
-                                             const flatbuffers::Vector<uint32_t> *poolTfRotIdx,
-                                             const flatbuffers::Vector<uint32_t> *poolTfTrlIdx) {
+semantic::ShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *data,
+                                               const flatbuffers::Vector<double> *poolRots,
+                                               const flatbuffers::Vector<double> *poolTrls,
+                                               const flatbuffers::Vector<uint32_t> *poolTfRotIdx,
+                                               const flatbuffers::Vector<uint32_t> *poolTfTrlIdx) {
     switch (type) {
     case fbs::ShapeData_BoxShape: {
         const auto *s = static_cast<const fbs::BoxShape *>(data);
-        return BoxShape{s->dx(), s->dy(), s->dz()};
+        return semantic::BoxShape{s->dx(), s->dy(), s->dz()};
     }
     case fbs::ShapeData_TubeShape: {
         const auto *s = static_cast<const fbs::TubeShape *>(data);
-        return TubeShape{s->r_min(), s->r_max(), s->dz(), s->phi_start(), s->phi_delta()};
+        return semantic::TubeShape{s->r_min(), s->r_max(), s->dz(), s->phi_start(), s->phi_delta()};
     }
     case fbs::ShapeData_ConeShape: {
         const auto *s = static_cast<const fbs::ConeShape *>(data);
-        return ConeShape{s->r_min1(), s->r_max1(),    s->r_min2(),   s->r_max2(),
-                         s->dz(),     s->phi_start(), s->phi_delta()};
+        return semantic::ConeShape{s->r_min1(), s->r_max1(),    s->r_min2(),   s->r_max2(),
+                                   s->dz(),     s->phi_start(), s->phi_delta()};
     }
     case fbs::ShapeData_TrdShape: {
         const auto *s = static_cast<const fbs::TrdShape *>(data);
-        return TrdShape{s->dx1(), s->dx2(), s->dy1(), s->dy2(), s->dz()};
+        return semantic::TrdShape{s->dx1(), s->dx2(), s->dy1(), s->dy2(), s->dz()};
     }
     case fbs::ShapeData_ParaShape: {
         const auto *s = static_cast<const fbs::ParaShape *>(data);
-        return ParaShape{s->dx(), s->dy(), s->dz(), s->alpha(), s->theta(), s->phi()};
+        return semantic::ParaShape{s->dx(), s->dy(), s->dz(), s->alpha(), s->theta(), s->phi()};
     }
     case fbs::ShapeData_PconShape: {
         const auto *s = static_cast<const fbs::PconShape *>(data);
-        PconShape result;
+        semantic::PconShape result;
         result.phiStart = s->phi_start();
         result.phiDelta = s->phi_delta();
         if (s->sections()) {
@@ -319,7 +319,7 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
     }
     case fbs::ShapeData_PgonShape: {
         const auto *s = static_cast<const fbs::PgonShape *>(data);
-        PgonShape result;
+        semantic::PgonShape result;
         result.phiStart = s->phi_start();
         result.phiDelta = s->phi_delta();
         result.nSides = s->n_sides();
@@ -333,15 +333,16 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
     }
     case fbs::ShapeData_TorusShape: {
         const auto *s = static_cast<const fbs::TorusShape *>(data);
-        return TorusShape{s->r_min(), s->r_max(), s->r_tor(), s->phi_start(), s->phi_delta()};
+        return semantic::TorusShape{s->r_min(), s->r_max(), s->r_tor(), s->phi_start(),
+                                    s->phi_delta()};
     }
     case fbs::ShapeData_TessellatedShape: {
         const auto *s = static_cast<const fbs::TessellatedShape *>(data);
-        TessellatedShape result;
+        semantic::TessellatedShape result;
         if (s->triangles()) {
             result.triangles.reserve(s->triangles()->size());
             for (const auto *tri : *s->triangles()) {
-                TessellatedShape::Triangle t;
+                semantic::TessellatedShape::Triangle t;
                 t.vertices[0] = {tri->v0().x(), tri->v0().y(), tri->v0().z()};
                 t.vertices[1] = {tri->v1().x(), tri->v1().y(), tri->v1().z()};
                 t.vertices[2] = {tri->v2().x(), tri->v2().y(), tri->v2().z()};
@@ -352,37 +353,37 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
     }
     case fbs::ShapeData_BooleanUnion: {
         const auto *s = static_cast<const fbs::BooleanUnion *>(data);
-        BooleanUnion result;
-        result.left = SemanticShapeId{s->left()};
-        result.right = SemanticShapeId{s->right()};
+        semantic::BooleanUnion result;
+        result.left = semantic::ShapeId{s->left()};
+        result.right = semantic::ShapeId{s->right()};
         result.rightTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx, poolTfTrlIdx,
                                                 s->right_transform_index());
         return result;
     }
     case fbs::ShapeData_BooleanIntersection: {
         const auto *s = static_cast<const fbs::BooleanIntersection *>(data);
-        BooleanIntersection result;
-        result.left = SemanticShapeId{s->left()};
-        result.right = SemanticShapeId{s->right()};
+        semantic::BooleanIntersection result;
+        result.left = semantic::ShapeId{s->left()};
+        result.right = semantic::ShapeId{s->right()};
         result.rightTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx, poolTfTrlIdx,
                                                 s->right_transform_index());
         return result;
     }
     case fbs::ShapeData_BooleanSubtraction: {
         const auto *s = static_cast<const fbs::BooleanSubtraction *>(data);
-        BooleanSubtraction result;
-        result.left = SemanticShapeId{s->left()};
-        result.right = SemanticShapeId{s->right()};
+        semantic::BooleanSubtraction result;
+        result.left = semantic::ShapeId{s->left()};
+        result.right = semantic::ShapeId{s->right()};
         result.rightTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx, poolTfTrlIdx,
                                                 s->right_transform_index());
         return result;
     }
     case fbs::ShapeData_UnknownShape: {
         const auto *s = static_cast<const fbs::UnknownShape *>(data);
-        return UnknownShape{s->original_type() ? s->original_type()->str() : ""};
+        return semantic::UnknownShape{s->original_type() ? s->original_type()->str() : ""};
     }
     default:
-        return UnknownShape{"flatbuffer_unknown"};
+        return semantic::UnknownShape{"flatbuffer_unknown"};
     }
 }
 
@@ -391,22 +392,22 @@ SemanticShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *da
 // ── Layer 1: Type conversion ────────────────────────────────────────────────
 
 flatbuffers::Offset<fbs::SemanticScene>
-semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const SemanticScene &scene) {
+semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semantic::Scene &scene) {
     TransformPoolBuild transformPool;
 
     // Collect nodes into a stable order (sorted by ID for reproducibility).
-    std::vector<const SemanticNode *> orderedNodes;
+    std::vector<const semantic::Node *> orderedNodes;
     orderedNodes.reserve(scene.nodes.size());
     for (const auto &[id, node] : scene.nodes) {
         (void)id;
         orderedNodes.push_back(&node);
     }
     std::sort(orderedNodes.begin(), orderedNodes.end(),
-              [](const SemanticNode *a, const SemanticNode *b) { return a->id < b->id; });
+              [](const semantic::Node *a, const semantic::Node *b) { return a->id < b->id; });
     const auto N = orderedNodes.size();
 
     // Remap logical volume IDs to a dense local range [1..M].
-    std::vector<SemanticLogVolId> orderedLogVolIds;
+    std::vector<semantic::LogVolId> orderedLogVolIds;
     orderedLogVolIds.reserve(scene.logVols.size());
     for (const auto &[id, lv] : scene.logVols) {
         (void)lv;
@@ -414,13 +415,13 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     }
     std::sort(orderedLogVolIds.begin(), orderedLogVolIds.end());
 
-    std::unordered_map<SemanticLogVolId, uint32_t> logVolIdRemap;
+    std::unordered_map<semantic::LogVolId, uint32_t> logVolIdRemap;
     logVolIdRemap.reserve(orderedLogVolIds.size());
     for (std::size_t i = 0; i < orderedLogVolIds.size(); ++i) {
         logVolIdRemap.emplace(orderedLogVolIds[i], toU32Checked(i + 1, "logvol remap index"));
     }
 
-    auto remapLogVolId = [&](SemanticLogVolId id, std::string_view what) -> uint32_t {
+    auto remapLogVolId = [&](semantic::LogVolId id, std::string_view what) -> uint32_t {
         if (const auto it = logVolIdRemap.find(id); it != logVolIdRemap.end()) {
             return it->second;
         }
@@ -439,18 +440,19 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     }
     for (const auto &[id, shape] : scene.shapes) {
         (void)id;
-        std::visit(
-            detail::overloaded{
-                [&](const BooleanUnion &s) { transformPool.internTransform(s.rightTransform); },
-                [&](const BooleanIntersection &s) {
-                    transformPool.internTransform(s.rightTransform);
-                },
-                [&](const BooleanSubtraction &s) {
-                    transformPool.internTransform(s.rightTransform);
-                },
-                [&](const auto &) {},
-            },
-            shape.data);
+        std::visit(detail::overloaded{
+                       [&](const semantic::BooleanUnion &s) {
+                           transformPool.internTransform(s.rightTransform);
+                       },
+                       [&](const semantic::BooleanIntersection &s) {
+                           transformPool.internTransform(s.rightTransform);
+                       },
+                       [&](const semantic::BooleanSubtraction &s) {
+                           transformPool.internTransform(s.rightTransform);
+                       },
+                       [&](const auto &) {},
+                   },
+                   shape.data);
     }
 
     // ── Shapes ──────────────────────────────────────────────────────────────
@@ -517,7 +519,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     std::vector<fbs::TagRef> tagRefs;
     std::vector<uint8_t> degradation(N);
     struct NodeRowData {
-        const SemanticNode *node{nullptr};
+        const semantic::Node *node{nullptr};
         uint32_t depth{0};
         uint64_t parentOldId{0};
         uint32_t logVolIndex{0};
@@ -588,14 +590,14 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
     uint32_t maxNodeLogVolId = 0;
     uint32_t maxNodeNameIndex = 0;
     uint32_t maxNodeTransformIndex = 0;
-    std::unordered_map<SemanticNodeId, const SemanticNode *> nodeById;
+    std::unordered_map<semantic::NodeId, const semantic::Node *> nodeById;
     nodeById.reserve(orderedNodes.size());
     for (const auto *node : orderedNodes) {
         nodeById.emplace(node->id, node);
     }
-    std::unordered_map<SemanticNodeId, uint32_t> nodeDepth;
+    std::unordered_map<semantic::NodeId, uint32_t> nodeDepth;
     nodeDepth.reserve(orderedNodes.size());
-    auto computeDepth = [&](const SemanticNode *start) -> uint32_t {
+    auto computeDepth = [&](const semantic::Node *start) -> uint32_t {
         if (!start) {
             return 0;
         }
@@ -603,9 +605,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
             return it->second;
         }
 
-        std::vector<const SemanticNode *> chain;
+        std::vector<const semantic::Node *> chain;
         chain.reserve(16);
-        const SemanticNode *cur = start;
+        const semantic::Node *cur = start;
         while (cur) {
             if (const auto it = nodeDepth.find(cur->id); it != nodeDepth.end()) {
                 uint32_t d = it->second;
@@ -722,7 +724,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
         return a.node->id.value < b.node->id.value;
     });
 
-    std::unordered_map<SemanticNodeId, uint32_t> nodeIdRemap;
+    std::unordered_map<semantic::NodeId, uint32_t> nodeIdRemap;
     nodeIdRemap.reserve(N);
     for (std::size_t i = 0; i < N; ++i) {
         nodeIdRemap.emplace(nodeRows[i].node->id, static_cast<uint32_t>(i + 1));
@@ -847,9 +849,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const Semanti
                                     nodeColumns, logVolsVec, shapesVec, matsVec);
 }
 
-SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
-    SemanticScene scene;
-    scene.rootId = SemanticNodeId{fb.root_id()};
+semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
+    semantic::Scene scene;
+    scene.rootId = semantic::NodeId{fb.root_id()};
     if (fb.source_file()) {
         scene.sourceFile = fb.source_file()->str();
     }
@@ -863,8 +865,8 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
     // ── Shapes ──────────────────────────────────────────────────────────────
     if (fb.shapes()) {
         for (const auto *fbShape : *fb.shapes()) {
-            SemanticShape shape;
-            shape.id = SemanticShapeId{fbShape->id()};
+            semantic::Shape shape;
+            shape.id = semantic::ShapeId{fbShape->id()};
             shape.data = deserializeShapeVariant(fbShape->data_type(), fbShape->data(), poolRots,
                                                  poolTrls, poolTfRotIdx, poolTfTrlIdx);
             scene.shapes[shape.id] = std::move(shape);
@@ -874,8 +876,8 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
     // ── Materials ───────────────────────────────────────────────────────────
     if (fb.materials()) {
         for (const auto *fbMat : *fb.materials()) {
-            SourceMaterial mat;
-            mat.id = SemanticMaterialId{fbMat->id()};
+            semantic::SourceMaterial mat;
+            mat.id = semantic::MaterialId{fbMat->id()};
             mat.name = fbMat->name() ? fbMat->name()->str() : "";
             mat.density = fbMat->density();
             if (fbMat->has_color()) {
@@ -889,17 +891,17 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
     // ── Logical Volumes ─────────────────────────────────────────────────────
     if (fb.log_vols()) {
         for (const auto *fbLv : *fb.log_vols()) {
-            SemanticLogicalVolume lv;
-            lv.id = SemanticLogVolId{fbLv->id()};
+            semantic::LogicalVolume lv;
+            lv.id = semantic::LogVolId{fbLv->id()};
             lv.name = fbLv->name() ? fbLv->name()->str() : "";
-            lv.shapeId = SemanticShapeId{fbLv->shape_id()};
-            lv.materialId = SemanticMaterialId{fbLv->material_id()};
+            lv.shapeId = semantic::ShapeId{fbLv->shape_id()};
+            lv.materialId = semantic::MaterialId{fbLv->material_id()};
             if (fbLv->daughters()) {
                 lv.daughters.reserve(fbLv->daughters()->size());
                 for (const auto *fbD : *fbLv->daughters()) {
-                    SemanticDaughterPlacement d;
+                    semantic::DaughterPlacement d;
                     d.name = fbD->name() ? fbD->name()->str() : "";
-                    d.logVolId = SemanticLogVolId{fbD->log_vol_id()};
+                    d.logVolId = semantic::LogVolId{fbD->log_vol_id()};
                     d.localTransform = decodeTransform(poolRots, poolTrls, poolTfRotIdx,
                                                        poolTfTrlIdx, fbD->transform_index());
                     lv.daughters.push_back(std::move(d));
@@ -929,7 +931,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         const auto *ssTable = nc->source_system_table();
         const auto *ssIndices = nc->source_system_indices();
         const auto *degrad = nc->degradation();
-        std::vector<SemanticNodeId> nodeOrder;
+        std::vector<semantic::NodeId> nodeOrder;
 
         std::size_t N = 0;
         if (parentIdsVec) {
@@ -952,8 +954,8 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
             nodeOrder.reserve(N);
             flatbuffers::uoffset_t tagCursor = 0;
             for (flatbuffers::uoffset_t i = 0; i < N; ++i) {
-                SemanticNode node;
-                node.id = SemanticNodeId{static_cast<uint64_t>(i) + 1u};
+                semantic::Node node;
+                node.id = semantic::NodeId{static_cast<uint64_t>(i) + 1u};
                 nodeOrder.push_back(node.id);
 
                 // Name from string table
@@ -986,7 +988,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                         logVolId = logVolIdsU32->Get(i);
                     }
                 }
-                node.logVolId = SemanticLogVolId{logVolId};
+                node.logVolId = semantic::LogVolId{logVolId};
 
                 node.localTransform = glm::dmat4{1.0};
                 uint32_t transformIndex = 0;
@@ -1008,7 +1010,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                 if (parentIdsVec) {
                     auto pid = parentIdsVec->Get(i);
                     if (pid != 0) {
-                        node.parentId = SemanticNodeId{pid};
+                        node.parentId = semantic::NodeId{pid};
                     }
                 }
 
@@ -1068,7 +1070,7 @@ SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
     return scene;
 }
 
-SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &scene) {
+SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const semantic::Scene &scene) {
     SemanticFlatbufferSizeReport report;
     report.nodeCount = scene.nodes.size();
     report.logicalVolumeCount = scene.logVols.size();
@@ -1083,14 +1085,14 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
     std::size_t uniqueNodeNameBytes = 0;
 
     // Mirror serialization: logical-volume IDs are remapped to dense [1..M].
-    std::vector<SemanticLogVolId> orderedLogVolIds;
+    std::vector<semantic::LogVolId> orderedLogVolIds;
     orderedLogVolIds.reserve(scene.logVols.size());
     for (const auto &[id, lv] : scene.logVols) {
         (void)lv;
         orderedLogVolIds.push_back(id);
     }
     std::sort(orderedLogVolIds.begin(), orderedLogVolIds.end());
-    std::unordered_map<SemanticLogVolId, uint32_t> logVolIdRemap;
+    std::unordered_map<semantic::LogVolId, uint32_t> logVolIdRemap;
     logVolIdRemap.reserve(orderedLogVolIds.size());
     for (std::size_t i = 0; i < orderedLogVolIds.size(); ++i) {
         logVolIdRemap.emplace(orderedLogVolIds[i], toU32Checked(i + 1, "logvol remap index"));
@@ -1123,15 +1125,15 @@ SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &s
     for (const auto &[id, shape] : scene.shapes) {
         (void)id;
         std::visit(detail::overloaded{
-                       [&](const BooleanUnion &s) {
+                       [&](const semantic::BooleanUnion &s) {
                            ++report.booleanShapeCount;
                            transformPool.internTransform(s.rightTransform);
                        },
-                       [&](const BooleanIntersection &s) {
+                       [&](const semantic::BooleanIntersection &s) {
                            ++report.booleanShapeCount;
                            transformPool.internTransform(s.rightTransform);
                        },
-                       [&](const BooleanSubtraction &s) {
+                       [&](const semantic::BooleanSubtraction &s) {
                            ++report.booleanShapeCount;
                            transformPool.internTransform(s.rightTransform);
                        },
@@ -1223,7 +1225,7 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
-std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene) {
+std::vector<std::byte> semanticSceneToBytes(const semantic::Scene &scene) {
     flatbuffers::FlatBufferBuilder builder{1024};
     auto root = semanticSceneToFlatBuffer(builder, scene);
     fbs::FinishSemanticSceneBuffer(builder, root);
@@ -1233,7 +1235,7 @@ std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene) {
     return std::vector<std::byte>(span.begin(), span.end());
 }
 
-SemanticScene semanticSceneFromBytes(std::span<const std::byte> buf) {
+semantic::Scene semanticSceneFromBytes(std::span<const std::byte> buf) {
     const auto *ptr = reinterpret_cast<const uint8_t *>(buf.data());
     flatbuffers::Verifier verifier{ptr, buf.size()};
     if (!fbs::VerifySemanticSceneBuffer(verifier)) {

@@ -146,9 +146,10 @@ Aabb transformAabb(const Aabb &a, const glm::dmat4 &m) {
     return out;
 }
 
-Aabb localAabb(const ir::SemanticShapeVariant &shape, const ir::SemanticScene &scene, int depth);
+Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::Scene &scene,
+               int depth);
 
-Aabb localAabbById(ir::SemanticShapeId id, const ir::SemanticScene &scene, int depth) {
+Aabb localAabbById(ir::semantic::ShapeId id, const ir::semantic::Scene &scene, int depth) {
     auto it = scene.shapes.find(id);
     if (it == scene.shapes.end()) {
         return Aabb{};
@@ -156,29 +157,30 @@ Aabb localAabbById(ir::SemanticShapeId id, const ir::SemanticScene &scene, int d
     return localAabb(it->second.data, scene, depth);
 }
 
-Aabb localAabb(const ir::SemanticShapeVariant &shape, const ir::SemanticScene &scene, int depth) {
+Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::Scene &scene,
+               int depth) {
     if (depth > kMaxBoolDepth) {
         return Aabb{};
     }
     using detail::overloaded;
     return std::visit(
         overloaded{
-            [](const ir::BoxShape &s) { return sym(s.dx, s.dy, s.dz); },
-            [](const ir::TubeShape &s) { return sym(s.rMax, s.rMax, s.dz); },
-            [](const ir::ConeShape &s) {
+            [](const ir::semantic::BoxShape &s) { return sym(s.dx, s.dy, s.dz); },
+            [](const ir::semantic::TubeShape &s) { return sym(s.rMax, s.rMax, s.dz); },
+            [](const ir::semantic::ConeShape &s) {
                 const double r = std::max(s.rMax1, s.rMax2);
                 return sym(r, r, s.dz);
             },
-            [](const ir::TrdShape &s) {
+            [](const ir::semantic::TrdShape &s) {
                 return sym(std::max(s.dx1, s.dx2), std::max(s.dy1, s.dy2), s.dz);
             },
-            [](const ir::ParaShape &s) {
+            [](const ir::semantic::ParaShape &s) {
                 const double ex = s.dx + std::abs(s.dy * std::tan(s.alpha)) +
                                   std::abs(s.dz * std::tan(s.theta) * std::cos(s.phi));
                 const double ey = s.dy + std::abs(s.dz * std::tan(s.theta) * std::sin(s.phi));
                 return sym(ex, ey, s.dz);
             },
-            [](const ir::PconShape &s) -> Aabb {
+            [](const ir::semantic::PconShape &s) -> Aabb {
                 if (s.sections.empty()) {
                     return Aabb{};
                 }
@@ -190,7 +192,7 @@ Aabb localAabb(const ir::SemanticShapeVariant &shape, const ir::SemanticScene &s
                 }
                 return Aabb{{-r, -r, zlo}, {r, r, zhi}, true};
             },
-            [](const ir::PgonShape &s) -> Aabb {
+            [](const ir::semantic::PgonShape &s) -> Aabb {
                 if (s.sections.empty()) {
                     return Aabb{};
                 }
@@ -205,11 +207,11 @@ Aabb localAabb(const ir::SemanticShapeVariant &shape, const ir::SemanticScene &s
                 r /= std::cos(kPi / static_cast<double>(n));
                 return Aabb{{-r, -r, zlo}, {r, r, zhi}, true};
             },
-            [](const ir::TorusShape &s) {
+            [](const ir::semantic::TorusShape &s) {
                 const double outer = s.rTor + s.rMax;
                 return Aabb{{-outer, -outer, -s.rMax}, {outer, outer, s.rMax}, true};
             },
-            [](const ir::TessellatedShape &s) -> Aabb {
+            [](const ir::semantic::TessellatedShape &s) -> Aabb {
                 Aabb out;
                 for (const auto &tri : s.triangles) {
                     for (const auto &v : tri.vertices) {
@@ -224,20 +226,20 @@ Aabb localAabb(const ir::SemanticShapeVariant &shape, const ir::SemanticScene &s
                 }
                 return out;
             },
-            [&](const ir::BooleanUnion &s) {
+            [&](const ir::semantic::BooleanUnion &s) {
                 const Aabb l = localAabbById(s.left, scene, depth + 1);
                 const Aabb r =
                     transformAabb(localAabbById(s.right, scene, depth + 1), s.rightTransform);
                 return mergeAabb(l, r);
             },
             // result ⊆ left for both subtraction and intersection
-            [&](const ir::BooleanIntersection &s) {
+            [&](const ir::semantic::BooleanIntersection &s) {
                 return localAabbById(s.left, scene, depth + 1);
             },
-            [&](const ir::BooleanSubtraction &s) {
+            [&](const ir::semantic::BooleanSubtraction &s) {
                 return localAabbById(s.left, scene, depth + 1);
             },
-            [](const ir::UnknownShape &) { return Aabb{}; },
+            [](const ir::semantic::UnknownShape &) { return Aabb{}; },
         },
         shape);
 }
@@ -305,7 +307,7 @@ struct CutKeyHash {
 struct WedgeCutJob::Impl {
     enum class Phase : std::uint8_t { Idle, Bounds, Classify, Prune };
 
-    ir::SemanticScene *scene{nullptr};
+    ir::semantic::Scene *scene{nullptr};
 
     double startRad{0.0};
     double endRad{0.0};
@@ -316,7 +318,7 @@ struct WedgeCutJob::Impl {
     // node *values* and insert into the shapes/logVols maps (never scene.nodes),
     // so iterating this id list across advance() calls stays valid. Prune is the
     // only phase that erases nodes, and it runs after the snapshot is consumed.
-    std::vector<ir::SemanticNodeId> nodeIds;
+    std::vector<ir::semantic::NodeId> nodeIds;
     std::size_t idx{0};
     Phase phase{Phase::Idle};
     bool started{false};
@@ -328,18 +330,18 @@ struct WedgeCutJob::Impl {
     bool anyBounds{false};
 
     // Built once Bounds completes, consumed during Classify.
-    ir::SemanticShapeId wedgeId{};
-    ir::SemanticLogVolId emptyLvId{};
+    ir::semantic::ShapeId wedgeId{};
+    ir::semantic::LogVolId emptyLvId{};
     glm::dvec4 planeStart{};
     glm::dvec4 planeEnd{};
 
     // Cut-shape dedup cache: identical (shape, local-frame wedge) → shared cut
     // logVol, so instances that need the same cut stay instanced.
-    ankerl::unordered_dense::map<CutKey, ir::SemanticLogVolId, CutKeyHash> cutCache;
+    ankerl::unordered_dense::map<CutKey, ir::semantic::LogVolId, CutKeyHash> cutCache;
     // Per-node "produces its own geometry" flag (kept or cut), used by Prune.
     // Emptied/skipped nodes produce no mesh; unclassified nodes default to "has
     // geometry" (never pruned).
-    ankerl::unordered_dense::map<ir::SemanticNodeId, bool> hasOwnGeom;
+    ankerl::unordered_dense::map<ir::semantic::NodeId, bool> hasOwnGeom;
 
     WedgeCutStats stats;
     // Counters are atomic so the SceneBuildJob's native worker thread can bump
@@ -349,12 +351,12 @@ struct WedgeCutJob::Impl {
     std::atomic<std::size_t> processed{0};
 
     // ── Pass 1 (per node): grow the global radius/z bounds. ──────────────────
-    void stepBounds(ir::SemanticNodeId id) {
+    void stepBounds(ir::semantic::NodeId id) {
         const auto nit = scene->nodes.find(id);
         if (nit == scene->nodes.end()) {
             return;
         }
-        const ir::SemanticNode &node = nit->second;
+        const ir::semantic::Node &node = nit->second;
         const auto lvIt = scene->logVols.find(node.logVolId);
         if (lvIt == scene->logVols.end()) {
             return;
@@ -386,16 +388,17 @@ struct WedgeCutJob::Impl {
 
         // Shared cutting solid: a phi-sector tube covering the removed wedge.
         wedgeId = scene->nextShapeId();
-        scene->shapes[wedgeId] =
-            ir::SemanticShape{wedgeId, ir::TubeShape{0.0, cutR, cutZ, startRad, removedWidth}};
+        scene->shapes[wedgeId] = ir::semantic::Shape{
+            wedgeId, ir::semantic::TubeShape{0.0, cutR, cutZ, startRad, removedWidth}};
 
         // Shared empty shape for placements fully inside the removed sector.
-        const ir::SemanticShapeId emptyShapeId = scene->nextShapeId();
-        scene->shapes[emptyShapeId] = ir::SemanticShape{emptyShapeId, ir::TessellatedShape{}};
-        const ir::SemanticMaterialId fillerMat =
-            scene->materials.empty() ? ir::SemanticMaterialId{} : scene->materials.begin()->first;
+        const ir::semantic::ShapeId emptyShapeId = scene->nextShapeId();
+        scene->shapes[emptyShapeId] =
+            ir::semantic::Shape{emptyShapeId, ir::semantic::TessellatedShape{}};
+        const ir::semantic::MaterialId fillerMat =
+            scene->materials.empty() ? ir::semantic::MaterialId{} : scene->materials.begin()->first;
         emptyLvId = scene->nextLogVolId();
-        scene->logVols[emptyLvId] = ir::SemanticLogicalVolume{
+        scene->logVols[emptyLvId] = ir::semantic::LogicalVolume{
             emptyLvId, std::string{kWedgeEmptyLogVolName}, emptyShapeId, fillerMat};
 
         // The two bounding half-planes of the removed sector, through the global
@@ -411,18 +414,18 @@ struct WedgeCutJob::Impl {
     // We only mutate scene.nodes values (logVolId) in place and *insert* into
     // scene.shapes / scene.logVols. Fields read from the (reference-returning)
     // maps are copied out before any insert that could rehash them.
-    void stepClassify(ir::SemanticNodeId id) {
+    void stepClassify(ir::semantic::NodeId id) {
         const auto nit = scene->nodes.find(id);
         if (nit == scene->nodes.end()) {
             return;
         }
-        ir::SemanticNode &node = nit->second;
+        ir::semantic::Node &node = nit->second;
         const auto lvIt = scene->logVols.find(node.logVolId);
         if (lvIt == scene->logVols.end()) {
             return;
         }
-        const ir::SemanticShapeId origShapeId = lvIt->second.shapeId;
-        const ir::SemanticMaterialId origMat = lvIt->second.materialId;
+        const ir::semantic::ShapeId origShapeId = lvIt->second.shapeId;
+        const ir::semantic::MaterialId origMat = lvIt->second.materialId;
         const std::string lvName = lvIt->second.name;
 
         const Aabb local = localAabbById(origShapeId, *scene, 0);
@@ -453,13 +456,13 @@ struct WedgeCutJob::Impl {
             if (auto it = cutCache.find(key); it != cutCache.end()) {
                 node.logVolId = it->second;
             } else {
-                const ir::SemanticShapeId cutShapeId = scene->nextShapeId();
-                scene->shapes[cutShapeId] = ir::SemanticShape{
-                    cutShapeId, ir::BooleanSubtraction{origShapeId, wedgeId,
-                                                       glm::inverse(node.worldTransform)}};
-                const ir::SemanticLogVolId cutLvId = scene->nextLogVolId();
+                const ir::semantic::ShapeId cutShapeId = scene->nextShapeId();
+                scene->shapes[cutShapeId] = ir::semantic::Shape{
+                    cutShapeId, ir::semantic::BooleanSubtraction{
+                                    origShapeId, wedgeId, glm::inverse(node.worldTransform)}};
+                const ir::semantic::LogVolId cutLvId = scene->nextLogVolId();
                 scene->logVols[cutLvId] =
-                    ir::SemanticLogicalVolume{cutLvId, lvName + "_wedgecut", cutShapeId, origMat};
+                    ir::semantic::LogicalVolume{cutLvId, lvName + "_wedgecut", cutShapeId, origMat};
                 cutCache.emplace(key, cutLvId);
                 node.logVolId = cutLvId;
                 ++stats.cutUnique;
@@ -477,8 +480,8 @@ struct WedgeCutJob::Impl {
         if (!scene->nodes.contains(scene->rootId)) {
             return;
         }
-        ankerl::unordered_dense::map<ir::SemanticNodeId, bool> subtreeGeom;
-        auto computeGeom = [&](auto &&self, ir::SemanticNodeId nid) -> bool {
+        ankerl::unordered_dense::map<ir::semantic::NodeId, bool> subtreeGeom;
+        auto computeGeom = [&](auto &&self, ir::semantic::NodeId nid) -> bool {
             const auto it = scene->nodes.find(nid);
             if (it == scene->nodes.end()) {
                 return false;
@@ -496,7 +499,7 @@ struct WedgeCutJob::Impl {
 
         // Collect maximal empty subtree roots: an empty node whose parent keeps
         // geometry. (The root itself is never removed.)
-        std::vector<ir::SemanticNodeId> removalRoots;
+        std::vector<ir::semantic::NodeId> removalRoots;
         for (const auto &[id, geom] : subtreeGeom) {
             if (geom || id == scene->rootId) {
                 continue;
@@ -525,7 +528,7 @@ struct WedgeCutJob::Impl {
                 }
             }
             // Erase the whole subtree.
-            std::vector<ir::SemanticNodeId> stack{rootOfEmpty};
+            std::vector<ir::semantic::NodeId> stack{rootOfEmpty};
             while (!stack.empty()) {
                 const auto cur = stack.back();
                 stack.pop_back();
@@ -548,7 +551,7 @@ WedgeCutJob::~WedgeCutJob() = default;
 WedgeCutJob::WedgeCutJob(WedgeCutJob &&) noexcept = default;
 WedgeCutJob &WedgeCutJob::operator=(WedgeCutJob &&) noexcept = default;
 
-void WedgeCutJob::start(ir::SemanticScene &scene, const WedgeCutParams &params) {
+void WedgeCutJob::start(ir::semantic::Scene &scene, const WedgeCutParams &params) {
     // std::atomic members make Impl non-assignable; replace the unique_ptr
     // wholesale to reset the job between runs.
     impl_ = std::make_unique<Impl>();
@@ -651,7 +654,7 @@ std::size_t WedgeCutJob::processedPlacements() const {
 
 // ── applyWedgeCut (run-to-completion shim) ────────────────────────────────────
 
-WedgeCutStats applyWedgeCut(ir::SemanticScene &scene, const WedgeCutParams &params) {
+WedgeCutStats applyWedgeCut(ir::semantic::Scene &scene, const WedgeCutParams &params) {
     WedgeCutJob job;
     job.start(scene, params);
     while (!job.advance(std::numeric_limits<std::uint64_t>::max())) {

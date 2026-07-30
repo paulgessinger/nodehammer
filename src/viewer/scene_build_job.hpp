@@ -44,7 +44,7 @@ class SceneBuildJob {
     /// imported ODD is tens of ms; doing it here used to freeze the UI right as
     /// the "Applying cut…" toast appeared).
     void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
-               std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+               std::shared_ptr<const ::nodehammer::ir::semantic::Scene> scene,
                std::string config_label, std::string geometry_label,
                std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut = std::nullopt);
 

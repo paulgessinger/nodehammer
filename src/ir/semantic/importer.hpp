@@ -14,7 +14,7 @@ namespace nodehammer::ir {
 /// Result of a single import call. Partial success is allowed:
 /// scene may be populated even when diags.hasErrors() is true.
 struct ImportResult {
-    SemanticScene scene;
+    semantic::Scene scene;
     DiagnosticList diags;
 };
 

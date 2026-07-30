@@ -17,7 +17,7 @@
 namespace nodehammer::pipeline {
 
 ScenePrepResult
-prepareSceneForTessellationFromInputs(config::NHConfig config, ir::SemanticScene scene,
+prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Scene scene,
                                       std::optional<tessellation::WedgeCutParams> wedgeCut) {
     ScenePrepResult prep;
     prep.config = std::move(config);
@@ -96,7 +96,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     // (invariant #1). A single unbounded slice finishes in one drive loop.
     tessellation::BuildPipeline pipe;
     pipe.start(std::make_shared<const config::NHConfig>(std::move(cfg)),
-               std::make_shared<const ir::SemanticScene>(std::move(importResult.scene)),
+               std::make_shared<const ir::semantic::Scene>(std::move(importResult.scene)),
                std::nullopt);
     while (!pipe.advance(std::numeric_limits<std::uint64_t>::max())) {
     }

@@ -33,6 +33,10 @@ void from_json(const nlohmann::json &j, DegradationFlags &f);
 void to_json(nlohmann::json &j, const Provenance &p);
 void from_json(const nlohmann::json &j, Provenance &p);
 
+} // namespace nodehammer::ir
+
+namespace nodehammer::ir::semantic {
+
 // ── Shapes ──────────────────────────────────────────────────────────────────────
 
 void to_json(nlohmann::json &j, const BoxShape &s);
@@ -49,28 +53,28 @@ void to_json(nlohmann::json &j, const BooleanUnion &s);
 void to_json(nlohmann::json &j, const BooleanIntersection &s);
 void to_json(nlohmann::json &j, const BooleanSubtraction &s);
 
-void to_json(nlohmann::json &j, const SemanticShape &s);
-void from_json(const nlohmann::json &j, SemanticShape &s);
+void to_json(nlohmann::json &j, const Shape &s);
+void from_json(const nlohmann::json &j, Shape &s);
 
 /// Reconstruct the shape variant from its JSON object (dispatches on "type").
 /// Unknown types decay to UnknownShape carrying the original type string.
-SemanticShapeVariant shapeVariantFromJson(const nlohmann::json &j);
+ShapeVariant shapeVariantFromJson(const nlohmann::json &j);
 
 // ── Material / logical volume / node / scene ────────────────────────────────────
 
 void to_json(nlohmann::json &j, const SourceMaterial &m);
 void from_json(const nlohmann::json &j, SourceMaterial &m);
 
-void to_json(nlohmann::json &j, const SemanticDaughterPlacement &d);
-void from_json(const nlohmann::json &j, SemanticDaughterPlacement &d);
+void to_json(nlohmann::json &j, const DaughterPlacement &d);
+void from_json(const nlohmann::json &j, DaughterPlacement &d);
 
-void to_json(nlohmann::json &j, const SemanticLogicalVolume &lv);
-void from_json(const nlohmann::json &j, SemanticLogicalVolume &lv);
+void to_json(nlohmann::json &j, const LogicalVolume &lv);
+void from_json(const nlohmann::json &j, LogicalVolume &lv);
 
-void to_json(nlohmann::json &j, const SemanticNode &n);
-void from_json(const nlohmann::json &j, SemanticNode &n);
+void to_json(nlohmann::json &j, const Node &n);
+void from_json(const nlohmann::json &j, Node &n);
 
-void to_json(nlohmann::json &j, const SemanticScene &sc);
-void from_json(const nlohmann::json &j, SemanticScene &sc);
+void to_json(nlohmann::json &j, const Scene &sc);
+void from_json(const nlohmann::json &j, Scene &sc);
 
-} // namespace nodehammer::ir
+} // namespace nodehammer::ir::semantic

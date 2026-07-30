@@ -9,9 +9,9 @@
 #include <span>
 #include <string>
 
-namespace nodehammer::ir {
-struct RenderScene;
-} // namespace nodehammer::ir
+namespace nodehammer::ir::render {
+struct Scene;
+} // namespace nodehammer::ir::render
 
 namespace nodehammer::viewer {
 
@@ -67,7 +67,7 @@ class App {
     /// reference; safe to drop the local copy afterwards. Pass nullptr to
     /// clear (revert to demo geometry). May be called before or after run();
     /// scene_renderer uploads lazily on the next frame.
-    void setScene(std::shared_ptr<const ir::RenderScene> scene);
+    void setScene(std::shared_ptr<const ir::render::Scene> scene);
 
     /// Hand the viewer a project. Each frame the App polls it; while
     /// Fetching it draws a progress / placeholder panel, and on Ready it

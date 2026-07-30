@@ -36,15 +36,15 @@ std::vector<CompiledRule> compileRules(const std::vector<config::SelectionRule> 
 }
 
 // BFS reachability: collect all node IDs reachable from root, in visitation order.
-std::vector<ir::SemanticNodeId> reachableNodes(const ir::SemanticScene &scene) {
-    std::vector<ir::SemanticNodeId> reachable;
+std::vector<ir::semantic::NodeId> reachableNodes(const ir::semantic::Scene &scene) {
+    std::vector<ir::semantic::NodeId> reachable;
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return reachable;
     }
     reachable.reserve(scene.nodes.size());
-    std::unordered_set<ir::SemanticNodeId> seen;
+    std::unordered_set<ir::semantic::NodeId> seen;
     seen.reserve(scene.nodes.size());
-    std::queue<ir::SemanticNodeId> q;
+    std::queue<ir::semantic::NodeId> q;
     q.push(scene.rootId);
     while (!q.empty()) {
         const auto id = q.front();
@@ -62,11 +62,11 @@ std::vector<ir::SemanticNodeId> reachableNodes(const ir::SemanticScene &scene) {
 
 // Transitively collect all SemanticShapeIds referenced by the given root shapes,
 // following left/right operands of boolean shapes.
-std::unordered_set<ir::SemanticShapeId>
-collectReferencedShapes(const ir::SemanticScene &scene,
-                        const std::unordered_set<ir::SemanticShapeId> &roots) {
-    std::unordered_set<ir::SemanticShapeId> visited = roots;
-    std::queue<ir::SemanticShapeId> q;
+std::unordered_set<ir::semantic::ShapeId>
+collectReferencedShapes(const ir::semantic::Scene &scene,
+                        const std::unordered_set<ir::semantic::ShapeId> &roots) {
+    std::unordered_set<ir::semantic::ShapeId> visited = roots;
+    std::queue<ir::semantic::ShapeId> q;
     for (const auto &id : roots) {
         q.push(id);
     }
@@ -79,9 +79,9 @@ collectReferencedShapes(const ir::SemanticScene &scene,
         std::visit(
             [&](const auto &s) {
                 using T = std::decay_t<decltype(s)>;
-                if constexpr (std::is_same_v<T, ir::BooleanUnion> ||
-                              std::is_same_v<T, ir::BooleanIntersection> ||
-                              std::is_same_v<T, ir::BooleanSubtraction>) {
+                if constexpr (std::is_same_v<T, ir::semantic::BooleanUnion> ||
+                              std::is_same_v<T, ir::semantic::BooleanIntersection> ||
+                              std::is_same_v<T, ir::semantic::BooleanSubtraction>) {
                     if (visited.insert(s.left).second) {
                         q.push(s.left);
                     }
@@ -102,7 +102,7 @@ collectReferencedShapes(const ir::SemanticScene &scene,
 SelectionEngine::SelectionEngine(std::vector<config::SelectionRule> rules, bool hoistOrphans)
     : rules_(std::move(rules)), hoistOrphans_(hoistOrphans) {}
 
-SelectionResult SelectionEngine::evaluate(const ir::SemanticScene &scene) const {
+SelectionResult SelectionEngine::evaluate(const ir::semantic::Scene &scene) const {
     SelectionResult result;
 
     if (scene.nodes.empty()) {
@@ -119,11 +119,11 @@ SelectionResult SelectionEngine::evaluate(const ir::SemanticScene &scene) const 
     // scene.nodes / scene.logVols / scene.materials hash-map traffic.
     //
     // `disposition` is indexed parallel to `nodeEntries` — a flat vector beats
-    // an unordered_map<SemanticNodeId, …> on every metric (no hashing, no node
+    // an unordered_map<semantic::NodeId, …> on every metric (no hashing, no node
     // allocations, contiguous access). Default-initialized SelectionAction is
     // KeepIf (enum value 0), which is exactly the Step-1 default we want.
     struct NodeEntry {
-        ir::SemanticNodeId id;
+        ir::semantic::NodeId id;
         NodeView view;
     };
     std::vector<NodeEntry> nodeEntries;
@@ -176,13 +176,13 @@ SelectionResult SelectionEngine::evaluate(const ir::SemanticScene &scene) const 
     // re-parenting instead of force-dropping, so we skip the enforcement here.
     if (!hoistOrphans_) {
         // Build an id → index map once so the BFS can look up dispositions by ID.
-        std::unordered_map<ir::SemanticNodeId, std::size_t> idToIndex;
+        std::unordered_map<ir::semantic::NodeId, std::size_t> idToIndex;
         idToIndex.reserve(nodeEntries.size());
         for (std::size_t i = 0; i < nodeEntries.size(); ++i) {
             idToIndex.emplace(nodeEntries[i].id, i);
         }
 
-        std::queue<ir::SemanticNodeId> q;
+        std::queue<ir::semantic::NodeId> q;
         if (scene.nodes.contains(scene.rootId)) {
             q.push(scene.rootId);
         }
@@ -226,11 +226,11 @@ SelectionResult SelectionEngine::evaluate(const ir::SemanticScene &scene) const 
     return result;
 }
 
-SelectionResult SelectionEngine::dryRun(const ir::SemanticScene &scene) const {
+SelectionResult SelectionEngine::dryRun(const ir::semantic::Scene &scene) const {
     return evaluate(scene);
 }
 
-ir::DiagnosticList SelectionEngine::prune(ir::SemanticScene &scene) const {
+ir::DiagnosticList SelectionEngine::prune(ir::semantic::Scene &scene) const {
     auto selResult = evaluate(scene);
 
     // ── Hoist orphans: re-parent KeepIf nodes whose parent is DropIf ─────────────
@@ -243,14 +243,14 @@ ir::DiagnosticList SelectionEngine::prune(ir::SemanticScene &scene) const {
         selResult.kept.insert(scene.rootId);
 
         for (const auto id : selResult.kept) {
-            const ir::SemanticNode &node = scene.nodes.at(id);
+            const ir::semantic::Node &node = scene.nodes.at(id);
             if (!node.parentId.has_value())
                 continue; // root itself
             if (selResult.kept.contains(*node.parentId))
                 continue; // parent already kept — no hoisting needed
 
             // Walk up to find nearest kept ancestor.
-            ir::SemanticNodeId newParent = scene.rootId;
+            ir::semantic::NodeId newParent = scene.rootId;
             auto cur = node.parentId;
             while (cur.has_value()) {
                 if (selResult.kept.contains(*cur)) {
@@ -287,7 +287,7 @@ ir::DiagnosticList SelectionEngine::prune(ir::SemanticScene &scene) const {
 
     // 2. Remove dropped IDs from surviving parents' children lists.
     for (auto &[id, node] : scene.nodes) {
-        std::erase_if(node.children, [&](ir::SemanticNodeId childId) {
+        std::erase_if(node.children, [&](ir::semantic::NodeId childId) {
             return selResult.dropped.contains(childId);
         });
     }
@@ -295,12 +295,12 @@ ir::DiagnosticList SelectionEngine::prune(ir::SemanticScene &scene) const {
     // 3. Garbage-collect unreferenced logVols. Logical volumes can carry source-level
     // daughter prototypes even when the corresponding placement nodes were pruned/hoisted,
     // so keep the transitive daughter logVol closure for every surviving node logVol.
-    std::unordered_set<ir::SemanticLogVolId> referencedLogVols;
+    std::unordered_set<ir::semantic::LogVolId> referencedLogVols;
     for (const auto &[id, node] : scene.nodes) {
         if (!referencedLogVols.insert(node.logVolId).second) {
             continue;
         }
-        std::queue<ir::SemanticLogVolId> q;
+        std::queue<ir::semantic::LogVolId> q;
         q.push(node.logVolId);
         while (!q.empty()) {
             const auto lvId = q.front();
@@ -319,7 +319,7 @@ ir::DiagnosticList SelectionEngine::prune(ir::SemanticScene &scene) const {
                   [&](const auto &kv) { return !referencedLogVols.contains(kv.first); });
 
     // 4. Garbage-collect shapes (transitive: follow boolean operand references).
-    std::unordered_set<ir::SemanticShapeId> rootShapes;
+    std::unordered_set<ir::semantic::ShapeId> rootShapes;
     for (const auto &[id, lv] : scene.logVols) {
         rootShapes.insert(lv.shapeId);
     }
@@ -328,7 +328,7 @@ ir::DiagnosticList SelectionEngine::prune(ir::SemanticScene &scene) const {
                   [&](const auto &kv) { return !referencedShapes.contains(kv.first); });
 
     // 5. Garbage-collect unreferenced materials.
-    std::unordered_set<ir::SemanticMaterialId> referencedMaterials;
+    std::unordered_set<ir::semantic::MaterialId> referencedMaterials;
     for (const auto &[id, lv] : scene.logVols) {
         referencedMaterials.insert(lv.materialId);
     }

@@ -64,7 +64,7 @@ class BuildPipeline {
     /// is always deferred to a `WedgeCutJob` (invariant #1) — pass it here and
     /// the pipeline runs it as a separate, progress-reportable phase.
     void start(std::shared_ptr<const config::NHConfig> config,
-               std::shared_ptr<const ir::SemanticScene> scene,
+               std::shared_ptr<const ir::semantic::Scene> scene,
                std::optional<WedgeCutParams> wedgeCut = std::nullopt);
 
     /// Advance one slice, spending up to `budget_ns` of wall-clock time driving

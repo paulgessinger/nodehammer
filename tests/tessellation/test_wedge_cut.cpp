@@ -27,35 +27,35 @@ namespace {
 //   C  @ ( 10, 10)  → emptied  (inside removed quadrant)
 //   D  @ ( 10,  0)  → straddle (crosses the +x / 0° boundary)
 struct TestScene {
-    SemanticScene scene;
-    SemanticNodeId a, b, c, d, root;
+    ir::semantic::Scene scene;
+    ir::semantic::NodeId a, b, c, d, root;
 };
 
 TestScene makeScene() {
     TestScene ts;
-    SemanticScene &scene = ts.scene;
+    ir::semantic::Scene &scene = ts.scene;
 
-    const SemanticMaterialId mat = scene.nextMaterialId();
+    const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
 
     // Shared leaf box (half-extents 1) and the straddling box (wider in x).
-    const SemanticShapeId boxShape = scene.nextShapeId();
-    scene.shapes[boxShape] = {boxShape, BoxShape{1, 1, 1}};
-    const SemanticShapeId wideShape = scene.nextShapeId();
-    scene.shapes[wideShape] = {wideShape, BoxShape{2, 1, 1}};
-    const SemanticShapeId worldShape = scene.nextShapeId();
-    scene.shapes[worldShape] = {worldShape, BoxShape{20, 20, 20}};
+    const ir::semantic::ShapeId boxShape = scene.nextShapeId();
+    scene.shapes[boxShape] = {boxShape, ir::semantic::BoxShape{1, 1, 1}};
+    const ir::semantic::ShapeId wideShape = scene.nextShapeId();
+    scene.shapes[wideShape] = {wideShape, ir::semantic::BoxShape{2, 1, 1}};
+    const ir::semantic::ShapeId worldShape = scene.nextShapeId();
+    scene.shapes[worldShape] = {worldShape, ir::semantic::BoxShape{20, 20, 20}};
 
-    const SemanticLogVolId boxLv = scene.nextLogVolId();
+    const ir::semantic::LogVolId boxLv = scene.nextLogVolId();
     scene.logVols[boxLv] = {boxLv, "box_lv", boxShape, mat};
-    const SemanticLogVolId wideLv = scene.nextLogVolId();
+    const ir::semantic::LogVolId wideLv = scene.nextLogVolId();
     scene.logVols[wideLv] = {wideLv, "wide_lv", wideShape, mat};
-    const SemanticLogVolId worldLv = scene.nextLogVolId();
+    const ir::semantic::LogVolId worldLv = scene.nextLogVolId();
     scene.logVols[worldLv] = {worldLv, "world_lv", worldShape, mat};
 
-    auto addNode = [&](const char *name, SemanticLogVolId lv, glm::dvec3 pos) {
-        const SemanticNodeId id = scene.nextNodeId();
-        SemanticNode n;
+    auto addNode = [&](const char *name, ir::semantic::LogVolId lv, glm::dvec3 pos) {
+        const ir::semantic::NodeId id = scene.nextNodeId();
+        ir::semantic::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = lv;
@@ -83,7 +83,7 @@ TestScene makeScene() {
     return ts;
 }
 
-const RenderNode *findBySemId(const RenderScene &rs, SemanticNodeId sid) {
+const ir::render::Node *findBySemId(const ir::render::Scene &rs, ir::semantic::NodeId sid) {
     for (const auto &[id, rn] : rs.nodes) {
         (void)id;
         if (rn.semanticNodeId == sid) {
@@ -93,7 +93,7 @@ const RenderNode *findBySemId(const RenderScene &rs, SemanticNodeId sid) {
     return nullptr;
 }
 
-bool meshNonEmpty(const RenderScene &rs, MeshAssetId mid) {
+bool meshNonEmpty(const ir::render::Scene &rs, ir::render::MeshAssetId mid) {
     auto it = rs.meshAssets.find(mid);
     return it != rs.meshAssets.end() && !it->second.indices.empty();
 }
@@ -126,9 +126,9 @@ TEST_CASE("wedge cut: lowers to a valid render scene", "[tessellation][wedgecut]
     auto result = pass.lower(ts.scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    const RenderNode *a = findBySemId(result.scene, ts.a);
-    const RenderNode *b = findBySemId(result.scene, ts.b);
-    const RenderNode *d = findBySemId(result.scene, ts.d);
+    const ir::render::Node *a = findBySemId(result.scene, ts.a);
+    const ir::render::Node *b = findBySemId(result.scene, ts.b);
+    const ir::render::Node *d = findBySemId(result.scene, ts.d);
     REQUIRE(a);
     REQUIRE(b);
     REQUIRE(d);
@@ -164,7 +164,7 @@ TEST_CASE("wedge cut: removes the geometry on the requested side", "[tessellatio
     auto result = pass.lower(ts.scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    const RenderNode *d = findBySemId(result.scene, ts.d);
+    const ir::render::Node *d = findBySemId(result.scene, ts.d);
     REQUIRE(d);
     REQUIRE(d->meshBindings.size() == 1);
     const auto meshIt = result.scene.meshAssets.find(d->meshBindings[0].meshId);
@@ -189,18 +189,18 @@ TEST_CASE("wedge cut: a narrow sector inside a wide AABB still cuts", "[tessella
     // no corner inside the removed sector and wrongly classified the box as
     // fully kept (so it was never cut); the angular-arc test classifies it as
     // straddling, as it must.
-    SemanticScene scene;
-    const SemanticMaterialId mat = scene.nextMaterialId();
+    ir::semantic::Scene scene;
+    const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     // World AABB x∈[9,11], y∈[-8,8] → angular span ≈ ±42°, corners near ±36/±42°,
     // none in the [10°,20°] sector we remove (which the box nonetheless covers).
-    const SemanticShapeId box = scene.nextShapeId();
-    scene.shapes[box] = {box, BoxShape{1, 8, 1}};
-    const SemanticLogVolId lv = scene.nextLogVolId();
+    const ir::semantic::ShapeId box = scene.nextShapeId();
+    scene.shapes[box] = {box, ir::semantic::BoxShape{1, 8, 1}};
+    const ir::semantic::LogVolId lv = scene.nextLogVolId();
     scene.logVols[lv] = {lv, "wide", box, mat};
 
-    const SemanticNodeId root = scene.nextNodeId();
-    SemanticNode n;
+    const ir::semantic::NodeId root = scene.nextNodeId();
+    ir::semantic::Node n;
     n.id = root;
     n.name = "wide";
     n.logVolId = lv;
@@ -244,7 +244,7 @@ TEST_CASE("wedge cut: wrap-around sector across 0 degrees", "[tessellation][wedg
     TessellationPass pass{cfg};
     auto result = pass.lower(ts.scene);
     CHECK_FALSE(result.diags.hasErrors());
-    const RenderNode *d = findBySemId(result.scene, ts.d);
+    const ir::render::Node *d = findBySemId(result.scene, ts.d);
     REQUIRE(d);
     REQUIRE(d->meshBindings.size() == 1);
     CHECK(meshNonEmpty(result.scene, d->meshBindings[0].meshId));
@@ -254,17 +254,17 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     // Mimics a stave (envelope) with child modules, the whole assembly sitting
     // inside the removed sector. The envelope + all children must be pruned so a
     // merge_descendants parent is never asked to merge an empty child set.
-    SemanticScene scene;
-    const SemanticMaterialId mat = scene.nextMaterialId();
+    ir::semantic::Scene scene;
+    const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
-    const SemanticShapeId box = scene.nextShapeId();
-    scene.shapes[box] = {box, BoxShape{1, 1, 1}};
-    const SemanticLogVolId lv = scene.nextLogVolId();
+    const ir::semantic::ShapeId box = scene.nextShapeId();
+    scene.shapes[box] = {box, ir::semantic::BoxShape{1, 1, 1}};
+    const ir::semantic::LogVolId lv = scene.nextLogVolId();
     scene.logVols[lv] = {lv, "lv", box, mat};
 
-    auto add = [&](const char *name, glm::dvec3 pos, std::optional<SemanticNodeId> parent) {
-        const SemanticNodeId id = scene.nextNodeId();
-        SemanticNode n;
+    auto add = [&](const char *name, glm::dvec3 pos, std::optional<ir::semantic::NodeId> parent) {
+        const ir::semantic::NodeId id = scene.nextNodeId();
+        ir::semantic::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = lv;
@@ -276,12 +276,12 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     // Root box at the origin straddles → keeps geometry (and as the root is never
     // pruned). The stave envelope + its two modules sit fully inside the removed
     // quadrant (absolute positions; root is at the origin so no inherited offset).
-    const SemanticNodeId root = add("root", {0, 0, 0}, std::nullopt);
+    const ir::semantic::NodeId root = add("root", {0, 0, 0}, std::nullopt);
     scene.rootId = root;
     scene.nodes[root].localTransform = glm::dmat4{1.0};
-    const SemanticNodeId stave = add("stave", {30, 30, 0}, root);
-    const SemanticNodeId m0 = add("mod0", {31, 30, 0}, stave);
-    const SemanticNodeId m1 = add("mod1", {29, 30, 0}, stave);
+    const ir::semantic::NodeId stave = add("stave", {30, 30, 0}, root);
+    const ir::semantic::NodeId m0 = add("mod0", {31, 30, 0}, stave);
+    const ir::semantic::NodeId m1 = add("mod1", {29, 30, 0}, stave);
     scene.nodes[root].children = {stave};
     scene.nodes[stave].children = {m0, m1};
     // mod positions are relative to the stave at (30,30); offset back so their
@@ -308,25 +308,25 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
     // differ only by a translation along the cut (z) axis → identical local-frame
     // wedge → must share one cut mesh. The third sits on the +y axis (different
     // phi) → distinct cut. So: 3 cut placements, 2 unique cut meshes.
-    SemanticScene scene;
-    const SemanticMaterialId mat = scene.nextMaterialId();
+    ir::semantic::Scene scene;
+    const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
-    const SemanticShapeId shape = scene.nextShapeId();
-    scene.shapes[shape] = {shape, BoxShape{2, 1, 1}};
-    const SemanticLogVolId lv = scene.nextLogVolId();
+    const ir::semantic::ShapeId shape = scene.nextShapeId();
+    scene.shapes[shape] = {shape, ir::semantic::BoxShape{2, 1, 1}};
+    const ir::semantic::LogVolId lv = scene.nextLogVolId();
     scene.logVols[lv] = {lv, "lv", shape, mat};
 
     // A non-cuttable empty root at the origin so children sit at absolute world
     // positions (no inherited translation to reason about).
-    const SemanticShapeId emptyShape = scene.nextShapeId();
-    scene.shapes[emptyShape] = {emptyShape, TessellatedShape{}};
-    const SemanticLogVolId emptyLv = scene.nextLogVolId();
+    const ir::semantic::ShapeId emptyShape = scene.nextShapeId();
+    scene.shapes[emptyShape] = {emptyShape, ir::semantic::TessellatedShape{}};
+    const ir::semantic::LogVolId emptyLv = scene.nextLogVolId();
     scene.logVols[emptyLv] = {emptyLv, "root_lv", emptyShape, mat};
 
-    auto add = [&](const char *name, SemanticLogVolId vol, glm::dvec3 pos,
-                   std::optional<SemanticNodeId> parent) {
-        const SemanticNodeId id = scene.nextNodeId();
-        SemanticNode n;
+    auto add = [&](const char *name, ir::semantic::LogVolId vol, glm::dvec3 pos,
+                   std::optional<ir::semantic::NodeId> parent) {
+        const ir::semantic::NodeId id = scene.nextNodeId();
+        ir::semantic::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = vol;
@@ -335,12 +335,12 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
         scene.nodes[id] = n;
         return id;
     };
-    const SemanticNodeId root = add("root", emptyLv, {0, 0, 0}, std::nullopt);
+    const ir::semantic::NodeId root = add("root", emptyLv, {0, 0, 0}, std::nullopt);
     scene.rootId = root;
     // Two copies on +x differing only along z (shared cut); one on +y (distinct).
-    const SemanticNodeId pxZ0 = add("px_z0", lv, {10, 0, 0}, root);
-    const SemanticNodeId pxZ50 = add("px_z50", lv, {10, 0, 50}, root);
-    const SemanticNodeId py = add("py_z0", lv, {0, 10, 0}, root);
+    const ir::semantic::NodeId pxZ0 = add("px_z0", lv, {10, 0, 0}, root);
+    const ir::semantic::NodeId pxZ50 = add("px_z50", lv, {10, 0, 50}, root);
+    const ir::semantic::NodeId py = add("py_z0", lv, {0, 10, 0}, root);
     scene.nodes[root].children = {pxZ0, pxZ50, py};
     scene.computeWorldTransforms();
 
@@ -353,9 +353,9 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
     auto result = pass.lower(scene);
     REQUIRE_FALSE(result.diags.hasErrors());
 
-    const RenderNode *r0 = findBySemId(result.scene, pxZ0);
-    const RenderNode *rz = findBySemId(result.scene, pxZ50);
-    const RenderNode *rpy = findBySemId(result.scene, py);
+    const ir::render::Node *r0 = findBySemId(result.scene, pxZ0);
+    const ir::render::Node *rz = findBySemId(result.scene, pxZ50);
+    const ir::render::Node *rpy = findBySemId(result.scene, py);
     REQUIRE(r0);
     REQUIRE(rz);
     REQUIRE(rpy);
@@ -371,15 +371,15 @@ TEST_CASE("wedge cut: allocates fresh IDs without overwriting existing shapes",
           "[tessellation][wedgecut]") {
     // Simulate a deserialized scene whose ID counters are stale (start at 1)
     // while existing entries use large IDs.
-    SemanticScene scene;
-    const SemanticMaterialId mat{500};
+    ir::semantic::Scene scene;
+    const ir::semantic::MaterialId mat{500};
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
-    const SemanticShapeId shape{1000};
-    scene.shapes[shape] = {shape, BoxShape{2, 1, 1}};
-    const SemanticLogVolId lv{2000};
+    const ir::semantic::ShapeId shape{1000};
+    scene.shapes[shape] = {shape, ir::semantic::BoxShape{2, 1, 1}};
+    const ir::semantic::LogVolId lv{2000};
     scene.logVols[lv] = {lv, "lv", shape, mat};
-    const SemanticNodeId node{3000};
-    SemanticNode n;
+    const ir::semantic::NodeId node{3000};
+    ir::semantic::Node n;
     n.id = node;
     n.name = "straddle";
     n.logVolId = lv;
@@ -393,7 +393,7 @@ TEST_CASE("wedge cut: allocates fresh IDs without overwriting existing shapes",
     // The original box shape must still be intact (not overwritten by a new
     // wedge/cut shape that collided with ID 1000…).
     REQUIRE(scene.shapes.contains(shape));
-    CHECK(std::holds_alternative<BoxShape>(scene.shapes.at(shape).data));
+    CHECK(std::holds_alternative<ir::semantic::BoxShape>(scene.shapes.at(shape).data));
 }
 
 TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
@@ -404,7 +404,7 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     // below Manifold's tolerance). That yields an empty *but succeeded* mesh. The
     // merge path used to treat empty-vertices as a tessellation failure and emit
     // NH0503; it must instead skip the emptied descendant and still merge the rest.
-    SemanticScene scene;
+    ir::semantic::Scene scene;
 
     const auto mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
@@ -412,18 +412,18 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     // A small box fully contained inside a larger subtractor at the same place →
     // Box - Box is empty, and Manifold reports success (NoError).
     const auto smallShape = scene.nextShapeId();
-    scene.shapes[smallShape] = {smallShape, BoxShape{1, 1, 1}};
+    scene.shapes[smallShape] = {smallShape, ir::semantic::BoxShape{1, 1, 1}};
     const auto bigShape = scene.nextShapeId();
-    scene.shapes[bigShape] = {bigShape, BoxShape{5, 5, 5}};
+    scene.shapes[bigShape] = {bigShape, ir::semantic::BoxShape{5, 5, 5}};
     const auto emptiedShape = scene.nextShapeId();
-    scene.shapes[emptiedShape] = {emptiedShape,
-                                  BooleanSubtraction{smallShape, bigShape, glm::dmat4{1.0}}};
+    scene.shapes[emptiedShape] = {
+        emptiedShape, ir::semantic::BooleanSubtraction{smallShape, bigShape, glm::dmat4{1.0}}};
 
     // An ordinary box sibling so the merge group still produces geometry.
     const auto keepShape = scene.nextShapeId();
-    scene.shapes[keepShape] = {keepShape, BoxShape{1, 1, 1}};
+    scene.shapes[keepShape] = {keepShape, ir::semantic::BoxShape{1, 1, 1}};
     const auto worldShape = scene.nextShapeId();
-    scene.shapes[worldShape] = {worldShape, BoxShape{20, 20, 20}};
+    scene.shapes[worldShape] = {worldShape, ir::semantic::BoxShape{20, 20, 20}};
 
     const auto emptiedLv = scene.nextLogVolId();
     scene.logVols[emptiedLv] = {emptiedLv, "emptied_lv", emptiedShape, mat};
@@ -432,10 +432,10 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     const auto staveLv = scene.nextLogVolId();
     scene.logVols[staveLv] = {staveLv, "stave_lv", worldShape, mat};
 
-    auto addNode = [&](const char *name, SemanticLogVolId lv, std::optional<SemanticNodeId> parent,
-                       glm::dvec3 pos) {
+    auto addNode = [&](const char *name, ir::semantic::LogVolId lv,
+                       std::optional<ir::semantic::NodeId> parent, glm::dvec3 pos) {
         const auto id = scene.nextNodeId();
-        SemanticNode n;
+        ir::semantic::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = lv;
@@ -467,7 +467,7 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     // The emptied Boolean must not be reported as a failure …
     CHECK_FALSE(result.diags.hasErrors());
     // … and the surviving sibling must still contribute a merged mesh.
-    const RenderNode *rn = findBySemId(result.scene, stave);
+    const ir::render::Node *rn = findBySemId(result.scene, stave);
     REQUIRE(rn);
     REQUIRE(rn->meshBindings.size() == 1);
     CHECK(meshNonEmpty(result.scene, rn->meshBindings[0].meshId));

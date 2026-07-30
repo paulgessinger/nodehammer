@@ -9,8 +9,9 @@ namespace nodehammer::tessellation {
 /// UnknownShape produces an empty mesh and an NH0500 error diagnostic.
 class PrimitiveTessellator final : public ITessellator {
   public:
-    [[nodiscard]] bool canTessellate(const ir::SemanticShapeVariant &shape) const noexcept override;
-    [[nodiscard]] TessellationOutput tessellate(const ir::SemanticShapeVariant &shape,
+    [[nodiscard]] bool
+    canTessellate(const ir::semantic::ShapeVariant &shape) const noexcept override;
+    [[nodiscard]] TessellationOutput tessellate(const ir::semantic::ShapeVariant &shape,
                                                 const TessellationParams &params) const override;
 };
 

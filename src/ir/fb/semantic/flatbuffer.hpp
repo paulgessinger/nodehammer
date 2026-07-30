@@ -50,15 +50,15 @@ namespace nodehammer::ir {
 // Work with FlatBufferBuilder offsets / FlatBuffer pointers directly so callers
 // can compose into larger FlatBuffer messages without intermediate buffers.
 
-/// Serialize a SemanticScene into an in-progress FlatBufferBuilder.
+/// Serialize a semantic::Scene into an in-progress FlatBufferBuilder.
 /// Returns the offset; the caller decides whether to Finish or nest it.
 flatbuffers::Offset<fbs::SemanticScene>
-semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const SemanticScene &scene);
+semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semantic::Scene &scene);
 
-/// Reconstruct a SemanticScene from a parsed FlatBuffer pointer.
+/// Reconstruct a semantic::Scene from a parsed FlatBuffer pointer.
 /// Does NOT call computeWorldTransforms() or computeOriginalPaths() —
 /// that is the caller's responsibility (e.g. the importer).
-SemanticScene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb);
+semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb);
 
 struct SemanticFlatbufferSizeEntry {
     std::string label;
@@ -85,20 +85,20 @@ struct SemanticFlatbufferSizeReport {
 /// Estimate major FlatBuffer payload contributors for the current schema.
 /// This is intended for optimization/profiling and excludes FlatBuffers table
 /// metadata overhead.
-SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const SemanticScene &scene);
+SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const semantic::Scene &scene);
 
 /// Format a human-readable size report suitable for CLI output.
 std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeReport &report);
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
-/// Serialize a SemanticScene to a standalone FlatBuffer byte buffer
+/// Serialize a semantic::Scene to a standalone FlatBuffer byte buffer
 /// (with file identifier "NHS8").
-std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene);
+std::vector<std::byte> semanticSceneToBytes(const semantic::Scene &scene);
 
-/// Deserialize a standalone FlatBuffer byte buffer to a SemanticScene.
+/// Deserialize a standalone FlatBuffer byte buffer to a semantic::Scene.
 /// Verifies the buffer and file identifier before parsing.
 /// Throws std::runtime_error on verification failure.
-SemanticScene semanticSceneFromBytes(std::span<const std::byte> buf);
+semantic::Scene semanticSceneFromBytes(std::span<const std::byte> buf);
 
 } // namespace nodehammer::ir

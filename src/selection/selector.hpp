@@ -12,14 +12,14 @@ namespace nodehammer::selection {
 // ── SelectionResult ───────────────────────────────────────────────────────────
 
 struct SelectionResult {
-    ankerl::unordered_dense::set<ir::SemanticNodeId> kept;
-    ankerl::unordered_dense::set<ir::SemanticNodeId> dropped;
+    ankerl::unordered_dense::set<ir::semantic::NodeId> kept;
+    ankerl::unordered_dense::set<ir::semantic::NodeId> dropped;
     ir::DiagnosticList diags;
 };
 
 // ── SelectionEngine ───────────────────────────────────────────────────────────
 
-/// Evaluates [[selection_rules]] against a SemanticScene.
+/// Evaluates [[selection_rules]] against a semantic::Scene.
 ///
 /// Rule semantics:
 ///   - Default disposition: every node is KEPT (no rules = no filtering).
@@ -39,21 +39,21 @@ class SelectionEngine {
     explicit SelectionEngine(std::vector<config::SelectionRule> rules, bool hoistOrphans = false);
 
     /// Compute which nodes would be kept or dropped without modifying the scene.
-    [[nodiscard]] SelectionResult dryRun(const ir::SemanticScene &scene) const;
+    [[nodiscard]] SelectionResult dryRun(const ir::semantic::Scene &scene) const;
 
     /// Remove dropped nodes from the scene in-place and garbage-collect
     /// unreferenced logVols, shapes, and materials.
     ///
     /// If the root node is in the dropped set the scene is left unchanged and
     /// an NH0401 error is emitted.  Returns accumulated diagnostics.
-    ir::DiagnosticList prune(ir::SemanticScene &scene) const;
+    ir::DiagnosticList prune(ir::semantic::Scene &scene) const;
 
   private:
     std::vector<config::SelectionRule> rules_;
     bool hoistOrphans_{false};
 
     /// Core evaluation logic shared by dryRun() and prune().
-    [[nodiscard]] SelectionResult evaluate(const ir::SemanticScene &scene) const;
+    [[nodiscard]] SelectionResult evaluate(const ir::semantic::Scene &scene) const;
 };
 
 } // namespace nodehammer::selection

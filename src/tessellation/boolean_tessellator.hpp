@@ -27,8 +27,8 @@ meshToManifold(const TessellationOutput &mesh, ir::DiagnosticList &diags, std::s
 /// Performs the boolean operation and returns the resulting mesh.
 ///
 /// Returns an empty TessellationOutput (with diagnostics) on failure.
-[[nodiscard]] TessellationOutput tessellateBooleanShape(const ir::SemanticShapeVariant &shape,
-                                                        const ir::SemanticScene &scene,
+[[nodiscard]] TessellationOutput tessellateBooleanShape(const ir::semantic::ShapeVariant &shape,
+                                                        const ir::semantic::Scene &scene,
                                                         const ITessellator &primitiveTessellator,
                                                         const TessellationParams &params);
 

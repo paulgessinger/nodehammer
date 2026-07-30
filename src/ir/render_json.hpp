@@ -4,19 +4,19 @@
 // non-JSON includers of the data model (tessellator, scene renderer, viewer)
 // don't drag in the Semantic IR's JSON codec (semantic_json.hpp) or compile the
 // inline to_json bodies. (render.hpp still includes nlohmann/json itself, since
-// RenderExtrasMap aliases it.) Only TUs that serialize render types include this.
+// render::ExtrasMap aliases it.) Only TUs that serialize render types include this.
 
 #include <ir/render.hpp>
 
 #include <nlohmann/json.hpp>
 
-namespace nodehammer::ir {
+namespace nodehammer::ir::render {
 
 void to_json(nlohmann::json &j, const Vertex &v);
 void to_json(nlohmann::json &j, const MeshAsset &a);
-void to_json(nlohmann::json &j, const RenderMaterial &m);
+void to_json(nlohmann::json &j, const Material &m);
 void to_json(nlohmann::json &j, const MeshBinding &b);
-void to_json(nlohmann::json &j, const RenderNode &n);
-void to_json(nlohmann::json &j, const RenderScene &sc);
+void to_json(nlohmann::json &j, const Node &n);
+void to_json(nlohmann::json &j, const Scene &sc);
 
-} // namespace nodehammer::ir
+} // namespace nodehammer::ir::render

@@ -27,11 +27,11 @@ namespace {
 
 constexpr int kPollBudget = 100;
 
-SemanticScene makeMinimalScene() {
-    SemanticScene scene;
+ir::semantic::Scene makeMinimalScene() {
+    ir::semantic::Scene scene;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = {shapeId, BoxShape{5.0, 10.0, 15.0}};
+    scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
 
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
@@ -40,7 +40,7 @@ SemanticScene makeMinimalScene() {
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
 
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    ir::semantic::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;

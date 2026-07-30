@@ -15,7 +15,7 @@ std::string_view ObjExporter::formatName() const noexcept { return "obj"; }
 
 std::vector<std::string> ObjExporter::supportedExtensions() const { return {".obj"}; }
 
-ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem::path &path,
+ExportResult ObjExporter::write(const render::Scene &scene, const std::filesystem::path &path,
                                 const ExportConfig &config) const {
     ExportResult result;
 
@@ -50,7 +50,7 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
 
     // ── Write MTL ─────────────────────────────────────────────────────────────
 
-    std::unordered_map<RenderMaterialId, std::string> matNames;
+    std::unordered_map<render::MaterialId, std::string> matNames;
     for (const auto &[id, mat] : scene.materials) {
         mtlFile << "newmtl " << mat.name << "\n";
         mtlFile << "Kd " << mat.baseColorFactor.r << " " << mat.baseColorFactor.g << " "
@@ -77,22 +77,22 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
 
     std::size_t vtxOffset = 0; // running 1-based index base
 
-    std::queue<RenderNodeId> q;
+    std::queue<render::NodeId> q;
     q.push(scene.rootId);
 
     while (!q.empty()) {
-        const RenderNodeId rnId = q.front();
+        const render::NodeId rnId = q.front();
         q.pop();
         if (!scene.nodes.contains(rnId)) {
             continue;
         }
-        const RenderNode &rn = scene.nodes.at(rnId);
+        const render::Node &rn = scene.nodes.at(rnId);
 
         for (const auto &binding : rn.meshBindings) {
             if (!scene.meshAssets.contains(binding.meshId)) {
                 continue;
             }
-            const MeshAsset &ma = scene.meshAssets.at(binding.meshId);
+            const render::MeshAsset &ma = scene.meshAssets.at(binding.meshId);
             if (ma.vertices.empty()) {
                 continue;
             }

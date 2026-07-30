@@ -95,7 +95,7 @@ struct MaterialDef {
     float roughness{0.5f};
     Color emissive{0.0f, 0.0f, 0.0f, 1.0f};
     // Single-sided by default — closed solids cull their back-faces (see
-    // RenderMaterial::doubleSided). Set `double_sided = true` per material to
+    // render::Material::doubleSided). Set `double_sided = true` per material to
     // opt into two-sided rendering.
     bool doubleSided{false};
     AlphaMode alphaMode{AlphaMode::Opaque};

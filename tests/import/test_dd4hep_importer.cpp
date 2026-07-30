@@ -40,7 +40,7 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> scene contains a BoxShape", "[impor
 
     bool hasBox = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::ir::BoxShape>(s.data)) {
+        if (std::holds_alternative<nodehammer::ir::semantic::BoxShape>(s.data)) {
             hasBox = true;
             break;
         }
@@ -84,7 +84,7 @@ TEST_CASE("DD4hepImporter: all nodes reachable from root via BFS", "[import][dd4
     nodehammer::ir::DD4hepImporter imp;
     auto result = imp.import(kSimpleBox);
 
-    std::unordered_set<nodehammer::ir::SemanticNodeId> visited;
+    std::unordered_set<nodehammer::ir::semantic::NodeId> visited;
     result.scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == result.scene.nodes.size());
 }

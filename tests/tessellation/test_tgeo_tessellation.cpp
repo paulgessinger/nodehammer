@@ -1,6 +1,6 @@
 // Integration tests: TGeo shape → dispatchTGeoShape → PrimitiveTessellator.
 // Each test builds a TGeoManager programmatically, dispatches the shape to our
-// internal SemanticShapeVariant, tessellates it, and writes an OBJ file that
+// internal semantic::ShapeVariant, tessellates it, and writes an OBJ file that
 // can be opened in Blender or MeshLab for visual inspection.
 //
 // OBJ files are written to NODEHAMMER_TESS_OBJ_DIR (set by CMake).
@@ -49,12 +49,12 @@ struct DispatchResult {
 
 static DispatchResult dispatchAndTessellate(const TGeoShape *shape, const std::string &objName,
                                             const TessellationParams &params = {}) {
-    SemanticScene scene;
+    ir::semantic::Scene scene;
     DiagnosticList diags;
-    const SemanticShapeId shapeId = dispatchTGeoShape(shape, scene, diags);
+    const ir::semantic::ShapeId shapeId = dispatchTGeoShape(shape, scene, diags);
 
     PrimitiveTessellator tess;
-    const SemanticShapeVariant &variant = scene.shapes.at(shapeId).data;
+    const ir::semantic::ShapeVariant &variant = scene.shapes.at(shapeId).data;
     TessellationOutput out = tess.tessellate(variant, params);
     test::writeObjToDir(out, objName);
     return {std::move(out), std::move(diags)};

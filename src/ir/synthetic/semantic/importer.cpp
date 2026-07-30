@@ -9,14 +9,14 @@ namespace nodehammer::ir {
 namespace {
 
 /// Add a shape+material+logvol to the scene and return the logvol ID.
-SemanticLogVolId addVolume(SemanticScene &scene, std::string_view lvName,
-                           SemanticShapeVariant shapeData, std::string_view matName,
-                           glm::vec3 color = {0.75f, 0.75f, 0.85f}, double density = 0.0) {
+semantic::LogVolId addVolume(semantic::Scene &scene, std::string_view lvName,
+                             semantic::ShapeVariant shapeData, std::string_view matName,
+                             glm::vec3 color = {0.75f, 0.75f, 0.85f}, double density = 0.0) {
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = SemanticShape{shapeId, std::move(shapeData)};
+    scene.shapes[shapeId] = semantic::Shape{shapeId, std::move(shapeData)};
 
     auto matId = scene.nextMaterialId();
-    SourceMaterial mat;
+    semantic::SourceMaterial mat;
     mat.id = matId;
     mat.name = std::string{matName};
     mat.color = color;
@@ -24,17 +24,17 @@ SemanticLogVolId addVolume(SemanticScene &scene, std::string_view lvName,
     scene.materials[matId] = mat;
 
     auto lvId = scene.nextLogVolId();
-    scene.logVols[lvId] = SemanticLogicalVolume{lvId, std::string{lvName}, shapeId, matId};
+    scene.logVols[lvId] = semantic::LogicalVolume{lvId, std::string{lvName}, shapeId, matId};
 
     return lvId;
 }
 
 /// Add a node to the scene, wire up the parent link, and return its ID.
-SemanticNodeId addNode(SemanticScene &scene, std::string_view name, SemanticLogVolId lvId,
-                       std::optional<SemanticNodeId> parentId = std::nullopt,
-                       glm::dmat4 localTransform = glm::dmat4{1.0}) {
+semantic::NodeId addNode(semantic::Scene &scene, std::string_view name, semantic::LogVolId lvId,
+                         std::optional<semantic::NodeId> parentId = std::nullopt,
+                         glm::dmat4 localTransform = glm::dmat4{1.0}) {
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    semantic::Node node;
     node.id = nodeId;
     node.name = std::string{name};
     node.logVolId = lvId;
@@ -54,9 +54,9 @@ SemanticNodeId addNode(SemanticScene &scene, std::string_view name, SemanticLogV
 
 // ── SyntheticSceneBuilder ─────────────────────────────────────────────────────
 
-SemanticScene SyntheticSceneBuilder::buildSingleBox() {
-    SemanticScene scene;
-    auto lvId = addVolume(scene, "boxLV", BoxShape{10.0, 10.0, 10.0}, "aluminum",
+semantic::Scene SyntheticSceneBuilder::buildSingleBox() {
+    semantic::Scene scene;
+    auto lvId = addVolume(scene, "boxLV", semantic::BoxShape{10.0, 10.0, 10.0}, "aluminum",
                           {0.75f, 0.75f, 0.85f}, 2.7);
     auto nodeId = addNode(scene, "world", lvId);
     scene.rootId = nodeId;
@@ -65,12 +65,12 @@ SemanticScene SyntheticSceneBuilder::buildSingleBox() {
     return scene;
 }
 
-SemanticScene SyntheticSceneBuilder::buildNestedBoxes() {
-    SemanticScene scene;
+semantic::Scene SyntheticSceneBuilder::buildNestedBoxes() {
+    semantic::Scene scene;
 
-    auto outerLv =
-        addVolume(scene, "worldLV", BoxShape{50.0, 50.0, 50.0}, "air", {0.9f, 0.9f, 0.9f}, 0.0012);
-    auto innerLv = addVolume(scene, "innerLV", BoxShape{10.0, 10.0, 10.0}, "aluminum",
+    auto outerLv = addVolume(scene, "worldLV", semantic::BoxShape{50.0, 50.0, 50.0}, "air",
+                             {0.9f, 0.9f, 0.9f}, 0.0012);
+    auto innerLv = addVolume(scene, "innerLV", semantic::BoxShape{10.0, 10.0, 10.0}, "aluminum",
                              {0.75f, 0.75f, 0.85f}, 2.7);
 
     auto rootId = addNode(scene, "world", outerLv);
@@ -85,12 +85,12 @@ SemanticScene SyntheticSceneBuilder::buildNestedBoxes() {
     return scene;
 }
 
-SemanticScene SyntheticSceneBuilder::buildTubeInBox() {
-    SemanticScene scene;
+semantic::Scene SyntheticSceneBuilder::buildTubeInBox() {
+    semantic::Scene scene;
 
-    auto outerLv =
-        addVolume(scene, "worldLV", BoxShape{50.0, 50.0, 50.0}, "air", {0.9f, 0.9f, 0.9f}, 0.0012);
-    auto tubeLv = addVolume(scene, "tubeLV", TubeShape{0.0, 5.0, 10.0}, "aluminum",
+    auto outerLv = addVolume(scene, "worldLV", semantic::BoxShape{50.0, 50.0, 50.0}, "air",
+                             {0.9f, 0.9f, 0.9f}, 0.0012);
+    auto tubeLv = addVolume(scene, "tubeLV", semantic::TubeShape{0.0, 5.0, 10.0}, "aluminum",
                             {0.75f, 0.75f, 0.85f}, 2.7);
 
     auto rootId = addNode(scene, "world", outerLv);
@@ -102,23 +102,25 @@ SemanticScene SyntheticSceneBuilder::buildTubeInBox() {
     return scene;
 }
 
-SemanticScene SyntheticSceneBuilder::buildBooleanSubtraction() {
-    SemanticScene scene;
+semantic::Scene SyntheticSceneBuilder::buildBooleanSubtraction() {
+    semantic::Scene scene;
 
     // Register the two operand shapes (not bound to logical volumes).
     auto outerShapeId = scene.nextShapeId();
-    scene.shapes[outerShapeId] = SemanticShape{outerShapeId, BoxShape{20.0, 20.0, 20.0}};
+    scene.shapes[outerShapeId] =
+        semantic::Shape{outerShapeId, semantic::BoxShape{20.0, 20.0, 20.0}};
 
     auto innerShapeId = scene.nextShapeId();
-    scene.shapes[innerShapeId] = SemanticShape{innerShapeId, BoxShape{10.0, 10.0, 10.0}};
+    scene.shapes[innerShapeId] =
+        semantic::Shape{innerShapeId, semantic::BoxShape{10.0, 10.0, 10.0}};
 
     // The composite boolean shape.
     auto boolShapeId = scene.nextShapeId();
     scene.shapes[boolShapeId] =
-        SemanticShape{boolShapeId, BooleanSubtraction{outerShapeId, innerShapeId}};
+        semantic::Shape{boolShapeId, semantic::BooleanSubtraction{outerShapeId, innerShapeId}};
 
     auto matId = scene.nextMaterialId();
-    SourceMaterial mat;
+    semantic::SourceMaterial mat;
     mat.id = matId;
     mat.name = "aluminum";
     mat.color = glm::vec3{0.75f, 0.75f, 0.85f};
@@ -126,7 +128,7 @@ SemanticScene SyntheticSceneBuilder::buildBooleanSubtraction() {
     scene.materials[matId] = mat;
 
     auto lvId = scene.nextLogVolId();
-    scene.logVols[lvId] = SemanticLogicalVolume{lvId, "boolLV", boolShapeId, matId};
+    scene.logVols[lvId] = semantic::LogicalVolume{lvId, "boolLV", boolShapeId, matId};
 
     auto nodeId = addNode(scene, "world", lvId);
     scene.rootId = nodeId;
@@ -136,14 +138,14 @@ SemanticScene SyntheticSceneBuilder::buildBooleanSubtraction() {
 }
 
 ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
-    SemanticScene scene;
+    semantic::Scene scene;
     DiagnosticList diags;
 
     auto shapeId = scene.nextShapeId();
-    scene.shapes[shapeId] = SemanticShape{shapeId, UnknownShape{"SyntheticUnknown"}};
+    scene.shapes[shapeId] = semantic::Shape{shapeId, semantic::UnknownShape{"SyntheticUnknown"}};
 
     auto matId = scene.nextMaterialId();
-    SourceMaterial mat;
+    semantic::SourceMaterial mat;
     mat.id = matId;
     mat.name = "aluminum";
     mat.color = glm::vec3{0.75f, 0.75f, 0.85f};
@@ -151,10 +153,10 @@ ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     scene.materials[matId] = mat;
 
     auto lvId = scene.nextLogVolId();
-    scene.logVols[lvId] = SemanticLogicalVolume{lvId, "unknownLV", shapeId, matId};
+    scene.logVols[lvId] = semantic::LogicalVolume{lvId, "unknownLV", shapeId, matId};
 
     auto nodeId = scene.nextNodeId();
-    SemanticNode node;
+    semantic::Node node;
     node.id = nodeId;
     node.name = "world";
     node.logVolId = lvId;

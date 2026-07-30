@@ -30,26 +30,30 @@ nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
     return nodehammer::detail::ColorMode::Auto;
 }
 
-std::string shapeTypeName(const nodehammer::ir::SemanticShapeVariant &data) {
+std::string shapeTypeName(const nodehammer::ir::semantic::ShapeVariant &data) {
     return std::visit(
         nodehammer::detail::overloaded{
-            [](const nodehammer::ir::BoxShape &) -> std::string { return "box"; },
-            [](const nodehammer::ir::TubeShape &) -> std::string { return "tube"; },
-            [](const nodehammer::ir::ConeShape &) -> std::string { return "cone"; },
-            [](const nodehammer::ir::TrdShape &) -> std::string { return "trd"; },
-            [](const nodehammer::ir::ParaShape &) -> std::string { return "para"; },
-            [](const nodehammer::ir::PconShape &) -> std::string { return "pcon"; },
-            [](const nodehammer::ir::PgonShape &) -> std::string { return "pgon"; },
-            [](const nodehammer::ir::TorusShape &) -> std::string { return "torus"; },
-            [](const nodehammer::ir::TessellatedShape &) -> std::string { return "tessellated"; },
-            [](const nodehammer::ir::BooleanUnion &) -> std::string { return "bool/union"; },
-            [](const nodehammer::ir::BooleanIntersection &) -> std::string {
+            [](const nodehammer::ir::semantic::BoxShape &) -> std::string { return "box"; },
+            [](const nodehammer::ir::semantic::TubeShape &) -> std::string { return "tube"; },
+            [](const nodehammer::ir::semantic::ConeShape &) -> std::string { return "cone"; },
+            [](const nodehammer::ir::semantic::TrdShape &) -> std::string { return "trd"; },
+            [](const nodehammer::ir::semantic::ParaShape &) -> std::string { return "para"; },
+            [](const nodehammer::ir::semantic::PconShape &) -> std::string { return "pcon"; },
+            [](const nodehammer::ir::semantic::PgonShape &) -> std::string { return "pgon"; },
+            [](const nodehammer::ir::semantic::TorusShape &) -> std::string { return "torus"; },
+            [](const nodehammer::ir::semantic::TessellatedShape &) -> std::string {
+                return "tessellated";
+            },
+            [](const nodehammer::ir::semantic::BooleanUnion &) -> std::string {
+                return "bool/union";
+            },
+            [](const nodehammer::ir::semantic::BooleanIntersection &) -> std::string {
                 return "bool/intersect";
             },
-            [](const nodehammer::ir::BooleanSubtraction &) -> std::string {
+            [](const nodehammer::ir::semantic::BooleanSubtraction &) -> std::string {
                 return "bool/subtract";
             },
-            [](const nodehammer::ir::UnknownShape &s) -> std::string {
+            [](const nodehammer::ir::semantic::UnknownShape &s) -> std::string {
                 return std::format("unknown({})", s.originalType);
             },
         },
@@ -64,14 +68,14 @@ std::string formatTranslation(const glm::dmat4 &m) {
     return std::format("{:.1f}, {:.1f}, {:.1f}", x, y, z);
 }
 
-void printRichTree(const nodehammer::ir::SemanticScene &scene, int maxDepth,
+void printRichTree(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
                    const std::string &filter, const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
 
     struct Entry {
-        nodehammer::ir::SemanticNodeId id;
+        nodehammer::ir::semantic::NodeId id;
         int depth;
         std::string prefix;
         bool isLast;

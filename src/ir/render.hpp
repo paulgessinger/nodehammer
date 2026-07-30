@@ -3,8 +3,8 @@
 #include <ankerl/unordered_dense.h>
 #include <glm/glm.hpp>
 #include <ir/provenance.hpp>
-#include <ir/semantic.hpp>   // StrongId, SemanticNodeId
-#include <nlohmann/json.hpp> // RenderExtrasMap is an alias for nlohmann::json
+#include <ir/semantic.hpp>   // StrongId, semantic::NodeId
+#include <nlohmann/json.hpp> // ExtrasMap is an alias for nlohmann::json
 
 // The JSON codec for these types lives in render_json.hpp / render_json.cpp so
 // this header stays free of the Semantic IR's codec and cheap to include.
@@ -13,17 +13,17 @@
 #include <string>
 #include <vector>
 
-namespace nodehammer::ir {
+namespace nodehammer::ir::render {
 
 // ── Strong IDs ────────────────────────────────────────────────────────────────
 
-struct RenderNodeTag {};
+struct NodeTag {};
 struct MeshAssetTag {};
-struct RenderMaterialTag {};
+struct MaterialTag {};
 
-using RenderNodeId = StrongId<RenderNodeTag>;
+using NodeId = StrongId<NodeTag>;
 using MeshAssetId = StrongId<MeshAssetTag>;
-using RenderMaterialId = StrongId<RenderMaterialTag>;
+using MaterialId = StrongId<MaterialTag>;
 
 // ── Mesh asset (shared geometry, immutable) ───────────────────────────────────
 
@@ -59,8 +59,8 @@ struct MeshAsset {
 
 // ── Material (per-instance binding) ──────────────────────────────────────────
 
-struct RenderMaterial {
-    RenderMaterialId id;
+struct Material {
+    MaterialId id;
     std::string name;
 
     // PBR metallic-roughness
@@ -94,25 +94,25 @@ struct RenderMaterial {
 
 struct MeshBinding {
     MeshAssetId meshId;
-    RenderMaterialId materialId;
+    MaterialId materialId;
 };
 
 // ── Extras ────────────────────────────────────────────────────────────────────
 
 /// Free-form metadata for export, emitted as glTF extras or similar.
-using RenderExtrasMap = nlohmann::json;
+using ExtrasMap = nlohmann::json;
 
 // ── Render node ───────────────────────────────────────────────────────────────
 
-struct RenderNode {
-    RenderNodeId id;
+struct Node {
+    NodeId id;
     std::string name;
 
-    glm::mat4 localTransform{1.f}; ///< float: from SemanticNode::localTransform
-    glm::mat4 worldTransform{1.f}; ///< float: from SemanticNode::worldTransform
+    glm::mat4 localTransform{1.f}; ///< float: from semantic::Node::localTransform
+    glm::mat4 worldTransform{1.f}; ///< float: from semantic::Node::worldTransform
 
-    std::optional<RenderNodeId> parentId;
-    std::vector<RenderNodeId> children;
+    std::optional<NodeId> parentId;
+    std::vector<NodeId> children;
 
     /// Mesh bindings for this instance (placement-aware: material on instance, not asset)
     std::vector<MeshBinding> meshBindings;
@@ -125,25 +125,25 @@ struct RenderNode {
     std::vector<MeshBinding> lodProxyBindings;
 
     /// Back-reference to the semantic node that produced this render node
-    SemanticNodeId semanticNodeId;
+    semantic::NodeId semanticNodeId;
 
     /// Free-form metadata for export (e.g. glTF scene extras)
-    RenderExtrasMap extras;
+    ExtrasMap extras;
 };
 
 // ── Render scene ─────────────────────────────────────────────────────────────
 
-struct RenderScene {
-    RenderNodeId rootId;
+struct Scene {
+    NodeId rootId;
 
-    ankerl::unordered_dense::map<RenderNodeId, RenderNode> nodes;
+    ankerl::unordered_dense::map<NodeId, Node> nodes;
     ankerl::unordered_dense::map<MeshAssetId, MeshAsset> meshAssets;
-    ankerl::unordered_dense::map<RenderMaterialId, RenderMaterial> materials;
+    ankerl::unordered_dense::map<MaterialId, Material> materials;
 
     // ID allocation
-    RenderNodeId nextNodeId() { return RenderNodeId{nextNodeId_++}; }
+    NodeId nextNodeId() { return NodeId{nextNodeId_++}; }
     MeshAssetId nextMeshId() { return MeshAssetId{nextMeshId_++}; }
-    RenderMaterialId nextMaterialId() { return RenderMaterialId{nextMaterialId_++}; }
+    MaterialId nextMaterialId() { return MaterialId{nextMaterialId_++}; }
 
   private:
     uint64_t nextNodeId_{1};
@@ -151,4 +151,4 @@ struct RenderScene {
     uint64_t nextMaterialId_{1};
 };
 
-} // namespace nodehammer::ir
+} // namespace nodehammer::ir::render

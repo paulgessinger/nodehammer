@@ -162,8 +162,8 @@ struct App::Impl {
     // shader cut while dragging), `cut_scene` is the watertight Boolean-cut bake
     // (shown once the angle settles). They never apply both cuts at the same time
     // (that z-fights the shader's discard plane against the Boolean cut faces).
-    std::shared_ptr<const ir::RenderScene> scene;
-    std::shared_ptr<const ir::RenderScene> cut_scene;
+    std::shared_ptr<const ir::render::Scene> scene;
+    std::shared_ptr<const ir::render::Scene> cut_scene;
     std::unique_ptr<ProjectFs> project_;
     /// Platform impl: native vs web. Constructed by App's ctor body
     /// after this Impl is in place, so the impl can hold a back-pointer
@@ -719,13 +719,13 @@ void App::Impl::onInit() {
     build_controller_.configure(&notifications,
                                 BuildController::Callbacks{
                                     .on_base_scene_ready =
-                                        [this](std::shared_ptr<const ir::RenderScene> s) {
+                                        [this](std::shared_ptr<const ir::render::Scene> s) {
                                             scene = std::move(s);
                                             scene_uploaded = false;
                                             camera_framed = false;
                                         },
                                     .on_cut_scene_ready =
-                                        [this](std::shared_ptr<const ir::RenderScene> s) {
+                                        [this](std::shared_ptr<const ir::render::Scene> s) {
                                             cut_scene = std::move(s);
                                             cut_uploaded = false;
                                         },
@@ -2842,7 +2842,7 @@ void App::Impl::onCleanup() {
     sg_shutdown();
 }
 
-void App::setScene(std::shared_ptr<const ir::RenderScene> scene) {
+void App::setScene(std::shared_ptr<const ir::render::Scene> scene) {
     impl_->scene = std::move(scene);
     impl_->scene_uploaded = false;
     impl_->camera_framed = false;

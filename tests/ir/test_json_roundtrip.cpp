@@ -5,7 +5,7 @@
 #include <ir/semantic_json.hpp>
 
 TEST_CASE("to_json: BoxShape serialization", "[ir][json]") {
-    nodehammer::ir::BoxShape box{1.0, 2.0, 3.0};
+    nodehammer::ir::semantic::BoxShape box{1.0, 2.0, 3.0};
     nlohmann::json j = box;
     REQUIRE(j["type"] == "box");
     REQUIRE(j["dx"] == Catch::Approx(1.0));
@@ -13,11 +13,11 @@ TEST_CASE("to_json: BoxShape serialization", "[ir][json]") {
     REQUIRE(j["dz"] == Catch::Approx(3.0));
 }
 
-TEST_CASE("to_json: SemanticNode serialization", "[ir][json]") {
-    nodehammer::ir::SemanticNode node;
-    node.id = nodehammer::ir::SemanticNodeId{42};
+TEST_CASE("to_json: semantic::Node serialization", "[ir][json]") {
+    nodehammer::ir::semantic::Node node;
+    node.id = nodehammer::ir::semantic::NodeId{42};
     node.name = "testNode";
-    node.logVolId = nodehammer::ir::SemanticLogVolId{7};
+    node.logVolId = nodehammer::ir::semantic::LogVolId{7};
     node.tags["subdetector"] = "tracker";
     node.sourceSystem = "tgeo";
 
@@ -29,9 +29,9 @@ TEST_CASE("to_json: SemanticNode serialization", "[ir][json]") {
     REQUIRE(j["sourceSystem"] == "tgeo");
 }
 
-TEST_CASE("to_json: RenderMaterial serialization", "[ir][json]") {
-    nodehammer::ir::RenderMaterial mat;
-    mat.id = nodehammer::ir::RenderMaterialId{1};
+TEST_CASE("to_json: render::Material serialization", "[ir][json]") {
+    nodehammer::ir::render::Material mat;
+    mat.id = nodehammer::ir::render::MaterialId{1};
     mat.name = "steel";
     mat.baseColorFactor = glm::vec4{0.5f, 0.5f, 0.5f, 1.f};
     mat.metallicFactor = 0.8f;
@@ -45,8 +45,8 @@ TEST_CASE("to_json: RenderMaterial serialization", "[ir][json]") {
 }
 
 TEST_CASE("to_json: MeshAsset serialization", "[ir][json]") {
-    nodehammer::ir::MeshAsset asset;
-    asset.id = nodehammer::ir::MeshAssetId{3};
+    nodehammer::ir::render::MeshAsset asset;
+    asset.id = nodehammer::ir::render::MeshAssetId{3};
     asset.name = "boxMesh";
     asset.provenance.sourceSystem = "synthetic";
 
@@ -64,11 +64,11 @@ TEST_CASE("to_json: MeshAsset serialization", "[ir][json]") {
     REQUIRE(j["provenance"]["sourceSystem"] == "synthetic");
 }
 
-TEST_CASE("to_json: RenderNode extras", "[ir][json]") {
-    nodehammer::ir::RenderNode node;
-    node.id = nodehammer::ir::RenderNodeId{1};
+TEST_CASE("to_json: render::Node extras", "[ir][json]") {
+    nodehammer::ir::render::Node node;
+    node.id = nodehammer::ir::render::NodeId{1};
     node.name = "volume";
-    node.semanticNodeId = nodehammer::ir::SemanticNodeId{9};
+    node.semanticNodeId = nodehammer::ir::semantic::NodeId{9};
 
     SECTION("populated extras are emitted") {
         node.extras = {{"detector", "tracker"}};
@@ -83,7 +83,7 @@ TEST_CASE("to_json: RenderNode extras", "[ir][json]") {
 }
 
 TEST_CASE("to_json: TubeShape serialization", "[ir][json]") {
-    nodehammer::ir::TubeShape tube{5.0, 10.0, 20.0, 0.0, 3.14159265};
+    nodehammer::ir::semantic::TubeShape tube{5.0, 10.0, 20.0, 0.0, 3.14159265};
     nlohmann::json j = tube;
     REQUIRE(j["type"] == "tube");
     REQUIRE(j["rMin"] == Catch::Approx(5.0));
@@ -91,7 +91,7 @@ TEST_CASE("to_json: TubeShape serialization", "[ir][json]") {
 }
 
 TEST_CASE("to_json: UnknownShape serialization", "[ir][json]") {
-    nodehammer::ir::UnknownShape unk{"TGeoArb8"};
+    nodehammer::ir::semantic::UnknownShape unk{"TGeoArb8"};
     nlohmann::json j = unk;
     REQUIRE(j["type"] == "unknown");
     REQUIRE(j["originalType"] == "TGeoArb8");

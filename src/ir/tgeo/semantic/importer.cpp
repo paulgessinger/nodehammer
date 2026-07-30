@@ -31,20 +31,20 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 }
 
 struct ImportState {
-    SemanticScene &scene;
+    semantic::Scene &scene;
     DiagnosticList &diags;
-    std::unordered_map<const TGeoVolume *, SemanticLogVolId> lvCache;
-    std::unordered_map<const TGeoShape *, SemanticShapeId> shapeCache;
-    std::unordered_map<const TGeoMaterial *, SemanticMaterialId> matCache;
-    std::unordered_map<const TGeoNode *, SemanticNodeId> nodeMap;
+    std::unordered_map<const TGeoVolume *, semantic::LogVolId> lvCache;
+    std::unordered_map<const TGeoShape *, semantic::ShapeId> shapeCache;
+    std::unordered_map<const TGeoMaterial *, semantic::MaterialId> matCache;
+    std::unordered_map<const TGeoNode *, semantic::NodeId> nodeMap;
 };
 
-SemanticMaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
+semantic::MaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
     const TGeoMaterial *mat = vol->GetMaterial();
     if (mat == nullptr) {
         st.diags.warn(codes::kWarnImportNoMaterial,
                       std::format("volume '{}' has no material", vol->GetName()));
-        const SemanticMaterialId id = st.scene.nextMaterialId();
+        const semantic::MaterialId id = st.scene.nextMaterialId();
         st.scene.materials[id] = {id, "<none>", std::nullopt, 0.0};
         return id;
     }
@@ -54,8 +54,8 @@ SemanticMaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
         return it->second;
     }
 
-    const SemanticMaterialId id = st.scene.nextMaterialId();
-    SourceMaterial sm;
+    const semantic::MaterialId id = st.scene.nextMaterialId();
+    semantic::SourceMaterial sm;
     sm.id = id;
     sm.name = mat->GetName();
     sm.density = mat->GetDensity();
@@ -72,7 +72,7 @@ SemanticMaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
     return id;
 }
 
-SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
+semantic::LogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
     auto it = st.lvCache.find(vol);
     if (it != st.lvCache.end()) {
         return it->second;
@@ -80,39 +80,39 @@ SemanticLogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
 
     const TGeoShape *geoShape = vol->GetShape();
     auto sit = st.shapeCache.find(geoShape);
-    SemanticShapeId shapeId;
+    semantic::ShapeId shapeId;
     if (sit != st.shapeCache.end()) {
         shapeId = sit->second;
     } else {
         shapeId = dispatchTGeoShape(geoShape, st.scene, st.diags);
         st.shapeCache[geoShape] = shapeId;
     }
-    const SemanticMaterialId matId = importMaterial(vol, st);
+    const semantic::MaterialId matId = importMaterial(vol, st);
 
-    const SemanticLogVolId id = st.scene.nextLogVolId();
+    const semantic::LogVolId id = st.scene.nextLogVolId();
     st.scene.logVols[id] = {id, vol->GetName(), shapeId, matId};
     st.lvCache[vol] = id;
 
-    std::vector<SemanticDaughterPlacement> daughters;
+    std::vector<semantic::DaughterPlacement> daughters;
     for (int i = 0; i < vol->GetNdaughters(); ++i) {
         const TGeoNode *daughter = vol->GetNode(i);
         if (daughter == nullptr || daughter->GetVolume() == nullptr) {
             continue;
         }
-        daughters.push_back(SemanticDaughterPlacement{daughter->GetName(),
-                                                      importLogVol(daughter->GetVolume(), st),
-                                                      tgeoMatrixToGlm(daughter->GetMatrix())});
+        daughters.push_back(semantic::DaughterPlacement{daughter->GetName(),
+                                                        importLogVol(daughter->GetVolume(), st),
+                                                        tgeoMatrixToGlm(daughter->GetMatrix())});
     }
     st.scene.logVols.at(id).daughters = std::move(daughters);
     return id;
 }
 
-SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> parentId,
-                          ImportState &st) {
-    const SemanticNodeId id = st.scene.nextNodeId();
+semantic::NodeId importNode(const TGeoNode *node, std::optional<semantic::NodeId> parentId,
+                            ImportState &st) {
+    const semantic::NodeId id = st.scene.nextNodeId();
     st.nodeMap[node] = id;
 
-    SemanticNode sn;
+    semantic::Node sn;
     sn.id = id;
     sn.name = node->GetName();
     sn.logVolId = importLogVol(node->GetVolume(), st);
@@ -124,7 +124,7 @@ SemanticNodeId importNode(const TGeoNode *node, std::optional<SemanticNodeId> pa
 
     for (int i = 0; i < node->GetNdaughters(); ++i) {
         const TGeoNode *child = node->GetDaughter(i);
-        const SemanticNodeId childId = importNode(child, id, st);
+        const semantic::NodeId childId = importNode(child, id, st);
         st.scene.nodes[id].children.push_back(childId);
     }
 
@@ -139,7 +139,7 @@ TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile
     ImportState st{tr.result.scene, tr.result.diags, {}, {}, {}, {}};
 
     TGeoNode *topNode = mgr->GetTopNode();
-    const SemanticNodeId rootId = importNode(topNode, std::nullopt, st);
+    const semantic::NodeId rootId = importNode(topNode, std::nullopt, st);
     tr.result.scene.rootId = rootId;
     tr.result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
 
