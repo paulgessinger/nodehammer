@@ -15,7 +15,7 @@
 #include <format>
 #include <unordered_map>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -179,4 +179,4 @@ ImportResult TGeoImporter::import(TGeoManager *mgr) const {
     return traverseTGeoManager(mgr, mgr->GetName()).result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

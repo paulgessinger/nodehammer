@@ -10,7 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 void to_json(nlohmann::json &j, const Vertex &v);
 void to_json(nlohmann::json &j, const MeshAsset &a);
@@ -19,4 +19,4 @@ void to_json(nlohmann::json &j, const MeshBinding &b);
 void to_json(nlohmann::json &j, const RenderNode &n);
 void to_json(nlohmann::json &j, const RenderScene &sc);
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

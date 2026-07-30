@@ -12,13 +12,13 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 /// Returned by ConfigLoader. Always valid — check diags.hasErrors() to determine whether
 /// the config can be used. On a fatal parse error, config is default-initialized.
 struct ConfigResult {
     NHConfig config;
-    DiagnosticList diags;
+    ir::DiagnosticList diags;
 };
 
 /// Synchronous byte fetcher used by `parseAndMerge` to look up the bytes
@@ -65,4 +65,4 @@ struct ConfigLoader {
                                                     IncludeFetcher fetcher);
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::config

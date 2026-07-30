@@ -41,7 +41,7 @@ void registerCmdConfigLua(CLI::App &app) {
         const std::filesystem::path baseDir =
             scriptPath.has_parent_path() ? scriptPath.parent_path() : std::filesystem::path{"."};
 
-        auto result = nodehammer::evalLuaConfig(buf.str(), configPath, baseDir);
+        auto result = nodehammer::lua::evalLuaConfig(buf.str(), configPath, baseDir);
         nodehammer::cli::printDiags(result.diags);
         if (result.diags.hasErrors()) {
             std::println(stderr, "config-lua: evaluation failed");
@@ -49,7 +49,7 @@ void registerCmdConfigLua(CLI::App &app) {
         }
 
         if (*validate) {
-            auto validationDiags = nodehammer::ConfigValidator::validate(result.config);
+            auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
             nodehammer::cli::printDiags(validationDiags);
             if (validationDiags.hasErrors()) {
                 std::println(stderr, "config-lua: validation failed");
@@ -57,7 +57,7 @@ void registerCmdConfigLua(CLI::App &app) {
             }
         }
 
-        const std::string toml = nodehammer::configToToml(result.config);
+        const std::string toml = nodehammer::config::configToToml(result.config);
 
         if (*outOpt) {
             std::string outPath;

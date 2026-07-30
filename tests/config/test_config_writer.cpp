@@ -4,6 +4,7 @@
 #include <config/config_writer.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::config;
 
 // ── Helper: round-trip through TOML ─────────────────────────────────────────
 

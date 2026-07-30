@@ -9,6 +9,9 @@
 #include <unordered_set>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::config;
+using namespace nodehammer::selection;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

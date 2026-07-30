@@ -5,11 +5,11 @@
 #include <ir/render.hpp>
 #include <ir/semantic.hpp>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 struct TessellationPassResult {
-    RenderScene scene;
-    DiagnosticList diags;
+    ir::RenderScene scene;
+    ir::DiagnosticList diags;
 };
 
 /// Lowers a SemanticScene to a RenderScene.
@@ -29,12 +29,12 @@ struct TessellationPassResult {
 /// UnknownShape nodes always emit NH0500 error; meshBinding is absent for that node.
 class TessellationPass {
   public:
-    explicit TessellationPass(const NHConfig &config);
+    explicit TessellationPass(const config::NHConfig &config);
 
-    [[nodiscard]] TessellationPassResult lower(const SemanticScene &scene) const;
+    [[nodiscard]] TessellationPassResult lower(const ir::SemanticScene &scene) const;
 
   private:
-    const NHConfig &config_;
+    const config::NHConfig &config_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

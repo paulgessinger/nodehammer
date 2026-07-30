@@ -45,6 +45,10 @@
 namespace {
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::pipeline;
+using namespace nodehammer::tessellation;
+using namespace nodehammer::config;
 
 // Phase codes posted to the main thread; the JS side maps them to labels.
 // Ordered to mirror BuildPipeline::Phase (Preparing/Cutting/Tessellating/Finalizing).

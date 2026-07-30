@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::viewer {
 
 /// Push-mode error/warning channel. Subsystems that produce diagnostics
 /// (project filesystems, build session, importers) take an optional
@@ -112,4 +112,4 @@ class LogSinkHolder {
     std::vector<PendingDiag> pending_diags_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::viewer

@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <memory>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 /// Cooperative, iterator-driven version of `TessellationPass::lower`. The
 /// pass walks every reachable `SemanticNode` once; this class lets the
@@ -27,7 +27,7 @@ class TessellationJob {
 
     /// Initialise the job. Compiles rule predicates and seeds the BFS
     /// queue with the scene root.
-    void start(const NHConfig &config, const SemanticScene &scene);
+    void start(const config::NHConfig &config, const ir::SemanticScene &scene);
 
     /// Process pending semantic nodes for up to `budget_ns` of wall-clock
     /// time. The atomic unit is one outer-BFS iteration (one semantic
@@ -52,4 +52,4 @@ class TessellationJob {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

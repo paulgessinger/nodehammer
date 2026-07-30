@@ -19,7 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -1243,4 +1243,4 @@ SemanticScene semanticSceneFromBytes(std::span<const std::byte> buf) {
     return semanticSceneFromFlatBuffer(*fb);
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

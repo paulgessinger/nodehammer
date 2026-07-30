@@ -4,7 +4,7 @@
 #include <format>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 namespace {
 
@@ -455,4 +455,4 @@ PredicateExpr combineAnd(std::vector<PredicateExpr> operands) {
     return PredicateExpr{std::make_shared<AndPredicate>(AndPredicate{std::move(operands)})};
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::config

@@ -17,7 +17,7 @@
 
 #include <format>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -144,4 +144,4 @@ SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, SemanticScene &scene,
     return id;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

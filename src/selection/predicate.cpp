@@ -3,7 +3,7 @@
 
 #include <memory>
 
-namespace nodehammer {
+namespace nodehammer::selection {
 
 // ── matchGlob ─────────────────────────────────────────────────────────────────
 //
@@ -298,20 +298,24 @@ Predicate makeNotPredicate(Predicate operand) {
 
 // ── compilePredicate ──────────────────────────────────────────────────────────
 
-Predicate compilePredicate(const PredicateExpr &expr) {
+Predicate compilePredicate(const config::PredicateExpr &expr) {
     return std::visit(
         detail::overloaded{
-            [](const NameGlobPredicate &node) { return makeNameGlobPredicate(node.pattern); },
-            [](const PathGlobPredicate &node) { return makePathGlobPredicate(node.pattern); },
-            [](const MaterialGlobPredicate &node) {
+            [](const config::NameGlobPredicate &node) {
+                return makeNameGlobPredicate(node.pattern);
+            },
+            [](const config::PathGlobPredicate &node) {
+                return makePathGlobPredicate(node.pattern);
+            },
+            [](const config::MaterialGlobPredicate &node) {
                 return makeMaterialGlobPredicate(node.pattern);
             },
-            [](const TagPredicate &node) { return makeTagPredicate(node.key, node.value); },
-            [](const IsLeafPredicate &) { return makeIsLeafPredicate(); },
-            [](const BoolPredicate &node) -> Predicate {
+            [](const config::TagPredicate &node) { return makeTagPredicate(node.key, node.value); },
+            [](const config::IsLeafPredicate &) { return makeIsLeafPredicate(); },
+            [](const config::BoolPredicate &node) -> Predicate {
                 return [v = node.value](const NodeView &) { return v; };
             },
-            [](const std::shared_ptr<AndPredicate> &node) -> Predicate {
+            [](const std::shared_ptr<config::AndPredicate> &node) -> Predicate {
                 std::vector<Predicate> ops;
                 ops.reserve(node->operands.size());
                 for (const auto &operand : node->operands) {
@@ -319,7 +323,7 @@ Predicate compilePredicate(const PredicateExpr &expr) {
                 }
                 return makeAndPredicate(std::move(ops));
             },
-            [](const std::shared_ptr<OrPredicate> &node) {
+            [](const std::shared_ptr<config::OrPredicate> &node) {
                 std::vector<Predicate> ops;
                 ops.reserve(node->operands.size());
                 for (const auto &operand : node->operands) {
@@ -327,11 +331,11 @@ Predicate compilePredicate(const PredicateExpr &expr) {
                 }
                 return makeOrPredicate(std::move(ops));
             },
-            [](const std::shared_ptr<NotPredicate> &node) {
+            [](const std::shared_ptr<config::NotPredicate> &node) {
                 return makeNotPredicate(compilePredicate(node->operand));
             },
         },
         expr.data);
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::selection

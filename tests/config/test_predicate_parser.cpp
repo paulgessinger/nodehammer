@@ -2,6 +2,7 @@
 #include <config/predicate_parser.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::config;
 
 // ── Helper: assert parse succeeds and return the expression ──────────────────
 

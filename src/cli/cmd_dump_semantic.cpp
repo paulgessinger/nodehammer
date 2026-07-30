@@ -30,22 +30,26 @@ nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
     return nodehammer::detail::ColorMode::Auto;
 }
 
-std::string shapeTypeName(const nodehammer::SemanticShapeVariant &data) {
+std::string shapeTypeName(const nodehammer::ir::SemanticShapeVariant &data) {
     return std::visit(
         nodehammer::detail::overloaded{
-            [](const nodehammer::BoxShape &) -> std::string { return "box"; },
-            [](const nodehammer::TubeShape &) -> std::string { return "tube"; },
-            [](const nodehammer::ConeShape &) -> std::string { return "cone"; },
-            [](const nodehammer::TrdShape &) -> std::string { return "trd"; },
-            [](const nodehammer::ParaShape &) -> std::string { return "para"; },
-            [](const nodehammer::PconShape &) -> std::string { return "pcon"; },
-            [](const nodehammer::PgonShape &) -> std::string { return "pgon"; },
-            [](const nodehammer::TorusShape &) -> std::string { return "torus"; },
-            [](const nodehammer::TessellatedShape &) -> std::string { return "tessellated"; },
-            [](const nodehammer::BooleanUnion &) -> std::string { return "bool/union"; },
-            [](const nodehammer::BooleanIntersection &) -> std::string { return "bool/intersect"; },
-            [](const nodehammer::BooleanSubtraction &) -> std::string { return "bool/subtract"; },
-            [](const nodehammer::UnknownShape &s) -> std::string {
+            [](const nodehammer::ir::BoxShape &) -> std::string { return "box"; },
+            [](const nodehammer::ir::TubeShape &) -> std::string { return "tube"; },
+            [](const nodehammer::ir::ConeShape &) -> std::string { return "cone"; },
+            [](const nodehammer::ir::TrdShape &) -> std::string { return "trd"; },
+            [](const nodehammer::ir::ParaShape &) -> std::string { return "para"; },
+            [](const nodehammer::ir::PconShape &) -> std::string { return "pcon"; },
+            [](const nodehammer::ir::PgonShape &) -> std::string { return "pgon"; },
+            [](const nodehammer::ir::TorusShape &) -> std::string { return "torus"; },
+            [](const nodehammer::ir::TessellatedShape &) -> std::string { return "tessellated"; },
+            [](const nodehammer::ir::BooleanUnion &) -> std::string { return "bool/union"; },
+            [](const nodehammer::ir::BooleanIntersection &) -> std::string {
+                return "bool/intersect";
+            },
+            [](const nodehammer::ir::BooleanSubtraction &) -> std::string {
+                return "bool/subtract";
+            },
+            [](const nodehammer::ir::UnknownShape &s) -> std::string {
                 return std::format("unknown({})", s.originalType);
             },
         },
@@ -60,14 +64,14 @@ std::string formatTranslation(const glm::dmat4 &m) {
     return std::format("{:.1f}, {:.1f}, {:.1f}", x, y, z);
 }
 
-void printRichTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
-                   const nodehammer::detail::Console &con) {
+void printRichTree(const nodehammer::ir::SemanticScene &scene, int maxDepth,
+                   const std::string &filter, const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
 
     struct Entry {
-        nodehammer::SemanticNodeId id;
+        nodehammer::ir::SemanticNodeId id;
         int depth;
         std::string prefix;
         bool isLast;
@@ -94,7 +98,7 @@ void printRichTree(const nodehammer::SemanticScene &scene, int maxDepth, const s
 
         bool show = true;
         if (!filter.empty()) {
-            show = nodehammer::matchGlob(filter, node.originalPath);
+            show = nodehammer::selection::matchGlob(filter, node.originalPath);
         }
 
         if (show) {
@@ -210,18 +214,18 @@ void registerCmdDumpSemantic(CLI::App &app) {
 
     sub->callback([=] {
         // ── Load config (optional) ─────────────────────────────────────────────
-        nodehammer::NHConfig cfg;
+        nodehammer::config::NHConfig cfg;
         if (*configOpt) {
             std::string cfgPath;
             configOpt->results(cfgPath);
-            auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
+            auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
             nodehammer::cli::printDiags(loaded.diags);
             if (loaded.diags.hasErrors()) {
                 std::println(stderr, "dump-semantic: config load failed");
                 return;
             }
             cfg = std::move(loaded.config);
-            auto validDiags = nodehammer::ConfigValidator::validate(cfg);
+            auto validDiags = nodehammer::config::ConfigValidator::validate(cfg);
             nodehammer::cli::printDiags(validDiags);
             if (validDiags.hasErrors()) {
                 std::println(stderr, "dump-semantic: config validation failed");
@@ -235,7 +239,7 @@ void registerCmdDumpSemantic(CLI::App &app) {
 
         // ── Select ─────────────────────────────────────────────────────────────
         if (!cfg.selection.empty()) {
-            nodehammer::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
+            nodehammer::selection::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
             auto selDiags = sel.prune(result.scene);
             nodehammer::cli::printDiags(selDiags);
         }
@@ -248,8 +252,8 @@ void registerCmdDumpSemantic(CLI::App &app) {
         }
 
         if (sizeReportOpt->count() > 0) {
-            auto report = nodehammer::semanticFlatbufferSizeReport(result.scene);
-            std::print(stderr, "{}", nodehammer::formatSemanticFlatbufferSizeReport(report));
+            auto report = nodehammer::ir::semanticFlatbufferSizeReport(result.scene);
+            std::print(stderr, "{}", nodehammer::ir::formatSemanticFlatbufferSizeReport(report));
         }
 
         // ── Output ─────────────────────────────────────────────────────────────
@@ -287,8 +291,8 @@ void registerCmdDumpSemantic(CLI::App &app) {
                 return;
             }
 
-            auto exporters = nodehammer::SemanticExporterRegistry::makeDefault();
-            const nodehammer::ISemanticExporter *exporter = nullptr;
+            auto exporters = nodehammer::ir::SemanticExporterRegistry::makeDefault();
+            const nodehammer::ir::ISemanticExporter *exporter = nullptr;
 
             // Preserve prior behavior:
             // 1) explicit --output-format wins
@@ -311,7 +315,7 @@ void registerCmdDumpSemantic(CLI::App &app) {
                 return;
             }
 
-            nodehammer::SemanticExportConfig exportCfg;
+            nodehammer::ir::SemanticExportConfig exportCfg;
             auto exportResult = exporter->write(result.scene, outPath, exportCfg);
             nodehammer::cli::printDiags(exportResult.diags);
             if (exportResult.diags.hasErrors()) {

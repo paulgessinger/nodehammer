@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -213,4 +213,4 @@ struct NHConfig {
     std::optional<ExtrasMap> extrasDefaults;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::config

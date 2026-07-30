@@ -7,10 +7,10 @@
 #include <string>
 #include <utility>
 
-using nodehammer::ExportConfig;
-using nodehammer::NHConfig;
-using nodehammer::resolveExportConfig;
-using Format = nodehammer::ExportConfig::Format;
+using nodehammer::config::NHConfig;
+using nodehammer::ir::ExportConfig;
+using nodehammer::pipeline::resolveExportConfig;
+using Format = nodehammer::ir::ExportConfig::Format;
 
 namespace {
 
@@ -38,8 +38,8 @@ struct ObjOpts {
 // 14 and 15 at -O3: `variant::operator=(T&&)` builds an internal temporary, and
 // GCC cannot prove the disengaged `optional<std::string>` payload inside it is
 // never read. Building the variant here keeps the workaround in one place.
-nodehammer::ExportFormatConfig gltfTable(GltfOpts o) {
-    nodehammer::GltfExportFormatConfig g;
+nodehammer::config::ExportFormatConfig gltfTable(GltfOpts o) {
+    nodehammer::config::GltfExportFormatConfig g;
     g.common.unitScale = o.unitScale;
     g.bakeUnitScale = o.bake;
     g.multiScene = o.multiScene;
@@ -47,8 +47,8 @@ nodehammer::ExportFormatConfig gltfTable(GltfOpts o) {
     return g;
 }
 
-nodehammer::ExportFormatConfig objTable(ObjOpts o) {
-    nodehammer::ObjExportFormatConfig obj;
+nodehammer::config::ExportFormatConfig objTable(ObjOpts o) {
+    nodehammer::config::ObjExportFormatConfig obj;
     obj.common.unitScale = o.unitScale;
     return obj;
 }

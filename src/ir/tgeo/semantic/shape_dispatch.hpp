@@ -5,7 +5,7 @@
 
 class TGeoShape;
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// Dispatch a TGeoShape* to the matching SemanticShapeVariant, register the
 /// resulting SemanticShape in the scene, and return its ID.
@@ -16,4 +16,4 @@ namespace nodehammer {
 [[nodiscard]] SemanticShapeId dispatchTGeoShape(const TGeoShape *shape, SemanticScene &scene,
                                                 DiagnosticList &diags);
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

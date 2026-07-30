@@ -1,11 +1,11 @@
 #pragma once
 
-#include <config/config_loader.hpp> // ConfigResult
+#include <config/config_loader.hpp> // config::ConfigResult
 
 #include <filesystem>
 #include <string_view>
 
-namespace nodehammer {
+namespace nodehammer::lua {
 
 /// Evaluate a Lua config script into an NHConfig.
 ///
@@ -26,7 +26,7 @@ namespace nodehammer {
 /// This is the Option-A core of the scripting front-end: the `config-lua` CLI
 /// command wraps it with `configToToml`. The same entry point can later back an
 /// embedded `ConfigLoader::loadFromLua` (Option B) unchanged.
-[[nodiscard]] ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
-                                         const std::filesystem::path &baseDir);
+[[nodiscard]] config::ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
+                                                 const std::filesystem::path &baseDir);
 
-} // namespace nodehammer
+} // namespace nodehammer::lua

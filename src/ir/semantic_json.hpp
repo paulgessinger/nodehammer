@@ -16,7 +16,7 @@
 
 #include <cstdint>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // ── Strong IDs (templated → header) ────────────────────────────────────────────
 
@@ -73,4 +73,4 @@ void from_json(const nlohmann::json &j, SemanticNode &n);
 void to_json(nlohmann::json &j, const SemanticScene &sc);
 void from_json(const nlohmann::json &j, SemanticScene &sc);
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

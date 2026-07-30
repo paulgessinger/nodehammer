@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::selection {
 
 // ── NodeView ──────────────────────────────────────────────────────────────────
 // Lightweight projection of a SemanticNode used by all predicates.
@@ -61,7 +61,7 @@ using Predicate = std::function<bool(const NodeView &)>;
 // ── Compiler ──────────────────────────────────────────────────────────────────
 
 /// Recursively compiles a PredicateExpr AST node into a callable Predicate.
-[[nodiscard]] Predicate compilePredicate(const PredicateExpr &expr);
+[[nodiscard]] Predicate compilePredicate(const config::PredicateExpr &expr);
 
 // ── Internal glob utility (exposed for testing) ───────────────────────────────
 
@@ -71,4 +71,4 @@ using Predicate = std::function<bool(const NodeView &)>;
 /// Matching is case-sensitive. '?' is treated as a literal character.
 [[nodiscard]] bool matchGlob(std::string_view pattern, std::string_view text);
 
-} // namespace nodehammer
+} // namespace nodehammer::selection

@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // ── Export configuration ──────────────────────────────────────────────────────
 
@@ -136,4 +136,4 @@ class RenderExporterRegistry {
     std::vector<std::unique_ptr<IRenderExporter>> exporters_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

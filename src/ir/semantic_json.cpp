@@ -2,7 +2,7 @@
 
 #include <numbers>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // ── Provenance / degradation ───────────────────────────────────────────────────
 
@@ -429,4 +429,4 @@ void to_json(nlohmann::json &j, const SemanticScene &sc) {
     }
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

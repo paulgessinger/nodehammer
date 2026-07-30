@@ -60,8 +60,8 @@ inline void transformAabb(const glm::mat4 &m, const glm::vec3 &lmin, const glm::
 }
 
 struct InstanceGroupKey {
-    MeshAssetId mesh;
-    RenderMaterialId material;
+    ir::MeshAssetId mesh;
+    ir::RenderMaterialId material;
     bool operator==(const InstanceGroupKey &o) const noexcept {
         return mesh == o.mesh && material == o.material;
     }
@@ -203,7 +203,7 @@ struct SceneRenderer::Impl {
     sg_buffer instance_buf{};
     size_t instance_buf_capacity{0}; // bytes
 
-    ankerl::unordered_dense::map<MeshAssetId, GpuMesh> meshes;
+    ankerl::unordered_dense::map<ir::MeshAssetId, GpuMesh> meshes;
     struct GpuMaterial {
         glm::vec4 base_color{0.8f, 0.8f, 0.8f, 1.f};
         glm::vec4 mr{0.f, 0.5f, 0.f, 0.f};           // x=metallic, y=roughness
@@ -211,7 +211,7 @@ struct SceneRenderer::Impl {
         glm::vec4 alpha_params{0.f, 0.5f, 0.f, 0.f}; // x = alpha mode (0=OPAQUE,1=MASK), y = cutoff
         bool double_sided{true};
     };
-    ankerl::unordered_dense::map<RenderMaterialId, GpuMaterial> materials;
+    ankerl::unordered_dense::map<ir::RenderMaterialId, GpuMaterial> materials;
 
     IblResources ibl;
 
@@ -221,8 +221,8 @@ struct SceneRenderer::Impl {
     enum class LodRole { Normal, Detail, Proxy };
 
     struct DrawGroup {
-        MeshAssetId mesh;
-        RenderMaterialId material;
+        ir::MeshAssetId mesh;
+        ir::RenderMaterialId material;
         bool double_sided{true};
         size_t visible_byte_offset{0}; // where in instance_buf this frame's matrices live
         uint32_t visible_count{0};
@@ -256,8 +256,8 @@ struct SceneRenderer::Impl {
     // `next_pending_mesh == pending_mesh_ids.size()`, the finalize step
     // (materials, groups, bounds, instance buffer) runs in one shot and
     // the upload is marked complete.
-    std::shared_ptr<const RenderScene> pending_scene;
-    std::vector<MeshAssetId> pending_mesh_ids;
+    std::shared_ptr<const ir::RenderScene> pending_scene;
+    std::vector<ir::MeshAssetId> pending_mesh_ids;
     size_t next_pending_mesh{0};
     bool upload_busy{false};
 
@@ -265,7 +265,7 @@ struct SceneRenderer::Impl {
     void ensurePipelines(sg_pixel_format color_fmt);
     void destroyGpu();
     void uploadInstanceBuffer();
-    void uploadOneMesh(MeshAssetId id, const MeshAsset &asset);
+    void uploadOneMesh(ir::MeshAssetId id, const ir::MeshAsset &asset);
     void finalizeUpload();
 };
 
@@ -305,7 +305,7 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
 
     sg_pipeline_desc pdesc{};
     pdesc.shader = shader;
-    pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(Vertex));
+    pdesc.layout.buffers[0].stride = static_cast<int>(sizeof(ir::Vertex));
     pdesc.layout.buffers[1].stride = static_cast<int>(sizeof(InstanceGpu));
     pdesc.layout.buffers[1].step_func = SG_VERTEXSTEP_PER_INSTANCE;
 
@@ -315,11 +315,11 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
     // and shader sources independently editable).
     pdesc.layout.attrs[ATTR_scene_scene_a_position].buffer_index = 0;
     pdesc.layout.attrs[ATTR_scene_scene_a_position].format = SG_VERTEXFORMAT_FLOAT3;
-    pdesc.layout.attrs[ATTR_scene_scene_a_position].offset = offsetof(Vertex, position);
+    pdesc.layout.attrs[ATTR_scene_scene_a_position].offset = offsetof(ir::Vertex, position);
 
     pdesc.layout.attrs[ATTR_scene_scene_a_normal].buffer_index = 0;
     pdesc.layout.attrs[ATTR_scene_scene_a_normal].format = SG_VERTEXFORMAT_FLOAT3;
-    pdesc.layout.attrs[ATTR_scene_scene_a_normal].offset = offsetof(Vertex, normal);
+    pdesc.layout.attrs[ATTR_scene_scene_a_normal].offset = offsetof(ir::Vertex, normal);
 
     // Per-instance world matrix as 4 vec4 attributes packed into the second
     // vertex buffer.
@@ -483,14 +483,14 @@ void SceneRenderer::release() {
     impl_->initialised = false;
 }
 
-void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const MeshAsset &asset) {
+void SceneRenderer::Impl::uploadOneMesh(ir::MeshAssetId id, const ir::MeshAsset &asset) {
     if (asset.vertices.empty() || asset.indices.empty()) {
         return;
     }
     GpuMesh gm;
 
     sg_buffer_desc vdesc{};
-    vdesc.size = asset.vertices.size() * sizeof(Vertex);
+    vdesc.size = asset.vertices.size() * sizeof(ir::Vertex);
     vdesc.usage.vertex_buffer = true;
     vdesc.usage.immutable = true;
     vdesc.data.ptr = asset.vertices.data();
@@ -524,7 +524,7 @@ void SceneRenderer::Impl::uploadOneMesh(MeshAssetId id, const MeshAsset &asset) 
 }
 
 void SceneRenderer::Impl::finalizeUpload() {
-    const RenderScene &scene = *pending_scene;
+    const ir::RenderScene &scene = *pending_scene;
 
     for (const auto &[id, mat] : scene.materials) {
         GpuMaterial gm;
@@ -542,7 +542,7 @@ void SceneRenderer::Impl::finalizeUpload() {
     glm::vec3 bmax{std::numeric_limits<float>::lowest()};
     bool any_bounds = false;
 
-    auto addBindings = [&](const RenderNode &node, const std::vector<MeshBinding> &bindings,
+    auto addBindings = [&](const ir::RenderNode &node, const std::vector<ir::MeshBinding> &bindings,
                            LodRole role) {
         for (const auto &binding : bindings) {
             auto mesh_it = meshes.find(binding.meshId);
@@ -613,8 +613,9 @@ void SceneRenderer::Impl::finalizeUpload() {
     upload_busy = false;
 }
 
-void SceneRenderer::beginUpload(std::shared_ptr<const RenderScene> scene) {
-    static_assert(sizeof(Vertex) == 24, "Vertex layout must match shader: 3f position + 3f normal");
+void SceneRenderer::beginUpload(std::shared_ptr<const ir::RenderScene> scene) {
+    static_assert(sizeof(ir::Vertex) == 24,
+                  "Vertex layout must match shader: 3f position + 3f normal");
     impl_->ensureInit();
     impl_->destroyGpu();
 

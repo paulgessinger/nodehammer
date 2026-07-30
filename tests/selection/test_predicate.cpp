@@ -5,6 +5,8 @@
 #include <map>
 
 using namespace nodehammer;
+using namespace nodehammer::config;
+using namespace nodehammer::selection;
 
 // ── matchGlob ─────────────────────────────────────────────────────────────────
 

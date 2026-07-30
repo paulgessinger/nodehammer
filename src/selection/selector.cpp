@@ -9,18 +9,18 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace nodehammer {
+namespace nodehammer::selection {
 
 namespace {
 
 // Compiled form of one SelectionRule: predicates are already turned into callables.
 struct CompiledRule {
-    SelectionAction action{};
+    config::SelectionAction action{};
     std::optional<Predicate> scopePred; // nullopt when rule.scope is absent
     Predicate pred;
 };
 
-std::vector<CompiledRule> compileRules(const std::vector<SelectionRule> &rules) {
+std::vector<CompiledRule> compileRules(const std::vector<config::SelectionRule> &rules) {
     std::vector<CompiledRule> out;
     out.reserve(rules.size());
     for (const auto &r : rules) {
@@ -36,15 +36,15 @@ std::vector<CompiledRule> compileRules(const std::vector<SelectionRule> &rules) 
 }
 
 // BFS reachability: collect all node IDs reachable from root, in visitation order.
-std::vector<SemanticNodeId> reachableNodes(const SemanticScene &scene) {
-    std::vector<SemanticNodeId> reachable;
+std::vector<ir::SemanticNodeId> reachableNodes(const ir::SemanticScene &scene) {
+    std::vector<ir::SemanticNodeId> reachable;
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return reachable;
     }
     reachable.reserve(scene.nodes.size());
-    std::unordered_set<SemanticNodeId> seen;
+    std::unordered_set<ir::SemanticNodeId> seen;
     seen.reserve(scene.nodes.size());
-    std::queue<SemanticNodeId> q;
+    std::queue<ir::SemanticNodeId> q;
     q.push(scene.rootId);
     while (!q.empty()) {
         const auto id = q.front();
@@ -62,11 +62,11 @@ std::vector<SemanticNodeId> reachableNodes(const SemanticScene &scene) {
 
 // Transitively collect all SemanticShapeIds referenced by the given root shapes,
 // following left/right operands of boolean shapes.
-std::unordered_set<SemanticShapeId>
-collectReferencedShapes(const SemanticScene &scene,
-                        const std::unordered_set<SemanticShapeId> &roots) {
-    std::unordered_set<SemanticShapeId> visited = roots;
-    std::queue<SemanticShapeId> q;
+std::unordered_set<ir::SemanticShapeId>
+collectReferencedShapes(const ir::SemanticScene &scene,
+                        const std::unordered_set<ir::SemanticShapeId> &roots) {
+    std::unordered_set<ir::SemanticShapeId> visited = roots;
+    std::queue<ir::SemanticShapeId> q;
     for (const auto &id : roots) {
         q.push(id);
     }
@@ -79,9 +79,9 @@ collectReferencedShapes(const SemanticScene &scene,
         std::visit(
             [&](const auto &s) {
                 using T = std::decay_t<decltype(s)>;
-                if constexpr (std::is_same_v<T, BooleanUnion> ||
-                              std::is_same_v<T, BooleanIntersection> ||
-                              std::is_same_v<T, BooleanSubtraction>) {
+                if constexpr (std::is_same_v<T, ir::BooleanUnion> ||
+                              std::is_same_v<T, ir::BooleanIntersection> ||
+                              std::is_same_v<T, ir::BooleanSubtraction>) {
                     if (visited.insert(s.left).second) {
                         q.push(s.left);
                     }
@@ -99,10 +99,10 @@ collectReferencedShapes(const SemanticScene &scene,
 
 // ── SelectionEngine ───────────────────────────────────────────────────────────
 
-SelectionEngine::SelectionEngine(std::vector<SelectionRule> rules, bool hoistOrphans)
+SelectionEngine::SelectionEngine(std::vector<config::SelectionRule> rules, bool hoistOrphans)
     : rules_(std::move(rules)), hoistOrphans_(hoistOrphans) {}
 
-SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
+SelectionResult SelectionEngine::evaluate(const ir::SemanticScene &scene) const {
     SelectionResult result;
 
     if (scene.nodes.empty()) {
@@ -123,7 +123,7 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     // allocations, contiguous access). Default-initialized SelectionAction is
     // KeepIf (enum value 0), which is exactly the Step-1 default we want.
     struct NodeEntry {
-        SemanticNodeId id;
+        ir::SemanticNodeId id;
         NodeView view;
     };
     std::vector<NodeEntry> nodeEntries;
@@ -145,7 +145,8 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
         view.tags = &node.tags;
         nodeEntries.push_back({id, view});
     }
-    std::vector<SelectionAction> disposition(nodeEntries.size(), SelectionAction::KeepIf);
+    std::vector<config::SelectionAction> disposition(nodeEntries.size(),
+                                                     config::SelectionAction::KeepIf);
 
     // ── Step 2: evaluate rules in order (last match wins). ────────────────────
     //
@@ -175,13 +176,13 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     // re-parenting instead of force-dropping, so we skip the enforcement here.
     if (!hoistOrphans_) {
         // Build an id → index map once so the BFS can look up dispositions by ID.
-        std::unordered_map<SemanticNodeId, std::size_t> idToIndex;
+        std::unordered_map<ir::SemanticNodeId, std::size_t> idToIndex;
         idToIndex.reserve(nodeEntries.size());
         for (std::size_t i = 0; i < nodeEntries.size(); ++i) {
             idToIndex.emplace(nodeEntries[i].id, i);
         }
 
-        std::queue<SemanticNodeId> q;
+        std::queue<ir::SemanticNodeId> q;
         if (scene.nodes.contains(scene.rootId)) {
             q.push(scene.rootId);
         }
@@ -199,14 +200,14 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
                 }
                 const auto childIt = idToIndex.find(childId);
                 if (childIt != idToIndex.end() &&
-                    disposition[parentIt->second] == SelectionAction::DropIf &&
-                    disposition[childIt->second] == SelectionAction::KeepIf) {
+                    disposition[parentIt->second] == config::SelectionAction::DropIf &&
+                    disposition[childIt->second] == config::SelectionAction::KeepIf) {
                     result.diags.warn(
                         codes::kWarnSelectionOrphan,
                         std::format("node '{}' kept but parent '{}' dropped -- forcing drop",
                                     scene.nodes.at(childId).name, node.name),
                         scene.nodes.at(childId).name);
-                    disposition[childIt->second] = SelectionAction::DropIf;
+                    disposition[childIt->second] = config::SelectionAction::DropIf;
                 }
                 q.push(childId);
             }
@@ -215,7 +216,7 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
 
     // ── Step 4: separate into kept / dropped sets. ────────────────────────────
     for (std::size_t i = 0; i < nodeEntries.size(); ++i) {
-        if (disposition[i] == SelectionAction::DropIf) {
+        if (disposition[i] == config::SelectionAction::DropIf) {
             result.dropped.insert(nodeEntries[i].id);
         } else {
             result.kept.insert(nodeEntries[i].id);
@@ -225,11 +226,11 @@ SelectionResult SelectionEngine::evaluate(const SemanticScene &scene) const {
     return result;
 }
 
-SelectionResult SelectionEngine::dryRun(const SemanticScene &scene) const {
+SelectionResult SelectionEngine::dryRun(const ir::SemanticScene &scene) const {
     return evaluate(scene);
 }
 
-DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
+ir::DiagnosticList SelectionEngine::prune(ir::SemanticScene &scene) const {
     auto selResult = evaluate(scene);
 
     // ── Hoist orphans: re-parent KeepIf nodes whose parent is DropIf ─────────────
@@ -242,14 +243,14 @@ DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
         selResult.kept.insert(scene.rootId);
 
         for (const auto id : selResult.kept) {
-            const SemanticNode &node = scene.nodes.at(id);
+            const ir::SemanticNode &node = scene.nodes.at(id);
             if (!node.parentId.has_value())
                 continue; // root itself
             if (selResult.kept.contains(*node.parentId))
                 continue; // parent already kept — no hoisting needed
 
             // Walk up to find nearest kept ancestor.
-            SemanticNodeId newParent = scene.rootId;
+            ir::SemanticNodeId newParent = scene.rootId;
             auto cur = node.parentId;
             while (cur.has_value()) {
                 if (selResult.kept.contains(*cur)) {
@@ -271,7 +272,7 @@ DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
 
     // Root-dropped guard: leave scene untouched and emit an error.
     if (selResult.dropped.contains(scene.rootId)) {
-        DiagnosticList diags;
+        ir::DiagnosticList diags;
         diags.append(selResult.diags);
         diags.error(codes::kErrSelectionRootDropped,
                     "root node is in the dropped set; pruning is a no-op",
@@ -286,19 +287,20 @@ DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
 
     // 2. Remove dropped IDs from surviving parents' children lists.
     for (auto &[id, node] : scene.nodes) {
-        std::erase_if(node.children,
-                      [&](SemanticNodeId childId) { return selResult.dropped.contains(childId); });
+        std::erase_if(node.children, [&](ir::SemanticNodeId childId) {
+            return selResult.dropped.contains(childId);
+        });
     }
 
     // 3. Garbage-collect unreferenced logVols. Logical volumes can carry source-level
     // daughter prototypes even when the corresponding placement nodes were pruned/hoisted,
     // so keep the transitive daughter logVol closure for every surviving node logVol.
-    std::unordered_set<SemanticLogVolId> referencedLogVols;
+    std::unordered_set<ir::SemanticLogVolId> referencedLogVols;
     for (const auto &[id, node] : scene.nodes) {
         if (!referencedLogVols.insert(node.logVolId).second) {
             continue;
         }
-        std::queue<SemanticLogVolId> q;
+        std::queue<ir::SemanticLogVolId> q;
         q.push(node.logVolId);
         while (!q.empty()) {
             const auto lvId = q.front();
@@ -317,7 +319,7 @@ DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
                   [&](const auto &kv) { return !referencedLogVols.contains(kv.first); });
 
     // 4. Garbage-collect shapes (transitive: follow boolean operand references).
-    std::unordered_set<SemanticShapeId> rootShapes;
+    std::unordered_set<ir::SemanticShapeId> rootShapes;
     for (const auto &[id, lv] : scene.logVols) {
         rootShapes.insert(lv.shapeId);
     }
@@ -326,7 +328,7 @@ DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
                   [&](const auto &kv) { return !referencedShapes.contains(kv.first); });
 
     // 5. Garbage-collect unreferenced materials.
-    std::unordered_set<SemanticMaterialId> referencedMaterials;
+    std::unordered_set<ir::SemanticMaterialId> referencedMaterials;
     for (const auto &[id, lv] : scene.logVols) {
         referencedMaterials.insert(lv.materialId);
     }
@@ -336,4 +338,4 @@ DiagnosticList SelectionEngine::prune(SemanticScene &scene) const {
     return selResult.diags;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::selection

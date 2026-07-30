@@ -150,10 +150,10 @@ namespace {
 
 class WorkerBackend final : public IWebBackend {
   public:
-    void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-               std::shared_ptr<const ::nodehammer::SemanticScene> scene, std::string config_label,
-               std::string geometry_label,
-               std::optional<::nodehammer::WedgeCutParams> wedge_cut) override {
+    void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
+               std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+               std::string config_label, std::string geometry_label,
+               std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) override {
         logPreBuild(config_label, geometry_label);
         result_ = {};
 
@@ -165,8 +165,8 @@ class WorkerBackend final : public IWebBackend {
         if (scene_changed) {
             ++epoch_;
             last_scene_ = scene.get();
-            scene_bytes_ = ::nodehammer::semanticSceneToBytes(*scene);
-            config_toml_ = ::nodehammer::configToToml(*config);
+            scene_bytes_ = ::nodehammer::ir::semanticSceneToBytes(*scene);
+            config_toml_ = ::nodehammer::config::configToToml(*config);
         }
 
         const int wedge = wedge_cut ? 1 : 0;
@@ -230,8 +230,9 @@ class WorkerBackend final : public IWebBackend {
             try {
                 const auto *bytes =
                     reinterpret_cast<const std::byte *>(static_cast<uintptr_t>(ptr));
-                auto rendered = ::nodehammer::renderSceneFromBytes(std::span{bytes, len});
-                result_.scene = std::make_shared<::nodehammer::RenderScene>(std::move(rendered));
+                auto rendered = ::nodehammer::ir::renderSceneFromBytes(std::span{bytes, len});
+                result_.scene =
+                    std::make_shared<::nodehammer::ir::RenderScene>(std::move(rendered));
             } catch (const std::exception &ex) {
                 result_.scene = nullptr;
                 result_.diags.error(::nodehammer::codes::kErrComputeWorker,
@@ -245,8 +246,8 @@ class WorkerBackend final : public IWebBackend {
         return false;
     }
 
-    ::nodehammer::SceneBuildResult take() override {
-        ::nodehammer::SceneBuildResult out = std::move(result_);
+    ::nodehammer::pipeline::SceneBuildResult take() override {
+        ::nodehammer::pipeline::SceneBuildResult out = std::move(result_);
         result_ = {};
         state_ = State::Idle;
         return out;
@@ -299,12 +300,12 @@ class WorkerBackend final : public IWebBackend {
     int activeBuildPhase() const { return state_ == State::Building ? nh_worker_phase() : 0; }
 
     State state_{State::Idle};
-    ::nodehammer::SceneBuildResult result_;
+    ::nodehammer::pipeline::SceneBuildResult result_;
     bool fatal_{false};
 
     // Pristine-scene cache (main-thread side): identity + serialized bytes so a
     // re-aim reuses them instead of re-serializing.
-    const ::nodehammer::SemanticScene *last_scene_{nullptr};
+    const ::nodehammer::ir::SemanticScene *last_scene_{nullptr};
     std::uint32_t epoch_{0};
     std::vector<std::byte> scene_bytes_;
     std::string config_toml_;

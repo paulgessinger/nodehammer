@@ -1,7 +1,7 @@
 #pragma once
 
-#include <log_sink.hpp>
 #include <viewer/byte_buffer.hpp>
+#include <viewer/log_sink.hpp>
 
 #include <cstddef>
 #include <cstdint>

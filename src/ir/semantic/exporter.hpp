@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 struct SemanticExportConfig {};
 
@@ -52,4 +52,4 @@ class SemanticExporterRegistry {
     std::vector<std::unique_ptr<ISemanticExporter>> exporters_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

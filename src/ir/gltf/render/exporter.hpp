@@ -2,7 +2,7 @@
 
 #include <ir/render/exporter.hpp>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// Writes a RenderScene to glTF 2.0 (`.gltf`) or binary GLB (`.glb`).
 ///
@@ -17,4 +17,4 @@ class GltfExporter final : public IRenderExporter {
                                      const ExportConfig &config) const override;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

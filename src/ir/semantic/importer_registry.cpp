@@ -15,7 +15,7 @@
 #include <fstream>
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -124,4 +124,4 @@ ImporterRegistry ImporterRegistry::makeDefault() {
     return reg;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

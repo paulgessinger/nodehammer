@@ -5,12 +5,12 @@
 
 #include <manifold/manifold.h>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 /// Convert a TessellationOutput mesh to a Manifold, welding duplicate vertices.
 /// Returns nullopt (with diagnostics) if the mesh is not manifold-compatible.
 [[nodiscard]] std::optional<manifold::Manifold>
-meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::string_view context);
+meshToManifold(const TessellationOutput &mesh, ir::DiagnosticList &diags, std::string_view context);
 
 /// Convex hull of a point cloud, as a flat-shaded watertight mesh. Used to
 /// build a gap-free LOD proxy for a merged sampling stack (the hull spans the
@@ -27,9 +27,9 @@ meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::strin
 /// Performs the boolean operation and returns the resulting mesh.
 ///
 /// Returns an empty TessellationOutput (with diagnostics) on failure.
-[[nodiscard]] TessellationOutput tessellateBooleanShape(const SemanticShapeVariant &shape,
-                                                        const SemanticScene &scene,
+[[nodiscard]] TessellationOutput tessellateBooleanShape(const ir::SemanticShapeVariant &shape,
+                                                        const ir::SemanticScene &scene,
                                                         const ITessellator &primitiveTessellator,
                                                         const TessellationParams &params);
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

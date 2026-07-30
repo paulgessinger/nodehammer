@@ -10,7 +10,7 @@
 #include <memory>
 #include <optional>
 
-namespace nodehammer {
+namespace nodehammer::pipeline {
 
 /// Outcome of buildSceneFromPaths. On any pipeline-stage failure, scene is
 /// null and diags carries the reason. Warnings can accompany a successful
@@ -21,8 +21,8 @@ struct SceneBuildResult {
     /// as the resident scene, and every downstream consumer already spells it
     /// `shared_ptr<const RenderScene>`. Keeping the producer's handle mutable
     /// was the one gap in that chain.
-    std::shared_ptr<const RenderScene> scene;
-    DiagnosticList diags;
+    std::shared_ptr<const ir::RenderScene> scene;
+    ir::DiagnosticList diags;
 };
 
 /// Outcome of `prepareSceneForTessellation`. When `ok` is true, `config`
@@ -30,9 +30,9 @@ struct SceneBuildResult {
 /// `diags` describes why we stopped before reaching the tessellation
 /// stage.
 struct ScenePrepResult {
-    NHConfig config;
-    SemanticScene scene;
-    DiagnosticList diags;
+    config::NHConfig config;
+    ir::SemanticScene scene;
+    ir::DiagnosticList diags;
     bool ok{false};
 };
 
@@ -56,8 +56,8 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 /// When `wedgeCut` is set, an azimuthal wedge cut is applied after dedup
 /// (matching the `convert --angle-cut` pipeline ordering), so the scene
 /// handed to tessellation already carries the Boolean-cut shapes.
-ScenePrepResult
-prepareSceneForTessellationFromInputs(NHConfig config, SemanticScene scene,
-                                      std::optional<WedgeCutParams> wedgeCut = std::nullopt);
+ScenePrepResult prepareSceneForTessellationFromInputs(
+    config::NHConfig config, ir::SemanticScene scene,
+    std::optional<tessellation::WedgeCutParams> wedgeCut = std::nullopt);
 
-} // namespace nodehammer
+} // namespace nodehammer::pipeline

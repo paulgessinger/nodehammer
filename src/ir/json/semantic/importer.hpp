@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// ISemanticImporter that reads a previously-dumped SemanticScene JSON file.
 /// Format name: "json"   Extension: ".json"
@@ -16,4 +16,4 @@ class JsonImporter final : public ISemanticImporter {
     [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

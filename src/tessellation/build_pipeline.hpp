@@ -8,7 +8,7 @@
 #include <memory>
 #include <optional>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 /// Core, GPU-free driver for the `prep → wedge → tessellate` build sequence.
 ///
@@ -63,7 +63,8 @@ class BuildPipeline {
     /// cooperative "burn one paint frame before working" behaviours). The wedge
     /// is always deferred to a `WedgeCutJob` (invariant #1) — pass it here and
     /// the pipeline runs it as a separate, progress-reportable phase.
-    void start(std::shared_ptr<const NHConfig> config, std::shared_ptr<const SemanticScene> scene,
+    void start(std::shared_ptr<const config::NHConfig> config,
+               std::shared_ptr<const ir::SemanticScene> scene,
                std::optional<WedgeCutParams> wedgeCut = std::nullopt);
 
     /// Advance one slice, spending up to `budget_ns` of wall-clock time driving
@@ -76,7 +77,7 @@ class BuildPipeline {
 
     /// Move out the result. Valid only after `advance()` has returned true.
     /// Resets the pipeline to `Idle`.
-    [[nodiscard]] SceneBuildResult take();
+    [[nodiscard]] pipeline::SceneBuildResult take();
 
     [[nodiscard]] Phase phase() const;
     [[nodiscard]] std::size_t tessellationTotal() const;
@@ -89,4 +90,4 @@ class BuildPipeline {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

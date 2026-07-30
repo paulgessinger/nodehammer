@@ -33,7 +33,7 @@
 #include <queue>
 #include <unordered_map>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -576,4 +576,4 @@ ExportResult GltfExporter::write(const RenderScene &scene, const std::filesystem
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

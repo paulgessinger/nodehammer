@@ -10,7 +10,7 @@ class TGeoManager;
 class TGeoNode;
 class TGeoVolume;
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// Extended import result that also carries the TGeoNode → SemanticNodeId mapping
 /// built during tree traversal. Used by DD4hep to annotate nodes in a second pass.
@@ -38,4 +38,4 @@ class TGeoImporter final : public ISemanticImporter {
     [[nodiscard]] ImportResult import(TGeoManager *mgr) const;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

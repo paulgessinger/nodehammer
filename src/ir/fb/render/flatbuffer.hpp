@@ -9,7 +9,7 @@
 #include <span>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // FlatBuffer render IR (RenderScene) — sibling of the semantic codec.
 //
@@ -43,4 +43,4 @@ std::vector<std::byte> renderSceneToBytes(const RenderScene &scene);
 /// Throws std::runtime_error on verification failure.
 RenderScene renderSceneFromBytes(std::span<const std::byte> buf);
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

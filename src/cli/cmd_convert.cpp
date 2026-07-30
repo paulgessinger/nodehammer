@@ -36,12 +36,13 @@ namespace {
 
 /// Paths that `convert` may produce in addition to the primary `-o` path.
 [[nodiscard]] std::vector<std::filesystem::path>
-convertOutputArtifacts(const std::filesystem::path &primary, nodehammer::ExportConfig::Format fmt) {
+convertOutputArtifacts(const std::filesystem::path &primary,
+                       nodehammer::ir::ExportConfig::Format fmt) {
     std::vector<std::filesystem::path> paths;
     paths.push_back(primary);
-    if (fmt == nodehammer::ExportConfig::Format::OBJ) {
+    if (fmt == nodehammer::ir::ExportConfig::Format::OBJ) {
         paths.emplace_back(primary.parent_path() / (primary.stem().string() + ".mtl"));
-    } else if (fmt == nodehammer::ExportConfig::Format::GLTF) {
+    } else if (fmt == nodehammer::ir::ExportConfig::Format::GLTF) {
         paths.emplace_back(primary.parent_path() / (primary.stem().string() + ".bin"));
     }
     return paths;
@@ -111,12 +112,12 @@ void registerCmdConvert(CLI::App &app) {
         nodehammer::detail::TimingReport timings;
 
         // ── Load config ────────────────────────────────────────────────────────
-        nodehammer::NHConfig cfg;
+        nodehammer::config::NHConfig cfg;
         if (*configOpt) {
             auto _t = timings.scope("config");
             std::string cfgPath;
             configOpt->results(cfgPath);
-            auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
+            auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
             printDiags(loaded.diags);
             if (loaded.diags.hasErrors()) {
                 std::println(stderr, "convert: config load failed");
@@ -124,7 +125,7 @@ void registerCmdConvert(CLI::App &app) {
             }
             cfg = std::move(loaded.config);
 
-            auto validDiags = nodehammer::ConfigValidator::validate(cfg);
+            auto validDiags = nodehammer::config::ConfigValidator::validate(cfg);
             printDiags(validDiags);
             if (validDiags.hasErrors()) {
                 std::println(stderr, "convert: config validation failed");
@@ -146,7 +147,7 @@ void registerCmdConvert(CLI::App &app) {
         // ── Select ─────────────────────────────────────────────────────────────
         if (!cfg.selection.empty()) {
             auto _t = timings.scope("select");
-            nodehammer::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
+            nodehammer::selection::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
             auto selDiags = sel.prune(importResult.scene);
             printDiags(selDiags);
             if (selDiags.hasErrors()) {
@@ -176,13 +177,13 @@ void registerCmdConvert(CLI::App &app) {
             auto _t = timings.scope("wedgecut");
             std::vector<double> angles;
             angleCutOpt->results(angles); // exactly 2 (enforced by expected(2))
-            nodehammer::WedgeCutParams wcp;
+            nodehammer::tessellation::WedgeCutParams wcp;
             wcp.startDeg = angles[0];
             wcp.endDeg = angles[1];
             if (*acMarginOpt) {
                 wcp.margin = acMarginOpt->as<double>();
             }
-            const auto wcStats = nodehammer::applyWedgeCut(importResult.scene, wcp);
+            const auto wcStats = nodehammer::tessellation::applyWedgeCut(importResult.scene, wcp);
             std::println(
                 stderr,
                 "Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} kept, "
@@ -193,7 +194,7 @@ void registerCmdConvert(CLI::App &app) {
 
         // ── Tessellate ─────────────────────────────────────────────────────────
         nodehammer::detail::Timer tessTimer;
-        nodehammer::TessellationPass pass{cfg};
+        nodehammer::tessellation::TessellationPass pass{cfg};
         auto tessResult = pass.lower(importResult.scene);
         timings.record("tessellate", tessTimer.elapsed());
         printDiags(tessResult.diags);
@@ -203,7 +204,7 @@ void registerCmdConvert(CLI::App &app) {
         }
 
         // ── Export (one pass per output path) ─────────────────────────────────
-        const auto expRegistry = nodehammer::RenderExporterRegistry::makeDefault();
+        const auto expRegistry = nodehammer::ir::RenderExporterRegistry::makeDefault();
 
         for (const auto &outputPath : outputPaths) {
             const auto *exp = expRegistry.resolve(outputPath, outputFmt);
@@ -213,7 +214,7 @@ void registerCmdConvert(CLI::App &app) {
                 std::exit(1);
             }
 
-            const auto ecfg = nodehammer::resolveExportConfig(cfg, outputPath, outputFmt);
+            const auto ecfg = nodehammer::pipeline::resolveExportConfig(cfg, outputPath, outputFmt);
 
             std::println("Writing {} ...", outputPath);
             nodehammer::detail::Timer expTimer;
@@ -228,9 +229,9 @@ void registerCmdConvert(CLI::App &app) {
             int warnings = 0, errors = 0;
             for (const auto *dl : {&importResult.diags, &tessResult.diags, &expResult.diags}) {
                 for (const auto &d : dl->items()) {
-                    if (d.severity >= nodehammer::DiagnosticSeverity::Error) {
+                    if (d.severity >= nodehammer::ir::DiagnosticSeverity::Error) {
                         ++errors;
-                    } else if (d.severity == nodehammer::DiagnosticSeverity::Warning) {
+                    } else if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning) {
                         ++warnings;
                     }
                 }

@@ -9,7 +9,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// Result of a single import call. Partial success is allowed:
 /// scene may be populated even when diags.hasErrors() is true.
@@ -67,4 +67,4 @@ class ImporterRegistry {
     std::vector<std::unique_ptr<ISemanticImporter>> importers_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

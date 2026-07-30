@@ -8,7 +8,7 @@
 #include <span>
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -87,4 +87,4 @@ SemanticExporterRegistry SemanticExporterRegistry::makeDefault() {
     return reg;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

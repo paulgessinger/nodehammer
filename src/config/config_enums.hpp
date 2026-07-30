@@ -5,7 +5,7 @@
 #include <optional>
 #include <string_view>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 // ── BooleanFallback ─────────────────────────────────────────────────────────
 
@@ -59,4 +59,4 @@ inline std::optional<AlphaMode> parseAlphaMode(std::string_view s) {
     return std::nullopt;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::config

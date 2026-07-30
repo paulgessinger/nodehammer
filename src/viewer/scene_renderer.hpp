@@ -6,9 +6,9 @@
 #include <memory>
 #include <sokol_gfx.h>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 struct RenderScene;
-} // namespace nodehammer
+} // namespace nodehammer::ir
 
 namespace nodehammer::viewer {
 
@@ -48,7 +48,7 @@ class SceneRenderer {
     /// scene state. The renderer keeps `scene` alive until the upload
     /// completes (so the caller's shared_ptr can be released immediately).
     /// Pair with `advanceUpload`.
-    void beginUpload(std::shared_ptr<const RenderScene> scene);
+    void beginUpload(std::shared_ptr<const ir::RenderScene> scene);
 
     /// Make progress on a chunked upload started by `beginUpload`. Spends
     /// up to `budget_ns` creating per-mesh GPU buffers and finalises the

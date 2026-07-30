@@ -4,7 +4,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 enum class DiagnosticSeverity {
     Debug,
@@ -97,4 +97,4 @@ class DiagnosticList {
     std::vector<Diagnostic> items_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

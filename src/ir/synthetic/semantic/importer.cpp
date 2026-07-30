@@ -4,7 +4,7 @@
 
 #include <glm/glm.hpp>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -180,4 +180,4 @@ ImportResult SyntheticImporter::import([[maybe_unused]] const std::filesystem::p
     return ImportResult{SyntheticSceneBuilder::buildSingleBox(), {}};
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

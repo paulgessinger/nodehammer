@@ -6,7 +6,7 @@
 #include <detail/glm_json.hpp>
 #include <ir/semantic_json.hpp>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 void to_json(nlohmann::json &j, const Vertex &v) {
     j = {
@@ -78,4 +78,4 @@ void to_json(nlohmann::json &j, const RenderScene &sc) {
     };
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

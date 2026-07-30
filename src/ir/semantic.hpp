@@ -17,7 +17,7 @@
 #include <variant>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // ── Strong ID types ───────────────────────────────────────────────────────────
 
@@ -38,16 +38,16 @@ using SemanticLogVolId = StrongId<SemanticLogVolTag>;
 using SemanticShapeId = StrongId<SemanticShapeTag>;
 using SemanticMaterialId = StrongId<SemanticMaterialTag>;
 
-} // namespace nodehammer
+} // namespace nodehammer::ir
 
 // Hash support for StrongId
-template <typename Tag> struct std::hash<nodehammer::StrongId<Tag>> {
-    std::size_t operator()(const nodehammer::StrongId<Tag> &id) const noexcept {
+template <typename Tag> struct std::hash<nodehammer::ir::StrongId<Tag>> {
+    std::size_t operator()(const nodehammer::ir::StrongId<Tag> &id) const noexcept {
         return std::hash<uint64_t>{}(id.value);
     }
 };
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // ── Shape types ───────────────────────────────────────────────────────────────
 // All shape types must be complete before SemanticShapeVariant is instantiated.
@@ -319,4 +319,4 @@ class SemanticScene {
     uint64_t nextMaterialId_{1};
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

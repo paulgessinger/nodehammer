@@ -10,6 +10,8 @@
 #include <numbers>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::tessellation;
 
 namespace {
 const TessellationParams kDefault;

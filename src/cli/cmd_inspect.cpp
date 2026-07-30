@@ -25,26 +25,30 @@ nodehammer::detail::ColorMode parseColorMode(const std::string &s) {
 
 // ── Summary ─��─────────────────────────────────���──────────────────────────────
 
-void printSummary(const nodehammer::ImportResult &result, std::string_view formatName) {
+void printSummary(const nodehammer::ir::ImportResult &result, std::string_view formatName) {
     std::map<std::string, int> shapeCounts;
     for (const auto &[id, shape] : result.scene.shapes) {
         std::string typeName = std::visit(
             nodehammer::detail::overloaded{
-                [](const nodehammer::BoxShape &) -> std::string { return "box"; },
-                [](const nodehammer::TubeShape &) -> std::string { return "tube"; },
-                [](const nodehammer::ConeShape &) -> std::string { return "cone"; },
-                [](const nodehammer::TrdShape &) -> std::string { return "trd"; },
-                [](const nodehammer::ParaShape &) -> std::string { return "para"; },
-                [](const nodehammer::PconShape &) -> std::string { return "pcon"; },
-                [](const nodehammer::PgonShape &) -> std::string { return "pgon"; },
-                [](const nodehammer::TorusShape &) -> std::string { return "torus"; },
-                [](const nodehammer::TessellatedShape &) -> std::string { return "tessellated"; },
-                [](const nodehammer::BooleanUnion &) -> std::string { return "union"; },
-                [](const nodehammer::BooleanIntersection &) -> std::string {
+                [](const nodehammer::ir::BoxShape &) -> std::string { return "box"; },
+                [](const nodehammer::ir::TubeShape &) -> std::string { return "tube"; },
+                [](const nodehammer::ir::ConeShape &) -> std::string { return "cone"; },
+                [](const nodehammer::ir::TrdShape &) -> std::string { return "trd"; },
+                [](const nodehammer::ir::ParaShape &) -> std::string { return "para"; },
+                [](const nodehammer::ir::PconShape &) -> std::string { return "pcon"; },
+                [](const nodehammer::ir::PgonShape &) -> std::string { return "pgon"; },
+                [](const nodehammer::ir::TorusShape &) -> std::string { return "torus"; },
+                [](const nodehammer::ir::TessellatedShape &) -> std::string {
+                    return "tessellated";
+                },
+                [](const nodehammer::ir::BooleanUnion &) -> std::string { return "union"; },
+                [](const nodehammer::ir::BooleanIntersection &) -> std::string {
                     return "intersection";
                 },
-                [](const nodehammer::BooleanSubtraction &) -> std::string { return "subtraction"; },
-                [](const nodehammer::UnknownShape &) -> std::string { return "unknown"; },
+                [](const nodehammer::ir::BooleanSubtraction &) -> std::string {
+                    return "subtraction";
+                },
+                [](const nodehammer::ir::UnknownShape &) -> std::string { return "unknown"; },
             },
             shape.data);
         shapeCounts[typeName]++;
@@ -58,9 +62,9 @@ void printSummary(const nodehammer::ImportResult &result, std::string_view forma
 
     int warnings = 0, errors = 0;
     for (const auto &d : result.diags.items()) {
-        if (d.severity >= nodehammer::DiagnosticSeverity::Error) {
+        if (d.severity >= nodehammer::ir::DiagnosticSeverity::Error) {
             ++errors;
-        } else if (d.severity == nodehammer::DiagnosticSeverity::Warning) {
+        } else if (d.severity == nodehammer::ir::DiagnosticSeverity::Warning) {
             ++warnings;
         }
     }
@@ -90,14 +94,14 @@ void printSummary(const nodehammer::ImportResult &result, std::string_view forma
 
 // ── Tree ───────────────────────────���───────────────────────────���─────────────
 
-void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::string &filter,
+void printTree(const nodehammer::ir::SemanticScene &scene, int maxDepth, const std::string &filter,
                const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
 
     struct Entry {
-        nodehammer::SemanticNodeId id;
+        nodehammer::ir::SemanticNodeId id;
         int depth;
         std::string prefix; // tree-drawing prefix
         bool isLast;
@@ -127,7 +131,7 @@ void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::
         // Check filter.
         bool show = true;
         if (!filter.empty()) {
-            show = nodehammer::matchGlob(filter, node.originalPath);
+            show = nodehammer::selection::matchGlob(filter, node.originalPath);
         }
 
         if (show) {
@@ -192,7 +196,7 @@ void printTree(const nodehammer::SemanticScene &scene, int maxDepth, const std::
 
 // ── Tags ──────────��───────────────────────────────���──────────────────────────
 
-void printTags(const nodehammer::SemanticScene &scene, const nodehammer::detail::Console &con) {
+void printTags(const nodehammer::ir::SemanticScene &scene, const nodehammer::detail::Console &con) {
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
     int nodesWithTags = 0;

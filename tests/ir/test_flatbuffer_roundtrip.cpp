@@ -14,6 +14,7 @@
 #include <span>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
 using Catch::Approx;
 
 namespace {

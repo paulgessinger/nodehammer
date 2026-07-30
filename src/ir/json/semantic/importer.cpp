@@ -7,7 +7,7 @@
 
 #include <format>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view JsonImporter::formatName() const noexcept { return "json"; }
 
@@ -30,4 +30,4 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

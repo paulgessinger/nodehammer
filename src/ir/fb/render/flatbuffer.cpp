@@ -8,13 +8,13 @@
 #include <stdexcept>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
 namespace fbr = fbs::render;
 
-// Whole-array memcpy fast path for vertices relies on nodehammer::Vertex having
+// Whole-array memcpy fast path for vertices relies on nodehammer::ir::Vertex having
 // the exact byte layout of fbr::Vertex (pos+normal, 6 contiguous floats). GLM's
 // default vec3 is 12 bytes; if a build ever forces aligned gentypes this assert
 // fires and the codec must switch to element-wise copies.
@@ -372,4 +372,4 @@ RenderScene renderSceneFromBytes(std::span<const std::byte> buf) {
     return renderSceneFromFlatBuffer(*fb);
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

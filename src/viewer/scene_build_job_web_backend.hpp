@@ -27,12 +27,12 @@ class IWebBackend {
   public:
     virtual ~IWebBackend() = default;
 
-    virtual void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-                       std::shared_ptr<const ::nodehammer::SemanticScene> scene,
+    virtual void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
+                       std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
                        std::string config_label, std::string geometry_label,
-                       std::optional<::nodehammer::WedgeCutParams> wedge_cut) = 0;
+                       std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) = 0;
     virtual bool poll(std::uint64_t budget_ns) = 0;
-    [[nodiscard]] virtual ::nodehammer::SceneBuildResult take() = 0;
+    [[nodiscard]] virtual ::nodehammer::pipeline::SceneBuildResult take() = 0;
 
     [[nodiscard]] virtual std::size_t tessellationTotal() const = 0;
     [[nodiscard]] virtual std::size_t tessellationProcessed() const = 0;

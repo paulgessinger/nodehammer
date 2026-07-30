@@ -6,7 +6,7 @@
 
 #include <sstream>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 using detail::overloaded;
 
@@ -326,4 +326,4 @@ std::string configToToml(const NHConfig &cfg) {
     return os.str();
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::config

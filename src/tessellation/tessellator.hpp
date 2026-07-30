@@ -6,16 +6,16 @@
 
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 struct TessellationParams {
     int maxSegmentsCircle{64}; ///< Segments per full circle (tubes, cones, torus, pcon, pgon)
 };
 
 struct TessellationOutput {
-    std::vector<Vertex> vertices;
+    std::vector<ir::Vertex> vertices;
     std::vector<uint32_t> indices;
-    DiagnosticList diags;
+    ir::DiagnosticList diags;
     /// Whether the producing operation completed. False marks a genuine failure
     /// (e.g. a boolean whose operands could not be built). Note that `succeeded`
     /// with empty `vertices` is a *valid* result: a boolean can legitimately
@@ -31,11 +31,12 @@ class ITessellator {
 
     /// Returns true if this tessellator can produce geometry for the given shape.
     /// BooleanShape variants return false (require Manifold, Phase 2).
-    [[nodiscard]] virtual bool canTessellate(const SemanticShapeVariant &shape) const noexcept = 0;
+    [[nodiscard]] virtual bool
+    canTessellate(const ir::SemanticShapeVariant &shape) const noexcept = 0;
 
     /// Tessellate the shape. Called only when canTessellate() returns true.
-    [[nodiscard]] virtual TessellationOutput tessellate(const SemanticShapeVariant &shape,
+    [[nodiscard]] virtual TessellationOutput tessellate(const ir::SemanticShapeVariant &shape,
                                                         const TessellationParams &params) const = 0;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

@@ -24,11 +24,11 @@ void registerCmdDumpRender(CLI::App &app) {
 
     sub->callback([=] {
         // ── Load config ────────────────────────────────────────────────────────
-        nodehammer::NHConfig cfg;
+        nodehammer::config::NHConfig cfg;
         if (*configOpt) {
             std::string cfgPath;
             configOpt->results(cfgPath);
-            auto loaded = nodehammer::ConfigLoader::loadFromFile(cfgPath);
+            auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
             nodehammer::cli::printDiags(loaded.diags);
             if (loaded.diags.hasErrors()) {
                 return;
@@ -37,9 +37,9 @@ void registerCmdDumpRender(CLI::App &app) {
         }
 
         // ── Import scene ───────────────────────────────────────────────────────
-        nodehammer::SemanticScene semScene;
+        nodehammer::ir::SemanticScene semScene;
         if (syntheticBoxOpt->count()) {
-            semScene = nodehammer::SyntheticSceneBuilder::buildSingleBox();
+            semScene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
         } else if (*inputOpt) {
             auto [importResult, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
             nodehammer::cli::printDiags(importResult.diags);
@@ -60,7 +60,7 @@ void registerCmdDumpRender(CLI::App &app) {
         }
 
         // ── Tessellate ─────────────────────────────────────────────────────────
-        nodehammer::TessellationPass pass{cfg};
+        nodehammer::tessellation::TessellationPass pass{cfg};
         auto passResult = pass.lower(semScene);
         nodehammer::cli::printDiags(passResult.diags);
 

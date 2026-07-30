@@ -7,6 +7,10 @@
 #include <variant>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::pipeline;
+using namespace nodehammer::tessellation;
+using namespace nodehammer::config;
 
 namespace {
 

@@ -6,7 +6,7 @@
 #include <filesystem>
 #include <string_view>
 
-namespace nodehammer {
+namespace nodehammer::pipeline {
 
 /// Resolve the effective `ExportConfig` for one output path.
 ///
@@ -32,8 +32,8 @@ namespace nodehammer {
 ///
 /// A default-constructed `NHConfig` yields exactly the format defaults, so
 /// callers with no config file need no separate entry point.
-[[nodiscard]] ExportConfig resolveExportConfig(const NHConfig &cfg,
-                                               const std::filesystem::path &outputPath,
-                                               std::string_view formatHint = {});
+[[nodiscard]] ir::ExportConfig resolveExportConfig(const config::NHConfig &cfg,
+                                                   const std::filesystem::path &outputPath,
+                                                   std::string_view formatHint = {});
 
-} // namespace nodehammer
+} // namespace nodehammer::pipeline

@@ -28,7 +28,7 @@ void registerCmdConfigFlatten(CLI::App &app) {
         // ConfigLoader::loadFromFile already resolves the include tree
         // recursively into a single NHConfig — that's exactly the merged
         // form we want to serialise back out.
-        auto result = nodehammer::ConfigLoader::loadFromFile(configPath);
+        auto result = nodehammer::config::ConfigLoader::loadFromFile(configPath);
         nodehammer::cli::printDiags(result.diags);
         if (result.diags.hasErrors()) {
             std::println(stderr, "config-flatten: parse failed");
@@ -36,7 +36,7 @@ void registerCmdConfigFlatten(CLI::App &app) {
         }
 
         if (*validate) {
-            auto validationDiags = nodehammer::ConfigValidator::validate(result.config);
+            auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
             nodehammer::cli::printDiags(validationDiags);
             if (validationDiags.hasErrors()) {
                 std::println(stderr, "config-flatten: validation failed");
@@ -44,7 +44,7 @@ void registerCmdConfigFlatten(CLI::App &app) {
             }
         }
 
-        const std::string toml = nodehammer::configToToml(result.config);
+        const std::string toml = nodehammer::config::configToToml(result.config);
 
         if (*outOpt) {
             std::string outPath;

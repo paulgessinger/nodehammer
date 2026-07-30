@@ -43,10 +43,10 @@ class SceneBuildJob {
     /// wedge cut from stalling the frame on a large scene (the copy of a fully
     /// imported ODD is tens of ms; doing it here used to freeze the UI right as
     /// the "Applying cut…" toast appeared).
-    void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-               std::shared_ptr<const ::nodehammer::SemanticScene> scene, std::string config_label,
-               std::string geometry_label,
-               std::optional<::nodehammer::WedgeCutParams> wedge_cut = std::nullopt);
+    void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
+               std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+               std::string config_label, std::string geometry_label,
+               std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut = std::nullopt);
 
     /// Drive progress. Returns true once the build has finished (either
     /// with a scene or with diagnostics describing a failure). Until then
@@ -57,7 +57,7 @@ class SceneBuildJob {
 
     /// Move out the build result. Valid only after `poll()` has returned
     /// true. Resets the job to its idle state — a fresh `start` may follow.
-    ::nodehammer::SceneBuildResult take();
+    ::nodehammer::pipeline::SceneBuildResult take();
 
     /// Tessellation progress for UI feedback. Both return 0 until the
     /// tessellation phase is reached; on completion, `processed == total`.
@@ -81,7 +81,7 @@ class SceneBuildJob {
     // numeric wire protocol), so a future reorder can't silently drift the UI
     // labels out of sync with the pipeline. All existing `SceneBuildJob::Phase::
     // Cutting`-style references keep compiling through this alias.
-    using Phase = ::nodehammer::BuildPipeline::Phase;
+    using Phase = ::nodehammer::tessellation::BuildPipeline::Phase;
     [[nodiscard]] Phase phase() const;
 
   private:

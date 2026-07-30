@@ -2,7 +2,7 @@
 
 #include <ir/semantic/exporter.hpp>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 class SemanticJsonExporter final : public ISemanticExporter {
   public:
@@ -13,4 +13,4 @@ class SemanticJsonExporter final : public ISemanticExporter {
                                              const SemanticExportConfig &config) const override;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

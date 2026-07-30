@@ -5,7 +5,7 @@
 #include <optional>
 #include <string_view>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 /// Parse a hex color string of the form "#RRGGBB" or "#RRGGBBAA" (the leading
 /// '#' is optional). The RGB channels are converted from sRGB to linear; the
@@ -17,4 +17,4 @@ namespace nodehammer {
 /// resolves to identical linear values regardless of which front-end read it.
 [[nodiscard]] std::optional<Color> parseHexColor(std::string_view hex);
 
-} // namespace nodehammer
+} // namespace nodehammer::config

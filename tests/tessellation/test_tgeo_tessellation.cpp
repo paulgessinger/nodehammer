@@ -30,6 +30,8 @@
 #include <glm/glm.hpp>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::tessellation;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

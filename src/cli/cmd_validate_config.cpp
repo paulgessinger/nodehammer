@@ -15,7 +15,7 @@ void registerCmdValidateConfig(CLI::App &app) {
         std::string configPath;
         configOpt->results(configPath);
 
-        auto result = nodehammer::ConfigLoader::loadFromFile(configPath);
+        auto result = nodehammer::config::ConfigLoader::loadFromFile(configPath);
         nodehammer::cli::printDiags(result.diags);
 
         if (result.diags.hasErrors()) {
@@ -23,7 +23,7 @@ void registerCmdValidateConfig(CLI::App &app) {
             return;
         }
 
-        auto validationDiags = nodehammer::ConfigValidator::validate(result.config);
+        auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
         nodehammer::cli::printDiags(validationDiags);
 
         if (validationDiags.hasErrors()) {

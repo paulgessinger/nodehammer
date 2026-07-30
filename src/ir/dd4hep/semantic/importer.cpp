@@ -19,7 +19,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -142,4 +142,4 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     return std::move(tr.result);
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

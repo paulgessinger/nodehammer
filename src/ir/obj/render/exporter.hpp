@@ -2,7 +2,7 @@
 
 #include <ir/render/exporter.hpp>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// Writes a RenderScene to Wavefront OBJ + MTL.
 ///
@@ -18,4 +18,4 @@ class ObjExporter final : public IRenderExporter {
                                      const ExportConfig &config) const override;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

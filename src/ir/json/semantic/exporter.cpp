@@ -8,7 +8,7 @@
 
 #include <format>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view SemanticJsonExporter::formatName() const noexcept { return "json"; }
 
@@ -34,4 +34,4 @@ SemanticJsonExporter::write(const SemanticScene &scene, const std::filesystem::p
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

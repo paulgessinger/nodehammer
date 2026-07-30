@@ -7,7 +7,7 @@
 #include <memory>
 #include <string_view>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 /// Name of the shared logical volume `applyWedgeCut` binds placements to when
 /// they fall entirely inside the removed sector (an empty shape that renders
@@ -62,7 +62,7 @@ struct WedgeCutStats {
 /// degenerate (≈0° or ≈360°) the scene is left unchanged and an all-zero stats
 /// value is returned. Outcome counts are reported via the returned stats; the
 /// CLI/viewer summarise them — the pass itself emits no diagnostics.
-[[nodiscard]] WedgeCutStats applyWedgeCut(SemanticScene &scene, const WedgeCutParams &params);
+[[nodiscard]] WedgeCutStats applyWedgeCut(ir::SemanticScene &scene, const WedgeCutParams &params);
 
 /// Cooperative, iterator-driven version of `applyWedgeCut`. The cut walks every
 /// placement twice — once to size the cutting solid, once to classify and
@@ -87,7 +87,7 @@ class WedgeCutJob {
 
     /// Initialise the job: validate the sector, recompute world transforms and
     /// snapshot the placement list. `scene` is mutated as the job advances.
-    void start(SemanticScene &scene, const WedgeCutParams &params);
+    void start(ir::SemanticScene &scene, const WedgeCutParams &params);
 
     /// Apply the cut to pending placements for up to `budget_ns` of wall-clock
     /// time. The atomic unit is one placement (classification plus any cut-shape
@@ -109,4 +109,4 @@ class WedgeCutJob {
     std::unique_ptr<Impl> impl_;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

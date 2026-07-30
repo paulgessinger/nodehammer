@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// ISemanticImporter that reads a FlatBuffer-encoded SemanticScene (.nhb/.nhb.zst).
 /// Format name: "flatbuffer"   Extensions: "nhb", "nhb.zst"
@@ -26,4 +26,4 @@ class FlatBufferImporter final : public ISemanticImporter {
                                                       std::span<const std::byte> bytes);
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

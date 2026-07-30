@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // ── Strong IDs ────────────────────────────────────────────────────────────────
 
@@ -151,4 +151,4 @@ struct RenderScene {
     uint64_t nextMaterialId_{1};
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

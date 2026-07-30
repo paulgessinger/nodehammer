@@ -6,7 +6,7 @@
 #include <cctype>
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -65,4 +65,4 @@ RenderExporterRegistry RenderExporterRegistry::makeDefault() {
     return reg;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

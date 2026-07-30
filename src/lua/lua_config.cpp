@@ -45,7 +45,7 @@
 // through ConfigLoader identically to hand-written TOML. See
 // docs/config-scripting-lua.md.
 
-namespace nodehammer {
+namespace nodehammer::lua {
 
 namespace {
 
@@ -70,7 +70,7 @@ std::optional<std::string> readFileToString(const std::filesystem::path &p) {
 // TOML loader's warnUnknownKeys, drawing on the same lists (config_keys.hpp) so a
 // typo'd or stale key is rejected identically on both front-ends.
 void warnUnknownKeys(const sol::table &t, std::span<const std::string_view> known,
-                     const std::string &ctx, DiagnosticList &diags) {
+                     const std::string &ctx, ir::DiagnosticList &diags) {
     for (const auto &kv : t) {
         if (kv.first.get_type() != sol::type::string) {
             continue;
@@ -85,9 +85,9 @@ void warnUnknownKeys(const sol::table &t, std::span<const std::string_view> know
 
 // ── Predicate parsing (string or list-of-strings → OR) ───────────────────────
 
-std::optional<PredicateExpr> parseOnePredicate(const std::string &expr, const std::string &ctx,
-                                               DiagnosticList &diags) {
-    auto parsed = parsePredicateExpr(expr);
+std::optional<config::PredicateExpr>
+parseOnePredicate(const std::string &expr, const std::string &ctx, ir::DiagnosticList &diags) {
+    auto parsed = config::parsePredicateExpr(expr);
     if (!parsed) {
         diags.error(
             codes::kErrConfigParse,
@@ -101,8 +101,8 @@ std::optional<PredicateExpr> parseOnePredicate(const std::string &expr, const st
 // A DSL predicate value is either a single expression string or a sequence of
 // expression strings (OR'd together) — byte-identical to the TOML `match` /
 // `keep_if` scalar-or-array forms.
-std::optional<PredicateExpr> predicateFromLua(const sol::object &val, const std::string &ctx,
-                                              DiagnosticList &diags) {
+std::optional<config::PredicateExpr>
+predicateFromLua(const sol::object &val, const std::string &ctx, ir::DiagnosticList &diags) {
     if (val.get_type() == sol::type::string) {
         return parseOnePredicate(val.as<std::string>(), ctx, diags);
     }
@@ -121,7 +121,7 @@ std::optional<PredicateExpr> predicateFromLua(const sol::object &val, const std:
                         std::format("{}: expected an array of predicate strings", ctx), ctx);
             return std::nullopt;
         }
-        std::vector<PredicateExpr> operands;
+        std::vector<config::PredicateExpr> operands;
         operands.reserve(n);
         for (std::size_t i = 1; i <= n; ++i) {
             const sol::object e = arr.get<sol::object>(i);
@@ -142,7 +142,7 @@ std::optional<PredicateExpr> predicateFromLua(const sol::object &val, const std:
                        std::format("{}: empty predicate list — entry skipped", ctx), ctx);
             return std::nullopt;
         }
-        return combineOr(std::move(operands));
+        return config::combineOr(std::move(operands));
     }
     diags.error(codes::kErrConfigParse,
                 std::format("{}: expected a predicate string or list of strings", ctx), ctx);
@@ -151,7 +151,7 @@ std::optional<PredicateExpr> predicateFromLua(const sol::object &val, const std:
 
 // ── Color array parsing (hex strings go through the shared parseHexColor) ────
 
-Color colorFromArray(const sol::table &arr, Color base) {
+config::Color colorFromArray(const sol::table &arr, config::Color base) {
     if (arr.size() >= 3) {
         base.r = arr.get_or(1, base.r);
         base.g = arr.get_or(2, base.g);
@@ -222,9 +222,10 @@ nlohmann::json jsonFromLua(const sol::object &o) {
 
 // ── Tessellation sub-table → Rule::Tessellation ──────────────────────────────
 
-Rule::Tessellation tessFromLua(const sol::table &t, const std::string &ctx, DiagnosticList &diags) {
+config::Rule::Tessellation tessFromLua(const sol::table &t, const std::string &ctx,
+                                       ir::DiagnosticList &diags) {
     warnUnknownKeys(t, keys::kTessellationKeys, ctx, diags);
-    Rule::Tessellation tess;
+    config::Rule::Tessellation tess;
     if (const sol::optional<bool> v = t[keys::kSkipGeometry]) {
         tess.skipGeometry = *v;
     }
@@ -241,7 +242,7 @@ Rule::Tessellation tessFromLua(const sol::table &t, const std::string &ctx, Diag
         tess.maxSegmentsCircle = *v;
     }
     if (const sol::optional<std::string> v = t[keys::kFallback]) {
-        if (auto parsed = parseBooleanFallback(*v)) {
+        if (auto parsed = config::parseBooleanFallback(*v)) {
             tess.fallback = *parsed;
         } else {
             diags.error(codes::kErrConfigParse,
@@ -286,10 +287,10 @@ return readonly
 
 } // namespace
 
-ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
-                           const std::filesystem::path &baseDir) {
-    NHConfig cfg;
-    DiagnosticList diags;
+config::ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
+                                   const std::filesystem::path &baseDir) {
+    config::NHConfig cfg;
+    ir::DiagnosticList diags;
     const std::string chunkName{sourceName};
 
     try {
@@ -383,7 +384,7 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
         // ── export(name, { … }) ──────────────────────────────────────────────
         lua.set_function("export", [&](const std::string &name, sol::table t) {
             const std::string ctx = "export." + name;
-            CommonExportConfig common;
+            config::CommonExportConfig common;
             if (const sol::optional<double> v = t[keys::kUnitScale]) {
                 common.unitScale = *v;
             }
@@ -414,12 +415,12 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
 
             if (name == "obj") {
                 warnUnknownKeys(t, validKeys, ctx, diags);
-                ObjExportFormatConfig c;
+                config::ObjExportFormatConfig c;
                 c.common = common;
                 cfg.exportFormats[name] = c;
             } else if (name == "gltf" || name == "glb") {
                 warnUnknownKeys(t, validKeys, ctx, diags);
-                GltfExportFormatConfig c;
+                config::GltfExportFormatConfig c;
                 c.common = common;
                 if (const sol::optional<bool> v = t[keys::kBakeUnitScale]) {
                     c.bakeUnitScale = *v;
@@ -443,14 +444,14 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
         lua.set_function("material", [&](const std::string &name, sol::table t) {
             const std::string ctx = std::format("material.{}", name);
             warnUnknownKeys(t, keys::kMaterialKeys, ctx, diags);
-            MaterialDef def;
+            config::MaterialDef def;
             def.name = name;
             const sol::object bc = t[keys::kBaseColor];
             if (bc.get_type() == sol::type::table) {
                 def.baseColor = colorFromArray(bc.as<sol::table>(), def.baseColor);
             } else if (bc.get_type() == sol::type::string) {
                 const std::string hex = bc.as<std::string>();
-                if (auto parsed = parseHexColor(hex)) {
+                if (auto parsed = config::parseHexColor(hex)) {
                     def.baseColor = *parsed;
                 } else {
                     diags.warn(codes::kWarnConfigUnknownKey,
@@ -473,7 +474,7 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
                 def.emissive = colorFromArray(em.as<sol::table>(), def.emissive);
             }
             if (const sol::optional<std::string> am = t[keys::kAlphaMode]) {
-                if (auto parsed = parseAlphaMode(*am)) {
+                if (auto parsed = config::parseAlphaMode(*am)) {
                     def.alphaMode = *parsed;
                 } else {
                     diags.warn(codes::kWarnConfigUnknownKey,
@@ -509,28 +510,30 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
             }
             if (const sol::object sc = t[keys::kSpecularColor]; sc.get_type() == sol::type::table) {
                 def.specularColor =
-                    colorFromArray(sc.as<sol::table>(), Color{1.0f, 1.0f, 1.0f, 1.0f});
+                    colorFromArray(sc.as<sol::table>(), config::Color{1.0f, 1.0f, 1.0f, 1.0f});
             }
             cfg.materials.push_back(std::move(def));
         });
 
         // ── keep{…} / drop{…} — string or list-of-strings ────────────────────
-        auto addSelection = [&](SelectionAction action, const sol::object &v) {
-            if (auto p = predicateFromLua(v, action == SelectionAction::KeepIf ? "keep" : "drop",
-                                          diags)) {
-                SelectionRule rule;
+        auto addSelection = [&](config::SelectionAction action, const sol::object &v) {
+            if (auto p = predicateFromLua(
+                    v, action == config::SelectionAction::KeepIf ? "keep" : "drop", diags)) {
+                config::SelectionRule rule;
                 rule.action = action;
                 rule.predicate = std::move(*p);
                 cfg.selection.push_back(std::move(rule));
             }
         };
-        lua.set_function("keep", [&](sol::object v) { addSelection(SelectionAction::KeepIf, v); });
-        lua.set_function("drop", [&](sol::object v) { addSelection(SelectionAction::DropIf, v); });
+        lua.set_function("keep",
+                         [&](sol::object v) { addSelection(config::SelectionAction::KeepIf, v); });
+        lua.set_function("drop",
+                         [&](sol::object v) { addSelection(config::SelectionAction::DropIf, v); });
 
         // ── rule{ match=, material=, tessellation=, extras= } ────────────────
         lua.set_function("rule", [&](sol::table t) {
             warnUnknownKeys(t, keys::kRuleKeys, "rule", diags);
-            Rule rule;
+            config::Rule rule;
             const sol::object m = t[keys::kMatch];
             if (m.get_type() == sol::type::string || m.get_type() == sol::type::table) {
                 if (auto p = predicateFromLua(m, "rule.match", diags)) {
@@ -640,10 +643,10 @@ ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
                     chunkName);
     }
 
-    return ConfigResult{std::move(cfg), std::move(diags)};
+    return config::ConfigResult{std::move(cfg), std::move(diags)};
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::lua
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop

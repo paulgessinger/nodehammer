@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// Builds pre-defined synthetic SemanticScene fixtures for testing
 /// and for use as the "synthetic" importer format.
@@ -39,4 +39,4 @@ class SyntheticImporter final : public ISemanticImporter {
     [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// ISemanticImporter for DD4hep compact XML geometry descriptions.
 /// Format name: "dd4hep"   Extensions: none — .xml is ambiguous, explicit --input-format required.
@@ -16,4 +16,4 @@ class DD4hepImporter final : public ISemanticImporter {
     [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

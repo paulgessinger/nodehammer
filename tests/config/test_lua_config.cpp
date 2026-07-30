@@ -14,6 +14,9 @@
 #include <variant>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
+using namespace nodehammer::lua;
+using namespace nodehammer::config;
 
 namespace {
 

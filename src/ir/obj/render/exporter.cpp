@@ -9,7 +9,7 @@
 #include <queue>
 #include <unordered_map>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view ObjExporter::formatName() const noexcept { return "obj"; }
 
@@ -136,4 +136,4 @@ ExportResult ObjExporter::write(const RenderScene &scene, const std::filesystem:
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

@@ -4,11 +4,11 @@
 
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 /// Serialize a NHConfig to a TOML string.
 /// The output is a complete, valid TOML document that can be round-tripped
 /// through ConfigLoader::loadFromString().
 [[nodiscard]] std::string configToToml(const NHConfig &cfg);
 
-} // namespace nodehammer
+} // namespace nodehammer::config

@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
 /// Parse a predicate expression string into a PredicateExpr AST node.
 /// Returns the parsed expression or an error message.
@@ -41,4 +41,4 @@ namespace nodehammer {
 /// single → the predicate bare, else an `AndPredicate`.
 [[nodiscard]] PredicateExpr combineAnd(std::vector<PredicateExpr> operands);
 
-} // namespace nodehammer
+} // namespace nodehammer::config

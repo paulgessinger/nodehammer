@@ -17,7 +17,8 @@ namespace nodehammer::test {
 
 /// Write a TessellationOutput to an OBJ file at the given path.
 /// Exports positions (v), normals (vn), and indexed triangles (f).
-inline void writeObj(const TessellationOutput &out, const std::filesystem::path &path) {
+inline void writeObj(const tessellation::TessellationOutput &out,
+                     const std::filesystem::path &path) {
     std::ofstream f{path};
 
     for (const auto &v : out.vertices) {
@@ -39,7 +40,7 @@ inline void writeObj(const TessellationOutput &out, const std::filesystem::path 
 
 /// Write out to NODEHAMMER_TESS_OBJ_DIR/<name>.obj when that macro is defined.
 /// Compiles to a no-op otherwise.
-inline void writeObjToDir(const TessellationOutput &out, const std::string &name) {
+inline void writeObjToDir(const tessellation::TessellationOutput &out, const std::string &name) {
 #ifdef NODEHAMMER_TESS_OBJ_DIR
     const std::filesystem::path dir{NODEHAMMER_TESS_OBJ_DIR};
     std::filesystem::create_directories(dir);

@@ -7,7 +7,7 @@
 #include <format>
 #include <span>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view SemanticFlatbufferExporter::formatName() const noexcept { return "nhb"; }
 
@@ -33,4 +33,4 @@ SemanticFlatbufferExporter::write(const SemanticScene &scene, const std::filesys
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

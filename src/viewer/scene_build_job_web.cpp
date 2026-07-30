@@ -33,17 +33,17 @@ namespace {
 
 class CooperativeBackend final : public IWebBackend {
   public:
-    void start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-               std::shared_ptr<const ::nodehammer::SemanticScene> scene, std::string config_label,
-               std::string geometry_label,
-               std::optional<::nodehammer::WedgeCutParams> wedge_cut) override {
+    void start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
+               std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
+               std::string config_label, std::string geometry_label,
+               std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) override {
         logPreBuild(config_label, geometry_label);
         pipe_.start(std::move(config), std::move(scene), wedge_cut);
     }
 
     bool poll(std::uint64_t budget_ns) override { return pipe_.advance(budget_ns); }
 
-    ::nodehammer::SceneBuildResult take() override { return pipe_.take(); }
+    ::nodehammer::pipeline::SceneBuildResult take() override { return pipe_.take(); }
 
     std::size_t tessellationTotal() const override { return pipe_.tessellationTotal(); }
     std::size_t tessellationProcessed() const override { return pipe_.tessellationProcessed(); }
@@ -53,7 +53,7 @@ class CooperativeBackend final : public IWebBackend {
     SceneBuildJob::Phase phase() const override { return pipe_.phase(); }
 
   private:
-    ::nodehammer::BuildPipeline pipe_;
+    ::nodehammer::tessellation::BuildPipeline pipe_;
 };
 
 } // namespace
@@ -75,11 +75,11 @@ struct SceneBuildJob::Impl {
     // Saved start() args, kept only while the worker backend is active, so a
     // fatal worker failure mid-build can be replayed on the cooperative backend
     // without the App ever knowing.
-    std::shared_ptr<const ::nodehammer::NHConfig> saved_config;
-    std::shared_ptr<const ::nodehammer::SemanticScene> saved_scene;
+    std::shared_ptr<const ::nodehammer::config::NHConfig> saved_config;
+    std::shared_ptr<const ::nodehammer::ir::SemanticScene> saved_scene;
     std::string saved_config_label;
     std::string saved_geometry_label;
-    std::optional<::nodehammer::WedgeCutParams> saved_wedge;
+    std::optional<::nodehammer::tessellation::WedgeCutParams> saved_wedge;
 
     Impl() {
         backend = makeWorkerBackend();
@@ -93,10 +93,10 @@ struct SceneBuildJob::Impl {
 SceneBuildJob::SceneBuildJob() : impl_(std::make_unique<Impl>()) {}
 SceneBuildJob::~SceneBuildJob() = default;
 
-void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::NHConfig> config,
-                          std::shared_ptr<const ::nodehammer::SemanticScene> scene,
+void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::config::NHConfig> config,
+                          std::shared_ptr<const ::nodehammer::ir::SemanticScene> scene,
                           std::string config_label, std::string geometry_label,
-                          std::optional<::nodehammer::WedgeCutParams> wedge_cut) {
+                          std::optional<::nodehammer::tessellation::WedgeCutParams> wedge_cut) {
     if (impl_->using_worker) {
         // Cheap (shared_ptr refcount + small string copies) — retained for a
         // possible cooperative replay if the worker turns out to be broken.
@@ -129,7 +129,7 @@ bool SceneBuildJob::poll(uint64_t budget_ns) {
     return done;
 }
 
-::nodehammer::SceneBuildResult SceneBuildJob::take() { return impl_->backend->take(); }
+::nodehammer::pipeline::SceneBuildResult SceneBuildJob::take() { return impl_->backend->take(); }
 
 size_t SceneBuildJob::tessellationTotal() const { return impl_->backend->tessellationTotal(); }
 size_t SceneBuildJob::tessellationProcessed() const {

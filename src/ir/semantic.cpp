@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 namespace {
 
@@ -537,4 +537,4 @@ std::size_t SemanticScene::deduplicateMaterials() {
     return before - materials.size();
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <string>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 /// Bit positions for degradation flags. Pass to DegradationFlags::set()/has().
 enum class DegradationBit : std::size_t {
@@ -37,4 +37,4 @@ struct Provenance {
     DegradationFlags degradation;
 };
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

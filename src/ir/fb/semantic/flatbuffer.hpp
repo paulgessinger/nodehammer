@@ -12,7 +12,7 @@
 #include <string_view>
 #include <vector>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 // FlatBuffer semantic IR design notes:
 //
@@ -101,4 +101,4 @@ std::vector<std::byte> semanticSceneToBytes(const SemanticScene &scene);
 /// Throws std::runtime_error on verification failure.
 SemanticScene semanticSceneFromBytes(std::span<const std::byte> buf);
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

@@ -18,13 +18,13 @@ static const std::string kSensitiveDet =
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("DD4hepImporter: formatName and supportedExtensions", "[import][dd4hep]") {
-    nodehammer::DD4hepImporter imp;
+    nodehammer::ir::DD4hepImporter imp;
     REQUIRE(imp.formatName() == "dd4hep");
     REQUIRE(imp.supportedExtensions().empty());
 }
 
 TEST_CASE("DD4hepImporter: simple_box.xml -> no errors, sourceSystem dd4hep", "[import][dd4hep]") {
-    nodehammer::DD4hepImporter imp;
+    nodehammer::ir::DD4hepImporter imp;
     auto result = imp.import(kSimpleBox);
 
     REQUIRE_FALSE(result.diags.hasErrors());
@@ -35,12 +35,12 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> no errors, sourceSystem dd4hep", "[
 }
 
 TEST_CASE("DD4hepImporter: simple_box.xml -> scene contains a BoxShape", "[import][dd4hep]") {
-    nodehammer::DD4hepImporter imp;
+    nodehammer::ir::DD4hepImporter imp;
     auto result = imp.import(kSimpleBox);
 
     bool hasBox = false;
     for (const auto &[id, s] : result.scene.shapes) {
-        if (std::holds_alternative<nodehammer::BoxShape>(s.data)) {
+        if (std::holds_alternative<nodehammer::ir::BoxShape>(s.data)) {
             hasBox = true;
             break;
         }
@@ -49,7 +49,7 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> scene contains a BoxShape", "[impor
 }
 
 TEST_CASE("DD4hepImporter: simple_box.xml -> subdetector tag propagated", "[import][dd4hep]") {
-    nodehammer::DD4hepImporter imp;
+    nodehammer::ir::DD4hepImporter imp;
     auto result = imp.import(kSimpleBox);
 
     // At least one node should carry the "subdetector" tag
@@ -64,7 +64,7 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> subdetector tag propagated", "[impo
 }
 
 TEST_CASE("DD4hepImporter: sensitive_detector.xml -> sensitive tag set", "[import][dd4hep]") {
-    nodehammer::DD4hepImporter imp;
+    nodehammer::ir::DD4hepImporter imp;
     auto result = imp.import(kSensitiveDet);
 
     REQUIRE_FALSE(result.diags.hasErrors());
@@ -81,10 +81,10 @@ TEST_CASE("DD4hepImporter: sensitive_detector.xml -> sensitive tag set", "[impor
 }
 
 TEST_CASE("DD4hepImporter: all nodes reachable from root via BFS", "[import][dd4hep]") {
-    nodehammer::DD4hepImporter imp;
+    nodehammer::ir::DD4hepImporter imp;
     auto result = imp.import(kSimpleBox);
 
-    std::unordered_set<nodehammer::SemanticNodeId> visited;
+    std::unordered_set<nodehammer::ir::SemanticNodeId> visited;
     result.scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == result.scene.nodes.size());
 }

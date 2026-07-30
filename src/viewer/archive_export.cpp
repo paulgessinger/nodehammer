@@ -105,8 +105,8 @@ void collectClosure(const ProjectFs &fs, ZipWorkingSet &ws, std::string_view con
         if (!bytes || !isTomlKey(key)) {
             continue;
         }
-        for (const auto &rel : ConfigLoader::peekIncludesFromBytes(bytes->span())) {
-            auto abs = ConfigLoader::resolveIncludeKey(key, rel);
+        for (const auto &rel : config::ConfigLoader::peekIncludesFromBytes(bytes->span())) {
+            auto abs = config::ConfigLoader::resolveIncludeKey(key, rel);
             if (seen.insert(abs).second) {
                 queue.push_back(std::move(abs));
             }

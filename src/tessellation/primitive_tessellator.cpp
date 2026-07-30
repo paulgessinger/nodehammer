@@ -8,7 +8,7 @@
 #include <cmath>
 #include <numbers>
 
-namespace nodehammer {
+namespace nodehammer::tessellation {
 
 using detail::overloaded;
 
@@ -122,8 +122,8 @@ bool pickAcDiagonal(const glm::vec3 &a, const glm::vec3 &b, const glm::vec3 &c,
 // Both splits preserve the cyclic corner order a→b→c→d and CCW winding by
 // construction; only the reader's choice of which diagonal to cut along
 // changes. Per-vertex normals (carried on a/b/c/d) are untouched either way.
-void appendQuad(TessellationOutput &out, const Vertex &a, const Vertex &b, const Vertex &c,
-                const Vertex &d) {
+void appendQuad(TessellationOutput &out, const ir::Vertex &a, const ir::Vertex &b,
+                const ir::Vertex &c, const ir::Vertex &d) {
     const auto base = static_cast<uint32_t>(out.vertices.size());
     out.vertices.push_back(a);
     out.vertices.push_back(b);
@@ -147,7 +147,8 @@ void appendQuad(TessellationOutput &out, const Vertex &a, const Vertex &b, const
 }
 
 // Append a single triangle a → b → c (CCW when viewed from outside).
-void appendTriangle(TessellationOutput &out, const Vertex &a, const Vertex &b, const Vertex &c) {
+void appendTriangle(TessellationOutput &out, const ir::Vertex &a, const ir::Vertex &b,
+                    const ir::Vertex &c) {
     const auto base = static_cast<uint32_t>(out.vertices.size());
     out.vertices.push_back(a);
     out.vertices.push_back(b);
@@ -176,7 +177,7 @@ void appendTriangle(TessellationOutput &out, const Vertex &a, const Vertex &b, c
 // they each carry a different normal; sharing vertices across faces would require
 // averaged normals, which would produce incorrect shading on a hard-edged box.
 
-TessellationOutput tessellateBox(const BoxShape &s) {
+TessellationOutput tessellateBox(const ir::BoxShape &s) {
     TessellationOutput out;
     const float x = static_cast<float>(s.dx);
     const float y = static_cast<float>(s.dy);
@@ -240,7 +241,7 @@ TessellationOutput tessellateBox(const BoxShape &s) {
 //   4. Side walls (partial arc, !full only): two flat rectangular faces that
 //      close the open ends of the arc at phi0 and phi0+dphi.
 
-TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &p) {
+TessellationOutput tessellateTube(const ir::TubeShape &s, const TessellationParams &p) {
     TessellationOutput out;
     const int segs = std::max(3, p.maxSegmentsCircle);
     const float rMin = static_cast<float>(s.rMin);
@@ -403,7 +404,7 @@ TessellationOutput tessellateTube(const TubeShape &s, const TessellationParams &
 // (outward) is (2*hz, -dR), normalised. In 3D this is rotated around Z at each
 // azimuthal angle.
 
-TessellationOutput tessellateCone(const ConeShape &s, const TessellationParams &p) {
+TessellationOutput tessellateCone(const ir::ConeShape &s, const TessellationParams &p) {
     TessellationOutput out;
     const int segs = std::max(3, p.maxSegmentsCircle);
     const float rMin1 = static_cast<float>(s.rMin1);
@@ -526,7 +527,7 @@ TessellationOutput tessellateCone(const ConeShape &s, const TessellationParams &
 // Face normals are computed from the cross product of two edges in that face,
 // so they correctly follow the slant of each trapezoidal side.
 
-TessellationOutput tessellateTrd(const TrdShape &s) {
+TessellationOutput tessellateTrd(const ir::TrdShape &s) {
     TessellationOutput out;
     const float x1 = static_cast<float>(s.dx1);
     const float x2 = static_cast<float>(s.dx2);
@@ -582,7 +583,7 @@ TessellationOutput tessellateTrd(const TrdShape &s) {
 //
 // Face normals are derived from the cross product of edge vectors, same as Trd.
 
-TessellationOutput tessellatePara(const ParaShape &s) {
+TessellationOutput tessellatePara(const ir::ParaShape &s) {
     TessellationOutput out;
     const float dx = static_cast<float>(s.dx);
     const float dy = static_cast<float>(s.dy);
@@ -656,7 +657,7 @@ TessellationOutput tessellatePara(const ParaShape &s) {
 // two passes are made (outer then inner). nTube = segs/2 keeps poloidal
 // resolution roughly proportional to toroidal resolution.
 
-TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams &p) {
+TessellationOutput tessellateTorus(const ir::TorusShape &s, const TessellationParams &p) {
     TessellationOutput out;
     const int segs = std::max(3, p.maxSegmentsCircle);
     const int nTube = std::max(3, segs / 2); // poloidal segments around the tube
@@ -669,7 +670,7 @@ TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams
     // Compute a surface vertex at toroidal index i, poloidal index j, on the
     // surface at tube radius r. normalSign: +1 for outward (outer surface),
     // -1 for inward (inner surface).
-    auto vert = [&](int i, int j, float r, float normalSign) -> Vertex {
+    auto vert = [&](int i, int j, float r, float normalSign) -> ir::Vertex {
         const float phi = sweepAngle(phi0, dphi, i, segs);
         const float theta = loopAngle(j, nTube);
         const float ct = std::cos(theta), st = std::sin(theta);
@@ -724,7 +725,7 @@ TessellationOutput tessellateTorus(const TorusShape &s, const TessellationParams
 // (rMin > 0). The cap normal is (0,0,-1) for the bottom and (0,0,+1) for the
 // top.
 
-TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &p) {
+TessellationOutput tessellatePcon(const ir::PconShape &s, const TessellationParams &p) {
     TessellationOutput out;
     if (s.sections.size() < 2) {
         return out;
@@ -840,7 +841,7 @@ TessellationOutput tessellatePcon(const PconShape &s, const TessellationParams &
 // End caps are emitted at the first and last section, using the same winding
 // convention as Pcon (solid polygon fan or annular polygon ring).
 
-TessellationOutput tessellatePgon(const PgonShape &s, const TessellationParams &p) {
+TessellationOutput tessellatePgon(const ir::PgonShape &s, const TessellationParams &p) {
     TessellationOutput out;
     if (s.sections.size() < 2 || s.nSides < 3) {
         return out;
@@ -942,7 +943,7 @@ TessellationOutput tessellatePgon(const PgonShape &s, const TessellationParams &
 // not shared or welded — each triangle owns three independent vertices, which
 // is consistent with the flat-shading convention used by the other tessellators.
 
-TessellationOutput tessellateTessellated(const TessellatedShape &s) {
+TessellationOutput tessellateTessellated(const ir::TessellatedShape &s) {
     TessellationOutput out;
     out.vertices.reserve(s.triangles.size() * 3);
     out.indices.reserve(s.triangles.size() * 3);
@@ -960,39 +961,41 @@ TessellationOutput tessellateTessellated(const TessellatedShape &s) {
 
 // ── PrimitiveTessellator ──────────────────────────────────────────────────────
 
-bool PrimitiveTessellator::canTessellate(const SemanticShapeVariant &shape) const noexcept {
-    return !isBooleanShape(shape);
+bool PrimitiveTessellator::canTessellate(const ir::SemanticShapeVariant &shape) const noexcept {
+    return !ir::isBooleanShape(shape);
 }
 
-TessellationOutput PrimitiveTessellator::tessellate(const SemanticShapeVariant &shape,
+TessellationOutput PrimitiveTessellator::tessellate(const ir::SemanticShapeVariant &shape,
                                                     const TessellationParams &params) const {
-    return std::visit(
-        overloaded{
-            [&](const BoxShape &s) { return tessellateBox(s); },
-            [&](const TubeShape &s) { return tessellateTube(s, params); },
-            [&](const ConeShape &s) { return tessellateCone(s, params); },
-            [&](const TrdShape &s) { return tessellateTrd(s); },
-            [&](const ParaShape &s) { return tessellatePara(s); },
-            [&](const TorusShape &s) -> TessellationOutput { return tessellateTorus(s, params); },
-            [&](const PconShape &s) { return tessellatePcon(s, params); },
-            [&](const PgonShape &s) { return tessellatePgon(s, params); },
-            [&](const TessellatedShape &s) { return tessellateTessellated(s); },
-            [](const UnknownShape &s) {
-                TessellationOutput err;
-                err.diags.error(codes::kErrTessUnknownShape,
-                                "cannot tessellate unknown shape: " + s.originalType,
-                                s.originalType);
-                return err;
-            },
-            [](const auto &) {
-                // Boolean — caller should have checked canTessellate()
-                TessellationOutput err;
-                err.diags.error(codes::kErrTessUnknownShape,
-                                "boolean shape passed to PrimitiveTessellator", "boolean");
-                return err;
-            },
-        },
-        shape);
+    return std::visit(overloaded{
+                          [&](const ir::BoxShape &s) { return tessellateBox(s); },
+                          [&](const ir::TubeShape &s) { return tessellateTube(s, params); },
+                          [&](const ir::ConeShape &s) { return tessellateCone(s, params); },
+                          [&](const ir::TrdShape &s) { return tessellateTrd(s); },
+                          [&](const ir::ParaShape &s) { return tessellatePara(s); },
+                          [&](const ir::TorusShape &s) -> TessellationOutput {
+                              return tessellateTorus(s, params);
+                          },
+                          [&](const ir::PconShape &s) { return tessellatePcon(s, params); },
+                          [&](const ir::PgonShape &s) { return tessellatePgon(s, params); },
+                          [&](const ir::TessellatedShape &s) { return tessellateTessellated(s); },
+                          [](const ir::UnknownShape &s) {
+                              TessellationOutput err;
+                              err.diags.error(codes::kErrTessUnknownShape,
+                                              "cannot tessellate unknown shape: " + s.originalType,
+                                              s.originalType);
+                              return err;
+                          },
+                          [](const auto &) {
+                              // Boolean — caller should have checked canTessellate()
+                              TessellationOutput err;
+                              err.diags.error(codes::kErrTessUnknownShape,
+                                              "boolean shape passed to PrimitiveTessellator",
+                                              "boolean");
+                              return err;
+                          },
+                      },
+                      shape);
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::tessellation

@@ -7,7 +7,7 @@
 #include <format>
 #include <span>
 
-namespace nodehammer {
+namespace nodehammer::ir {
 
 std::string_view FlatBufferImporter::formatName() const noexcept { return "flatbuffer"; }
 
@@ -60,4 +60,4 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
     return result;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::ir

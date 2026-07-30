@@ -4,10 +4,10 @@
 #include <format>
 #include <unordered_set>
 
-namespace nodehammer {
+namespace nodehammer::config {
 
-DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
-    DiagnosticList diags;
+ir::DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
+    ir::DiagnosticList diags;
 
     // Build set of defined material names for reference checking.
     std::unordered_set<std::string> definedMaterials;
@@ -75,4 +75,4 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
     return diags;
 }
 
-} // namespace nodehammer
+} // namespace nodehammer::config

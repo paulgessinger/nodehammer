@@ -17,9 +17,11 @@
 #include <vector>
 
 using namespace nodehammer;
+using namespace nodehammer::ir;
 using nodehammer::viewer::BagProjectFs;
 using nodehammer::viewer::BuildPhase;
 using nodehammer::viewer::BuildSession;
+using nodehammer::viewer::CapturingLogSink;
 
 namespace {
 
