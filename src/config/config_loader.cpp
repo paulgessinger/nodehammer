@@ -757,6 +757,42 @@ ConfigResult parseTable(const toml::table &tbl) {
     return ConfigResult{std::move(cfg), std::move(diags)};
 }
 
+// ── The filesystem include fetcher ───────────────────────────────────────────
+//
+// The one place includes are read from disk. Both filesystem-rooted entry
+// points below share it, so "how does an include become bytes" has a single
+// answer — a second fetcher here is exactly the drift that would let the two
+// entry points disagree about cycles, caching, or what counts as missing.
+//
+// It is not itself rooted anywhere: `resolveIncludeKey` has already joined
+// each key against its parent's directory by the time the fetcher sees it, so
+// rooting is entirely a property of the root key the caller passes to
+// `parseAndMerge`.
+IncludeFetcher filesystemFetcher() {
+    // Cache so the fetcher returns stable spans across `parseAndMerge`'s
+    // walk. Lifetime is tied to the lambda-captured `shared_ptr`, which
+    // outlives the `parseAndMerge` call.
+    auto cache = std::make_shared<std::unordered_map<std::string, std::vector<std::byte>>>();
+
+    return [cache](std::string_view key) -> std::optional<std::span<const std::byte>> {
+        std::string canon_key;
+        std::error_code ec;
+        auto canonical_path = std::filesystem::canonical(std::filesystem::path{key}, ec);
+        canon_key = ec ? std::string{key} : canonical_path.string();
+
+        if (auto it = cache->find(canon_key); it != cache->end()) {
+            return std::span<const std::byte>{it->second};
+        }
+        try {
+            auto bytes = detail::file_io::readFile(canon_key);
+            auto [ins, _] = cache->emplace(std::move(canon_key), std::move(bytes));
+            return std::span<const std::byte>{ins->second};
+        } catch (...) {
+            return std::nullopt;
+        }
+    };
+}
+
 } // namespace
 
 // ── ConfigLoader ──────────────────────────────────────────────────────────────
@@ -779,32 +815,8 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
         return ConfigResult{{}, std::move(diags)};
     }
 
-    // Cache so the fetcher returns stable spans across `parseAndMerge`'s
-    // walk. Lifetime is tied to the lambda-captured `shared_ptr`, which
-    // outlives the `parseAndMerge` call.
-    auto cache = std::make_shared<std::unordered_map<std::string, std::vector<std::byte>>>();
-
-    IncludeFetcher fetcher =
-        [cache](std::string_view key) -> std::optional<std::span<const std::byte>> {
-        std::string canon_key;
-        std::error_code ec;
-        auto canonical_path = std::filesystem::canonical(std::filesystem::path{key}, ec);
-        canon_key = ec ? std::string{key} : canonical_path.string();
-
-        if (auto it = cache->find(canon_key); it != cache->end()) {
-            return std::span<const std::byte>{it->second};
-        }
-        try {
-            auto bytes = detail::file_io::readFile(canon_key);
-            auto [ins, _] = cache->emplace(std::move(canon_key), std::move(bytes));
-            return std::span<const std::byte>{ins->second};
-        } catch (...) {
-            return std::nullopt;
-        }
-    };
-
     return parseAndMerge(std::span<const std::byte>{root_bytes}, canonical.string(),
-                         std::move(fetcher));
+                         filesystemFetcher());
 }
 
 std::vector<std::string> ConfigLoader::peekIncludesFromBytes(std::span<const std::byte> bytes) {
@@ -863,17 +875,15 @@ ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
     return ConfigResult{{}, std::move(diags)};
 }
 
-ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName) {
-    diagnostics::DiagnosticList diags;
-    try {
-        auto tbl = toml::parse(content, sourceName);
-        return parseTable(tbl);
-    } catch (const toml::parse_error &e) {
-        diags.error(
-            codes::kErrConfigParse, e.description(),
-            std::format("{}:{}:{}", sourceName, e.source().begin.line, e.source().begin.column));
-    }
-    return ConfigResult{{}, std::move(diags)};
+ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName,
+                                          const std::filesystem::path &baseDir) {
+    // The root key is what `resolveIncludeKey` takes the parent directory of,
+    // so joining `baseDir` onto the source name is what roots the include tree
+    // there. An empty `baseDir` leaves the key equal to `sourceName`, so the
+    // parse-error context is unchanged for callers that pass no directory.
+    const std::string root_key = (baseDir / std::filesystem::path{sourceName}).generic_string();
+    return parseAndMerge(std::as_bytes(std::span{content.data(), content.size()}), root_key,
+                         filesystemFetcher());
 }
 
 } // namespace nodehammer::config

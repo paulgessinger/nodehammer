@@ -1,10 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <config/config_loader.hpp>
+#include <config/config_writer.hpp>
 #include <diagnostic_codes.hpp>
 
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <span>
+#include <string>
 
 #ifndef NODEHAMMER_FIXTURES_DIR
 #error "NODEHAMMER_FIXTURES_DIR must be defined by CMake"
@@ -754,4 +757,93 @@ TEST_CASE("ConfigLoader: parseAndMerge detects cycles via key equality",
         }
     }
     REQUIRE(foundCycle);
+}
+
+// ── loadFromString rooted at a base directory ────────────────────────────────
+//
+// The string form resolves includes through the same engine as loadFromFile:
+// same fetcher, same merge walk, same cycle rules. These tests are the check
+// that the two entry points cannot drift apart.
+
+namespace {
+
+std::string readFileText(const std::filesystem::path &path) {
+    std::ifstream in{path, std::ios::binary};
+    REQUIRE(in);
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+// Load one fixture both ways and compare the *serialized* configs, so the
+// comparison covers the whole document rather than the handful of fields an
+// individual include test asserts on.
+void requireLoadsIdentically(const std::filesystem::path &path) {
+    using nodehammer::config::ConfigLoader;
+
+    auto via_file = ConfigLoader::loadFromFile(path);
+    auto via_string = ConfigLoader::loadFromString(readFileText(path), path.filename().string(),
+                                                   path.parent_path());
+
+    REQUIRE_FALSE(via_file.diags.hasErrors());
+    REQUIRE_FALSE(via_string.diags.hasErrors());
+    REQUIRE(nodehammer::config::configToToml(via_string.config) ==
+            nodehammer::config::configToToml(via_file.config));
+}
+
+} // namespace
+
+TEST_CASE("ConfigLoader: loadFromString with baseDir matches loadFromFile",
+          "[config][loader][include]") {
+    requireLoadsIdentically(fixturesDir / "configs/include_basic.toml");
+    requireLoadsIdentically(fixturesDir / "configs/include_nested.toml");
+    requireLoadsIdentically(fixturesDir / "configs/include_diamond.toml");
+}
+
+TEST_CASE("ConfigLoader: loadFromString with baseDir reports a circular include",
+          "[config][loader][include]") {
+    const auto path = fixturesDir / "configs/include_cycle.toml";
+    auto result = nodehammer::config::ConfigLoader::loadFromString(
+        readFileText(path), path.filename().string(), path.parent_path());
+
+    REQUIRE(result.diags.hasErrors());
+    bool foundCycle = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("circular") != std::string::npos) {
+            foundCycle = true;
+        }
+    }
+    REQUIRE(foundCycle);
+}
+
+TEST_CASE("ConfigLoader: loadFromString with baseDir reports a missing include",
+          "[config][loader][include]") {
+    const auto path = fixturesDir / "configs/include_bad_path.toml";
+    auto result = nodehammer::config::ConfigLoader::loadFromString(
+        readFileText(path), path.filename().string(), path.parent_path());
+    REQUIRE(result.diags.hasErrors());
+}
+
+TEST_CASE("ConfigLoader: loadFromString without baseDir roots includes at the working directory",
+          "[config][loader][include]") {
+    // Not silently ignored, which is what the string form used to do: the
+    // include is looked up relative to the process's working directory and
+    // surfaces as a diagnostic when it is not there.
+    auto result = nodehammer::config::ConfigLoader::loadFromString(
+        "include = \"nonexistent_file_that_does_not_exist.toml\"\n");
+    REQUIRE(result.diags.hasErrors());
+    bool foundMissing = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("not found") != std::string::npos) {
+            foundMissing = true;
+        }
+    }
+    REQUIRE(foundMissing);
+}
+
+TEST_CASE("ConfigLoader: loadFromString keeps its source name in parse diagnostics",
+          "[config][loader]") {
+    // The baseDir join must not disturb the context of a plain string load.
+    constexpr std::string_view bad = "[unclosed\nkey = 1\n";
+    auto result = nodehammer::config::ConfigLoader::loadFromString(bad, "test_input");
+    REQUIRE(result.diags.hasErrors());
+    REQUIRE(result.diags.items().front().context.starts_with("test_input:"));
 }
