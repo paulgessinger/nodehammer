@@ -38,10 +38,14 @@ struct ConfigLoader {
 
     /// Parse `content` as TOML and resolve its include tree against `baseDir`
     /// on the filesystem — this is `loadFromFile` minus the initial read, and
-    /// runs through the same fetcher and the same merge walk. An empty
-    /// `baseDir` roots includes at the working directory, which is also what
-    /// keeps the diagnostic context equal to `sourceName` for the callers
-    /// (round-trips, the compute worker) whose TOML never carries an include.
+    /// runs through the same fetcher and the same merge walk.
+    ///
+    /// `baseDir` is the caller's to choose and the loader never invents one: an
+    /// empty `baseDir` means the content has no location, so its includes
+    /// resolve against nothing and are reported as not found. A caller that
+    /// wants them read relative to the process's working directory says so by
+    /// passing it — the choice belongs where the program's notion of "here"
+    /// does, which for the Lua front end is cmd_config_lua.cpp.
     [[nodiscard]] static ConfigResult loadFromString(std::string_view content,
                                                      std::string_view sourceName = "<string>",
                                                      const std::filesystem::path &baseDir = {});

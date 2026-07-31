@@ -822,13 +822,25 @@ TEST_CASE("ConfigLoader: loadFromString with baseDir reports a missing include",
     REQUIRE(result.diags.hasErrors());
 }
 
-TEST_CASE("ConfigLoader: loadFromString without baseDir roots includes at the working directory",
+TEST_CASE("ConfigLoader: loadFromString without baseDir never reads the working directory",
           "[config][loader][include]") {
-    // Not silently ignored, which is what the string form used to do: the
-    // include is looked up relative to the process's working directory and
-    // surfaces as a diagnostic when it is not there.
+    // The loader invents no base directory: with none given, an include is
+    // unresolvable rather than being fetched from wherever the process happens
+    // to be. Planting the include target in the working directory is what makes
+    // this a real assertion — a loader that silently rooted there would find it
+    // and report success.
+    const std::filesystem::path planted =
+        std::filesystem::current_path() / "nh_unrooted_include_probe.toml";
+    {
+        std::ofstream out{planted};
+        REQUIRE(out);
+        out << "hoist_orphans = true\n";
+    }
+
     auto result = nodehammer::config::ConfigLoader::loadFromString(
-        "include = \"nonexistent_file_that_does_not_exist.toml\"\n");
+        "include = \"nh_unrooted_include_probe.toml\"\n");
+    std::filesystem::remove(planted);
+
     REQUIRE(result.diags.hasErrors());
     bool foundMissing = false;
     for (const auto &d : result.diags.items()) {
@@ -837,6 +849,22 @@ TEST_CASE("ConfigLoader: loadFromString without baseDir roots includes at the wo
         }
     }
     REQUIRE(foundMissing);
+    REQUIRE_FALSE(result.config.hoistOrphans); // the planted file was not merged
+
+    // Naming the directory is what makes it resolvable, and that is the
+    // caller's decision to make.
+    {
+        std::ofstream out{planted};
+        REQUIRE(out);
+        out << "hoist_orphans = true\n";
+    }
+    auto rooted = nodehammer::config::ConfigLoader::loadFromString(
+        "include = \"nh_unrooted_include_probe.toml\"\n", "<string>",
+        std::filesystem::current_path());
+    std::filesystem::remove(planted);
+
+    REQUIRE_FALSE(rooted.diags.hasErrors());
+    REQUIRE(rooted.config.hoistOrphans);
 }
 
 TEST_CASE("ConfigLoader: loadFromString keeps its source name in parse diagnostics",

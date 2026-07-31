@@ -768,6 +768,18 @@ ConfigResult parseTable(const toml::table &tbl) {
 // each key against its parent's directory by the time the fetcher sees it, so
 // rooting is entirely a property of the root key the caller passes to
 // `parseAndMerge`.
+// The fetcher for a load that was given no base directory. It resolves
+// nothing, so an include in such a config is reported as unresolvable rather
+// than being looked up somewhere the caller never named — in particular, not
+// against the process's working directory. Deciding that the working directory
+// is the right base is an application-level choice (see cmd_config_lua.cpp,
+// which makes it for the Lua front end), so it is made by the caller passing
+// that directory in, never here.
+IncludeFetcher unrootedFetcher() {
+    return
+        [](std::string_view) -> std::optional<std::span<const std::byte>> { return std::nullopt; };
+}
+
 IncludeFetcher filesystemFetcher() {
     // Cache so the fetcher returns stable spans across `parseAndMerge`'s
     // walk. Lifetime is tied to the lambda-captured `shared_ptr`, which
@@ -879,11 +891,13 @@ ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_
                                           const std::filesystem::path &baseDir) {
     // The root key is what `resolveIncludeKey` takes the parent directory of,
     // so joining `baseDir` onto the source name is what roots the include tree
-    // there. An empty `baseDir` leaves the key equal to `sourceName`, so the
-    // parse-error context is unchanged for callers that pass no directory.
+    // there. An empty `baseDir` leaves the key equal to `sourceName`, which
+    // also keeps the parse-error context unchanged for callers that name no
+    // directory — and those get a fetcher that resolves nothing, so no include
+    // is ever read from a location the caller did not choose.
     const std::string root_key = (baseDir / std::filesystem::path{sourceName}).generic_string();
     return parseAndMerge(std::as_bytes(std::span{content.data(), content.size()}), root_key,
-                         filesystemFetcher());
+                         baseDir.empty() ? unrootedFetcher() : filesystemFetcher());
 }
 
 } // namespace nodehammer::config
