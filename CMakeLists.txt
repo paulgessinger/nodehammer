@@ -59,9 +59,10 @@ endif()
 # nothing — so --enable-new-dtags pins that default rather than establishing it,
 # which is worth one line because the failure it prevents would be silent.
 # Mach-O has its own @rpath mechanism and no equivalent flag; Windows has no
-# concept.
+# concept; and Emscripten counts as UNIX to CMake but its wasm-ld rejects the
+# flag outright, so it needs excluding explicitly.
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
-if(UNIX AND NOT APPLE)
+if(UNIX AND NOT APPLE AND NOT EMSCRIPTEN)
     add_link_options("LINKER:--enable-new-dtags")
 endif()
 
@@ -493,13 +494,17 @@ if(NODEHAMMER_BUILD_SHARED)
     add_library(nodehammer_shared SHARED ${NH_CORE_INPUT})
     nh_core_common(nodehammer_shared)
 
-    # PRIVATE behind $<BUILD_INTERFACE:>, so nothing reaches the generated export
-    # set: the .so absorbs its static dependencies, so a consumer needs no
-    # find_dependency() for zstd/flatbuffers/manifold (#41 §10). NH_APP_DEPS is
-    # absent entirely — watcher belongs to sources this target does not compile.
-    foreach(dep IN LISTS NH_CORE_DEPS NH_CORE_PRIVATE_DEPS)
-        target_link_libraries(nodehammer_shared PRIVATE "$<BUILD_INTERFACE:${dep}>")
-    endforeach()
+    # Plain PRIVATE is enough to keep the generated export empty, so a consumer
+    # needs no find_dependency() (#41 §10). CMake propagates a static library's
+    # PRIVATE dependencies as $<LINK_ONLY:dep> — the consumer still has to link
+    # them — but a *shared* library resolves its own, so nothing lands in
+    # INTERFACE_LINK_LIBRARIES at all. Verified both ways: the property reads
+    # NOTFOUND here, and wrapping each entry in $<BUILD_INTERFACE:> produces a
+    # byte-identical nodehammer-targets.cmake.
+    #
+    # NH_APP_DEPS is absent entirely — watcher belongs to sources this target
+    # does not compile.
+    target_link_libraries(nodehammer_shared PRIVATE ${NH_CORE_DEPS} ${NH_CORE_PRIVATE_DEPS})
     if(NH_CORE_INCLUDE_DIRS)
         target_include_directories(nodehammer_shared SYSTEM PRIVATE ${NH_CORE_INCLUDE_DIRS})
     endif()
