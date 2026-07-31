@@ -475,8 +475,9 @@ if(NODEHAMMER_BUILD_SHARED)
     # symbols are default-visible and would land in the dynamic export table
     # wholesale — zstd, flatbuffers, manifold and friends, re-exported by
     # accident. --exclude-libs,ALL forces every symbol arriving from a static
-    # archive to hidden, which is what makes the export table equal the public
-    # API rather than merely contain it.
+    # archive to hidden, and it is the flag that does the work we actually care
+    # about: measured, it is the difference between two third-party symbols
+    # escaping and none.
     #
     # --no-undefined then asserts the other half of §10's claim: that a shared
     # library resolves its private dependencies internally, so an external
@@ -487,19 +488,24 @@ if(NODEHAMMER_BUILD_SHARED)
     # dependencies' symbols do stay visible in the dylib. ci/check_shared_exports.py
     # is correspondingly Linux-only.
     #
-    # The version script closes the remaining gap, which neither flag can:
-    # libstdc++ forces default visibility on namespace std, so std:: template
-    # instantiations emitted into our own objects stay exported regardless.
-    # cmake/nodehammer.map explains the measurement that motivated it.
+    # What deliberately is *not* here is a linker version script. These two flags
+    # leave the std:: template instantiations that libstdc++ forces to default
+    # visibility (`namespace std _GLIBCXX_VISIBILITY(default)`), and a script
+    # restricting the table to `nodehammer::*` would remove them — at a price not
+    # worth paying. libstdc++ exports those on purpose so they merge across
+    # shared objects, and this library's own API passes std:: types across the
+    # boundary anyway, so hiding its std:: internals buys no ABI independence it
+    # does not already lack. It also costs: ld matches `extern "C++"` patterns
+    # against the whole demangled name, and `vtable for nodehammer::X` does not
+    # start with `nodehammer::`, so such a script silently drops the vtable and
+    # typeinfo of every public class — an over-removal that no export-table check
+    # can observe, because a symbol that should be there and is not leaves
+    # nothing to inspect. See ci/check_shared_exports.py for what is asserted
+    # instead.
     if(UNIX AND NOT APPLE)
         target_link_options(nodehammer_shared PRIVATE
             "LINKER:--exclude-libs,ALL"
             "LINKER:--no-undefined"
-            "LINKER:--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodehammer.map"
-        )
-        # Relink when the script changes; link options are not tracked as deps.
-        set_property(TARGET nodehammer_shared APPEND PROPERTY
-            LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodehammer.map"
         )
     endif()
 endif()
