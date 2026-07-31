@@ -220,6 +220,22 @@ jobs:
         shell: bash
         run: ci/build.sh install ${{ matrix.kind }} stage
 
+      # #41 step 5's verification, run against the tree this job just staged.
+      # It used to be a separate two-leg job that configured, built and installed
+      # everything a second time; since every native leg now builds the shared
+      # library (ci/build.sh's native case), there is nothing left for a separate
+      # job to do that this one has not already done.
+      #
+      # Native only: NODEHAMMER_BUILD_SHARED is a hard CMake error under
+      # Emscripten, which is why the option lives in the dispatcher's `native`
+      # case rather than as a matrix field — kind already carries the
+      # distinction, so the matrix stays free of a flag that would apply to four
+      # of its five legs.
+      - name: Verify shared install
+        if: matrix.kind == 'native'
+        shell: bash
+        run: ci/verify-shared-install.sh stage
+
       - name: Package archive
         shell: bash
         run: |
@@ -236,93 +252,6 @@ jobs:
           path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
-
-  # #41 step 5's verification, and the only job that can perform it: everything
-  # it checks — that nothing escapes into the export table, that the installed
-  # header set is exactly include/nodehammer, that an outside consumer needs no
-  # find_dependency() — is invisible to an in-tree build.
-  #
-  # Two platforms, because their export models differ and nothing else in the
-  # matrix exercises the shared library at all. Linux carries the export-table
-  # half (ELF-only: ld64 has no --exclude-libs). Windows carries no export check
-  # — PE/COFF exports nothing without __declspec(dllexport), so the property is
-  # the platform default — but it is the only place that compiles the dllexport
-  # spelling of NH_API, links a DLL, and proves the install/import-library half
-  # works. Without it the Windows branch of api.hpp is unexecuted code.
-  #
-  # The viewer is left off on both: the installed library is the headless core,
-  # which also keeps the dependency graph small.
-  shared-build:
-    name: Shared build (${{ matrix.name }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            name: linux + export check
-            cache-key: linux-x86_64
-          - os: windows-2025
-            name: windows
-            cache-key: windows-x86_64
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install CMake and Ninja
-        uses: lukka/get-cmake@e6906078ebd1ccb8ce51ab4626ac46a1b5a517e3 # v4.4.0
-
-      - name: Install GCC 14
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-14 g++-14
-          echo "CC=gcc-14" >> "$GITHUB_ENV"
-          echo "CXX=g++-14" >> "$GITHUB_ENV"
-
-      - name: Set up MSVC environment
-        if: runner.os == 'Windows'
-        uses: TheMrMilchmann/setup-msvc-dev@368ef7d1ee4d1171b31d4a7f67f4d954f903f5a9 # v4.1.0
-        with:
-          arch: x64
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          enable-cache: false
-
-      - name: Install Conan
-        run: uv tool install conan
-
-      - name: Detect Conan profile
-        shell: bash
-        run: |
-          conan profile detect --force
-          cp ~/.conan2/profiles/default ./.conan-profile-snapshot
-
-      # Restore-only, sharing the matching build-matrix job's cache. This job
-      # never saves: it installs a subset (no viewer), so writing that back under
-      # the same key would evict the fuller graph the build matrix depends on.
-      - name: Restore Conan cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.conan2/p
-          key: conan-nodehammer-${{ matrix.cache-key }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot', 'profiles/emscripten') }}
-          restore-keys: |
-            conan-nodehammer-${{ matrix.cache-key }}-
-
-      - name: Set up ccache
-        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
-        with:
-          key: ccache-shared-build-${{ matrix.cache-key }}
-
-      - name: Conan install
-        shell: bash
-        run: ci/build.sh conan-install native
-
-      - name: Shared build, install, export check, consumer
-        shell: bash
-        run: ci/shared-build.sh
-
   bench-summary:
     name: Benchmark summary
     needs: build
@@ -472,6 +401,16 @@ jobs:
             ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
             ci/build.sh build native
             ci/build.sh test native -j4
+            # The shared library comes along automatically — ci/build.sh's
+            # native case turns it on — and this is the only environment that
+            # can check the interesting case: ROOT and DD4hep arrive as *shared*
+            # libraries, not the static archives every other job absorbs. So the
+            # "no find_dependency() needed" claim in cmake/nodehammer-config.cmake.in
+            # is tested here against dependencies that cannot be absorbed, and
+            # the consumer has to link and run with only nodehammer's own prefix
+            # on CMAKE_PREFIX_PATH.
+            ci/build.sh install native stage
+            ci/verify-shared-install.sh stage
 
       # blubb
 
