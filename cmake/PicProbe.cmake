@@ -30,31 +30,22 @@ if(NODEHAMMER_PIC_CHECK)
     else()
         add_library(nodehammer_pic_probe MODULE ${CMAKE_CURRENT_LIST_DIR}/pic_probe.cpp)
 
-        # Only the leaf target is named: nodehammer_lua links nodehammer_lib
-        # PUBLIC, and CMake does not deduplicate an explicit entry against the
-        # transitive one — harmless for ordinary archive semantics, fatal under
-        # --whole-archive, where the archive is pulled twice and every symbol in
-        # it collides with itself. The bindings will link lua statically into
-        # the same .so, so it is subject to the same PIC requirement.
-        if(TARGET nodehammer_lua)
-            target_link_libraries(nodehammer_pic_probe PRIVATE nodehammer_lua)
-        else()
-            target_link_libraries(nodehammer_pic_probe PRIVATE nodehammer_lib)
-        endif()
+        # One archive to name, since the lua front-end is compiled into
+        # nodehammer_lib rather than a library of its own. That also removes the
+        # hazard this block used to work around: naming both a leaf target and
+        # the core it links PUBLIC meant CMake emitted the core twice, which is
+        # harmless for ordinary archive semantics but fatal under
+        # --whole-archive, where every symbol in it collides with itself. Lua is
+        # still covered — the bindings link it statically into the same .so, so
+        # it carries the same PIC requirement.
+        target_link_libraries(nodehammer_pic_probe PRIVATE nodehammer_lib)
 
         # WHOLE_ARCHIVE (CMake >= 3.24) is what makes this a real test: without
-        # it the linker pulls nothing out of the archives, since the probe TU
+        # it the linker pulls nothing out of the archive, since the probe TU
         # references none of it, and the probe would link clean no matter what.
-        # Set as an override rather than a $<LINK_LIBRARY:...> genex on the link
-        # itself so it also reaches nodehammer_lib, which arrives transitively.
         set_property(TARGET nodehammer_pic_probe PROPERTY
             LINK_LIBRARY_OVERRIDE_nodehammer_lib WHOLE_ARCHIVE
         )
-        if(TARGET nodehammer_lua)
-            set_property(TARGET nodehammer_pic_probe PROPERTY
-                LINK_LIBRARY_OVERRIDE_nodehammer_lua WHOLE_ARCHIVE
-            )
-        endif()
 
         message(STATUS "NODEHAMMER_PIC_CHECK: enabled (target nodehammer_pic_probe)")
     endif()

@@ -44,12 +44,25 @@ class Nodehammer(ConanFile):
         # (3.5.1 vs 3.5.2); reintroduce a local recipe here if we need
         # something ConanCenter hasn't packaged yet.
         self.requires("manifold/3.5.1")
+        # ZIP read/write backing ZipWorkingSet, ArchiveProjectFs and archive
+        # export — i.e. reading and writing .nhproj, which is a capability of the
+        # library rather than of the viewer that first needed it.
+        #
+        # Unconditional on purpose. It used to sit under `if self.options.viewer`,
+        # which made the *installed shared library* vary with an application
+        # feature flag: a viewer-off build produced a libnodehammer that could not
+        # open a project. Since the library is what a consumer links, its feature
+        # set has to be a property of the library. miniz is the cheapest possible
+        # dep to make unconditional — plain C, no OS deps, builds for Emscripten
+        # — and static-lib dead-strip keeps it out of any binary that does not
+        # reference it.
+        self.requires("miniz/3.0.2")
         # Lua scripting config front-end (the `config-lua` CLI command). Lua is
         # a small C interpreter; sol2 is its header-only C++ binding (and pulls
         # lua transitively, but we pin lua explicitly for parity with the CMake
-        # find_package). Native-only: the front-end lives in nodehammer_lua,
-        # linked solely by the CLI + tests, never by the wasm closure — so skip
-        # the deps entirely under Emscripten and keep them out of the .wasm.
+        # find_package). Native-only: the front-end is a build-gated source in
+        # nodehammer_lib, never compiled into the wasm closure — so skip the
+        # deps entirely under Emscripten and keep them out of the .wasm.
         if self.settings.os != "Emscripten":
             self.requires("lua/5.4.6")
             self.requires("sol2/3.5.0")
@@ -68,12 +81,6 @@ class Nodehammer(ConanFile):
             self.requires("sokol/2026.07.02")
             self.requires("imgui/1.92.8")
             self.requires("implot/1.0.0")
-            # ZIP read/write backing ZipWorkingSet (strategy doc step 5) and the
-            # native ArchiveProjectFs (step 6). Unlike watcher/platformfolders
-            # this is viewer-only but *not* native-only: the future web bag
-            # (step 8, ZIP-in-IDB) reuses ZipWorkingSet, so miniz must build for
-            # Emscripten too. miniz is plain C with no OS deps, so it does.
-            self.requires("miniz/3.0.2")
             if self.settings.os != "Emscripten":
                 self.requires("nfd/1.3.0")
 

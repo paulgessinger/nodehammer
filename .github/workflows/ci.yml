@@ -220,6 +220,15 @@ jobs:
         shell: bash
         run: ci/build.sh install ${{ matrix.kind }} stage
 
+      # #41 step 5's verification, against the tree this job just staged.
+      # Native only: NODEHAMMER_BUILD_SHARED is a hard CMake error under
+      # Emscripten, which is why the option lives in ci/build.sh's `native` case
+      # rather than as a matrix field.
+      - name: Verify shared install
+        if: matrix.kind == 'native'
+        shell: bash
+        run: ci/verify-shared-install.sh stage
+
       - name: Package archive
         shell: bash
         run: |
@@ -236,7 +245,6 @@ jobs:
           path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
-
   bench-summary:
     name: Benchmark summary
     needs: build
@@ -386,6 +394,11 @@ jobs:
             ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
             ci/build.sh build native
             ci/build.sh test native -j4
+            # The only environment where the backends are *shared* libraries
+            # rather than absorbable static archives, so the only real test of
+            # cmake/nodehammer-config.cmake.in's "no find_dependency() needed".
+            ci/build.sh install native stage
+            ci/verify-shared-install.sh stage
 
       # blubb
 

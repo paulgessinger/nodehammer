@@ -184,6 +184,31 @@ Key CMake options:
 | `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | 🚧 links Geant4 only, no importer yet |
 | `NODEHAMMER_WITH_GEOMODEL` | GeoModel importer | 🚧 declared only |
 | `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary | ✅ |
+| `NODEHAMMER_BUILD_SHARED` | Also build and install `libnodehammer` + the public headers + a CMake package config | 🚧 packaging works; the API it exposes is still being written |
+
+With `NODEHAMMER_BUILD_SHARED=ON`, `cmake --install` adds the shared library,
+`include/nodehammer/`, and a package config, so a consumer needs only:
+
+```cmake
+find_package(nodehammer REQUIRED)
+target_link_libraries(app PRIVATE nodehammer::nodehammer)
+```
+
+No `find_dependency` for zstd, flatbuffers, manifold or the rest — the shared
+library absorbs them. `ci/shared-build.sh` runs the whole thing end to end and,
+on ELF, checks that nothing third-party or internal escaped into the export
+table. CI runs it on every native platform.
+
+**A consumer needs only C++20.** nodehammer itself is built as C++23, but the
+installed headers do not require it, and the exported target asks for no more
+than `cxx_std_20`. `ci/shared_consumer` compiles at exactly that floor, so a
+public header reaching past it fails there rather than in your build.
+
+On Windows the library and its consumer must agree on the C runtime (`/MD` vs
+`/MT`) and on `_ITERATOR_DEBUG_LEVEL` — so a Debug consumer needs a Debug
+`nodehammer`. This is not specific to nodehammer; it is what passing `std::`
+types across a DLL boundary requires, and mismatches usually surface as heap
+corruption rather than as a link error.
 
 ## Try it
 

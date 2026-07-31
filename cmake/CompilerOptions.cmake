@@ -1,7 +1,7 @@
 # Sets C++23 compiler warnings and optional sanitizers on a target.
-# Call nodehammer_set_compiler_options(target) for each target.
+# Call nh_set_compiler_options(target) for each target.
 
-function(nodehammer_set_compiler_options target)
+function(nh_set_compiler_options target)
     # Warnings are PRIVATE: do not propagate to dependents (and not to FetchContent subprojects).
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(${target} PRIVATE
@@ -22,10 +22,20 @@ function(nodehammer_set_compiler_options target)
             target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
         endif()
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        # No /external:anglebrackets: this project includes its own headers that
+        # way throughout, so the flag classified the whole codebase as external
+        # and silenced it at /external:W0 — MSVC reported nothing from any
+        # nodehammer header while gcc and clang reported everything. That hides
+        # C4251 in particular, which fires exactly where packaging needs it: on a
+        # dllexport'd class with std:: members, in a public header.
+        #
+        # Dependencies stay quiet anyway: CMake marks imported targets' includes
+        # SYSTEM, and spells SYSTEM as /external:I from MSVC 19.29.30036.3
+        # (Modules/Compiler/MSVC.cmake) — external by directory rather than by
+        # bracket style.
         target_compile_options(${target} PRIVATE
             /W4
             /permissive-
-            /external:anglebrackets
             /external:W0
             /external:templates-
         )
@@ -50,11 +60,35 @@ function(nodehammer_set_compiler_options target)
     endif()
 endfunction()
 
+# Export nothing unless it says NH_API (include/nodehammer/api.hpp).
+#
+# Applied to *both* core variants. For the shared library that is the point. The
+# static one has no export table, and the reason there is that it makes the
+# in-tree build deny-by-default like Windows — so a missing NH_API fails in an
+# ordinary build rather than only on MSVC. It also protects anything that links
+# the archive *into* a shared object, where default-visible objects would become
+# exports of that module; whether the Python bindings do that or link
+# libnodehammer instead is a step-6 question.
+#
+# Skipped under Emscripten: no shared object exists there, exports are named by
+# the link flags, and hidden visibility only adds a way for them to go missing
+# under the Release -flto + --closure link.
+function(nh_set_visibility target)
+    if(EMSCRIPTEN)
+        return()
+    endif()
+    set_target_properties(${target} PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        C_VISIBILITY_PRESET hidden
+        VISIBILITY_INLINES_HIDDEN ON
+    )
+endfunction()
+
 # Apply link options that Emscripten executables need to run under node:
 # NODERAWFS exposes the host filesystem (so fixture paths resolve), EXIT_RUNTIME
 # makes the process return the C++ exit code, and ALLOW_MEMORY_GROWTH avoids
 # OOM aborts on larger test inputs. No-op on non-emscripten builds.
-function(nodehammer_apply_emscripten_exe_options target)
+function(nh_apply_emscripten_exe_options target)
     if(EMSCRIPTEN)
         target_link_options(${target} PRIVATE
             "-sNODERAWFS=1"
@@ -65,7 +99,7 @@ function(nodehammer_apply_emscripten_exe_options target)
 endfunction()
 
 # Apply link options for the browser viewer build (Emscripten only). Use this
-# *instead* of nodehammer_apply_emscripten_exe_options when building the viewer:
+# *instead* of nh_apply_emscripten_exe_options when building the viewer:
 # NODERAWFS is incompatible with browsers, so we deliberately do not set it.
 # WebGL2 flags are kept for the SOKOL_GLES3 build; the WebGPU build adds
 # -sUSE_WEBGPU=1 separately at its target site.
@@ -73,7 +107,7 @@ endfunction()
 # Output is .js + .wasm (no .html). web/viewer.html is served separately as
 # a static page that probes navigator.gpu and dynamically loads the matching
 # nodehammer-{gles3,wgpu}.js — see web/viewer.html and Justfile wasm-serve.
-function(nodehammer_apply_emscripten_viewer_options target)
+function(nh_apply_emscripten_viewer_options target)
     if(NOT EMSCRIPTEN)
         return()
     endif()
@@ -135,7 +169,7 @@ endfunction()
 # thread. MODULARIZE + EXPORT_NAME let the worker JS instantiate it explicitly;
 # EXIT_RUNTIME=0 keeps it alive so the pristine-scene cache survives across
 # builds. Output is .js + .wasm; see src/web/compute_worker.js.
-function(nodehammer_apply_emscripten_compute_options target)
+function(nh_apply_emscripten_compute_options target)
     if(NOT EMSCRIPTEN)
         return()
     endif()
