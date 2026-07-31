@@ -1,13 +1,31 @@
 #!/usr/bin/env python3
-"""Assert that libnodehammer.so exports the public API and nothing else.
+"""Assert that libnodehammer.so leaks neither third-party nor internal symbols.
 
-This is the check #41 step 5 is verified by: the one thing that proves the
-public/internal split holds at link time and not merely at include time. The
-physical header split (§1) stops a consumer *including* an internal header;
-hidden visibility plus --exclude-libs stops them *linking* an internal symbol.
-Only the second is observable from outside the build, and only here.
+Two properties, and it is worth being precise about which, because an earlier
+version of this script claimed a third that it could not actually check.
 
-The rule is derived rather than listed. An allowlist of expected symbols would
+  A. No third-party symbol escapes. zstd, flatbuffers, manifold, miniz, lua and
+     the rest are absorbed into the .so as static archives, and on ELF's flat
+     symbol namespace an exported `ZSTD_compress` can interpose — or be
+     interposed by — a different zstd elsewhere in the process, silently mixing
+     versions. --exclude-libs,ALL is what prevents this, and this half of the
+     check is a regression test on that flag: it is one line in CMakeLists.txt,
+     easy to lose in a refactor, and nothing else would notice.
+
+  B. No internal nodehammer namespace is exported. Hidden visibility already
+     ensures this, so a failure here means someone marked an internal entity
+     NH_API by mistake.
+
+What is deliberately *not* asserted is "the export table is exactly the public
+API". The table also carries std:: template instantiations, because libstdc++
+declares `namespace std _GLIBCXX_VISIBILITY(default)` and so overrides
+-fvisibility=hidden for everything in std::. That is intentional on libstdc++'s
+part — vague-linkage instantiations are meant to merge across shared objects —
+and this library's own API passes std:: types across the boundary anyway, so
+suppressing them would buy no ABI independence it does not already lack. They
+are reported separately below as tolerated, not counted as leaks.
+
+The rules are derived rather than listed. An allowlist of expected symbols would
 have to be edited every time step 6 adds a verb, and an entry nobody removed
 would silently permit a leak. Instead:
 
@@ -15,7 +33,8 @@ would silently permit a leak. Instead:
      src/ for `namespace nodehammer::...`. A namespace added tomorrow is picked
      up tomorrow, with no list to update.
   2. An exported symbol is a leak if it is scoped into one of those, and a
-     third-party leak if it is not under `nodehammer::` at all.
+     third-party leak if it is under neither `nodehammer::` nor a tolerated
+     runtime prefix.
   3. As a backstop for a namespace the grep somehow misses, a symbol whose
      second scope component is lowercase *and* followed by `::` is treated as
      internal too — namespaces are lowercase by convention here and public
@@ -28,7 +47,7 @@ verb directly in `nodehammer::` is not mistaken for a namespace. That case is
 the reason rule 3 tests the separator and not just the case.
 
 Linux/ELF only. macOS is skipped by the caller: ld64 has no --exclude-libs, so
-the static dependencies' symbols do remain visible in the dylib and the check
+the static dependencies' symbols do remain visible in the dylib and property A
 would fail for a reason that is not a defect in this project.
 
 Usage: ci/check_shared_exports.py <path-to-libnodehammer.so> [--source-dir DIR]
@@ -54,12 +73,29 @@ LINKER_ARTEFACTS = {
 
 # c++filt renders some symbols as "<kind> for <name>"; the interesting part is
 # the name, and the kind is orthogonal to whether it should be exported.
+#
+# The thunk spellings are enumerated rather than matched with a leading `thunk`:
+# c++filt emits "non-virtual thunk to", "virtual thunk to" and "covariant return
+# thunk to", none of which *start* with "thunk", so a `^thunk .*? to ` pattern
+# matches nothing at all. Thunks reach the table whenever a public class uses
+# multiple inheritance.
 DEMANGLED_PREFIX = re.compile(
-    r"^(?:typeinfo(?: name)? for |vtable for |VTT for |"
-    r"guard variable for |thunk .*? to |construction vtable for .*?-in-)"
+    r"^(?:typeinfo(?: name)? for |vtable for |VTT for |guard variable for |"
+    r"(?:non-virtual |virtual |covariant return )?thunk to |"
+    r"construction vtable for .*?-in-)"
 )
 
 TOP = "nodehammer::"
+
+# Exported, not public API, and not a leak either. Everything here is emitted
+# into our own objects by the compiler or the standard library rather than
+# coming from a dependency archive, so --exclude-libs cannot reach it and
+# hidden visibility does not apply (see the module docstring on std::).
+TOLERATED_PREFIXES = (
+    "std::",
+    "__gnu_cxx::",
+    "__cxxabiv1::",
+)
 
 
 def internal_namespaces(source_dir: Path) -> set[str]:
@@ -112,20 +148,26 @@ def scope_of(name: str) -> str:
     return name[:cut]
 
 
-def classify(symbol: str, internal: set[str]) -> str | None:
-    """Return a reason string if the symbol must not be exported, else None."""
+def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
+    """Sort an exported symbol into "public", "tolerated" or "leak".
+
+    The reason string is populated for leaks, and for tolerated symbols carries
+    the category so the report can group them.
+    """
     name = DEMANGLED_PREFIX.sub("", symbol)
 
     if name in LINKER_ARTEFACTS:
-        return None
+        return "tolerated", "linker artefact"
+
+    for prefix in TOLERATED_PREFIXES:
+        if name.startswith(prefix):
+            return "tolerated", prefix.rstrip(":")
 
     if not name.startswith(TOP):
-        # With cmake/nodehammer.map in force this should be unreachable: the
-        # version script keeps only `nodehammer::*`. Reaching it means the
-        # script was not applied, so say that rather than leaving someone to
-        # rediscover it — the symbol itself (a std:: instantiation, or a
-        # dependency --exclude-libs missed) is a symptom, not the cause.
-        return "not in nodehammer:: — the linker version script is not in effect"
+        # Property A. Reaching here means a dependency's symbol survived into
+        # the dynamic table, which on ELF's flat namespace is the failure that
+        # actually bites — so name the flag rather than the symbol.
+        return "leak", "third-party symbol — is --exclude-libs,ALL still on the link?"
 
     scope = scope_of(name)
 
@@ -133,13 +175,13 @@ def classify(symbol: str, internal: set[str]) -> str | None:
     # nodehammer::ir and the message names the namespace actually responsible.
     for ns in sorted(internal, key=len, reverse=True):
         if scope.startswith(ns + "::"):
-            return f"internal namespace {ns}"
+            return "leak", f"internal namespace {ns}"
 
     head, sep, _ = scope[len(TOP):].partition("::")
     if sep and head[:1].islower():
-        return f"looks like an internal namespace (nodehammer::{head}) not found in src/"
+        return "leak", f"looks like an internal namespace (nodehammer::{head}) not found in src/"
 
-    return None
+    return "public", None
 
 
 # Cases the rules have to get right, checked by --self-test. They exist because
@@ -148,40 +190,55 @@ def classify(symbol: str, internal: set[str]) -> str | None:
 # in its parameter list. Public entries use step 6's planned surface, so the
 # check is exercised against the API it will actually police rather than only
 # against the single symbol that exists today.
-SELF_TEST_CASES: list[tuple[str, bool]] = [
-    # (demangled symbol, is_leak)
-    ("nodehammer::version()", False),
-    ("nodehammer::tessellate(nodehammer::SemanticScene const&, nodehammer::SceneConfig const&)", False),
-    ("nodehammer::build(nodehammer::SemanticScene const&, nodehammer::SceneConfig const&)", False),
-    ("nodehammer::applySelection(nodehammer::SemanticScene const&)", False),
-    ("nodehammer::SemanticScene::read(std::filesystem::path const&)", False),
-    ("nodehammer::RenderScene::write(std::filesystem::path const&) const", False),
-    ("nodehammer::DiagnosticList::hasErrors() const", False),
-    ("vtable for nodehammer::SemanticScene", False),
-    ("nodehammer::operator==(nodehammer::Diagnostic const&, nodehammer::Diagnostic const&)", False),
-    ("_init", False),
-    ("__bss_start", False),
-    ("nodehammer::ir::render::Scene::clear()", True),
-    ("nodehammer::ir::semantic::Scene::visitBFS()", True),
-    ("nodehammer::diagnostics::DiagnosticList::hasErrors() const", True),
-    ("nodehammer::config::keys::kExport", True),
-    ("nodehammer::viewer::ui::icon_font::glyphs", True),
-    ("nodehammer::detail::zstd_io::compress(std::span<std::byte const>)", True),
-    ("typeinfo for nodehammer::ir::semantic::Scene", True),
-    ("ZSTD_compress", True),
-    ("flatbuffers::ClassicLocale::instance_", True),
-    ("manifold::Manifold::Boolean(manifold::Manifold const&)", True),
-    # The class the version script exists to remove. Real symbols from the
-    # first CI run, before cmake/nodehammer.map was added: libstdc++ forces
-    # default visibility on namespace std, so these survived -fvisibility=hidden
-    # and were emitted from our own objects. Kept as cases so that removing the
-    # version script fails here too, not only on the .so.
-    ("std::_Rb_tree<std::array<unsigned int, 2ul>, std::pair<std::array<unsigned int, 2ul> const, "
-     "unsigned int> >::_M_get_insert_unique_pos(std::array<unsigned int, 2ul> const&)", True),
-    ("std::__unicode::__v15_1_0::__width_edges", True),
-    ("typeinfo for std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>", True),
+SELF_TEST_CASES: list[tuple[str, str]] = [
+    # (demangled symbol, expected bucket)
+    ("nodehammer::version()", "public"),
+    ("nodehammer::tessellate(nodehammer::SemanticScene const&, nodehammer::SceneConfig const&)", "public"),
+    ("nodehammer::build(nodehammer::SemanticScene const&, nodehammer::SceneConfig const&)", "public"),
+    ("nodehammer::applySelection(nodehammer::SemanticScene const&)", "public"),
+    ("nodehammer::SemanticScene::read(std::filesystem::path const&)", "public"),
+    ("nodehammer::RenderScene::write(std::filesystem::path const&) const", "public"),
+    ("nodehammer::DiagnosticList::hasErrors() const", "public"),
+    ("nodehammer::operator==(nodehammer::Diagnostic const&, nodehammer::Diagnostic const&)", "public"),
+    # The decorated forms a public class brings with it. All of them have to be
+    # exported for a consumer to derive from the class, construct it, catch it
+    # by type, or dynamic_cast it — a version script restricted to
+    # `nodehammer::*` would silently drop every one, since none of these
+    # demangled names *starts* with `nodehammer::`.
+    ("vtable for nodehammer::SemanticScene", "public"),
+    ("typeinfo for nodehammer::SemanticScene", "public"),
+    ("typeinfo name for nodehammer::SemanticScene", "public"),
+    ("VTT for nodehammer::SemanticScene", "public"),
+    ("non-virtual thunk to nodehammer::SemanticScene::write() const", "public"),
+    ("virtual thunk to nodehammer::SemanticScene::~SemanticScene()", "public"),
+    ("covariant return thunk to nodehammer::SemanticScene::clone() const", "public"),
+    # Property A: a dependency's symbol in the table means --exclude-libs is not
+    # doing its job. This is the half of the check that earns its keep.
+    ("ZSTD_compress", "leak"),
+    ("flatbuffers::ClassicLocale::instance_", "leak"),
+    ("manifold::Manifold::Boolean(manifold::Manifold const&)", "leak"),
+    ("mz_zip_reader_init", "leak"),
+    ("luaL_newstate", "leak"),
+    # Property B: internal namespaces, caught by the src/ harvest.
+    ("nodehammer::ir::render::Scene::clear()", "leak"),
+    ("nodehammer::ir::semantic::Scene::visitBFS()", "leak"),
+    ("nodehammer::diagnostics::DiagnosticList::hasErrors() const", "leak"),
+    ("nodehammer::config::keys::kExport", "leak"),
+    ("nodehammer::viewer::ui::icon_font::glyphs", "leak"),
+    ("nodehammer::detail::zstd_io::compress(std::span<std::byte const>)", "leak"),
+    ("typeinfo for nodehammer::ir::semantic::Scene", "leak"),
     # A namespace nobody has written yet: rule 1 cannot know it, rule 3 must.
-    ("nodehammer::brandnew::Thing::f()", True),
+    ("nodehammer::brandnew::Thing::f()", "leak"),
+    # Tolerated. Real symbols from the first CI run of this job: libstdc++ gives
+    # namespace std default visibility, so these are emitted from our own
+    # objects and survive -fvisibility=hidden. Not leaks — see the docstring.
+    ("std::_Rb_tree<std::array<unsigned int, 2ul>, std::pair<std::array<unsigned int, 2ul> const, "
+     "unsigned int> >::_M_get_insert_unique_pos(std::array<unsigned int, 2ul> const&)", "tolerated"),
+    ("std::__unicode::__v15_1_0::__width_edges", "tolerated"),
+    ("typeinfo for std::_Sp_counted_base<(__gnu_cxx::_Lock_policy)2>", "tolerated"),
+    ("__gnu_cxx::__throw_insufficient_space(char const*, char const*)", "tolerated"),
+    ("_init", "tolerated"),
+    ("__bss_start", "tolerated"),
 ]
 
 
@@ -192,12 +249,12 @@ def self_test(source_dir: Path) -> int:
         return 2
 
     failures = 0
-    for symbol, is_leak in SELF_TEST_CASES:
-        why = classify(symbol, internal)
-        if (why is not None) != is_leak:
+    for symbol, expected in SELF_TEST_CASES:
+        got, why = bucket(symbol, internal)
+        if got != expected:
             failures += 1
-            expected = "rejected" if is_leak else "accepted"
-            print(f"FAIL: expected {symbol!r} to be {expected}, got {why!r}", file=sys.stderr)
+            print(f"FAIL: expected {symbol!r} to be {expected}, got {got} ({why})",
+                  file=sys.stderr)
 
     print(f"self-test: {len(SELF_TEST_CASES) - failures}/{len(SELF_TEST_CASES)} cases pass "
           f"against {len(internal)} harvested namespaces")
@@ -241,15 +298,28 @@ def main() -> int:
         return 2
 
     symbols = defined_dynamic_symbols(args.library)
-    leaks = [(s, why) for s in symbols if (why := classify(s, internal)) is not None]
-    public = [s for s in symbols if classify(s, internal) is None
-              and DEMANGLED_PREFIX.sub("", s) not in LINKER_ARTEFACTS]
+
+    public: list[str] = []
+    tolerated: dict[str, int] = {}
+    leaks: list[tuple[str, str]] = []
+    for symbol in symbols:
+        kind, why = bucket(symbol, internal)
+        if kind == "public":
+            public.append(symbol)
+        elif kind == "tolerated":
+            tolerated[why or "?"] = tolerated.get(why or "?", 0) + 1
+        else:
+            leaks.append((symbol, why or "?"))
 
     print(f"{args.library.name}: {len(symbols)} exported symbols, "
           f"{len(internal)} internal namespaces harvested from src/")
     print("\npublic API surface:")
     for s in sorted(public):
         print(f"  {s}")
+
+    if tolerated:
+        summary = ", ".join(f"{n}× {k}" for k, n in sorted(tolerated.items()))
+        print(f"\ntolerated (not public API, not a leak): {summary}")
 
     if leaks:
         print(f"\n{len(leaks)} symbol(s) must not be exported:", file=sys.stderr)
@@ -258,12 +328,11 @@ def main() -> int:
         if len(leaks) > 50:
             print(f"  ... and {len(leaks) - 50} more", file=sys.stderr)
         print(
-            "\nEvery exported entity must be declared in an installed header and "
-            "marked NH_API. If one of these is meant to be public, move its "
-            "declaration into include/nodehammer/ and out of a nested namespace; "
-            "if it is not, it is reaching the export table by accident — check "
-            "that the shared link still carries --exclude-libs,ALL and that the "
-            "target went through nodehammer_set_visibility().",
+            "\nA third-party symbol here means --exclude-libs,ALL is no longer on "
+            "the shared link. A nodehammer:: one means an internal entity picked up "
+            "NH_API by mistake, or a target skipped nodehammer_set_visibility(): if "
+            "it is meant to be public, move its declaration into include/nodehammer/ "
+            "and out of a nested namespace.",
             file=sys.stderr,
         )
         return 1
@@ -276,7 +345,7 @@ def main() -> int:
         )
         return 1
 
-    print("\nOK: the export table is exactly the public API.")
+    print("\nOK: no third-party and no internal symbols are exported.")
     return 0
 
 
