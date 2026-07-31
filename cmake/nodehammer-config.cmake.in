@@ -13,12 +13,15 @@
 # Note this covers *linking*, and how a dependency is satisfied differs by kind.
 # The static ones (zstd, flatbuffers, manifold, miniz, …) are absorbed into the
 # library and disappear. A shared backend — ROOT or DD4hep, when those importers
-# are enabled — stays a DT_NEEDED reference instead, and nothing here records
-# where it lives: no INSTALL_RPATH is set, deliberately, because baking absolute
-# paths in would not survive an LCG view being swapped underneath it. Such a
-# build therefore expects its backends on the loader path, which is what sourcing
-# the view already does. Set CMAKE_INSTALL_RPATH_USE_LINK_PATH at configure time
-# if you want a self-contained install instead.
+# are enabled — stays a DT_NEEDED reference instead. Finding *that* at runtime is
+# an rpath question, not a find_dependency one: CMAKE_INSTALL_RPATH_USE_LINK_PATH
+# records where it was linked from, as DT_RUNPATH so LD_LIBRARY_PATH still wins.
+#
+# What would make find_dependency necessary is a public header including a
+# backend header. That would put ROOT's include directories in the interface,
+# which means ROOT::Geom becomes an INTERFACE dependency, which means a consumer
+# has to resolve it. As long as no installed header names a backend type, the
+# list above stays empty. That is the tripwire; this is the file that changes.
 
 include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
 

@@ -44,6 +44,27 @@ if(NOT EMSCRIPTEN)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 
+# Record where external shared dependencies were found, so an installed
+# libnodehammer says how to load itself rather than relying on the environment.
+# Only ever has an effect when a backend is enabled: with no backends every
+# dependency is a static archive absorbed into the library, and there is nothing
+# to point at. The case it exists for is ROOT/DD4hep, which stay DT_NEEDED
+# references.
+#
+# What keeps that from becoming an assumption about the build machine is the tag
+# it lands in. DT_RUNPATH is searched *after* LD_LIBRARY_PATH, so a sourced LCG
+# view still wins and the recorded path is only a fallback; DT_RPATH is searched
+# before, and would override a deliberately set environment. Modern binutils
+# already default to RUNPATH — verified on gcc:14, where the flag changes
+# nothing — so --enable-new-dtags pins that default rather than establishing it,
+# which is worth one line because the failure it prevents would be silent.
+# Mach-O has its own @rpath mechanism and no equivalent flag; Windows has no
+# concept.
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH ON)
+if(UNIX AND NOT APPLE)
+    add_link_options("LINKER:--enable-new-dtags")
+endif()
+
 # Emscripten: compile and link all in-tree code (including FetchContent'd
 # manifold/clipper2) with native wasm exceptions. Must be set BEFORE
 # Dependencies.cmake so FetchContent targets inherit it. The matching conan
