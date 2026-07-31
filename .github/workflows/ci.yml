@@ -113,11 +113,14 @@ jobs:
 
       # WGSL shader validation (see cmake/Sokol.cmake). naga-cli has no prebuilt
       # binary, so cargo-install it; cache the resulting binary keyed on the
-      # pinned version so only the first run pays the build cost.
-      - name: Cache naga-cli (WGSL validator)
+      # pinned version so only the first run pays the build cost. Saving is
+      # restricted to main: the key only ever changes when the pinned version
+      # bumps, so PR branches just restore main's entry via the same key
+      # instead of each writing their own redundant copy.
+      - name: Restore naga-cli cache (WGSL validator)
         if: matrix.kind == 'wasm'
         id: cache-naga
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cargo/bin/naga
           key: naga-cli-30.0.0-${{ runner.os }}-${{ runner.arch }}
@@ -125,6 +128,13 @@ jobs:
       - name: Install naga-cli (WGSL validator)
         if: matrix.kind == 'wasm' && steps.cache-naga.outputs.cache-hit != 'true'
         run: cargo install naga-cli --version 30.0.0 --locked
+
+      - name: Save naga-cli cache (WGSL validator)
+        if: matrix.kind == 'wasm' && steps.cache-naga.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/naga
+          key: naga-cli-30.0.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
@@ -159,7 +169,7 @@ jobs:
         run: ci/build.sh conan-install ${{ matrix.kind }} -o viewer=True
 
       - name: Save Conan cache
-        if: always()
+        if: always() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.conan2/p
@@ -189,7 +199,7 @@ jobs:
         run: ccache -sv
 
       - name: Save Emscripten cache
-        if: always() && matrix.kind == 'wasm'
+        if: always() && matrix.kind == 'wasm' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/emsdk-stable/upstream/emscripten/cache
@@ -407,7 +417,7 @@ jobs:
         run: sudo chown -R "$USER" "${{ github.workspace }}/.conan2" || true
 
       - name: Save Conan cache
-        if: always()
+        if: always() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.conan2/p
