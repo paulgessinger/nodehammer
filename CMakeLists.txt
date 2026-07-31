@@ -721,8 +721,23 @@ else()
     set(NH_INSTALL_TARGETS nodehammer)
 endif()
 
+# Every install rule below names a COMPONENT — Runtime for what an end user
+# needs to run nodehammer, Development for what a consumer needs to build
+# against it. `cmake --install` with no --component still installs everything
+# ("during a full installation all components are installed"), so this changes
+# nothing for the existing callers; what it adds is the ability to ask for one
+# half, which is how a release artifact takes the CLI and its licences without
+# the headers and the CMake package config.
+#
+# Tagging is all-or-nothing in practice: an untagged rule lands in a default
+# component named Unspecified, so it would be silently omitted from *both*
+# `--component Runtime` and `--component Development`. That is why the LICENSE,
+# the wasm sidecars and cmake/ThirdPartyLicenses.cmake are annotated here too,
+# and not only the library rules that motivated this. `list_install_components`
+# reports what exists.
 install(TARGETS ${NH_INSTALL_TARGETS}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT Runtime
 )
 
 # Emscripten produces a sidecar .wasm next to each .js loader; CMake's
@@ -732,12 +747,14 @@ if(EMSCRIPTEN)
     foreach(_t ${NH_INSTALL_TARGETS})
         install(FILES "$<TARGET_FILE_DIR:${_t}>/${_t}.wasm"
             DESTINATION ${CMAKE_INSTALL_BINDIR}
+            COMPONENT Runtime
         )
     endforeach()
 endif()
 
 install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
+    COMPONENT Runtime
 )
 
 # ── Library install: the shared library, the public headers, a package config ──
@@ -748,27 +765,43 @@ install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"
 # annotation an internal header could carry by mistake — an internal header is
 # unreachable because it lives somewhere else on disk (#41 §1).
 if(NODEHAMMER_BUILD_SHARED)
+    # The component split follows the artefacts' actual audiences, and for a
+    # versioned shared library that split runs *through* install(TARGETS LIBRARY)
+    # rather than around it. NAMELINK_COMPONENT is what expresses it: the real
+    # file and its SONAME symlink (libnodehammer.so.0.0.0, libnodehammer.so.0)
+    # are Runtime, because anything that already links nodehammer needs them at
+    # load time; the bare libnodehammer.so devlink is Development, because only a
+    # linker resolving -lnodehammer ever looks at it. Windows has no namelink —
+    # its equivalent division is the .dll (Runtime) against the .lib import
+    # library (Development), which the RUNTIME and ARCHIVE lines already state.
     install(TARGETS nodehammer_shared
         EXPORT nodehammer-targets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+                COMPONENT Runtime
+                NAMELINK_COMPONENT Development
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}   # Windows import library
+                COMPONENT Development
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}   # Windows DLL
+                COMPONENT Runtime
     )
 
     # FILES_MATCHING "*.hpp" also excludes version.hpp.in, which would otherwise
     # install an uninstantiated template next to the header generated from it.
     install(DIRECTORY include/nodehammer
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        COMPONENT Development
         FILES_MATCHING PATTERN "*.hpp"
     )
     install(FILES "${CMAKE_CURRENT_BINARY_DIR}/include/nodehammer/version.hpp"
         DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/nodehammer"
+        COMPONENT Development
     )
 
     install(EXPORT nodehammer-targets
         FILE nodehammer-targets.cmake
         NAMESPACE nodehammer::
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
+        COMPONENT Development
     )
 
     include(CMakePackageConfigHelpers)
@@ -790,6 +823,7 @@ if(NODEHAMMER_BUILD_SHARED)
         "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config-version.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
+        COMPONENT Development
     )
 endif()
 

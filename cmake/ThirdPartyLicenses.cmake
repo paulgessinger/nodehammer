@@ -61,12 +61,19 @@ endif()
 
 file(WRITE "${NH_TPL_NOTICES}" "${_nh_body}")
 
+# Runtime, not Development: these are the attribution obligations that travel
+# with a redistributed binary, so they belong with the binary. Tagged for the
+# same reason every other rule is — an untagged rule lands in Unspecified and is
+# omitted from every component-filtered install, which for licence texts would
+# be the one omission with consequences outside the build.
 install(DIRECTORY "${NH_TPL_DIR}/"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/licenses"
+    COMPONENT Runtime
     FILES_MATCHING
         PATTERN "*"
         PATTERN "manifest.json" EXCLUDE
 )
 install(FILES "${NH_TPL_NOTICES}"
     DESTINATION "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}"
+    COMPONENT Runtime
 )
