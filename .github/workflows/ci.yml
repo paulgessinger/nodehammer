@@ -220,17 +220,10 @@ jobs:
         shell: bash
         run: ci/build.sh install ${{ matrix.kind }} stage
 
-      # #41 step 5's verification, run against the tree this job just staged.
-      # It used to be a separate two-leg job that configured, built and installed
-      # everything a second time; since every native leg now builds the shared
-      # library (ci/build.sh's native case), there is nothing left for a separate
-      # job to do that this one has not already done.
-      #
+      # #41 step 5's verification, against the tree this job just staged.
       # Native only: NODEHAMMER_BUILD_SHARED is a hard CMake error under
-      # Emscripten, which is why the option lives in the dispatcher's `native`
-      # case rather than as a matrix field — kind already carries the
-      # distinction, so the matrix stays free of a flag that would apply to four
-      # of its five legs.
+      # Emscripten, which is why the option lives in ci/build.sh's `native` case
+      # rather than as a matrix field.
       - name: Verify shared install
         if: matrix.kind == 'native'
         shell: bash
@@ -401,14 +394,9 @@ jobs:
             ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
             ci/build.sh build native
             ci/build.sh test native -j4
-            # The shared library comes along automatically — ci/build.sh's
-            # native case turns it on — and this is the only environment that
-            # can check the interesting case: ROOT and DD4hep arrive as *shared*
-            # libraries, not the static archives every other job absorbs. So the
-            # "no find_dependency() needed" claim in cmake/nodehammer-config.cmake.in
-            # is tested here against dependencies that cannot be absorbed, and
-            # the consumer has to link and run with only nodehammer's own prefix
-            # on CMAKE_PREFIX_PATH.
+            # The only environment where the backends are *shared* libraries
+            # rather than absorbable static archives, so the only real test of
+            # cmake/nodehammer-config.cmake.in's "no find_dependency() needed".
             ci/build.sh install native stage
             ci/verify-shared-install.sh stage
 

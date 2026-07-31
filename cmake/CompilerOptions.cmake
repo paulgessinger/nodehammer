@@ -22,24 +22,17 @@ function(nodehammer_set_compiler_options target)
             target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
         endif()
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        # Note the absence of /external:anglebrackets. It was suppressing this
-        # project's own warnings, not just its dependencies': every internal
-        # header is included as <ir/semantic.hpp>, <config/...>, <nodehammer/...>
-        # — 310 angle-bracket includes and no quoted ones — so the flag
-        # classified the entire codebase as external and silenced it at
-        # /external:W0. MSVC was reporting essentially nothing from any
-        # nodehammer header while gcc and clang reported everything, which is
-        # the wrong way round for the headers that are a public contract: C4251
-        # ("needs to have dll-interface to be used by clients") fires at the
-        # definition of a dllexport'd class with std:: members, i.e. exactly
-        # where it was being hidden.
+        # No /external:anglebrackets: this project includes its own headers that
+        # way throughout, so the flag classified the whole codebase as external
+        # and silenced it at /external:W0 — MSVC reported nothing from any
+        # nodehammer header while gcc and clang reported everything. That hides
+        # C4251 in particular, which fires exactly where packaging needs it: on a
+        # dllexport'd class with std:: members, in a public header.
         #
-        # Dependencies stay quiet without it. CMake marks imported targets'
-        # include directories SYSTEM by default, and from MSVC 19.29.30036.3 it
-        # spells SYSTEM as /external:I (Modules/Compiler/MSVC.cmake) — so Conan's
-        # targets and the SYSTEM-declared FlatBuffers output are external by
-        # directory, which is the precise version of what the blanket flag was
-        # approximating.
+        # Dependencies stay quiet anyway: CMake marks imported targets' includes
+        # SYSTEM, and spells SYSTEM as /external:I from MSVC 19.29.30036.3
+        # (Modules/Compiler/MSVC.cmake) — external by directory rather than by
+        # bracket style.
         target_compile_options(${target} PRIVATE
             /W4
             /permissive-
@@ -67,27 +60,18 @@ function(nodehammer_set_compiler_options target)
     endif()
 endfunction()
 
-# Compile a library target so that nothing is exported unless it says so with
-# NH_API (include/nodehammer/api.hpp).
+# Export nothing unless it says NH_API (include/nodehammer/api.hpp).
 #
-# Applied to *both* core variants, which is the counter-intuitive half. For the
-# shared library the reason is obvious — it is what makes the installed export
-# table equal the public API. For the static library there is no export table
-# at all, and the reason is the Python extension: it links the archive into a
-# .so, and every default-visible object in that archive becomes an exported
-# symbol of the extension module, where it can collide with another extension
-# in the same interpreter (the concrete case being a second module that also
-# links lua statically). Compiling the archive hidden means the extension
-# exports only its own entry point.
+# Applied to *both* core variants. For the shared library that is the point. For
+# the static one — which has no export table — the reason is the Python
+# extension: it links the archive into a .so, where every default-visible object
+# becomes an exported symbol that can collide with another extension in the same
+# interpreter. It also makes the in-tree build behave like Windows, so a missing
+# NH_API fails here rather than only on MSVC.
 #
-# VISIBILITY_INLINES_HIDDEN additionally drops inline member functions, which
-# is most of what a header-heavy C++ library would otherwise emit.
-#
-# Skipped under Emscripten. There is no shared object in the wasm build — every
-# target is a statically linked executable whose exports are named explicitly
-# via -sEXPORTED_FUNCTIONS / EMSCRIPTEN_KEEPALIVE — so hidden visibility buys
-# nothing there while adding a way for those exports to go missing under the
-# Release build's -flto + --closure link.
+# Skipped under Emscripten: no shared object exists there, exports are named by
+# the link flags, and hidden visibility only adds a way for them to go missing
+# under the Release -flto + --closure link.
 function(nodehammer_set_visibility target)
     if(EMSCRIPTEN)
         return()

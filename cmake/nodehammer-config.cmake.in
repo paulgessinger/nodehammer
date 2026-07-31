@@ -1,20 +1,14 @@
 @PACKAGE_INIT@
 
-# Deliberately no find_dependency() calls.
+# Deliberately no find_dependency() calls: every dependency is PRIVATE and only
+# the *shared* library is installed, so they are linked into it and resolved
+# before a consumer ever sees it (#41 §10).
 #
-# nodehammer's dependencies — zstd, flatbuffers, manifold, toml++, glm, tinygltf,
-# nlohmann, unordered_dense, lua — are all PRIVATE, and only the *shared*
-# library is installed. A shared library links its static dependencies into
-# itself, so they are resolved before a consumer ever sees it and none of them
-# appears in the exported interface (#41 §10).
-#
-# This is the payoff for not shipping the static archive. A static nodehammer
-# would be a thin archive: creating a .a links nothing, so every private
-# dependency would remain an undefined symbol to be resolved at the consumer's
-# final link, and this file would have to find_dependency() the entire list —
-# pushing nine packages a consumer has no reason to know about into their
-# CMAKE_PREFIX_PATH. If that variant is ever added, this is the file that has
-# to grow the branch.
+# This is the payoff for not shipping the archive. A static nodehammer would
+# leave every private dependency undefined until the consumer's final link, so
+# this file would have to find_dependency() the lot — ten packages a consumer has
+# no reason to know about. If that variant is ever added, this file grows the
+# branch.
 
 include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
 

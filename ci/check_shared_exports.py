@@ -1,54 +1,35 @@
 #!/usr/bin/env python3
 """Assert that libnodehammer.so leaks neither third-party nor internal symbols.
 
-Two properties, and it is worth being precise about which, because an earlier
-version of this script claimed a third that it could not actually check.
+Two properties, deliberately not three:
 
-  A. No third-party symbol escapes. zstd, flatbuffers, manifold, miniz, lua and
-     the rest are absorbed into the .so as static archives, and on ELF's flat
-     symbol namespace an exported `ZSTD_compress` can interpose — or be
-     interposed by — a different zstd elsewhere in the process, silently mixing
-     versions. --exclude-libs,ALL is what prevents this, and this half of the
-     check is a regression test on that flag: it is one line in CMakeLists.txt,
-     easy to lose in a refactor, and nothing else would notice.
+  A. No third-party symbol escapes. zstd, flatbuffers, manifold and the rest are
+     absorbed as static archives, and on ELF's flat namespace an exported
+     `ZSTD_compress` can interpose — or be interposed by — a different zstd in
+     the same process, silently mixing versions. --exclude-libs,ALL prevents
+     that, and this half is a regression test on that one line of CMakeLists.
 
-  B. No internal nodehammer namespace is exported. Hidden visibility already
-     ensures this, so a failure here means someone marked an internal entity
-     NH_API by mistake.
+  B. No internal namespace is exported. Hidden visibility already ensures it, so
+     a failure means something internal was marked NH_API by mistake.
 
-What is deliberately *not* asserted is "the export table is exactly the public
-API". The table also carries std:: template instantiations, because libstdc++
-declares `namespace std _GLIBCXX_VISIBILITY(default)` and so overrides
--fvisibility=hidden for everything in std::. That is intentional on libstdc++'s
-part — vague-linkage instantiations are meant to merge across shared objects —
-and this library's own API passes std:: types across the boundary anyway, so
-suppressing them would buy no ABI independence it does not already lack. They
-are reported separately below as tolerated, not counted as leaks.
+Not asserted: "the export table is exactly the public API". The table also
+carries std:: template instantiations, because libstdc++ declares
+`namespace std _GLIBCXX_VISIBILITY(default)` — on purpose, so they merge across
+shared objects. They are reported as tolerated rather than counted as leaks.
+Note that an enumeration of what *is* exported could not check that claim
+anyway: a symbol wrongly *missing* leaves nothing to inspect.
 
-The rules are derived rather than listed. An allowlist of expected symbols would
-have to be edited every time step 6 adds a verb, and an entry nobody removed
-would silently permit a leak. Instead:
+The rules are derived rather than listed, so no allowlist goes stale:
 
-  1. Every internal namespace is harvested from the tree itself, by grepping
-     src/ for `namespace nodehammer::...`. A namespace added tomorrow is picked
-     up tomorrow, with no list to update.
-  2. An exported symbol is a leak if it is scoped into one of those, and a
-     third-party leak if it is under neither `nodehammer::` nor a tolerated
-     runtime prefix.
-  3. As a backstop for a namespace the grep somehow misses, a symbol whose
-     second scope component is lowercase *and* followed by `::` is treated as
-     internal too — namespaces are lowercase by convention here and public
-     types are not. This is deliberately secondary: it is a convention, and
-     conventions are what rule 1 exists to avoid depending on.
+  1. Internal namespaces are harvested from src/ on every run.
+  2. A symbol is a leak if scoped into one of those, or if it is under neither
+     `nodehammer::` nor a tolerated runtime prefix.
+  3. Backstop for a namespace the harvest misses: a lowercase second component
+     *followed by* `::` reads as internal. Testing the separator is what keeps
+     `nodehammer::tessellate(...)` — a lowercase public verb — from matching.
 
-Note what rule 3 does *not* reject: `nodehammer::tessellate(...)`. A namespace
-is always followed by `::` and a free function by `(`, so a lowercase public
-verb directly in `nodehammer::` is not mistaken for a namespace. That case is
-the reason rule 3 tests the separator and not just the case.
-
-Linux/ELF only. macOS is skipped by the caller: ld64 has no --exclude-libs, so
-the static dependencies' symbols do remain visible in the dylib and property A
-would fail for a reason that is not a defect in this project.
+Linux/ELF only; the caller skips macOS, where ld64 has no --exclude-libs and
+property A would fail for a reason that is not a defect here.
 
 Usage: ci/check_shared_exports.py <path-to-libnodehammer.so> [--source-dir DIR]
 """
@@ -71,14 +52,9 @@ LINKER_ARTEFACTS = {
     "__bss_start",
 }
 
-# c++filt renders some symbols as "<kind> for <name>"; the interesting part is
-# the name, and the kind is orthogonal to whether it should be exported.
-#
-# The thunk spellings are enumerated rather than matched with a leading `thunk`:
-# c++filt emits "non-virtual thunk to", "virtual thunk to" and "covariant return
-# thunk to", none of which *start* with "thunk", so a `^thunk .*? to ` pattern
-# matches nothing at all. Thunks reach the table whenever a public class uses
-# multiple inheritance.
+# c++filt renders some symbols as "<kind> for <name>"; the kind is orthogonal to
+# whether the entity should be exported. The three thunk spellings are
+# enumerated because none of them *starts* with "thunk".
 DEMANGLED_PREFIX = re.compile(
     r"^(?:typeinfo(?: name)? for |vtable for |VTT for |guard variable for |"
     r"(?:non-virtual |virtual |covariant return )?thunk to |"
@@ -87,10 +63,9 @@ DEMANGLED_PREFIX = re.compile(
 
 TOP = "nodehammer::"
 
-# Exported, not public API, and not a leak either. Everything here is emitted
-# into our own objects by the compiler or the standard library rather than
-# coming from a dependency archive, so --exclude-libs cannot reach it and
-# hidden visibility does not apply (see the module docstring on std::).
+# Emitted into our own objects by the compiler or the standard library, so
+# neither --exclude-libs nor hidden visibility reaches them. Not public API, not
+# a leak.
 TOLERATED_PREFIXES = (
     "std::",
     "__gnu_cxx::",
@@ -137,31 +112,22 @@ _OPERATOR_TOKEN = re.compile(r"operator(?:<=>|<<=|>>=|<<|>>|<=|>=|<|>|\(\)|\[\])
 
 
 def scope_of(name: str) -> str:
-    """The qualified name of the entity itself: return type, parameters and
-    template arguments removed.
+    """The entity's own qualified name: return type, parameters and template
+    arguments removed.
 
-    Three things have to come off, and only the first is obvious.
+    The entity is the last space-separated word at bracket depth zero before the
+    parameter list. Depth matters in both directions: it leaves a trailing
+    `const` alone, and it keeps a templated return type intact, so
+    `std::pair<int, int> nodehammer::compute()` yields `nodehammer::compute`.
 
-    Parameters carry their own `::` — `nodehammer::tessellate(nodehammer::Scene
-    const&)` has one inside the parameter list — and reading those as scope
-    separators would misfile a public free function as a namespace.
+    A return type is present only sometimes — the Itanium ABI mangles it for
+    function templates, so c++filt writes `char* std::__add_grouping<char>(...)`
+    but plain `nodehammer::version()`. Anchoring at the start of the string
+    therefore works for ordinary functions and silently fails for template
+    instantiations, which are most of what a header-heavy library exports.
 
-    A *return type* comes off the front, and it is there only sometimes: the
-    Itanium ABI mangles the return type of a function template, so c++filt
-    writes `char* std::__add_grouping<char>(...)` for one and plain
-    `nodehammer::version()` for an ordinary function. Anchoring on the start of
-    the string therefore works for most symbols and silently fails for template
-    instantiations — which are most of what a header-heavy library exports.
-
-    So the entity is the last space-separated word at bracket depth zero before
-    the parameter list. That leaves a trailing `const` alone (it follows the
-    parameters, not precedes them) and keeps a templated return type intact
-    (`std::pair<int, int> nodehammer::compute()` yields `nodehammer::compute`,
-    since the space inside the angle brackets is not at depth zero).
-
-    Returns "" when the symbol names no entity at all — RTTI for a function or
-    builtin type, where what remains after the decoration is a bare type like
-    `bool (*)(std::string const&, void*)`.
+    Returns "" when there is no entity — RTTI over a function or builtin type,
+    where what remains is a bare `bool (*)(std::string const&, void*)`.
     """
     scan = _OPERATOR_TOKEN.sub(lambda m: "operator" + "_" * (len(m.group()) - 8), name)
 
@@ -188,10 +154,9 @@ def scope_of(name: str) -> str:
 
 
 def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
-    """Sort an exported symbol into "public", "tolerated" or "leak".
+    """Sort a symbol into "public", "tolerated" or "leak".
 
-    The reason string is populated for leaks, and for tolerated symbols carries
-    the category so the report can group them.
+    The reason is a message for leaks and a grouping key for tolerated symbols.
     """
     name = DEMANGLED_PREFIX.sub("", symbol)
     decorated = name != symbol
@@ -199,20 +164,16 @@ def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
     if name in LINKER_ARTEFACTS:
         return "tolerated", "linker artefact"
 
-    # Everything below asks about the *entity*, not the raw demangled string:
-    # a function template carries its return type in front of its name, so
-    # `char* std::__add_grouping<char>(...)` is a std:: symbol that does not
-    # begin with "std::".
+    # Ask about the *entity*, not the raw string: a function template carries
+    # its return type in front of its name, so `char* std::__add_grouping<char>`
+    # is a std:: symbol that does not begin with "std::".
     scope = scope_of(name)
 
     if not scope:
-        # No entity name at all, which happens for RTTI over a function or
-        # builtin type — `typeinfo for bool (*)(std::string const&, void*)`.
-        # Those belong to no namespace to leak from: they are vague-linkage
-        # records the compiler emits wherever the type is used, the same
-        # category as the std:: instantiations above. Only reachable through a
-        # decoration prefix; a bare identifier like ZSTD_compress has an entity
-        # name and is judged below.
+        # No entity at all: RTTI over a function or builtin type, e.g.
+        # `typeinfo for bool (*)(std::string const&, void*)`. Such a type has no
+        # namespace to leak from. Only reachable via a decoration prefix — a bare
+        # identifier like ZSTD_compress has an entity name and is judged below.
         if decorated:
             return "tolerated", "RTTI for a non-class type"
         return "leak", "unqualified symbol — is --exclude-libs,ALL still on the link?"
@@ -222,9 +183,7 @@ def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
             return "tolerated", prefix.rstrip(":")
 
     if not scope.startswith(TOP):
-        # Property A. Reaching here means a dependency's symbol survived into
-        # the dynamic table, which on ELF's flat namespace is the failure that
-        # actually bites — so name the flag rather than the symbol.
+        # Property A: a dependency's symbol survived into the dynamic table.
         return "leak", "third-party symbol — is --exclude-libs,ALL still on the link?"
 
     # Longest match first, so nodehammer::ir::render is preferred over
@@ -240,12 +199,9 @@ def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
     return "public", None
 
 
-# Cases the rules have to get right, checked by --self-test. They exist because
-# the signature-stripping above is not obvious: the first draft of this script
-# rejected `nodehammer::tessellate(...)` as a namespace, having found the `::`
-# in its parameter list. Public entries use step 6's planned surface, so the
-# check is exercised against the API it will actually police rather than only
-# against the single symbol that exists today.
+# Checked by --self-test, which needs no ELF library and so runs anywhere.
+# Public entries use step 6's planned surface, so the rules are exercised
+# against the API they will police rather than today's single symbol.
 SELF_TEST_CASES: list[tuple[str, str]] = [
     # (demangled symbol, expected bucket)
     ("nodehammer::version()", "public"),
@@ -256,11 +212,9 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("nodehammer::RenderScene::write(std::filesystem::path const&) const", "public"),
     ("nodehammer::DiagnosticList::hasErrors() const", "public"),
     ("nodehammer::operator==(nodehammer::Diagnostic const&, nodehammer::Diagnostic const&)", "public"),
-    # The decorated forms a public class brings with it. All of them have to be
-    # exported for a consumer to derive from the class, construct it, catch it
-    # by type, or dynamic_cast it — a version script restricted to
-    # `nodehammer::*` would silently drop every one, since none of these
-    # demangled names *starts* with `nodehammer::`.
+    # A public class brings all of these, and a consumer needs them to derive
+    # from it, construct it, catch it by type or dynamic_cast it. None starts
+    # with `nodehammer::`, which is why a version script cannot be used here.
     ("vtable for nodehammer::SemanticScene", "public"),
     ("typeinfo for nodehammer::SemanticScene", "public"),
     ("typeinfo name for nodehammer::SemanticScene", "public"),
@@ -268,8 +222,7 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("non-virtual thunk to nodehammer::SemanticScene::write() const", "public"),
     ("virtual thunk to nodehammer::SemanticScene::~SemanticScene()", "public"),
     ("covariant return thunk to nodehammer::SemanticScene::clone() const", "public"),
-    # Property A: a dependency's symbol in the table means --exclude-libs is not
-    # doing its job. This is the half of the check that earns its keep.
+    # Property A: --exclude-libs is not doing its job.
     ("ZSTD_compress", "leak"),
     ("flatbuffers::ClassicLocale::instance_", "leak"),
     ("manifold::Manifold::Boolean(manifold::Manifold const&)", "leak"),
@@ -285,9 +238,8 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("typeinfo for nodehammer::ir::semantic::Scene", "leak"),
     # A namespace nobody has written yet: rule 1 cannot know it, rule 3 must.
     ("nodehammer::brandnew::Thing::f()", "leak"),
-    # Tolerated. Real symbols from the first CI run of this job: libstdc++ gives
-    # namespace std default visibility, so these are emitted from our own
-    # objects and survive -fvisibility=hidden. Not leaks — see the docstring.
+    # Real symbols from CI: libstdc++ gives namespace std default visibility, so
+    # these are emitted from our own objects and survive -fvisibility=hidden.
     ("std::_Rb_tree<std::array<unsigned int, 2ul>, std::pair<std::array<unsigned int, 2ul> const, "
      "unsigned int> >::_M_get_insert_unique_pos(std::array<unsigned int, 2ul> const&)", "tolerated"),
     ("std::__unicode::__v15_1_0::__width_edges", "tolerated"),
@@ -295,12 +247,9 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("__gnu_cxx::__throw_insufficient_space(char const*, char const*)", "tolerated"),
     ("_init", "tolerated"),
     ("__bss_start", "tolerated"),
-    # Verbatim from the CI run that caught the first version of these rules.
-    # Both categories were reported as third-party leaks by a startswith("std::")
-    # test, and neither is third-party.
-    #
-    # A function template mangles its return type, so c++filt puts the return
-    # type in front of the name and the symbol does not begin with "std::":
+    # Verbatim from CI. Both shapes were misread as third-party leaks by a
+    # startswith("std::") test. First: a function template mangles its return
+    # type, so the name does not begin with "std::".
     ("char* std::__add_grouping<char>(char*, char, char const*, unsigned long, "
      "char const*, char const*)", "tolerated"),
     ("void std::deque<std::__cxx11::basic_string<char, std::char_traits<char>, "
@@ -309,9 +258,8 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
      "<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > "
      "const&>(std::__cxx11::basic_string<char, std::char_traits<char>, "
      "std::allocator<char> > const&)", "tolerated"),
-    # RTTI over a function type names no entity at all — these are tinygltf's
-    # FsCallbacks signatures, but the records belong to the *type*, which has no
-    # namespace to leak from:
+    # Second: RTTI over a function type names no entity at all. These are
+    # tinygltf's FsCallbacks signatures, but the record belongs to the *type*.
     ("typeinfo for bool (*)(std::__cxx11::basic_string<char, std::char_traits<char>, "
      "std::allocator<char> > const&, void*)", "tolerated"),
     ("typeinfo name for bool (*)(std::vector<unsigned char, std::allocator<unsigned char> >*, "
@@ -320,13 +268,11 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
      "const&, void*)", "tolerated"),
     ("typeinfo for bool (std::__cxx11::basic_string<char, std::char_traits<char>, "
      "std::allocator<char> > const&, void*)", "tolerated"),
-    # The distinction the "no entity name" branch rests on: a bare C identifier
-    # also has no namespace, but arrives with no decoration prefix and must stay
-    # a leak. ZSTD_compress above covers the plain case; this is the same shape
-    # as the RTTI entries minus the prefix.
+    # What the "no entity" branch rests on: a bare C identifier also has no
+    # namespace, but arrives undecorated and must stay a leak.
     ("mz_zip_writer_end", "leak"),
     # Return type with its own template arguments: the space inside <> is not at
-    # depth zero, so the entity is still found correctly.
+    # depth zero.
     ("std::pair<int, int> nodehammer::computeBounds()", "public"),
     ("nodehammer::operator<<(std::ostream&, nodehammer::Diagnostic const&)", "public"),
 ]

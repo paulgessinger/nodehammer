@@ -1,25 +1,18 @@
 #!/usr/bin/env bash
-# Verify an *installed* nodehammer tree — #41 step 5's verification, split out
-# from the build so any job that already produced an install can run it.
-#
-# Asks the questions no in-tree build can answer:
+# Verify an *installed* nodehammer tree — #41 step 5's verification. Asks the
+# three questions no in-tree build can answer:
 #
 #   1. Is the installed header set exactly include/nodehammer?
 #   2. Did anything escape into the export table? (ci/check_shared_exports.py)
 #   3. Can somebody outside the build tree use the result — with no dependency
-#      hints, no include paths, and no source access? (ci/shared_consumer/)
+#      hints, no include paths, no source access? (ci/shared_consumer/)
 #
 # Usage: ci/verify-shared-install.sh <install-prefix>
 #
-# Step 2 is ELF-only and skipped elsewhere, for opposite reasons on the two other
-# platforms. macOS: ld64 has no --exclude-libs (only per-archive -hidden-l), so
-# the dependencies' symbols do stay visible in the dylib and the check would fail
-# for something that is not a defect. Windows: there is nothing to check, because
-# PE/COFF exports nothing without __declspec(dllexport) — the property this
-# asserts on ELF is the platform default there, which is also why NH_API has a
-# distinct static spelling (include/nodehammer/api.hpp).
-#
-# Steps 1 and 3 run everywhere, and on Windows step 3 is the whole verification.
+# Step 2 is ELF-only, skipped elsewhere for opposite reasons: macOS has no
+# --exclude-libs equivalent, so it would fail for something that is not a defect;
+# Windows has nothing to check, since PE/COFF exports nothing without
+# __declspec(dllexport). Steps 1 and 3 run everywhere.
 
 set -euo pipefail
 
@@ -62,9 +55,8 @@ if [ "$(uname -s)" = "Linux" ]; then
         echo "error: no libnodehammer.so under $prefix" >&2
         exit 1
     fi
-    # Survives ci/build.sh's `cmake --install --strip`: strip removes .symtab
-    # but never .dynsym, which is the table the loader needs and the only one
-    # check_shared_exports.py reads (nm --dynamic).
+    # Survives `cmake --install --strip`: strip drops .symtab but never .dynsym,
+    # which is what the loader needs and the only table this script reads.
     ci/check_shared_exports.py "$lib"
 else
     echo "skipped: ELF only (see the header of this script)"

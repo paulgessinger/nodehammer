@@ -11,15 +11,12 @@ inline constexpr int VERSION_MAJOR = @NODEHAMMER_VERSION_MAJOR@;
 inline constexpr int VERSION_MINOR = @NODEHAMMER_VERSION_MINOR@;
 inline constexpr int VERSION_PATCH = @NODEHAMMER_VERSION_PATCH@;
 
-// The version of the library that is *linked*, as opposed to the VERSION
-// constant above, which is the version whose headers were *compiled against*.
-// For a shared library those can differ, and only the out-of-line form reports
-// the former — which also makes this the one entity that proves an installed
-// consumer is really talking to libnodehammer rather than just reading its
-// headers, and so the first thing the shared-build check has to find in the
-// export table. Its final home is a step-6 question (the API sketch files it
-// under diagnostics.hpp); it lives here because this is the only public header
-// that exists today.
+// The version *linked*, as against VERSION above, which is the version the
+// headers were *compiled against*. For a shared library those can differ, and
+// only the out-of-line form reports the former — which also makes this the one
+// entity proving a consumer is really talking to libnodehammer rather than just
+// reading its headers. Final home is a step-6 question (the API sketch files it
+// under diagnostics.hpp); here for now because this is the only public header.
 NH_API std::string_view version() noexcept;
 
 } // namespace nodehammer

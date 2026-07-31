@@ -2,37 +2,28 @@
 
 // Visibility decoration for the public API.
 //
-// This is the *add-on* to the public/internal split, not the split itself.
-// What keeps internals unreachable is physical: `include/nodehammer/` holds
-// only public headers, everything else lives next to its source under `src/`
-// and is never installed. NH_API adds the second half of the guarantee for the
-// shared build — internal symbols are compiled with hidden visibility, so they
-// are not merely un-includable but un-linkable.
+// The add-on to the public/internal split, not the split itself: what keeps
+// internals unreachable is physical, since `include/nodehammer/` holds only
+// public headers and everything else lives under `src/` and is never installed.
+// NH_API adds the link-time half — internals compile hidden, so they are not
+// merely un-includable but un-linkable.
 //
-// Three build situations, three expansions:
+// Three situations, three expansions:
 //
-//   NH_STATIC   consumer of the in-tree static library (the CLI, the viewer,
-//               the tests, and the future Python extension). Expands to
-//               nothing: an archive has no export table, and the static target
-//               is compiled with hidden visibility precisely so its symbols do
-//               *not* end up in the export table of whatever .so links it.
-//               Defined PUBLIC on nodehammer_lib, so no in-tree target has to
-//               remember it.
-//
-//   NH_EXPORTS  building the shared library itself. Defined PRIVATE on
+//   NH_STATIC   consumer of the in-tree archive (CLI, viewer, tests, and the
+//               future Python extension). Expands to nothing. Defined PUBLIC on
+//               nodehammer_lib so no in-tree target has to remember it.
+//   NH_EXPORTS  building the shared library. Defined PRIVATE on
 //               nodehammer_shared.
+//   neither     consumer of the *installed* library — the case that must work
+//               with no macros defined at all, since a consumer's build system
+//               is not ours to configure. Hence dllimport / default visibility
+//               as the fallback rather than the opt-in.
 //
-//   neither     consumer of the *installed* shared library. This is the case
-//               that must work with no macro definitions at all, since a
-//               consumer's build system is not ours to configure — hence
-//               dllimport / default visibility as the fallback rather than as
-//               an opt-in.
-//
-// On ELF and Mach-O the annotation only ever *raises* visibility back to
-// default against the target-wide -fvisibility=hidden, so decorating a
-// declaration is harmless in every configuration. On Windows it is
-// load-bearing in both directions, which is why the static case has to be
-// distinguished by a macro rather than inferred.
+// On ELF and Mach-O the annotation only ever *raises* visibility against
+// -fvisibility=hidden, so it is harmless in any configuration. On Windows it is
+// load-bearing in both directions, which is why the static case needs a macro
+// rather than being inferred.
 
 #if defined(NH_STATIC)
 #define NH_API

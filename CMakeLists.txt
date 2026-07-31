@@ -135,16 +135,11 @@ endif()
 # link against it without pulling subcommand registration code (and CLI11's
 # header-only template forest) into their closure.
 #
-# Accumulated into variables rather than written straight onto a target because
-# the core is built *twice* in a packaging build: once as the static archive
-# every in-tree target links, and once as the installed shared library. The two
-# cannot share objects — __declspec(dllexport) is codegen-affecting, so DLL
-# objects are not valid inside a static library, which rules out the OBJECT
-# library trick on Windows — so the configuration is what gets shared instead.
-# Anything appended to *this* list lands in both variants by construction, which
-# is where the "describe once" guarantee actually lives. NH_APP_SOURCES below is
-# the deliberate exception: sources the static archive gets and the installed
-# shared library does not.
+# Accumulated into variables rather than written onto a target, because a
+# packaging build describes the core once and builds it twice: the static
+# archive every in-tree target links, and the installed shared library. Anything
+# appended to *this* list reaches both — that is where the "describe once"
+# guarantee lives. NH_APP_SOURCES below is the deliberate exception.
 set(NH_CORE_SOURCES
     src/ir/semantic.cpp
     src/ir/semantic_json.cpp
@@ -186,46 +181,29 @@ set(NH_CORE_SOURCES
 )
 
 # ── Application sources ───────────────────────────────────────────────────────
-# Compiled into the static archive that every in-tree target links, and
-# deliberately *not* into the installed shared library.
+# Static archive only, never the installed shared library: the library is the
+# headless pipeline core, and a consumer wants neither a camera nor a UI state
+# machine — nor watcher's Apple CoreServices/CoreFoundation link for a file
+# watcher it never calls.
 #
-# The shared library is the headless pipeline core, which is what the public API
-# is: IR, config, selection, tessellation, importers, exporters, and in time the
-# ability to read and write a .nhproj. A consumer does not want a camera, a UI
-# state machine, or an adaptive render-scale controller, and should not pay
-# watcher's Apple CoreServices/CoreFoundation link for a file watcher it never
-# calls.
-#
-# The line is drawn here rather than at `src/viewer/*`, because that directory
-# holds two unrelated clusters. The project/VFS/archive stack — project_fs,
-# bag_project_fs, filesystem_project_fs, native_bag_project_fs, zip_working_set,
-# archive_project_fs, archive_export, project_manifest — reaches only itself plus
-# byte_buffer and log_sink, and is the .nhproj capability, so it is core. What
-# remains is the app: app_state.hpp names camera/config/render_quality,
-# build_session.hpp names log_sink/project_fs. Both point *into* the core cluster
-# and never out of it, which is what makes the subtraction safe.
-#
-# That direction is also what checks it. Since nothing in the core references the
-# app set, dropping these from the shared library cannot leave an undefined
-# symbol — and if a pipeline source is ever misfiled into this list,
-# --no-undefined fails the shared link and names it. The previous arrangement
-# built both variants from one list and treated the symmetry as an invariant;
-# this is the same guarantee, asserted by the linker rather than by convention.
+# Note the line is *not* `src/viewer/*`. That directory also holds the
+# project/VFS/archive stack, which is the .nhproj capability and stays core.
+# These four (plus watched_filesystem_project_fs below) only ever reach *into*
+# the core, never out of it — which is what makes removing them safe, and what
+# --no-undefined checks: misfile a pipeline source here and the shared link
+# fails naming the symbol.
 set(NH_APP_SOURCES
     src/viewer/app_state.cpp
     src/viewer/camera.cpp
-    # Headless, GPU-free viewer controller: the adaptive render-scale state
-    # machine. No sokol deps (like camera.cpp), so the unit tests can link it
+    # Adaptive render-scale state machine. GPU-free, so the tests link it
     # without the viewer.
     src/viewer/dynamic_render_scale.cpp
-    # Build orchestration (resolve→parse→import driver). Drives builds for the
-    # viewer and the headless buildSceneFromPaths shim; app-side for now, and a
-    # plausible candidate to promote if step 6 exposes it.
+    # resolve→parse→import driver. App-side for now; a candidate to promote if
+    # step 6 exposes it.
     src/viewer/build_session.cpp
 )
 
-# Dependencies and defines that follow NH_APP_SOURCES onto the static archive
-# only. Appended to below, alongside their sources.
+# Appended to below, alongside their sources.
 set(NH_APP_DEPS "")
 set(NH_APP_DEFINES "")
 
@@ -235,16 +213,10 @@ configure_file(
     @ONLY
 )
 
-# Dependency scope on the *archive*, which is a different question from scope on
-# the installed shared library (that one is uniformly PRIVATE, behind
-# $<BUILD_INTERFACE:>). The archive is consumed in-tree through internal headers,
-# so the test is simply: does an internal header include the dependency's headers
-# in a way an out-of-core target sees?
-#
-# Determined by moving the whole list to PRIVATE and rebuilding until it was
-# clean, three iterations — `fatal error` stops at the first bad include, so one
-# pass reports only the first offender per TU and reads as a much shorter list
-# than the truth.
+# PUBLIC on the archive, because an internal header names the dependency where an
+# out-of-core target sees it. Each entry cites the header that justifies it;
+# remove one and the build fails. (Scope on the shared library is a different
+# question — there everything is PRIVATE behind $<BUILD_INTERFACE:>.)
 set(NH_CORE_DEPS
     # src/config/config_ast.hpp, src/ir/render.hpp — `using ExtrasMap = nlohmann::json`
     nlohmann_json::nlohmann_json
@@ -260,25 +232,15 @@ set(NH_CORE_DEPS
 
 # Used only from .cpp files in the core, so nothing outside it needs them.
 #
-# This is also what settles #41's "nlohmann can finally go PRIVATE" row, and it
-# settles it the other way. The row assumed nlohmann was over-declared; in fact
-# it is one of the few that is *correctly* PUBLIC, because ExtrasMap puts
-# nlohmann::json in an internal header's interface. What was over-declared was
-# tinygltf — and tinygltf is what made the question hard to answer, since it
-# lists nlohmann_json in its own INTERFACE_LINK_LIBRARIES and so handed nlohmann
-# to every in-tree target regardless of what this file said. With tinygltf
-# PRIVATE that confound is gone: nlohmann's PUBLIC entry is now load-bearing and
-# removing it fails the build, which is the property the row wanted to be able
-# to check.
-#
-# The installed side was never affected either way: the shared variant takes
-# every dependency PRIVATE behind $<BUILD_INTERFACE:>, so the generated export
-# has no INTERFACE_LINK_LIBRARIES at all and ci/shared_consumer builds with
-# nothing but nodehammer's own prefix on CMAKE_PREFIX_PATH.
+# tinygltf being PRIVATE is what makes nlohmann's PUBLIC entry above meaningful:
+# tinygltf lists nlohmann_json in its own INTERFACE_LINK_LIBRARIES, so while it
+# was PUBLIC every in-tree target got nlohmann regardless of what this file said
+# (#41's "nlohmann can finally go PRIVATE" row — the answer turned out to be that
+# nlohmann is correctly PUBLIC and tinygltf was the over-declared one).
 set(NH_CORE_PRIVATE_DEPS
     tomlplusplus::tomlplusplus
-    # tests/export/test_gltf_exporter.cpp includes <tiny_gltf.h> to read back what
-    # the exporter wrote, and declares the dependency itself — see tests/.
+    # tests/export/test_gltf_exporter.cpp includes <tiny_gltf.h> directly and
+    # declares this itself — see tests/CMakeLists.txt.
     TinyGLTF::TinyGLTF
 )
 
@@ -295,24 +257,14 @@ set(NH_CORE_INCLUDE_DIRS "")
 # inside the helper: they are configuration, not target description, and must
 # run exactly once.
 
-# Lua config front-end. Compiled into the core rather than a library of its own.
+# Lua config front-end: a build-gated source rather than a library of its own.
+# The constraint was only ever "no lua under Emscripten", which a gate satisfies,
+# while a separate target could not put the engine *inside* the shared library
+# for step 6's `Config::read` (docs/config-scripting-lua.md, #41 §6).
 #
-# It used to be a separate nodehammer_lua target, which read as the tidy way to
-# keep the interpreter out of the wasm closure — but the constraint was only
-# ever "no lua under Emscripten", and a gated source satisfies that identically
-# (docs/config-scripting-lua.md, and #41 §6). The separate target actively cost
-# us three things: `Config::read` dispatching a `.lua` path needs the engine
-# *inside* the shared library, which a target that itself links the core cannot
-# provide without linking the core into itself; NH_WITH_LUA sat on the CLI where
-# the library could not see it, though the library is what has to answer
-# `Config::formats()`; and cmake/PicProbe.cmake needed a special case to avoid
-# pulling the core archive twice under --whole-archive.
-#
-# The dependency direction is unchanged: lua_config.hpp includes
-# config/config_loader.hpp, never the reverse, so this is a merge downhill.
-# `-Wconversion`/`-Wsign-conversion` are silenced by a scoped #pragma inside
-# lua_config.cpp (sol2's proxy conversions are not clean under them), kept in
-# the TU so it cannot leak to neighbouring sources now that they share a target.
+# lua_config.cpp silences -Wconversion/-Wsign-conversion via a scoped #pragma
+# (sol2's proxy conversions are not clean under them), kept in the TU so it
+# cannot leak to the sources it now shares a target with.
 if(NOT EMSCRIPTEN)
     list(APPEND NH_CORE_SOURCES src/lua/lua_config.cpp)
     # lua_config.hpp exposes only config::ConfigResult, so the interpreter and
@@ -375,16 +327,13 @@ if(NOT EMSCRIPTEN)
 endif()
 
 # WatchedFilesystemProjectFs (strategy doc step 4) decorates FilesystemProjectFs
-# and uses the wtr.watcher Conan dep to bump generation() on disk changes.
-# Viewer-gated like platform_folders (the dep is only required when
-# `-o '&:viewer=True'`), native-only like the FS backend it wraps.
+# and uses wtr.watcher to bump generation() on disk changes. Viewer-gated like
+# platform_folders, native-only like the FS backend it wraps.
 #
-# App-side, and it is the source that makes the split pay for itself: live
-# reload is a viewer feature, and watcher is the one dependency whose recipe
-# propagates the Apple CoreServices/CoreFoundation frameworks. Keeping it out of
-# the shared library keeps those frameworks off an installed libnodehammer that
-# would never call them. Promote it if a consumer ever wants a watching
-# ProjectFs — the decorated FilesystemProjectFs it wraps is already core.
+# App-side, and the source that makes the split pay: watcher is the one
+# dependency whose recipe propagates the Apple CoreServices/CoreFoundation
+# frameworks, and an installed libnodehammer never calls it. Promote it if a
+# consumer wants a watching ProjectFs — what it decorates is already core.
 if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
     list(APPEND NH_APP_SOURCES src/viewer/watched_filesystem_project_fs.cpp)
     find_package(watcher CONFIG REQUIRED)
@@ -394,28 +343,15 @@ if(NOT EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
 endif()
 
 # ZipWorkingSet (strategy doc step 5) + ArchiveProjectFs (step 6) + archive
-# export (step 7): ZIP-backed read/override/serialize substrate and the archive
-# backend. Archive mode is cross-platform — only the POSIX save internals are
-# native-only (guarded inside the .cpp) — so these are viewer-gated but *not*
-# native-only; miniz builds for Emscripten too, and the web bag (step 8) reuses
-# the same substrate.
+# export (step 7): the .nhproj capability. Cross-platform — only the POSIX save
+# internals are native-only, guarded inside the .cpp.
 #
-# Unconditional, and core rather than app. This is the .nhproj capability, and
-# the library is expected to read and write project archives in its own right
-# rather than only on the viewer's behalf.
-#
-# It used to be gated on NODEHAMMER_WITH_VIEWER, which made the installed shared
-# library vary with an application-feature flag — a viewer-off build produced a
-# libnodehammer that could not open a project. That is the same defect the
-# NH_CORE/NH_APP split above exists to remove, so leaving it here would have
-# fixed the property everywhere except the one cluster most likely to be public
-# API. What a consumer links has to have a feature set of its own.
-#
-# The cost of ungating is small enough to be worth stating: miniz joins ten
-# existing unconditional requirements as the eleventh, and is the cheapest of
-# them — plain C, no OS deps, builds for Emscripten. Binaries that never touch
-# an archive are unaffected, because static-lib dead-strip drops the objects (the
-# same mechanism that keeps BagProjectFs out of the wasm viewer).
+# Unconditional on purpose. Gating this on the viewer made the *installed* library
+# vary with an application feature: a viewer-off build produced a libnodehammer
+# that could not open a project. miniz is the cheapest dependency to make
+# unconditional (plain C, no OS deps, builds for Emscripten), and binaries that
+# never touch an archive are unaffected — static-lib dead-strip drops the objects,
+# the same mechanism that keeps BagProjectFs out of the wasm viewer.
 list(APPEND NH_CORE_SOURCES
     src/viewer/zip_working_set.cpp
     src/viewer/archive_project_fs.cpp
@@ -433,25 +369,15 @@ if(NODEHAMMER_WITH_VIEWER)
 endif()
 
 # ── Core library targets ──────────────────────────────────────────────────────
-# Everything both variants need that does not depend on which variant it is.
-#
-# Deliberately takes no parameter beyond the target. An earlier version of this
-# helper took a `depScope` that drove the link scope, the define scope and the
-# include scope at once, plus an `if(depScope STREQUAL "PRIVATE")` branch — it
-# was a variant discriminator wearing a scope keyword's clothes, and roughly half
-# the function body was conditional on it. The genuine "describe once" guarantee
-# never lived in the function anyway; it lives in the NH_CORE_* lists, which are
-# what make a new source or dependency reach both targets. So the two variants
-# are now written out below, and what survives here is the part that is the same
-# either way — including nodehammer_set_visibility(), which is the one step
-# neither target can afford to skip.
+# The settings that do not depend on which variant is being built. No parameter
+# beyond the target, deliberately: the "describe once" guarantee lives in the
+# NH_CORE_* lists, not here, so anything variant-specific is written out at the
+# two call sites instead of hidden behind a discriminator.
 function(nh_core_common target)
-    # `include/` holds the public headers; every internal header lives next to
-    # its source under `src/` and is included as <ir/semantic.hpp>,
-    # <config/...>, etc. The split is physical, so nothing internal *can* leak
-    # into an install: the BUILD_INTERFACE genex keeps src/ on the include path
-    # for every in-tree target (cli, viewer, tests) while dropping it from the
-    # exported interface, which carries only the installed include dir.
+    # `include/` holds the public headers; internal ones live next to their
+    # source under `src/`. The BUILD_INTERFACE genex keeps src/ on the include
+    # path in-tree while dropping it from the exported interface, so nothing
+    # internal *can* reach an install (#41 §1).
     target_include_directories(${target} PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/include>
@@ -459,9 +385,8 @@ function(nh_core_common target)
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
-    # The one usage requirement that *is* real for a consumer: these headers
-    # need C++23. CMAKE_CXX_STANDARD is a build-tree setting and does not
-    # propagate through an export, so state it on the target.
+    # CMAKE_CXX_STANDARD is a build-tree setting and does not survive an export,
+    # so the C++23 requirement has to be stated on the target.
     target_compile_features(${target} PUBLIC cxx_std_23)
 
     add_dependencies(${target} flatbuffers_generate)
@@ -472,39 +397,27 @@ function(nh_core_common target)
 endfunction()
 
 # ── Shared core objects (non-Windows) ─────────────────────────────────────────
-# When both variants are built, the core sources are compiled twice — once for
-# the archive and once for the shared library. On Windows that is unavoidable:
-# __declspec(dllexport) is codegen-affecting, MSVC bakes /EXPORT: directives into
-# the object's .drectve section, and such an object is not valid inside a static
-# library. So the DLL and the archive genuinely need different objects.
+# A shared build compiles the core twice, once per variant. On Windows that is
+# unavoidable — __declspec(dllexport) is codegen-affecting, so a DLL's objects
+# are not valid inside a static library. Elsewhere NH_API only ever *raises*
+# visibility (include/nodehammer/api.hpp), so one object serves both and an
+# OBJECT library compiles the core once.
 #
-# Everywhere else they do not. NH_API expands to
-# __attribute__((visibility("default"))), which — as include/nodehammer/api.hpp
-# notes — only ever *raises* visibility against the target-wide
-# -fvisibility=hidden, so one object is valid in both an archive and a .so. An
-# OBJECT library compiles the core once and both targets consume it.
-#
-# The trade is that shared objects cannot carry NH_STATIC, so the archive's
-# public entities are compiled with default visibility rather than collapsed to
-# nothing. That is the one place this weakens #41 §10's Python-extension
-# argument: a module linking the archive would export the public API instead of
-# only its own entry point. It is bounded — internal symbols stay hidden because
-# they were never NH_API, and the third-party mass is --exclude-libs's job — so
-# what leaks is exactly the API a consumer is entitled to see. Note that in-tree
-# consumers still get NH_STATIC from nodehammer_lib below, so only the core
-# objects themselves differ, and only on platforms where both spellings work.
+# The trade: shared objects cannot carry NH_STATIC, so the archive's *public*
+# entities keep default visibility instead of collapsing to nothing. That
+# slightly weakens #41 §10 — a Python extension linking the archive would export
+# the public API rather than only its entry point — but internals stay hidden
+# (they were never NH_API) and third-party symbols remain --exclude-libs's job.
 if(NODEHAMMER_BUILD_SHARED AND NOT WIN32)
     add_library(nodehammer_core_objs OBJECT ${NH_CORE_SOURCES})
     nh_core_common(nodehammer_core_objs)
 
-    # Required for the objects to be linkable into the .so; harmless in the
-    # archive, and what cmake/PicProbe.cmake asserts for the whole archive
-    # anyway.
+    # Needed to link into the .so; harmless in the archive, which
+    # cmake/PicProbe.cmake requires to be PIC anyway.
     set_property(TARGET nodehammer_core_objs PROPERTY POSITION_INDEPENDENT_CODE ON)
 
-    # PRIVATE throughout: this target exists to be compiled, not to be depended
-    # on. Both consumers below re-declare the dependencies at the scope they
-    # actually want to propagate.
+    # PRIVATE throughout: this target exists to be compiled, not depended on.
+    # Both consumers re-declare dependencies at the scope they want to propagate.
     target_link_libraries(nodehammer_core_objs PRIVATE ${NH_CORE_DEPS} ${NH_CORE_PRIVATE_DEPS})
     target_compile_definitions(nodehammer_core_objs PRIVATE ${NH_CORE_DEFINES})
     if(NH_CORE_INCLUDE_DIRS)
@@ -518,10 +431,9 @@ endif()
 
 # ── Static archive ────────────────────────────────────────────────────────────
 # What every in-tree target links — CLI, viewer, tests, benchmarks, and the
-# future Python extension. Never installed, so its dependencies are PUBLIC:
-# in-tree targets include internal headers that include toml++, glm and nlohmann
-# directly, and they reach them through this link. Carries the app sources on
-# top of the core.
+# future Python extension. Core + app sources. Never installed, so its
+# dependencies are PUBLIC: in-tree targets reach toml++, glm and nlohmann through
+# this link.
 add_library(nodehammer_lib STATIC ${NH_CORE_INPUT} ${NH_APP_SOURCES})
 nh_core_common(nodehammer_lib)
 
@@ -554,20 +466,15 @@ if(NODEHAMMER_BUILD_SHARED)
             "linked executables whose exports are named by the link flags.")
     endif()
 
-    # Core only — no NH_APP_SOURCES. See that list for the line and for why
-    # --no-undefined below is what verifies it. NH_CORE_INPUT is either the
-    # sources or the shared objects, depending on whether this platform can
-    # compile the core once (see the OBJECT block above).
+    # Core only — no NH_APP_SOURCES. NH_CORE_INPUT is either the sources or the
+    # shared objects, per the OBJECT block above.
     add_library(nodehammer_shared SHARED ${NH_CORE_INPUT})
     nh_core_common(nodehammer_shared)
 
-    # Every dependency PRIVATE, and wrapped in $<BUILD_INTERFACE:> so it is
-    # dropped from the generated export set. That is what spares an external
-    # consumer a find_dependency() for zstd/flatbuffers/manifold it has no way to
-    # satisfy and no reason to know about (#41 §10) — the shared library absorbs
-    # its static dependencies whole, so they are resolved before a consumer ever
-    # sees it. NH_APP_DEPS is absent entirely: watcher belongs to sources this
-    # target does not compile.
+    # PRIVATE behind $<BUILD_INTERFACE:>, so nothing reaches the generated export
+    # set: the .so absorbs its static dependencies, so a consumer needs no
+    # find_dependency() for zstd/flatbuffers/manifold (#41 §10). NH_APP_DEPS is
+    # absent entirely — watcher belongs to sources this target does not compile.
     foreach(dep IN LISTS NH_CORE_DEPS NH_CORE_PRIVATE_DEPS)
         target_link_libraries(nodehammer_shared PRIVATE "$<BUILD_INTERFACE:${dep}>")
     endforeach()
@@ -575,11 +482,10 @@ if(NODEHAMMER_BUILD_SHARED)
         target_include_directories(nodehammer_shared SYSTEM PRIVATE ${NH_CORE_INCLUDE_DIRS})
     endif()
 
-    # PRIVATE, unlike the archive. By §5 no public header contains an #if, so a
-    # consumer has no use for NH_WITH_*, and pushing NH_WITH_LUA=1 into somebody
-    # else's translation units is a collision waiting to happen. This is what
-    # keeps INTERFACE_COMPILE_DEFINITIONS empty in the generated export, which is
-    # in turn what makes the installed headers self-describing.
+    # PRIVATE, unlike the archive: no public header has an #if (#41 §5), so a
+    # consumer has no use for NH_WITH_*, and pushing them into someone else's
+    # translation units invites a collision. Keeps INTERFACE_COMPILE_DEFINITIONS
+    # empty in the export.
     target_compile_definitions(nodehammer_shared PRIVATE ${NH_CORE_DEFINES})
 
     # NH_EXPORTS selects the dllexport spelling of NH_API while compiling the
@@ -595,38 +501,25 @@ if(NODEHAMMER_BUILD_SHARED)
         SOVERSION ${PROJECT_VERSION_MAJOR}
     )
 
-    # Hidden visibility only governs the objects *we* compile. The static
-    # dependencies absorbed into this .so were compiled without it, so their
-    # symbols are default-visible and would land in the dynamic export table
-    # wholesale — zstd, flatbuffers, manifold and friends, re-exported by
-    # accident. --exclude-libs,ALL forces every symbol arriving from a static
-    # archive to hidden, and it is the flag that does the work we actually care
-    # about: measured, it is the difference between two third-party symbols
-    # escaping and none.
+    # Hidden visibility only governs objects *we* compile; the static
+    # dependencies absorbed into this .so were not, so their symbols would land
+    # in the dynamic table wholesale. --exclude-libs,ALL forces archive symbols
+    # hidden and is the flag doing the work here. --no-undefined then asserts the
+    # rest of §10's claim: the library resolves its private dependencies
+    # internally, so a consumer needs no find_dependency().
     #
-    # --no-undefined then asserts the other half of §10's claim: that a shared
-    # library resolves its private dependencies internally, so an external
-    # consumer needs no find_dependency() for them.
+    # ELF-only, like cmake/PicProbe.cmake: ld64 has no equivalent (only
+    # per-archive -hidden-l), so on macOS the dependencies' symbols do stay
+    # visible and ci/check_shared_exports.py is correspondingly Linux-only.
     #
-    # ELF-only, like cmake/PicProbe.cmake and for the same reason: ld64 has no
-    # equivalent of either flag (only per-archive -hidden-l), so on macOS the
-    # dependencies' symbols do stay visible in the dylib. ci/check_shared_exports.py
-    # is correspondingly Linux-only.
-    #
-    # What deliberately is *not* here is a linker version script. These two flags
-    # leave the std:: template instantiations that libstdc++ forces to default
-    # visibility (`namespace std _GLIBCXX_VISIBILITY(default)`), and a script
-    # restricting the table to `nodehammer::*` would remove them — at a price not
-    # worth paying. libstdc++ exports those on purpose so they merge across
-    # shared objects, and this library's own API passes std:: types across the
-    # boundary anyway, so hiding its std:: internals buys no ABI independence it
-    # does not already lack. It also costs: ld matches `extern "C++"` patterns
-    # against the whole demangled name, and `vtable for nodehammer::X` does not
-    # start with `nodehammer::`, so such a script silently drops the vtable and
-    # typeinfo of every public class — an over-removal that no export-table check
-    # can observe, because a symbol that should be there and is not leaves
-    # nothing to inspect. See ci/check_shared_exports.py for what is asserted
-    # instead.
+    # Deliberately *no* linker version script. It would only remove the std::
+    # instantiations libstdc++ forces to default visibility — which it does on
+    # purpose, so they merge across shared objects, and this API passes std::
+    # types across the boundary anyway. It would also break public classes: ld
+    # matches `extern "C++"` patterns against the whole demangled name, and
+    # `vtable for nodehammer::X` does not start with `nodehammer::`, so a
+    # `nodehammer::*` script silently drops every public vtable and typeinfo —
+    # an over-removal no export-table check can see.
     if(UNIX AND NOT APPLE)
         target_link_options(nodehammer_shared PRIVATE
             "LINKER:--exclude-libs,ALL"
@@ -771,20 +664,13 @@ else()
     set(NH_INSTALL_TARGETS nodehammer)
 endif()
 
-# Every install rule below names a COMPONENT — Runtime for what an end user
-# needs to run nodehammer, Development for what a consumer needs to build
-# against it. `cmake --install` with no --component still installs everything
-# ("during a full installation all components are installed"), so this changes
-# nothing for the existing callers; what it adds is the ability to ask for one
-# half, which is how a release artifact takes the CLI and its licences without
-# the headers and the CMake package config.
+# Every install rule names a COMPONENT: Runtime to run nodehammer, Development
+# to build against it. A plain `cmake --install` still installs everything, so
+# existing callers are unaffected; what this adds is `--component Runtime` for a
+# release artifact that wants the CLI and its licences but not the headers.
 #
-# Tagging is all-or-nothing in practice: an untagged rule lands in a default
-# component named Unspecified, so it would be silently omitted from *both*
-# `--component Runtime` and `--component Development`. That is why the LICENSE,
-# the wasm sidecars and cmake/ThirdPartyLicenses.cmake are annotated here too,
-# and not only the library rules that motivated this. `list_install_components`
-# reports what exists.
+# Tag every rule, not just the new ones — an untagged rule lands in a default
+# component named Unspecified and would be silently missing from *both* halves.
 install(TARGETS ${NH_INSTALL_TARGETS}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
             COMPONENT Runtime
@@ -815,15 +701,11 @@ install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"
 # annotation an internal header could carry by mistake — an internal header is
 # unreachable because it lives somewhere else on disk (#41 §1).
 if(NODEHAMMER_BUILD_SHARED)
-    # The component split follows the artefacts' actual audiences, and for a
-    # versioned shared library that split runs *through* install(TARGETS LIBRARY)
-    # rather than around it. NAMELINK_COMPONENT is what expresses it: the real
-    # file and its SONAME symlink (libnodehammer.so.0.0.0, libnodehammer.so.0)
-    # are Runtime, because anything that already links nodehammer needs them at
-    # load time; the bare libnodehammer.so devlink is Development, because only a
-    # linker resolving -lnodehammer ever looks at it. Windows has no namelink —
-    # its equivalent division is the .dll (Runtime) against the .lib import
-    # library (Development), which the RUNTIME and ARCHIVE lines already state.
+    # NAMELINK_COMPONENT splits one target across both components: the real file
+    # and its SONAME symlink are Runtime (anything already linked needs them at
+    # load time), while the bare libnodehammer.so devlink is Development (only a
+    # linker resolving -lnodehammer reads it). Windows has no namelink; its
+    # equivalent is .dll against .lib, stated by RUNTIME and ARCHIVE below.
     install(TARGETS nodehammer_shared
         EXPORT nodehammer-targets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

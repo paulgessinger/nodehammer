@@ -25,12 +25,10 @@ case "$kind" in
     preset=conan-release
     build_dir=build/Release
     install_extra=(--strip)
-    # Every native CI build also builds and installs the shared library, so that
-    # ci/verify-shared-install.sh can run against the tree the job already
-    # staged. Stated here rather than per-leg in the workflow, which is what
-    # keeps the build matrix free of a `shared:` field: the one place the option
-    # does not apply is Emscripten, and that is already a different kind.
-    # NODEHAMMER_BUILD_SHARED under Emscripten is a hard CMake error by design.
+    # Native CI builds also build+install the shared library, so
+    # ci/verify-shared-install.sh can check the tree the job already staged.
+    # Here rather than per-leg in the workflow: `kind` already excludes the one
+    # case it cannot apply to (Emscripten, where it is a hard CMake error).
     configure_extra=(-DNODEHAMMER_BUILD_SHARED=ON)
     ;;
   wasm)
