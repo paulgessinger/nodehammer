@@ -22,10 +22,27 @@ function(nodehammer_set_compiler_options target)
             target_compile_options(${target} PRIVATE -Wno-c2y-extensions)
         endif()
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        # Note the absence of /external:anglebrackets. It was suppressing this
+        # project's own warnings, not just its dependencies': every internal
+        # header is included as <ir/semantic.hpp>, <config/...>, <nodehammer/...>
+        # — 310 angle-bracket includes and no quoted ones — so the flag
+        # classified the entire codebase as external and silenced it at
+        # /external:W0. MSVC was reporting essentially nothing from any
+        # nodehammer header while gcc and clang reported everything, which is
+        # the wrong way round for the headers that are a public contract: C4251
+        # ("needs to have dll-interface to be used by clients") fires at the
+        # definition of a dllexport'd class with std:: members, i.e. exactly
+        # where it was being hidden.
+        #
+        # Dependencies stay quiet without it. CMake marks imported targets'
+        # include directories SYSTEM by default, and from MSVC 19.29.30036.3 it
+        # spells SYSTEM as /external:I (Modules/Compiler/MSVC.cmake) — so Conan's
+        # targets and the SYSTEM-declared FlatBuffers output are external by
+        # directory, which is the precise version of what the blanket flag was
+        # approximating.
         target_compile_options(${target} PRIVATE
             /W4
             /permissive-
-            /external:anglebrackets
             /external:W0
             /external:templates-
         )
