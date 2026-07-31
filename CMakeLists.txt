@@ -471,13 +471,58 @@ function(nh_core_common target)
     nodehammer_set_visibility(${target})
 endfunction()
 
+# ── Shared core objects (non-Windows) ─────────────────────────────────────────
+# When both variants are built, the core sources are compiled twice — once for
+# the archive and once for the shared library. On Windows that is unavoidable:
+# __declspec(dllexport) is codegen-affecting, MSVC bakes /EXPORT: directives into
+# the object's .drectve section, and such an object is not valid inside a static
+# library. So the DLL and the archive genuinely need different objects.
+#
+# Everywhere else they do not. NH_API expands to
+# __attribute__((visibility("default"))), which — as include/nodehammer/api.hpp
+# notes — only ever *raises* visibility against the target-wide
+# -fvisibility=hidden, so one object is valid in both an archive and a .so. An
+# OBJECT library compiles the core once and both targets consume it.
+#
+# The trade is that shared objects cannot carry NH_STATIC, so the archive's
+# public entities are compiled with default visibility rather than collapsed to
+# nothing. That is the one place this weakens #41 §10's Python-extension
+# argument: a module linking the archive would export the public API instead of
+# only its own entry point. It is bounded — internal symbols stay hidden because
+# they were never NH_API, and the third-party mass is --exclude-libs's job — so
+# what leaks is exactly the API a consumer is entitled to see. Note that in-tree
+# consumers still get NH_STATIC from nodehammer_lib below, so only the core
+# objects themselves differ, and only on platforms where both spellings work.
+if(NODEHAMMER_BUILD_SHARED AND NOT WIN32)
+    add_library(nodehammer_core_objs OBJECT ${NH_CORE_SOURCES})
+    nh_core_common(nodehammer_core_objs)
+
+    # Required for the objects to be linkable into the .so; harmless in the
+    # archive, and what cmake/PicProbe.cmake asserts for the whole archive
+    # anyway.
+    set_property(TARGET nodehammer_core_objs PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+    # PRIVATE throughout: this target exists to be compiled, not to be depended
+    # on. Both consumers below re-declare the dependencies at the scope they
+    # actually want to propagate.
+    target_link_libraries(nodehammer_core_objs PRIVATE ${NH_CORE_DEPS} ${NH_CORE_PRIVATE_DEPS})
+    target_compile_definitions(nodehammer_core_objs PRIVATE ${NH_CORE_DEFINES})
+    if(NH_CORE_INCLUDE_DIRS)
+        target_include_directories(nodehammer_core_objs SYSTEM PRIVATE ${NH_CORE_INCLUDE_DIRS})
+    endif()
+
+    set(NH_CORE_INPUT $<TARGET_OBJECTS:nodehammer_core_objs>)
+else()
+    set(NH_CORE_INPUT ${NH_CORE_SOURCES})
+endif()
+
 # ── Static archive ────────────────────────────────────────────────────────────
 # What every in-tree target links — CLI, viewer, tests, benchmarks, and the
 # future Python extension. Never installed, so its dependencies are PUBLIC:
 # in-tree targets include internal headers that include toml++, glm and nlohmann
 # directly, and they reach them through this link. Carries the app sources on
 # top of the core.
-add_library(nodehammer_lib STATIC ${NH_CORE_SOURCES} ${NH_APP_SOURCES})
+add_library(nodehammer_lib STATIC ${NH_CORE_INPUT} ${NH_APP_SOURCES})
 nh_core_common(nodehammer_lib)
 
 target_link_libraries(nodehammer_lib PUBLIC ${NH_CORE_DEPS} ${NH_APP_DEPS})
@@ -509,9 +554,11 @@ if(NODEHAMMER_BUILD_SHARED)
             "linked executables whose exports are named by the link flags.")
     endif()
 
-    # NH_CORE_SOURCES only — no NH_APP_SOURCES. See that list for the line and
-    # for why --no-undefined below is what verifies it.
-    add_library(nodehammer_shared SHARED ${NH_CORE_SOURCES})
+    # Core only — no NH_APP_SOURCES. See that list for the line and for why
+    # --no-undefined below is what verifies it. NH_CORE_INPUT is either the
+    # sources or the shared objects, depending on whether this platform can
+    # compile the core once (see the OBJECT block above).
+    add_library(nodehammer_shared SHARED ${NH_CORE_INPUT})
     nh_core_common(nodehammer_shared)
 
     # Every dependency PRIVATE, and wrapped in $<BUILD_INTERFACE:> so it is
