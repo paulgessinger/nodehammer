@@ -130,22 +130,61 @@ def defined_dynamic_symbols(library: Path) -> list[str]:
     return [s.strip() for s in demangled if s.strip()]
 
 
-def scope_of(name: str) -> str:
-    """The qualified name with any signature and template arguments removed.
+# `operator<`, `operator>>` and friends contain characters that the bracket
+# scanner below would otherwise read as nesting. Neutralised to a same-length
+# placeholder before scanning, so offsets into the original string stay valid.
+_OPERATOR_TOKEN = re.compile(r"operator(?:<=>|<<=|>>=|<<|>>|<=|>=|<|>|\(\)|\[\])")
 
-    Both carry their own `::` — `nodehammer::tessellate(nodehammer::SemanticScene
+
+def scope_of(name: str) -> str:
+    """The qualified name of the entity itself: return type, parameters and
+    template arguments removed.
+
+    Three things have to come off, and only the first is obvious.
+
+    Parameters carry their own `::` — `nodehammer::tessellate(nodehammer::Scene
     const&)` has one inside the parameter list — and reading those as scope
-    separators would misfile a public free function as a namespace. Truncating
-    at the first `(` or `<` leaves exactly the scope chain. `operator==` and
-    `operator()` survive it: what remains is still `nodehammer::operator...`,
-    whose second component is not followed by `::`.
+    separators would misfile a public free function as a namespace.
+
+    A *return type* comes off the front, and it is there only sometimes: the
+    Itanium ABI mangles the return type of a function template, so c++filt
+    writes `char* std::__add_grouping<char>(...)` for one and plain
+    `nodehammer::version()` for an ordinary function. Anchoring on the start of
+    the string therefore works for most symbols and silently fails for template
+    instantiations — which are most of what a header-heavy library exports.
+
+    So the entity is the last space-separated word at bracket depth zero before
+    the parameter list. That leaves a trailing `const` alone (it follows the
+    parameters, not precedes them) and keeps a templated return type intact
+    (`std::pair<int, int> nodehammer::compute()` yields `nodehammer::compute`,
+    since the space inside the angle brackets is not at depth zero).
+
+    Returns "" when the symbol names no entity at all — RTTI for a function or
+    builtin type, where what remains after the decoration is a bare type like
+    `bool (*)(std::string const&, void*)`.
     """
-    cut = len(name)
-    for ch in "(<":
-        pos = name.find(ch)
-        if pos != -1:
-            cut = min(cut, pos)
-    return name[:cut]
+    scan = _OPERATOR_TOKEN.sub(lambda m: "operator" + "_" * (len(m.group()) - 8), name)
+
+    depth = 0
+    start = 0
+    word = None
+    for i, ch in enumerate(scan):
+        if ch == "(" and depth == 0:
+            word = name[start:i]
+            break
+        if ch in "(<[":
+            depth += 1
+        elif ch in ")>]":
+            depth = max(0, depth - 1)
+        elif ch == " " and depth == 0:
+            start = i + 1
+    if word is None:
+        word = name[start:]
+
+    lt = word.find("<")
+    if lt != -1:
+        word = word[:lt]
+    return word.strip()
 
 
 def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
@@ -155,21 +194,38 @@ def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
     the category so the report can group them.
     """
     name = DEMANGLED_PREFIX.sub("", symbol)
+    decorated = name != symbol
 
     if name in LINKER_ARTEFACTS:
         return "tolerated", "linker artefact"
 
+    # Everything below asks about the *entity*, not the raw demangled string:
+    # a function template carries its return type in front of its name, so
+    # `char* std::__add_grouping<char>(...)` is a std:: symbol that does not
+    # begin with "std::".
+    scope = scope_of(name)
+
+    if not scope:
+        # No entity name at all, which happens for RTTI over a function or
+        # builtin type — `typeinfo for bool (*)(std::string const&, void*)`.
+        # Those belong to no namespace to leak from: they are vague-linkage
+        # records the compiler emits wherever the type is used, the same
+        # category as the std:: instantiations above. Only reachable through a
+        # decoration prefix; a bare identifier like ZSTD_compress has an entity
+        # name and is judged below.
+        if decorated:
+            return "tolerated", "RTTI for a non-class type"
+        return "leak", "unqualified symbol — is --exclude-libs,ALL still on the link?"
+
     for prefix in TOLERATED_PREFIXES:
-        if name.startswith(prefix):
+        if scope.startswith(prefix):
             return "tolerated", prefix.rstrip(":")
 
-    if not name.startswith(TOP):
+    if not scope.startswith(TOP):
         # Property A. Reaching here means a dependency's symbol survived into
         # the dynamic table, which on ELF's flat namespace is the failure that
         # actually bites — so name the flag rather than the symbol.
         return "leak", "third-party symbol — is --exclude-libs,ALL still on the link?"
-
-    scope = scope_of(name)
 
     # Longest match first, so nodehammer::ir::render is preferred over
     # nodehammer::ir and the message names the namespace actually responsible.
@@ -239,6 +295,40 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("__gnu_cxx::__throw_insufficient_space(char const*, char const*)", "tolerated"),
     ("_init", "tolerated"),
     ("__bss_start", "tolerated"),
+    # Verbatim from the CI run that caught the first version of these rules.
+    # Both categories were reported as third-party leaks by a startswith("std::")
+    # test, and neither is third-party.
+    #
+    # A function template mangles its return type, so c++filt puts the return
+    # type in front of the name and the symbol does not begin with "std::":
+    ("char* std::__add_grouping<char>(char*, char, char const*, unsigned long, "
+     "char const*, char const*)", "tolerated"),
+    ("void std::deque<std::__cxx11::basic_string<char, std::char_traits<char>, "
+     "std::allocator<char> >, std::allocator<std::__cxx11::basic_string<char, "
+     "std::char_traits<char>, std::allocator<char> > > >::_M_push_back_aux"
+     "<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > "
+     "const&>(std::__cxx11::basic_string<char, std::char_traits<char>, "
+     "std::allocator<char> > const&)", "tolerated"),
+    # RTTI over a function type names no entity at all — these are tinygltf's
+    # FsCallbacks signatures, but the records belong to the *type*, which has no
+    # namespace to leak from:
+    ("typeinfo for bool (*)(std::__cxx11::basic_string<char, std::char_traits<char>, "
+     "std::allocator<char> > const&, void*)", "tolerated"),
+    ("typeinfo name for bool (*)(std::vector<unsigned char, std::allocator<unsigned char> >*, "
+     "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >*, "
+     "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > "
+     "const&, void*)", "tolerated"),
+    ("typeinfo for bool (std::__cxx11::basic_string<char, std::char_traits<char>, "
+     "std::allocator<char> > const&, void*)", "tolerated"),
+    # The distinction the "no entity name" branch rests on: a bare C identifier
+    # also has no namespace, but arrives with no decoration prefix and must stay
+    # a leak. ZSTD_compress above covers the plain case; this is the same shape
+    # as the RTTI entries minus the prefix.
+    ("mz_zip_writer_end", "leak"),
+    # Return type with its own template arguments: the space inside <> is not at
+    # depth zero, so the entity is still found correctly.
+    ("std::pair<int, int> nodehammer::computeBounds()", "public"),
+    ("nodehammer::operator<<(std::ostream&, nodehammer::Diagnostic const&)", "public"),
 ]
 
 
