@@ -407,25 +407,10 @@ function(nh_core_common target)
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
-    # Two different standards, and the split is the point. nodehammer is built
-    # as C++23; a *consumer* only needs whatever the installed headers use, which
-    # is C++17 (std::string_view, inline constexpr — verified by compiling them
-    # standalone at each level, where 14 and below fail and 17 upwards pass).
-    #
-    # Forcing C++23 on a consumer would be a requirement the headers do not
-    # actually have, and docs/public-api-sketch.md already names C++17 as the
-    # floor for the amalgamated-header route and calls it "the binding
-    # constraint". CMAKE_CXX_STANDARD is a build-tree setting and does not
-    # survive an export, so the floor has to be stated on the target to reach
-    # the package config.
-    #
-    # The constraint this creates is on API vocabulary rather than on the build:
-    # a type in the public interface has to exist at the floor, so std::span
-    # (C++20) and std::expected (C++23) are off the table until the floor moves.
-    # ci/shared_consumer compiles at exactly the floor, so that is enforced
-    # rather than remembered.
+    # Everything here is built as C++23. What each variant *asks of its
+    # consumers* differs, so that is stated at the two call sites rather than
+    # here.
     target_compile_features(${target} PRIVATE cxx_std_23)
-    target_compile_features(${target} INTERFACE cxx_std_17)
 
     add_dependencies(${target} flatbuffers_generate)
     target_include_directories(${target} SYSTEM PRIVATE ${NH_FBS_GENERATED_DIR})
@@ -486,6 +471,12 @@ endif()
 # archive propagates them.
 target_compile_definitions(nodehammer_lib PUBLIC ${NH_CORE_DEFINES} ${NH_APP_DEFINES})
 
+# In-tree consumers — CLI, viewer, tests, benchmarks — are C++23 code and reach
+# internal headers that use it. This is what keeps them at 23 rather than
+# leaving them to inherit CMAKE_CXX_STANDARD by luck. The archive is never
+# installed, so this never reaches a package config.
+target_compile_features(nodehammer_lib INTERFACE cxx_std_23)
+
 # NH_STATIC collapses NH_API to nothing (include/nodehammer/api.hpp). PUBLIC so
 # every in-tree consumer — CLI, viewer, tests — inherits it and no target has to
 # remember; without it they would see the dllimport spelling on Windows and fail
@@ -530,6 +521,32 @@ if(NODEHAMMER_BUILD_SHARED)
     # translation units invites a collision. Keeps INTERFACE_COMPILE_DEFINITIONS
     # empty in the export.
     target_compile_definitions(nodehammer_shared PRIVATE ${NH_CORE_DEFINES})
+
+    # The floor an external consumer actually needs, which is not what we build
+    # with: the installed headers use std::string_view and inline constexpr and
+    # nothing later, verified by compiling them standalone at each level (C++14
+    # and below fail, 17 upwards pass). docs/public-api-sketch.md already names
+    # C++17 as the floor for the amalgamated route and calls it "the binding
+    # constraint". CMAKE_CXX_STANDARD does not survive an export, so the floor
+    # has to be stated on the target to reach the package config.
+    #
+    # The constraint is on API vocabulary rather than on the build: a type in the
+    # public interface has to exist at the floor, putting std::span (C++20) and
+    # std::expected (C++23) out of reach until it moves. ci/shared_consumer
+    # compiles at exactly the floor so that is enforced rather than remembered.
+    # The floor an external consumer needs, which is not what we build with.
+    # Today's installed headers need only C++17 — verified by compiling them
+    # standalone at each level, where 14 and below fail — so 20 is deliberately
+    # headroom rather than a description, chosen so step 6 can use std::span in
+    # the API. It matches the "convert" tier in docs/public-api-sketch.md's
+    # language-floor table. CMAKE_CXX_STANDARD does not survive an export, so
+    # this has to be stated on the target to reach the package config.
+    #
+    # The constraint is on API vocabulary rather than on the build: a type in the
+    # public interface has to exist at the floor, which still puts std::expected
+    # (C++23) out of reach. ci/shared_consumer compiles at exactly the floor, so
+    # that is enforced rather than remembered.
+    target_compile_features(nodehammer_shared INTERFACE cxx_std_20)
 
     # NH_EXPORTS selects the dllexport spelling of NH_API while compiling the
     # library itself; PRIVATE, since a consumer must see dllimport instead.

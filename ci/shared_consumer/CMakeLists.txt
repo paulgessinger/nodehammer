@@ -9,16 +9,15 @@
 #
 # The one thing it *does* state is the language standard, pinned to the floor the
 # installed target promises via INTERFACE_COMPILE_FEATURES. nodehammer is built
-# as C++23; its headers must not require it. Compiling this at exactly the floor
-# is what turns that from an intention into a check — a std::span or
-# std::expected reaching a public header fails here rather than in somebody
-# else's C++17 codebase. Keep this in step with the INTERFACE floor in
-# CMakeLists.txt, and note main.cpp deliberately avoids <print> for the same
-# reason.
+# as C++23; its headers must not require it. Compiling at exactly the floor turns
+# that from an intention into a check — a std::expected reaching a public header
+# fails here rather than in somebody else's C++20 codebase. Keep this in step
+# with the INTERFACE floor in CMakeLists.txt; main.cpp avoids <print> for the
+# same reason.
 cmake_minimum_required(VERSION 3.25)
 project(nodehammer_shared_consumer LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(nodehammer REQUIRED)

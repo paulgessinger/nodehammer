@@ -199,11 +199,10 @@ library absorbs them. `ci/shared-build.sh` runs the whole thing end to end and,
 on ELF, checks that nothing third-party or internal escaped into the export
 table. CI runs it on every native platform.
 
-**A consumer needs only C++17.** nodehammer itself is built as C++23, but the
+**A consumer needs only C++20.** nodehammer itself is built as C++23, but the
 installed headers do not require it, and the exported target asks for no more
-than `cxx_std_17`. `ci/shared_consumer` compiles at exactly that floor, so a
-public header reaching for `std::span` or `std::expected` fails there rather
-than in your build.
+than `cxx_std_20`. `ci/shared_consumer` compiles at exactly that floor, so a
+public header reaching past it fails there rather than in your build.
 
 On Windows the library and its consumer must agree on the C runtime (`/MD` vs
 `/MT`) and on `_ITERATOR_DEBUG_LEVEL` — so a Debug consumer needs a Debug
