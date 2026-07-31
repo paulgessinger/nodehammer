@@ -161,6 +161,9 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
             reportError(imported.diags, "compute: failed to deserialize semantic scene");
             return nullptr;
         }
+        // No base directory: this TOML arrives over postMessage from a config
+        // the main thread already flattened through `configToToml`, so it
+        // carries no include, and the worker has no filesystem to root one at.
         auto loaded = ConfigLoader::loadFromString(config_toml != nullptr ? config_toml : "",
                                                    "<worker-config>");
         if (loaded.diags.hasErrors()) {

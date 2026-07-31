@@ -1,10 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <config/config_loader.hpp>
+#include <config/config_writer.hpp>
 #include <diagnostic_codes.hpp>
 
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <span>
+#include <string>
 
 #ifndef NODEHAMMER_FIXTURES_DIR
 #error "NODEHAMMER_FIXTURES_DIR must be defined by CMake"
@@ -754,4 +757,121 @@ TEST_CASE("ConfigLoader: parseAndMerge detects cycles via key equality",
         }
     }
     REQUIRE(foundCycle);
+}
+
+// ── loadFromString rooted at a base directory ────────────────────────────────
+//
+// The string form resolves includes through the same engine as loadFromFile:
+// same fetcher, same merge walk, same cycle rules. These tests are the check
+// that the two entry points cannot drift apart.
+
+namespace {
+
+std::string readFileText(const std::filesystem::path &path) {
+    std::ifstream in{path, std::ios::binary};
+    REQUIRE(in);
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+// Load one fixture both ways and compare the *serialized* configs, so the
+// comparison covers the whole document rather than the handful of fields an
+// individual include test asserts on.
+void requireLoadsIdentically(const std::filesystem::path &path) {
+    using nodehammer::config::ConfigLoader;
+
+    auto via_file = ConfigLoader::loadFromFile(path);
+    auto via_string = ConfigLoader::loadFromString(readFileText(path), path.filename().string(),
+                                                   path.parent_path());
+
+    REQUIRE_FALSE(via_file.diags.hasErrors());
+    REQUIRE_FALSE(via_string.diags.hasErrors());
+    REQUIRE(nodehammer::config::configToToml(via_string.config) ==
+            nodehammer::config::configToToml(via_file.config));
+}
+
+} // namespace
+
+TEST_CASE("ConfigLoader: loadFromString with baseDir matches loadFromFile",
+          "[config][loader][include]") {
+    requireLoadsIdentically(fixturesDir / "configs/include_basic.toml");
+    requireLoadsIdentically(fixturesDir / "configs/include_nested.toml");
+    requireLoadsIdentically(fixturesDir / "configs/include_diamond.toml");
+}
+
+TEST_CASE("ConfigLoader: loadFromString with baseDir reports a circular include",
+          "[config][loader][include]") {
+    const auto path = fixturesDir / "configs/include_cycle.toml";
+    auto result = nodehammer::config::ConfigLoader::loadFromString(
+        readFileText(path), path.filename().string(), path.parent_path());
+
+    REQUIRE(result.diags.hasErrors());
+    bool foundCycle = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("circular") != std::string::npos) {
+            foundCycle = true;
+        }
+    }
+    REQUIRE(foundCycle);
+}
+
+TEST_CASE("ConfigLoader: loadFromString with baseDir reports a missing include",
+          "[config][loader][include]") {
+    const auto path = fixturesDir / "configs/include_bad_path.toml";
+    auto result = nodehammer::config::ConfigLoader::loadFromString(
+        readFileText(path), path.filename().string(), path.parent_path());
+    REQUIRE(result.diags.hasErrors());
+}
+
+TEST_CASE("ConfigLoader: loadFromString without baseDir never reads the working directory",
+          "[config][loader][include]") {
+    // The loader invents no base directory: with none given, an include is
+    // unresolvable rather than being fetched from wherever the process happens
+    // to be. Planting the include target in the working directory is what makes
+    // this a real assertion — a loader that silently rooted there would find it
+    // and report success.
+    const std::filesystem::path planted =
+        std::filesystem::current_path() / "nh_unrooted_include_probe.toml";
+    {
+        std::ofstream out{planted};
+        REQUIRE(out);
+        out << "hoist_orphans = true\n";
+    }
+
+    auto result = nodehammer::config::ConfigLoader::loadFromString(
+        "include = \"nh_unrooted_include_probe.toml\"\n");
+    std::filesystem::remove(planted);
+
+    REQUIRE(result.diags.hasErrors());
+    bool foundMissing = false;
+    for (const auto &d : result.diags.items()) {
+        if (d.message.find("not found") != std::string::npos) {
+            foundMissing = true;
+        }
+    }
+    REQUIRE(foundMissing);
+    REQUIRE_FALSE(result.config.hoistOrphans); // the planted file was not merged
+
+    // Naming the directory is what makes it resolvable, and that is the
+    // caller's decision to make.
+    {
+        std::ofstream out{planted};
+        REQUIRE(out);
+        out << "hoist_orphans = true\n";
+    }
+    auto rooted = nodehammer::config::ConfigLoader::loadFromString(
+        "include = \"nh_unrooted_include_probe.toml\"\n", "<string>",
+        std::filesystem::current_path());
+    std::filesystem::remove(planted);
+
+    REQUIRE_FALSE(rooted.diags.hasErrors());
+    REQUIRE(rooted.config.hoistOrphans);
+}
+
+TEST_CASE("ConfigLoader: loadFromString keeps its source name in parse diagnostics",
+          "[config][loader]") {
+    // The baseDir join must not disturb the context of a plain string load.
+    constexpr std::string_view bad = "[unclosed\nkey = 1\n";
+    auto result = nodehammer::config::ConfigLoader::loadFromString(bad, "test_input");
+    REQUIRE(result.diags.hasErrors());
+    REQUIRE(result.diags.items().front().context.starts_with("test_input:"));
 }

@@ -32,9 +32,23 @@ using IncludeFetcher =
     std::function<std::optional<std::span<const std::byte>>(std::string_view absolute_key)>;
 
 struct ConfigLoader {
+    /// Load a config file and resolve its include tree against the file's own
+    /// directory.
     [[nodiscard]] static ConfigResult loadFromFile(const std::filesystem::path &path);
+
+    /// Parse `content` as TOML and resolve its include tree against `baseDir`
+    /// on the filesystem — this is `loadFromFile` minus the initial read, and
+    /// runs through the same fetcher and the same merge walk.
+    ///
+    /// `baseDir` is the caller's to choose and the loader never invents one: an
+    /// empty `baseDir` means the content has no location, so its includes
+    /// resolve against nothing and are reported as not found. A caller that
+    /// wants them read relative to the process's working directory says so by
+    /// passing it — the choice belongs where the program's notion of "here"
+    /// does, which for the Lua front end is cmd_config_lua.cpp.
     [[nodiscard]] static ConfigResult loadFromString(std::string_view content,
-                                                     std::string_view sourceName = "<string>");
+                                                     std::string_view sourceName = "<string>",
+                                                     const std::filesystem::path &baseDir = {});
 
     /// Read only the top-level `include = [...]` array of a TOML buffer —
     /// does NOT recurse. Used by the BuildSession's include-graph walk
