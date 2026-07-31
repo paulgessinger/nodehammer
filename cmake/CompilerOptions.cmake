@@ -62,12 +62,13 @@ endfunction()
 
 # Export nothing unless it says NH_API (include/nodehammer/api.hpp).
 #
-# Applied to *both* core variants. For the shared library that is the point. For
-# the static one — which has no export table — the reason is the Python
-# extension: it links the archive into a .so, where every default-visible object
-# becomes an exported symbol that can collide with another extension in the same
-# interpreter. It also makes the in-tree build behave like Windows, so a missing
-# NH_API fails here rather than only on MSVC.
+# Applied to *both* core variants. For the shared library that is the point. The
+# static one has no export table, and the reason there is that it makes the
+# in-tree build deny-by-default like Windows — so a missing NH_API fails in an
+# ordinary build rather than only on MSVC. It also protects anything that links
+# the archive *into* a shared object, where default-visible objects would become
+# exports of that module; whether the Python bindings do that or link
+# libnodehammer instead is a step-6 question.
 #
 # Skipped under Emscripten: no shared object exists there, exports are named by
 # the link flags, and hidden visibility only adds a way for them to go missing

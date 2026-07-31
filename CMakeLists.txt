@@ -404,10 +404,12 @@ endfunction()
 # OBJECT library compiles the core once.
 #
 # The trade: shared objects cannot carry NH_STATIC, so the archive's *public*
-# entities keep default visibility instead of collapsing to nothing. That
-# slightly weakens #41 §10 — a Python extension linking the archive would export
-# the public API rather than only its entry point — but internals stay hidden
-# (they were never NH_API) and third-party symbols remain --exclude-libs's job.
+# entities keep default visibility instead of collapsing to nothing. That matters
+# only to something linking the archive into a shared object, which would then
+# re-export the public API — #41 §10 assumes the Python bindings do exactly that,
+# though linking libnodehammer instead would avoid it entirely. Either way
+# internals stay hidden (they were never NH_API) and third-party symbols remain
+# --exclude-libs's job.
 if(NODEHAMMER_BUILD_SHARED AND NOT WIN32)
     add_library(nodehammer_core_objs OBJECT ${NH_CORE_SOURCES})
     nh_core_common(nodehammer_core_objs)
@@ -430,10 +432,9 @@ else()
 endif()
 
 # ── Static archive ────────────────────────────────────────────────────────────
-# What every in-tree target links — CLI, viewer, tests, benchmarks, and the
-# future Python extension. Core + app sources. Never installed, so its
-# dependencies are PUBLIC: in-tree targets reach toml++, glm and nlohmann through
-# this link.
+# What every in-tree target links — CLI, viewer, tests, benchmarks. Core + app
+# sources. Never installed, so its dependencies are PUBLIC: in-tree targets reach
+# toml++, glm and nlohmann through this link.
 add_library(nodehammer_lib STATIC ${NH_CORE_INPUT} ${NH_APP_SOURCES})
 nh_core_common(nodehammer_lib)
 

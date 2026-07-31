@@ -10,9 +10,9 @@
 //
 // Three situations, three expansions:
 //
-//   NH_STATIC   consumer of the in-tree archive (CLI, viewer, tests, and the
-//               future Python extension). Expands to nothing. Defined PUBLIC on
-//               nodehammer_lib so no in-tree target has to remember it.
+//   NH_STATIC   consumer of the in-tree archive (CLI, viewer, tests). Expands
+//               to nothing. Defined PUBLIC on nodehammer_lib so no in-tree
+//               target has to remember it.
 //   NH_EXPORTS  building the shared library. Defined PRIVATE on
 //               nodehammer_shared.
 //   neither     consumer of the *installed* library — the case that must work
