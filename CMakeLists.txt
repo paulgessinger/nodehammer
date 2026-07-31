@@ -400,32 +400,35 @@ endif()
 # native-only; miniz builds for Emscripten too, and the web bag (step 8) reuses
 # the same substrate.
 #
-# Core, not app: this is the .nhproj capability, and the library is expected to
-# read and write project archives in its own right rather than only on the
-# viewer's behalf. So miniz stays a dependency of the shared library.
+# Unconditional, and core rather than app. This is the .nhproj capability, and
+# the library is expected to read and write project archives in its own right
+# rather than only on the viewer's behalf.
 #
-# It is nevertheless still gated on NODEHAMMER_WITH_VIEWER, which is the one
-# remaining respect in which the installed shared library is not invariant to
-# that option — a viewer-off build produces a libnodehammer without archive
-# support. Removing the gate is what completes the invariance, and it is a
-# dependency-baseline decision rather than a packaging one: miniz is requested
-# under `if self.options.viewer` in conanfile.py, so ungating here means
-# requiring it for every build, wasm included (it does build for Emscripten).
-# Deferred until .nhproj is actually part of the public API — at which point the
-# change is deleting this condition, not moving files between lists.
+# It used to be gated on NODEHAMMER_WITH_VIEWER, which made the installed shared
+# library vary with an application-feature flag — a viewer-off build produced a
+# libnodehammer that could not open a project. That is the same defect the
+# NH_CORE/NH_APP split above exists to remove, so leaving it here would have
+# fixed the property everywhere except the one cluster most likely to be public
+# API. What a consumer links has to have a feature set of its own.
 #
-# NH_WITH_VIEWER goes to the app defines: nothing in the core gates on it (the
-# only use in the whole tree is src/cli/main.cpp, reached via the archive's
-# PUBLIC propagation), so the shared library has no business carrying it.
+# The cost of ungating is small enough to be worth stating: miniz joins ten
+# existing unconditional requirements as the eleventh, and is the cheapest of
+# them — plain C, no OS deps, builds for Emscripten. Binaries that never touch
+# an archive are unaffected, because static-lib dead-strip drops the objects (the
+# same mechanism that keeps BagProjectFs out of the wasm viewer).
+list(APPEND NH_CORE_SOURCES
+    src/viewer/zip_working_set.cpp
+    src/viewer/archive_project_fs.cpp
+    src/viewer/archive_export.cpp
+)
+find_package(miniz CONFIG REQUIRED)
+# No header mentions miniz; ZipWorkingSet keeps it behind its .cpp.
+list(APPEND NH_CORE_PRIVATE_DEPS miniz::miniz)
+
+# NH_WITH_VIEWER is an app define: nothing in the core gates on it (the only use
+# in the whole tree is src/cli/main.cpp, reached via the archive's PUBLIC
+# propagation), so the shared library has no business carrying it.
 if(NODEHAMMER_WITH_VIEWER)
-    list(APPEND NH_CORE_SOURCES
-        src/viewer/zip_working_set.cpp
-        src/viewer/archive_project_fs.cpp
-        src/viewer/archive_export.cpp
-    )
-    find_package(miniz CONFIG REQUIRED)
-    # No header mentions miniz; ZipWorkingSet keeps it behind its .cpp.
-    list(APPEND NH_CORE_PRIVATE_DEPS miniz::miniz)
     list(APPEND NH_APP_DEFINES NH_WITH_VIEWER=1)
 endif()
 
