@@ -1,8 +1,8 @@
 # Scripted configuration (Lua) — design exploration
 
-**Status:** Option A implemented — the `config-lua` CLI command (backed by the
-native-only `nodehammer_lua` library) evaluates a Lua script into an `NHConfig`
-and emits flattened TOML. Option B (embedding the engine so scripts run inside
+**Status:** Option A implemented — the `config-lua` CLI command (backed by
+`src/lua/lua_config.cpp`, a native-only source compiled into `nodehammer_lib`)
+evaluates a Lua script into an `NHConfig` and emits flattened TOML. Option B (embedding the engine so scripts run inside
 the app/browser) remains future work. This document captures the design space so
 the remaining trade-offs stay mapped.
 

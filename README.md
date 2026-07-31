@@ -195,8 +195,15 @@ target_link_libraries(app PRIVATE nodehammer::nodehammer)
 ```
 
 No `find_dependency` for zstd, flatbuffers, manifold or the rest — the shared
-library absorbs them. `ci/shared-build.sh` runs the whole thing end to end and
-checks that the export table contains the public API and nothing else.
+library absorbs them. `ci/shared-build.sh` runs the whole thing end to end and,
+on ELF, checks that nothing third-party or internal escaped into the export
+table. CI runs it on Linux and Windows.
+
+On Windows the library and its consumer must agree on the C runtime (`/MD` vs
+`/MT`) and on `_ITERATOR_DEBUG_LEVEL` — so a Debug consumer needs a Debug
+`nodehammer`. This is not specific to nodehammer; it is what passing `std::`
+types across a DLL boundary requires, and mismatches usually surface as heap
+corruption rather than as a link error.
 
 ## Try it
 
