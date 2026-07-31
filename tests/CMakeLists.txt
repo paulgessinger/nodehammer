@@ -110,8 +110,8 @@ if(NODEHAMMER_WITH_DD4HEP)
     target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_DD4HEP=1)
 endif()
 
-nodehammer_set_compiler_options(nodehammer_tests)
-nodehammer_apply_emscripten_exe_options(nodehammer_tests)
+nh_set_compiler_options(nodehammer_tests)
+nh_apply_emscripten_exe_options(nodehammer_tests)
 
 # Tiny benchmark harness — `nodehammer_bench <cfg> <in> <out>`. Lives next to
 # the test binary because it shares the same dependency surface (linked
@@ -120,8 +120,8 @@ nodehammer_apply_emscripten_exe_options(nodehammer_tests)
 # the host filesystem). Driven by ci/bench.sh.
 add_executable(nodehammer_bench bench_main.cpp)
 target_link_libraries(nodehammer_bench PRIVATE nodehammer_lib)
-nodehammer_set_compiler_options(nodehammer_bench)
-nodehammer_apply_emscripten_exe_options(nodehammer_bench)
+nh_set_compiler_options(nodehammer_bench)
+nh_apply_emscripten_exe_options(nodehammer_bench)
 
 include(CTest)
 # catch_discover_tests runs the test binary to enumerate cases. Under

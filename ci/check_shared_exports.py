@@ -366,7 +366,7 @@ def main() -> int:
         print(
             "\nA third-party symbol here means --exclude-libs,ALL is no longer on "
             "the shared link. A nodehammer:: one means an internal entity picked up "
-            "NH_API by mistake, or a target skipped nodehammer_set_visibility(): if "
+            "NH_API by mistake, or a target skipped nh_set_visibility(): if "
             "it is meant to be public, move its declaration into include/nodehammer/ "
             "and out of a nested namespace.",
             file=sys.stderr,

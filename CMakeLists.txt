@@ -414,8 +414,8 @@ function(nh_core_common target)
     add_dependencies(${target} flatbuffers_generate)
     target_include_directories(${target} SYSTEM PRIVATE ${NH_FBS_GENERATED_DIR})
 
-    nodehammer_set_compiler_options(${target})
-    nodehammer_set_visibility(${target})
+    nh_set_compiler_options(${target})
+    nh_set_visibility(${target})
 endfunction()
 
 # ── Shared core objects (non-Windows) ─────────────────────────────────────────
@@ -574,7 +574,7 @@ target_link_libraries(nodehammer_cli PUBLIC
     CLI11::CLI11
 )
 
-nodehammer_set_compiler_options(nodehammer_cli)
+nh_set_compiler_options(nodehammer_cli)
 
 # The `config-lua` subcommand: evaluates a Lua config script into an NHConfig
 # and emits flattened TOML (Option A of docs/config-scripting-lua.md). The
@@ -605,13 +605,13 @@ if(NODEHAMMER_WITH_VIEWER)
         if(EMSCRIPTEN)
             add_executable(${name} src/web/viewer_main.cpp)
             target_link_libraries(${name} PRIVATE ${viewer_lib})
-            nodehammer_apply_emscripten_viewer_options(${name})
+            nh_apply_emscripten_viewer_options(${name})
         else()
             add_executable(${name} src/cli/main.cpp src/cli/cmd_viewer.cpp)
             target_link_libraries(${name} PRIVATE nodehammer_cli ${viewer_lib})
-            nodehammer_apply_emscripten_exe_options(${name})
+            nh_apply_emscripten_exe_options(${name})
         endif()
-        nodehammer_set_compiler_options(${name})
+        nh_set_compiler_options(${name})
     endfunction()
 
     if(EMSCRIPTEN)
@@ -639,8 +639,8 @@ if(NODEHAMMER_WITH_VIEWER)
         # src/web/compute_worker.js — see nh_compute_build.
         add_executable(nodehammer-compute src/web/compute_worker_main.cpp)
         target_link_libraries(nodehammer-compute PRIVATE nodehammer_lib)
-        nodehammer_apply_emscripten_compute_options(nodehammer-compute)
-        nodehammer_set_compiler_options(nodehammer-compute)
+        nh_apply_emscripten_compute_options(nodehammer-compute)
+        nh_set_compiler_options(nodehammer-compute)
     else()
         if(APPLE)
             set(_nh_backend SOKOL_METAL)
@@ -658,14 +658,14 @@ if(NODEHAMMER_WITH_VIEWER)
         # nodehammer_lib, no scene/render stack.
         add_executable(imgui-kitchen-sink src/tools/imgui_kitchen_sink_main.cpp)
         target_link_libraries(imgui-kitchen-sink PRIVATE sokol_native ImGui::ImGui)
-        nodehammer_set_compiler_options(imgui-kitchen-sink)
+        nh_set_compiler_options(imgui-kitchen-sink)
     endif()
 else()
     # Headless build: just the CLI dispatcher, no viewer subcommand.
     add_executable(nodehammer src/cli/main.cpp)
     target_link_libraries(nodehammer PRIVATE nodehammer_cli)
-    nodehammer_set_compiler_options(nodehammer)
-    nodehammer_apply_emscripten_exe_options(nodehammer)
+    nh_set_compiler_options(nodehammer)
+    nh_apply_emscripten_exe_options(nodehammer)
 endif()
 
 # ── Tests ──────────────────────────────────────────────────────────────────────

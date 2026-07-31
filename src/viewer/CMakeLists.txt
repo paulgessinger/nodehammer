@@ -94,7 +94,7 @@ function(nh_add_viewer_lib name sokol_lib backend)
     target_link_libraries(${name} PUBLIC nodehammer_lib ${sokol_lib} nh_fontawesome7 nh_stb ImPlot::ImPlot)
     target_include_directories(${name} PRIVATE ${NH_SHADER_INCLUDE_DIR})
     add_dependencies(${name} nodehammer_shaders)
-    nodehammer_set_compiler_options(${name})
+    nh_set_compiler_options(${name})
 
     if(NOT EMSCRIPTEN)
         # Native file picker (NFD-extended). The web build uses an HTML

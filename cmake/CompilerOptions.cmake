@@ -1,7 +1,7 @@
 # Sets C++23 compiler warnings and optional sanitizers on a target.
-# Call nodehammer_set_compiler_options(target) for each target.
+# Call nh_set_compiler_options(target) for each target.
 
-function(nodehammer_set_compiler_options target)
+function(nh_set_compiler_options target)
     # Warnings are PRIVATE: do not propagate to dependents (and not to FetchContent subprojects).
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(${target} PRIVATE
@@ -73,7 +73,7 @@ endfunction()
 # Skipped under Emscripten: no shared object exists there, exports are named by
 # the link flags, and hidden visibility only adds a way for them to go missing
 # under the Release -flto + --closure link.
-function(nodehammer_set_visibility target)
+function(nh_set_visibility target)
     if(EMSCRIPTEN)
         return()
     endif()
@@ -88,7 +88,7 @@ endfunction()
 # NODERAWFS exposes the host filesystem (so fixture paths resolve), EXIT_RUNTIME
 # makes the process return the C++ exit code, and ALLOW_MEMORY_GROWTH avoids
 # OOM aborts on larger test inputs. No-op on non-emscripten builds.
-function(nodehammer_apply_emscripten_exe_options target)
+function(nh_apply_emscripten_exe_options target)
     if(EMSCRIPTEN)
         target_link_options(${target} PRIVATE
             "-sNODERAWFS=1"
@@ -99,7 +99,7 @@ function(nodehammer_apply_emscripten_exe_options target)
 endfunction()
 
 # Apply link options for the browser viewer build (Emscripten only). Use this
-# *instead* of nodehammer_apply_emscripten_exe_options when building the viewer:
+# *instead* of nh_apply_emscripten_exe_options when building the viewer:
 # NODERAWFS is incompatible with browsers, so we deliberately do not set it.
 # WebGL2 flags are kept for the SOKOL_GLES3 build; the WebGPU build adds
 # -sUSE_WEBGPU=1 separately at its target site.
@@ -107,7 +107,7 @@ endfunction()
 # Output is .js + .wasm (no .html). web/viewer.html is served separately as
 # a static page that probes navigator.gpu and dynamically loads the matching
 # nodehammer-{gles3,wgpu}.js — see web/viewer.html and Justfile wasm-serve.
-function(nodehammer_apply_emscripten_viewer_options target)
+function(nh_apply_emscripten_viewer_options target)
     if(NOT EMSCRIPTEN)
         return()
     endif()
@@ -169,7 +169,7 @@ endfunction()
 # thread. MODULARIZE + EXPORT_NAME let the worker JS instantiate it explicitly;
 # EXIT_RUNTIME=0 keeps it alive so the pristine-scene cache survives across
 # builds. Output is .js + .wasm; see src/web/compute_worker.js.
-function(nodehammer_apply_emscripten_compute_options target)
+function(nh_apply_emscripten_compute_options target)
     if(NOT EMSCRIPTEN)
         return()
     endif()
