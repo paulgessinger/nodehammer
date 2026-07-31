@@ -1,6 +1,6 @@
 #include <nodehammer/version.hpp>
 
-#include <print>
+#include <cstdio>
 #include <string_view>
 
 // Deliberately links *and runs*: compiling alone proves little, since headers
@@ -13,11 +13,12 @@ int main() {
     // Header constant vs compiled-in value: a mismatch means headers from one
     // install and a library from another.
     if (linked != nodehammer::VERSION) {
-        std::println(stderr, "version mismatch: header says {}, library says {}",
-                     nodehammer::VERSION, linked);
+        std::fprintf(stderr, "version mismatch: header says %.*s, library says %.*s\n",
+                     static_cast<int>(nodehammer::VERSION.size()), nodehammer::VERSION.data(),
+                     static_cast<int>(linked.size()), linked.data());
         return 1;
     }
 
-    std::println("nodehammer {}", linked);
+    std::printf("nodehammer %.*s\n", static_cast<int>(linked.size()), linked.data());
     return 0;
 }

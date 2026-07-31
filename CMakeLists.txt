@@ -407,9 +407,25 @@ function(nh_core_common target)
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     )
 
-    # CMAKE_CXX_STANDARD is a build-tree setting and does not survive an export,
-    # so the C++23 requirement has to be stated on the target.
-    target_compile_features(${target} PUBLIC cxx_std_23)
+    # Two different standards, and the split is the point. nodehammer is built
+    # as C++23; a *consumer* only needs whatever the installed headers use, which
+    # is C++17 (std::string_view, inline constexpr — verified by compiling them
+    # standalone at each level, where 14 and below fail and 17 upwards pass).
+    #
+    # Forcing C++23 on a consumer would be a requirement the headers do not
+    # actually have, and docs/public-api-sketch.md already names C++17 as the
+    # floor for the amalgamated-header route and calls it "the binding
+    # constraint". CMAKE_CXX_STANDARD is a build-tree setting and does not
+    # survive an export, so the floor has to be stated on the target to reach
+    # the package config.
+    #
+    # The constraint this creates is on API vocabulary rather than on the build:
+    # a type in the public interface has to exist at the floor, so std::span
+    # (C++20) and std::expected (C++23) are off the table until the floor moves.
+    # ci/shared_consumer compiles at exactly the floor, so that is enforced
+    # rather than remembered.
+    target_compile_features(${target} PRIVATE cxx_std_23)
+    target_compile_features(${target} INTERFACE cxx_std_17)
 
     add_dependencies(${target} flatbuffers_generate)
     target_include_directories(${target} SYSTEM PRIVATE ${NH_FBS_GENERATED_DIR})
