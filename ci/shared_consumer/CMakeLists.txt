@@ -24,3 +24,11 @@ find_package(nodehammer REQUIRED)
 
 add_executable(consumer main.cpp)
 target_link_libraries(consumer PRIVATE nodehammer::nodehammer)
+
+# Reported, not set. What a consumer is compiled with is exactly what this test
+# exists to leave unstated — but when the result misbehaves at run time rather
+# than at link time, the build type and the MSVC runtime library are the first
+# two things worth knowing, and neither is visible from the failure alone.
+message(STATUS "consumer: CMAKE_BUILD_TYPE='${CMAKE_BUILD_TYPE}'")
+message(STATUS "consumer: MSVC_RUNTIME_LIBRARY='${CMAKE_MSVC_RUNTIME_LIBRARY}'")
+message(STATUS "consumer: CXX_FLAGS='${CMAKE_CXX_FLAGS}'")

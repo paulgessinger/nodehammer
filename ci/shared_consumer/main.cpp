@@ -46,7 +46,34 @@ bool listed(const std::vector<std::string> &names, std::string_view needle) {
 
 } // namespace
 
+// What the consumer's own standard library looks like. Printed unconditionally
+// because an owning container crossing a shared-library boundary is only safe
+// while both sides agree on its layout, and on MSVC that agreement is not
+// implied by anything a consumer writes: `std::string` carries an extra proxy
+// pointer when `_ITERATOR_DEBUG_LEVEL != 0`, so the two sides can differ in
+// `sizeof` while compiling and linking cleanly.
+void reportAbi() {
+    std::printf("consumer abi: sizeof(string)=%zu sizeof(vector<string>)=%zu"
+                " sizeof(vector<byte>)=%zu",
+                sizeof(std::string), sizeof(std::vector<std::string>),
+                sizeof(std::vector<std::byte>));
+#if defined(_MSC_VER)
+    std::printf(" _MSC_VER=%d _ITERATOR_DEBUG_LEVEL=%d _MSVC_STL_VERSION=%d", _MSC_VER,
+                _ITERATOR_DEBUG_LEVEL, _MSVC_STL_VERSION);
+#if defined(_DEBUG)
+    std::printf(" _DEBUG");
+#endif
+#if defined(NDEBUG)
+    std::printf(" NDEBUG");
+#endif
+#endif
+    std::printf(" __cplusplus=%ld\n", static_cast<long>(__cplusplus));
+    std::fflush(stdout);
+}
+
 int main() {
+    reportAbi();
+
     // Header constant vs compiled-in value: a mismatch means headers from one
     // install and a library from another.
     const std::string_view linked = nodehammer::version();
@@ -59,7 +86,17 @@ int main() {
 
     // The runtime capability query. These formats are unconditional, so a build
     // that cannot report them is broken rather than merely minimal.
+    //
+    // Dumped before it is judged: if an owning container does not survive the
+    // boundary, what came back is the evidence, and reporting only "missing a
+    // format" hides whether the vector was short, empty, or garbage.
     const auto semanticFormats = nodehammer::SemanticScene::formats();
+    std::printf("SemanticScene::formats() -> %zu entries\n", semanticFormats.size());
+    for (const auto &f : semanticFormats) {
+        std::printf("  '%s' (len %zu)\n", f.c_str(), f.size());
+    }
+    std::fflush(stdout);
+
     if (!listed(semanticFormats, "synthetic") || !listed(semanticFormats, "flatbuffer")) {
         std::fprintf(stderr, "SemanticScene::formats() is missing a built-in format\n");
         return 1;
