@@ -193,6 +193,14 @@ set(NH_CORE_SOURCES
     src/scene_build.cpp
     src/export_resolve.cpp
     src/version.cpp
+    # The public API bridge: the only translation units that see both a public
+    # handle and its internals (src/api/handles.hpp is where the seam lives).
+    # Core, not app — these *are* what the installed library publishes.
+    src/api/diagnostics.cpp
+    src/api/semantic_scene.cpp
+    src/api/config.cpp
+    src/api/render_scene.cpp
+    src/api/build.cpp
     # The in-memory bag (key→bytes store) behind ProjectFs. Under src/viewer/ for
     # organisational reasons, but no sokol/GUI deps and part of the project
     # substrate rather than the app — see NH_APP_SOURCES for where that line is.
