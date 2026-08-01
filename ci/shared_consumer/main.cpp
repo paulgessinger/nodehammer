@@ -20,6 +20,7 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -142,6 +143,64 @@ int main() {
         reread.scene.triangleCount() != rendered.scene.triangleCount()) {
         return fail("RenderScene byte round-trip failed", reread.diags);
     }
+
+    // ── Every remaining exported entry point ─────────────────────────────────
+    // Not for the behaviour — the unit tests cover that far better — but because
+    // calling one is the only way to prove it is *reachable*. A member that is
+    // missing its NH_API links fine in-tree against the static archive and fails
+    // only here, for an external consumer of the shared library. Anything the
+    // consumer never calls is annotated on trust rather than checked, so it
+    // calls all of them.
+    const auto selected = nodehammer::applySelection(imported.scene, config.config.scene());
+    const auto deduped = nodehammer::deduplicate(selected.scene, config.config.scene());
+    const auto lowered = nodehammer::tessellate(deduped.scene, config.config.scene());
+    if (selected.diags.hasErrors() || deduped.diags.hasErrors() || lowered.diags.hasErrors()) {
+        return fail("a pipeline verb failed", lowered.diags);
+    }
+    if (lowered.scene.triangleCount() != rendered.scene.triangleCount()) {
+        std::fprintf(stderr, "the decomposed pipeline disagreed with build()\n");
+        return 1;
+    }
+
+    const std::vector<std::byte> nhb = imported.scene.toNhb();
+    if (nhb.empty()) {
+        std::fprintf(stderr, "toNhb() produced nothing\n");
+        return 1;
+    }
+
+    // Counts: reached rather than checked, beyond the one invariant that a
+    // scene with triangles has meshes and materials to bind them.
+    std::printf("semantic: %zu nodes, %zu logVols, %zu shapes, %zu materials\n",
+                imported.scene.nodeCount(), imported.scene.logVolCount(),
+                imported.scene.shapeCount(), imported.scene.materialCount());
+    std::printf("render:   %zu nodes, %zu meshes, %zu materials, %zu triangles\n",
+                rendered.scene.nodeCount(), rendered.scene.meshCount(),
+                rendered.scene.materialCount(), rendered.scene.triangleCount());
+    if (rendered.scene.meshCount() == 0 || rendered.scene.materialCount() == 0) {
+        std::fprintf(stderr, "a scene with triangles reported no meshes or materials\n");
+        return 1;
+    }
+
+    // Both write paths, through the output slice, into a directory the consumer
+    // is allowed to create. `Config::output()` is reached nowhere else.
+    const auto outDir = std::filesystem::temp_directory_path() / "nh_shared_consumer";
+    std::error_code ec;
+    std::filesystem::create_directories(outDir, ec);
+    const auto semanticOut = outDir / "scene.nhb";
+    const auto renderOut = outDir / "scene.glb";
+    const auto semanticDiags = imported.scene.write(semanticOut);
+    if (semanticDiags.hasErrors()) {
+        return fail("SemanticScene::write failed", semanticDiags);
+    }
+    const auto renderDiags = rendered.scene.write(renderOut, config.config.output());
+    if (renderDiags.hasErrors()) {
+        return fail("RenderScene::write failed", renderDiags);
+    }
+    if (!std::filesystem::exists(semanticOut) || !std::filesystem::exists(renderOut)) {
+        std::fprintf(stderr, "a write reported success but produced no file\n");
+        return 1;
+    }
+    std::filesystem::remove_all(outDir, ec);
 
     // And a failure that must arrive as a diagnostic rather than as an exception
     // crossing the ABI. The handle still refers to a scene — an empty one —
