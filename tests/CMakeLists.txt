@@ -18,6 +18,9 @@ add_executable(nodehammer_tests
     tessellation/test_tessellation_pass.cpp
     tessellation/test_wedge_cut.cpp
     tessellation/test_build_pipeline.cpp
+    api/test_api_surface.cpp
+    api/test_api_equivalence.cpp
+    api/test_config_wrapper.cpp
     export/test_export_resolve.cpp
     export/test_gltf_exporter.cpp
     export/test_render_exporter_registry.cpp
