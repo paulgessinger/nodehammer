@@ -7,7 +7,7 @@
 // dropped a field, reordered an include, or resolved one against a different
 // base would show up as a text difference, over every fixture at once.
 //
-// Reaching through `api::Access` is deliberate and only possible in-tree: the
+// Reaching through `api::` is deliberate and only possible in-tree: the
 // seam is an internal header, so this asserts a property an external consumer
 // could not even ask about.
 
@@ -35,7 +35,7 @@
 namespace {
 
 namespace fs = std::filesystem;
-using nodehammer::api::Access;
+namespace api = nodehammer::api;
 
 const fs::path kConfigsDir = fs::path{NODEHAMMER_FIXTURES_DIR} / "configs";
 
@@ -79,7 +79,7 @@ TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api
     }
 
     REQUIRE(wrapped.config.valid());
-    const auto *parsed = Access::configOf(wrapped.config);
+    const auto *parsed = api::configOf(wrapped.config);
     REQUIRE(parsed != nullptr);
     REQUIRE(nodehammer::config::configToToml(*parsed) ==
             nodehammer::config::configToToml(reference.config));
@@ -104,14 +104,14 @@ TEST_CASE("Config::parse wraps loadFromString and roots includes at baseDir", "[
 
     REQUIRE_FALSE(reference.diags.hasErrors());
     REQUIRE_FALSE(listHasErrors(wrapped.diags));
-    REQUIRE(nodehammer::config::configToToml(*Access::configOf(wrapped.config)) ==
+    REQUIRE(nodehammer::config::configToToml(*api::configOf(wrapped.config)) ==
             nodehammer::config::configToToml(reference.config));
 
     // And the same content read straight off disk: `parse` + baseDir is
     // `read` minus the file read, which is what step 5b unified.
     const auto fromFile = nodehammer::Config::read(path);
-    REQUIRE(nodehammer::config::configToToml(*Access::configOf(wrapped.config)) ==
-            nodehammer::config::configToToml(*Access::configOf(fromFile.config)));
+    REQUIRE(nodehammer::config::configToToml(*api::configOf(wrapped.config)) ==
+            nodehammer::config::configToToml(*api::configOf(fromFile.config)));
 }
 
 TEST_CASE("Config::parse with no baseDir resolves no includes", "[api][config]") {
@@ -143,8 +143,8 @@ TEST_CASE("Config slices share one document and default to the built-in config",
     REQUIRE(scene.valid());
     REQUIRE(output.valid());
     // Slicing shares rather than copies: both halves must be the same document.
-    REQUIRE(&Access::configOf(scene) == &Access::configOf(output));
-    REQUIRE(&Access::configOf(scene) == Access::configOf(loaded.config));
+    REQUIRE(&api::configOf(scene) == &api::configOf(output));
+    REQUIRE(&api::configOf(scene) == api::configOf(loaded.config));
 
     // A slice outlives the handle it came from — it owns a share of the
     // document, so this is not a dangling read.
@@ -154,13 +154,13 @@ TEST_CASE("Config slices share one document and default to the built-in config",
         detached = temporaryHandle.config.scene();
     }
     REQUIRE(detached.valid());
-    REQUIRE_FALSE(Access::configOf(detached).materials.empty());
+    REQUIRE_FALSE(api::configOf(detached).materials.empty());
 
     // A default-constructed slice is usable and means "no config file".
     const nodehammer::SceneConfig none;
     REQUIRE_FALSE(none.valid());
     const nodehammer::config::NHConfig defaults;
-    REQUIRE(nodehammer::config::configToToml(Access::configOf(none)) ==
+    REQUIRE(nodehammer::config::configToToml(api::configOf(none)) ==
             nodehammer::config::configToToml(defaults));
 }
 

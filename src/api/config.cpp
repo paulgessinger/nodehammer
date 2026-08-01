@@ -19,11 +19,9 @@
 namespace nodehammer {
 namespace {
 
-using api::Access;
-
 [[nodiscard]] ConfigResult failure(std::string_view code, std::string_view message,
                                    std::string_view context = {}) {
-    return ConfigResult{Config{}, Access::error(code, message, context)};
+    return ConfigResult{Config{}, api::error(code, message, context)};
 }
 
 /// Adopt an internal load, then validate — the one thing these wrappers add
@@ -35,12 +33,12 @@ using api::Access;
 /// same list as the load's, which is what makes `build` free of a validation
 /// step of its own (#41 §8).
 [[nodiscard]] ConfigResult adopt(config::ConfigResult loaded) {
-    std::vector<Diagnostic> diags = Access::items(loaded.diags);
+    std::vector<Diagnostic> diags = api::items(loaded.diags);
     if (loaded.diags.hasErrors()) {
-        return ConfigResult{Config{}, Access::seal(std::move(diags))};
+        return ConfigResult{Config{}, api::seal(std::move(diags))};
     }
-    Access::appendTo(diags, config::ConfigValidator::validate(loaded.config));
-    return ConfigResult{Access::wrap(std::move(loaded.config)), Access::seal(std::move(diags))};
+    api::appendTo(diags, config::ConfigValidator::validate(loaded.config));
+    return ConfigResult{api::wrap(std::move(loaded.config)), api::seal(std::move(diags))};
 }
 
 [[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {
@@ -100,14 +98,14 @@ std::vector<std::string> Config::formats() {
     return out;
 }
 
-SceneConfig Config::scene() const { return Access::sceneSlice(Access::documentOf(impl_)); }
+SceneConfig Config::scene() const { return api::sceneSlice(api::documentOf(*this)); }
 
-OutputConfig Config::output() const { return Access::outputSlice(Access::documentOf(impl_)); }
+OutputConfig Config::output() const { return api::outputSlice(api::documentOf(*this)); }
 
-bool Config::valid() const noexcept { return impl_ != nullptr; }
+bool Config::valid() const noexcept { return impl != nullptr; }
 
-bool SceneConfig::valid() const noexcept { return impl_ != nullptr && impl_->cfg != nullptr; }
+bool SceneConfig::valid() const noexcept { return impl != nullptr && impl->cfg != nullptr; }
 
-bool OutputConfig::valid() const noexcept { return impl_ != nullptr && impl_->cfg != nullptr; }
+bool OutputConfig::valid() const noexcept { return impl != nullptr && impl->cfg != nullptr; }
 
 } // namespace nodehammer

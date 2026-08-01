@@ -33,11 +33,9 @@ class SceneConfig {
     /// provenance, not usability.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
-  private:
+    /// Opaque state — see `DiagnosticList::impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl_;
-
-    friend struct api::Access;
+    std::shared_ptr<const Impl> impl;
 };
 
 /// The half that changes only how a final scene is *serialized*: the
@@ -50,11 +48,9 @@ class OutputConfig {
     /// slice resolves to each format's built-in defaults.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
-  private:
+    /// Opaque state — see `DiagnosticList::impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl_;
-
-    friend struct api::Access;
+    std::shared_ptr<const Impl> impl;
 };
 
 /// A parsed TOML (or Lua) configuration.
@@ -100,11 +96,9 @@ class Config {
     /// True when this handle refers to a parsed document.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
-  private:
+    /// Opaque state — see `DiagnosticList::impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl_;
-
-    friend struct api::Access;
+    std::shared_ptr<const Impl> impl;
 };
 
 struct ConfigResult {

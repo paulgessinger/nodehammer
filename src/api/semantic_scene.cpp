@@ -18,12 +18,10 @@
 namespace nodehammer {
 namespace {
 
-using api::Access;
-
 /// The shape every failing read returns: no scene, one error saying why.
 [[nodiscard]] SemanticResult failure(std::string_view code, std::string_view message,
                                      std::string_view context = {}) {
-    return SemanticResult{SemanticScene{}, Access::error(code, message, context)};
+    return SemanticResult{SemanticScene{}, api::error(code, message, context)};
 }
 
 /// Adopt an internal ImportResult, scene and all.
@@ -34,7 +32,7 @@ using api::Access;
 /// nothing. The diagnostics are what say whether to trust the result; `valid()`
 /// only says whether there is one to look at.
 [[nodiscard]] SemanticResult adopt(ir::ImportResult result) {
-    return SemanticResult{Access::wrap(std::move(result.scene)), Access::wrap(result.diags)};
+    return SemanticResult{api::wrap(std::move(result.scene)), api::wrap(result.diags)};
 }
 
 void appendUnique(std::vector<std::string> &out, std::string_view name) {
@@ -99,15 +97,15 @@ std::vector<std::string> SemanticScene::formats() {
 
 DiagnosticList SemanticScene::write(const std::filesystem::path &path,
                                     const WriteOptions &options) const {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     if (scene == nullptr) {
-        return Access::error(codes::kErrApiInvalidHandle, "cannot write an empty scene handle",
-                             path.string());
+        return api::error(codes::kErrApiInvalidHandle, "cannot write an empty scene handle",
+                          path.string());
     }
     const auto registry = ir::SemanticExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(path, options.format);
     if (exporter == nullptr) {
-        return Access::error(
+        return api::error(
             codes::kErrExportWriteFailed,
             options.format.empty()
                 ? std::format("no exporter claims the extension of '{}'", path.string())
@@ -116,14 +114,14 @@ DiagnosticList SemanticScene::write(const std::filesystem::path &path,
             path.string());
     }
     try {
-        return Access::wrap(exporter->write(*scene, path, ir::SemanticExportConfig{}).diags);
+        return api::wrap(exporter->write(*scene, path, ir::SemanticExportConfig{}).diags);
     } catch (const std::exception &e) {
-        return Access::error(codes::kErrExportWriteFailed, e.what(), path.string());
+        return api::error(codes::kErrExportWriteFailed, e.what(), path.string());
     }
 }
 
 std::vector<std::byte> SemanticScene::toNhb() const {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     if (scene == nullptr) {
         return {};
     }
@@ -134,25 +132,25 @@ std::vector<std::byte> SemanticScene::toNhb() const {
     }
 }
 
-bool SemanticScene::valid() const noexcept { return Access::sceneOf(*this) != nullptr; }
+bool SemanticScene::valid() const noexcept { return api::sceneOf(*this) != nullptr; }
 
 std::size_t SemanticScene::nodeCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     return scene != nullptr ? scene->nodes.size() : 0;
 }
 
 std::size_t SemanticScene::logVolCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     return scene != nullptr ? scene->logVols.size() : 0;
 }
 
 std::size_t SemanticScene::shapeCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     return scene != nullptr ? scene->shapes.size() : 0;
 }
 
 std::size_t SemanticScene::materialCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     return scene != nullptr ? scene->materials.size() : 0;
 }
 

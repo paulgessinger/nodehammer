@@ -10,8 +10,6 @@
 namespace nodehammer {
 namespace {
 
-using api::Access;
-
 /// The stage conditions, written once so the standalone verbs and `build`
 /// cannot disagree about them. Both mirror `convert`: no selection rules means
 /// no filtering (rather than "keep everything", which would still garbage-
@@ -56,13 +54,13 @@ void runDedup(ir::semantic::Scene &scene) {
 } // namespace
 
 SemanticResult applySelection(const SemanticScene &scene, const SceneConfig &config) {
-    const auto *input = Access::sceneOf(scene);
+    const auto *input = api::sceneOf(scene);
     if (input == nullptr) {
         return SemanticResult{SemanticScene{},
-                              Access::error(codes::kErrApiInvalidHandle,
-                                            "applySelection: the scene handle refers to nothing")};
+                              api::error(codes::kErrApiInvalidHandle,
+                                         "applySelection: the scene handle refers to nothing")};
     }
-    const auto &cfg = Access::configOf(config);
+    const auto &cfg = api::configOf(config);
     if (!selectionApplies(cfg)) {
         return SemanticResult{scene, DiagnosticList{}};
     }
@@ -74,38 +72,38 @@ SemanticResult applySelection(const SemanticScene &scene, const SceneConfig &con
         // The scene comes back even when the diagnostics carry errors — a
         // root-dropped rule leaves `prune` a no-op and says so (NH0401), and
         // handing back nothing would hide the scene the caller still has.
-        return SemanticResult{Access::wrap(std::move(working)), Access::wrap(diags)};
+        return SemanticResult{api::wrap(std::move(working)), api::wrap(diags)};
     } catch (const std::exception &e) {
         return SemanticResult{SemanticScene{},
-                              Access::error(codes::kErrSelectionRootDropped, e.what())};
+                              api::error(codes::kErrSelectionRootDropped, e.what())};
     }
 }
 
 SemanticResult deduplicate(const SemanticScene &scene, const SceneConfig &config) {
-    const auto *input = Access::sceneOf(scene);
+    const auto *input = api::sceneOf(scene);
     if (input == nullptr) {
         return SemanticResult{SemanticScene{},
-                              Access::error(codes::kErrApiInvalidHandle,
-                                            "deduplicate: the scene handle refers to nothing")};
+                              api::error(codes::kErrApiInvalidHandle,
+                                         "deduplicate: the scene handle refers to nothing")};
     }
-    const auto &cfg = Access::configOf(config);
+    const auto &cfg = api::configOf(config);
     if (!dedupApplies(cfg)) {
         return SemanticResult{scene, DiagnosticList{}};
     }
 
     ir::semantic::Scene working = *input;
     runDedup(working);
-    return SemanticResult{Access::wrap(std::move(working)), DiagnosticList{}};
+    return SemanticResult{api::wrap(std::move(working)), DiagnosticList{}};
 }
 
 RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
-    const auto *input = Access::sceneOf(scene);
+    const auto *input = api::sceneOf(scene);
     if (input == nullptr) {
         return RenderResult{RenderScene{},
-                            Access::error(codes::kErrApiInvalidHandle,
-                                          "tessellate: the scene handle refers to nothing")};
+                            api::error(codes::kErrApiInvalidHandle,
+                                       "tessellate: the scene handle refers to nothing")};
     }
-    const auto &cfg = Access::configOf(config);
+    const auto &cfg = api::configOf(config);
     try {
         const tessellation::TessellationPass pass{cfg};
         auto result = pass.lower(*input);
@@ -113,20 +111,20 @@ RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
         // unknown shape and leaves that one node without a mesh binding, and the
         // rest of the scene is still a scene. Returning it is what lets a caller
         // decide whether to export anyway, exactly as the internal pass allows.
-        return RenderResult{Access::wrap(std::move(result.scene)), Access::wrap(result.diags)};
+        return RenderResult{api::wrap(std::move(result.scene)), api::wrap(result.diags)};
     } catch (const std::exception &e) {
-        return RenderResult{RenderScene{}, Access::error(codes::kErrTessBooleanFail, e.what())};
+        return RenderResult{RenderScene{}, api::error(codes::kErrTessBooleanFail, e.what())};
     }
 }
 
 RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
-    const auto *input = Access::sceneOf(scene);
+    const auto *input = api::sceneOf(scene);
     if (input == nullptr) {
-        return RenderResult{RenderScene{}, Access::error(codes::kErrApiInvalidHandle,
-                                                         "build: the scene handle refers to "
-                                                         "nothing")};
+        return RenderResult{RenderScene{}, api::error(codes::kErrApiInvalidHandle,
+                                                      "build: the scene handle refers to "
+                                                      "nothing")};
     }
-    const auto &cfg = Access::configOf(config);
+    const auto &cfg = api::configOf(config);
 
     // One working copy for all three stages rather than three handles chained
     // through the public verbs: same order, same conditions, one copy of the
@@ -143,7 +141,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
             // tessellating a scene the rules meant to prune is what `convert`
             // does too.
             if (diags.hasErrors()) {
-                return RenderResult{RenderScene{}, Access::wrap(diags)};
+                return RenderResult{RenderScene{}, api::wrap(diags)};
             }
         }
         if (dedupApplies(cfg)) {
@@ -154,9 +152,9 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
         auto result = pass.lower(working);
         diags.append(result.diags);
         // Tessellation errors come back *with* the scene — see `tessellate`.
-        return RenderResult{Access::wrap(std::move(result.scene)), Access::wrap(diags)};
+        return RenderResult{api::wrap(std::move(result.scene)), api::wrap(diags)};
     } catch (const std::exception &e) {
-        return RenderResult{RenderScene{}, Access::error(codes::kErrTessBooleanFail, e.what())};
+        return RenderResult{RenderScene{}, api::error(codes::kErrTessBooleanFail, e.what())};
     }
 }
 

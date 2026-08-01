@@ -16,13 +16,11 @@
 namespace nodehammer {
 namespace {
 
-using api::Access;
-
 constexpr std::string_view kNhr = "nhr";
 
 [[nodiscard]] RenderResult failure(std::string_view code, std::string_view message,
                                    std::string_view context = {}) {
-    return RenderResult{RenderScene{}, Access::error(code, message, context)};
+    return RenderResult{RenderScene{}, api::error(code, message, context)};
 }
 
 [[nodiscard]] std::string lowerExtension(const std::filesystem::path &path) {
@@ -53,7 +51,7 @@ void appendUnique(std::vector<std::string> &out, std::string_view name) {
 RenderResult RenderScene::read(const std::filesystem::path &path) {
     try {
         const auto bytes = detail::zstd_io::readBytesFromFile(path);
-        return RenderResult{Access::wrap(ir::renderSceneFromBytes(bytes)), DiagnosticList{}};
+        return RenderResult{api::wrap(ir::renderSceneFromBytes(bytes)), DiagnosticList{}};
     } catch (const std::exception &e) {
         // renderSceneFromBytes throws on a failed verify, and the reader throws
         // on a missing file. Neither may cross the API (#41 principle 5).
@@ -63,7 +61,7 @@ RenderResult RenderScene::read(const std::filesystem::path &path) {
 
 RenderResult RenderScene::read(std::span<const std::byte> nhr) {
     try {
-        return RenderResult{Access::wrap(ir::renderSceneFromBytes(nhr)), DiagnosticList{}};
+        return RenderResult{api::wrap(ir::renderSceneFromBytes(nhr)), DiagnosticList{}};
     } catch (const std::exception &e) {
         return failure(codes::kErrImportFileNotFound, e.what());
     }
@@ -82,10 +80,10 @@ std::vector<std::string> RenderScene::formats() {
 
 DiagnosticList RenderScene::write(const std::filesystem::path &path, const OutputConfig &output,
                                   const WriteOptions &options) const {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     if (scene == nullptr) {
-        return Access::error(codes::kErrApiInvalidHandle, "cannot write an empty scene handle",
-                             path.string());
+        return api::error(codes::kErrApiInvalidHandle, "cannot write an empty scene handle",
+                          path.string());
     }
 
     // The render IR's own format is not in the exporter registry — nothing in
@@ -97,14 +95,14 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
             detail::zstd_io::writeBytesToFile(path, bytes);
             return DiagnosticList{};
         } catch (const std::exception &e) {
-            return Access::error(codes::kErrExportWriteFailed, e.what(), path.string());
+            return api::error(codes::kErrExportWriteFailed, e.what(), path.string());
         }
     }
 
     const auto registry = ir::RenderExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(path, options.format);
     if (exporter == nullptr) {
-        return Access::error(
+        return api::error(
             codes::kErrExportWriteFailed,
             options.format.empty()
                 ? std::format("no exporter claims the extension of '{}'", path.string())
@@ -117,16 +115,16 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
     // defaults, then the matching `[export.<fmt>]` table field by field, then
     // GLB's table-level fallback to `[export.gltf]` (#41 §3).
     const auto resolved =
-        pipeline::resolveExportConfig(Access::configOf(output), path, options.format);
+        pipeline::resolveExportConfig(api::configOf(output), path, options.format);
     try {
-        return Access::wrap(exporter->write(*scene, path, resolved).diags);
+        return api::wrap(exporter->write(*scene, path, resolved).diags);
     } catch (const std::exception &e) {
-        return Access::error(codes::kErrExportWriteFailed, e.what(), path.string());
+        return api::error(codes::kErrExportWriteFailed, e.what(), path.string());
     }
 }
 
 std::vector<std::byte> RenderScene::toNhr() const {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     if (scene == nullptr) {
         return {};
     }
@@ -137,25 +135,25 @@ std::vector<std::byte> RenderScene::toNhr() const {
     }
 }
 
-bool RenderScene::valid() const noexcept { return Access::sceneOf(*this) != nullptr; }
+bool RenderScene::valid() const noexcept { return api::sceneOf(*this) != nullptr; }
 
 std::size_t RenderScene::nodeCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     return scene != nullptr ? scene->nodes.size() : 0;
 }
 
 std::size_t RenderScene::meshCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     return scene != nullptr ? scene->meshAssets.size() : 0;
 }
 
 std::size_t RenderScene::materialCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     return scene != nullptr ? scene->materials.size() : 0;
 }
 
 std::size_t RenderScene::triangleCount() const noexcept {
-    const auto *scene = Access::sceneOf(*this);
+    const auto *scene = api::sceneOf(*this);
     if (scene == nullptr) {
         return 0;
     }

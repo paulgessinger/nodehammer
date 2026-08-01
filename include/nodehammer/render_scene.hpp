@@ -76,11 +76,9 @@ class RenderScene {
     [[nodiscard]] NH_API std::size_t materialCount() const noexcept;
     [[nodiscard]] NH_API std::size_t triangleCount() const noexcept;
 
-  private:
+    /// Opaque state — see `DiagnosticList::impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl_;
-
-    friend struct api::Access;
+    std::shared_ptr<const Impl> impl;
 };
 
 struct RenderResult {

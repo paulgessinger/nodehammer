@@ -109,15 +109,12 @@ class SemanticScene {
     [[nodiscard]] NH_API std::size_t shapeCount() const noexcept;
     [[nodiscard]] NH_API std::size_t materialCount() const noexcept;
 
-  private:
+    /// Opaque state. `shared_ptr<const>` inside, value outside (#41 principle
+    /// 4); public because `Impl` being undefined here is what makes the handle
+    /// opaque, so privacy would add a friend declaration and protect nothing.
+    /// See `DiagnosticList::impl` for the full argument.
     struct Impl;
-    /// `shared_ptr<const>` inside, value outside (#41 principle 4). Special
-    /// members are implicit: copying and destroying a `shared_ptr` never needs
-    /// the pointee complete, so the handle stays opaque with no out-of-line
-    /// ceremony.
-    std::shared_ptr<const Impl> impl_;
-
-    friend struct api::Access;
+    std::shared_ptr<const Impl> impl;
 };
 
 /// Named after its type rather than a generic `scene`, so a structured binding

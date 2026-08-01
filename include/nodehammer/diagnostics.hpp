@@ -20,15 +20,6 @@
 
 namespace nodehammer {
 
-// The seam through which the implementation reaches a handle's internals.
-// Declared, never defined here: an installed header exposes the name and
-// nothing else, and being in a nested namespace it is internal by §1's rule
-// ("everything declared directly in nodehammer:: is public"). One friend per
-// handle is the whole of the ceremony.
-namespace api {
-struct Access;
-}
-
 /// One thing the pipeline has to say. A value type on purpose: the connector
 /// tier (#41 §3) carries this definition verbatim, and there is nothing here
 /// worth hiding behind an accessor.
@@ -68,15 +59,23 @@ class DiagnosticList {
     [[nodiscard]] NH_API const Diagnostic *begin() const noexcept;
     [[nodiscard]] NH_API const Diagnostic *end() const noexcept;
 
-  private:
-    struct Impl;
+    /// Opaque state.
+    ///
+    /// Public, and deliberately: what makes this handle opaque is that `Impl` is
+    /// never defined in an installed header, not the access specifier. A
+    /// consumer can copy or clear this pointer and nothing else — they cannot
+    /// construct an `Impl`, cannot dereference one, and clearing it only
+    /// produces the empty list a default-constructed one already is. Marking it
+    /// private would buy exactly that nothing, at the price of a friend
+    /// declaration on every handle so the library's own translation units could
+    /// reach past it.
+    ///
     /// `shared_ptr<const>`, so every special member stays implicit: copying and
-    /// destroying one never needs `Impl` complete. A `unique_ptr` would need an
-    /// out-of-line destructor, which is six exported entry points and a deep
-    /// copy, for a type nobody can mutate.
-    std::shared_ptr<const Impl> impl_;
-
-    friend struct api::Access;
+    /// destroying one never needs `Impl` complete. A `unique_ptr` would force an
+    /// out-of-line destructor — six exported entry points and a deep copy, for a
+    /// type nobody can mutate.
+    struct Impl;
+    std::shared_ptr<const Impl> impl;
 };
 
 } // namespace nodehammer
