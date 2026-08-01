@@ -1,31 +1,14 @@
 #include <api/handles.hpp>
 
-#include <memory>
-#include <utility>
-
 namespace nodehammer {
 
-// Out-of-line because Impl is incomplete in the installed header. A copy
-// deep-copies the items; a move leaves the source with no Impl, which every
-// accessor below treats as an empty list rather than as an error.
-
-DiagnosticList::DiagnosticList() : impl_(std::make_unique<Impl>()) {}
-
-DiagnosticList::~DiagnosticList() = default;
-
-DiagnosticList::DiagnosticList(const DiagnosticList &other)
-    : impl_(other.impl_ ? std::make_unique<Impl>(*other.impl_) : nullptr) {}
-
-DiagnosticList &DiagnosticList::operator=(const DiagnosticList &other) {
-    if (this != &other) {
-        impl_ = other.impl_ ? std::make_unique<Impl>(*other.impl_) : nullptr;
-    }
-    return *this;
-}
-
-DiagnosticList::DiagnosticList(DiagnosticList &&other) noexcept = default;
-
-DiagnosticList &DiagnosticList::operator=(DiagnosticList &&other) noexcept = default;
+// Five accessors and nothing else. The special members are implicit: `impl_` is
+// a `shared_ptr<const Impl>`, which copies and destroys without `Impl` being
+// complete, so none of them has to be written here — or exported.
+//
+// A null `impl_` is the empty list, not an error state: it is what a
+// default-constructed list holds, what `Access::seal` produces for no items,
+// and what a moved-from list is left with. Every accessor below answers for it.
 
 bool DiagnosticList::hasErrors() const noexcept {
     if (!impl_) {
@@ -43,8 +26,8 @@ bool DiagnosticList::empty() const noexcept { return impl_ == nullptr || impl_->
 
 std::size_t DiagnosticList::size() const noexcept { return impl_ ? impl_->items.size() : 0; }
 
-// A null-null pair is a valid empty range, so range-for over a moved-from list
-// is well-defined rather than merely unlikely.
+// A null-null pair is a valid empty range, so range-for over an empty or
+// moved-from list is well-defined rather than merely unlikely.
 const Diagnostic *DiagnosticList::begin() const noexcept {
     return impl_ ? impl_->items.data() : nullptr;
 }

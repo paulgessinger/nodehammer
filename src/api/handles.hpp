@@ -85,42 +85,48 @@ struct Access {
             static_cast<std::underlying_type_t<diagnostics::DiagnosticSeverity>>(s));
     }
 
-    /// A moved-from list has no Impl, so every mutator goes through this rather
-    /// than assuming the default constructor allocated.
-    [[nodiscard]] static DiagnosticList::Impl &items(DiagnosticList &list) {
-        if (!list.impl_) {
-            list.impl_ = std::make_unique<DiagnosticList::Impl>();
-        }
-        return *list.impl_;
-    }
-
-    static void append(DiagnosticList &dst, const diagnostics::DiagnosticList &src) {
-        auto &out = items(dst).items;
-        out.reserve(out.size() + src.items().size());
+    /// Convert an internal list to public items. Accumulate these, then `seal`
+    /// once — a `DiagnosticList` is immutable, so it is built as a vector and
+    /// frozen rather than appended to in place.
+    [[nodiscard]] static std::vector<Diagnostic> items(const diagnostics::DiagnosticList &src) {
+        std::vector<Diagnostic> out;
+        out.reserve(src.items().size());
         for (const auto &d : src.items()) {
             out.push_back(Diagnostic{severity(d.severity), d.code, d.message, d.context});
         }
+        return out;
     }
 
-    static void add(DiagnosticList &dst, Diagnostic::Severity sev, std::string_view code,
-                    std::string_view message, std::string_view context = {}) {
-        items(dst).items.push_back(
-            Diagnostic{sev, std::string{code}, std::string{message}, std::string{context}});
+    static void appendTo(std::vector<Diagnostic> &dst, const diagnostics::DiagnosticList &src) {
+        dst.reserve(dst.size() + src.items().size());
+        for (const auto &d : src.items()) {
+            dst.push_back(Diagnostic{severity(d.severity), d.code, d.message, d.context});
+        }
+    }
+
+    /// Freeze accumulated items into the public list. An empty list allocates
+    /// nothing — which is what every successful call returns.
+    [[nodiscard]] static DiagnosticList seal(std::vector<Diagnostic> items) {
+        DiagnosticList out;
+        if (!items.empty()) {
+            out.impl_ = std::make_shared<const DiagnosticList::Impl>(
+                DiagnosticList::Impl{std::move(items)});
+        }
+        return out;
     }
 
     [[nodiscard]] static DiagnosticList wrap(const diagnostics::DiagnosticList &src) {
-        DiagnosticList out;
-        append(out, src);
-        return out;
+        return seal(items(src));
     }
 
     /// The single-error list a bridge failure returns. Spelled out here so no
     /// verb has to remember the three-line dance.
     [[nodiscard]] static DiagnosticList error(std::string_view code, std::string_view message,
                                               std::string_view context = {}) {
-        DiagnosticList out;
-        add(out, Diagnostic::Severity::Error, code, message, context);
-        return out;
+        std::vector<Diagnostic> one;
+        one.push_back(Diagnostic{Diagnostic::Severity::Error, std::string{code},
+                                 std::string{message}, std::string{context}});
+        return seal(std::move(one));
     }
 
     // ── Semantic scenes ──────────────────────────────────────────────────────

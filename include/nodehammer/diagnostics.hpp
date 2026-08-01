@@ -49,15 +49,14 @@ struct Diagnostic {
 ///
 /// Range-for works through the pointer pair, so `for (const auto &d : diags)`
 /// is the intended traversal.
+///
+/// Immutable once produced, and shared rather than copied — the same handle
+/// contract as `SemanticScene` and the rest, for the same reason: with no
+/// mutator on the type, sharing is unobservable, so copying one is a pointer
+/// bump instead of a deep copy of every string. An empty list (the common case,
+/// since most calls succeed) owns nothing at all.
 class DiagnosticList {
   public:
-    NH_API DiagnosticList();
-    NH_API ~DiagnosticList();
-    NH_API DiagnosticList(const DiagnosticList &other);
-    NH_API DiagnosticList &operator=(const DiagnosticList &other);
-    NH_API DiagnosticList(DiagnosticList &&other) noexcept;
-    NH_API DiagnosticList &operator=(DiagnosticList &&other) noexcept;
-
     /// True when any item is Error or Fatal — the one check a caller must not
     /// skip, since a verb reports failure by returning an invalid handle and
     /// saying why here.
@@ -71,7 +70,11 @@ class DiagnosticList {
 
   private:
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    /// `shared_ptr<const>`, so every special member stays implicit: copying and
+    /// destroying one never needs `Impl` complete. A `unique_ptr` would need an
+    /// out-of-line destructor, which is six exported entry points and a deep
+    /// copy, for a type nobody can mutate.
+    std::shared_ptr<const Impl> impl_;
 
     friend struct api::Access;
 };

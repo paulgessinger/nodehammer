@@ -35,12 +35,12 @@ using api::Access;
 /// same list as the load's, which is what makes `build` free of a validation
 /// step of its own (#41 §8).
 [[nodiscard]] ConfigResult adopt(config::ConfigResult loaded) {
-    DiagnosticList diags = Access::wrap(loaded.diags);
+    std::vector<Diagnostic> diags = Access::items(loaded.diags);
     if (loaded.diags.hasErrors()) {
-        return ConfigResult{Config{}, std::move(diags)};
+        return ConfigResult{Config{}, Access::seal(std::move(diags))};
     }
-    Access::append(diags, config::ConfigValidator::validate(loaded.config));
-    return ConfigResult{Access::wrap(std::move(loaded.config)), std::move(diags)};
+    Access::appendTo(diags, config::ConfigValidator::validate(loaded.config));
+    return ConfigResult{Access::wrap(std::move(loaded.config)), Access::seal(std::move(diags))};
 }
 
 [[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {

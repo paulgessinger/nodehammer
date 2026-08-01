@@ -94,6 +94,23 @@ option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at bu
 option(NODEHAMMER_PIC_CHECK     "Link a probe shared module against the static library to prove every object is position-independent (consumed in cmake/PicProbe.cmake)" OFF)
 option(NODEHAMMER_BUILD_SHARED  "Also build and install the shared library + public headers + CMake package config" OFF)
 
+# DD4hep's importer *is* a TGeo importer with extra passes: it calls
+# `traverseTGeoManager`, and the importer registry registers `TGeoImporter`
+# whenever NH_WITH_TGEO is defined — which enabling DD4hep already does, since
+# that define is on the union of the two options. But the TU defining both of
+# those symbols was gated on NODEHAMMER_WITH_TGEO alone, so a DD4hep-only build
+# compiled two call sites for code nobody compiled and failed to link on both.
+#
+# Forcing the option on is the fix rather than widening that one source gate: it
+# keeps the define, the registry entry, the `.root` importer and the traversal
+# moving together, so there is one answer to "does this build have TGeo" instead
+# of two that can drift. Latent until now only because no configuration builds
+# DD4hep without TGeo — CI's LCG job sets both.
+if(NODEHAMMER_WITH_DD4HEP AND NOT NODEHAMMER_WITH_TGEO)
+    message(STATUS "nodehammer: NODEHAMMER_WITH_DD4HEP implies NODEHAMMER_WITH_TGEO; enabling it")
+    set(NODEHAMMER_WITH_TGEO ON CACHE BOOL "Enable TGeo/ROOT importer" FORCE)
+endif()
+
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
 
