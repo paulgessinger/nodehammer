@@ -71,9 +71,9 @@ SemanticResult applySelection(const SemanticScene &scene, const SceneConfig &con
         ir::semantic::Scene working = *input;
         diagnostics::DiagnosticList diags;
         runSelection(working, cfg, diags);
-        if (diags.hasErrors()) {
-            return SemanticResult{SemanticScene{}, Access::wrap(diags)};
-        }
+        // The scene comes back even when the diagnostics carry errors — a
+        // root-dropped rule leaves `prune` a no-op and says so (NH0401), and
+        // handing back nothing would hide the scene the caller still has.
         return SemanticResult{Access::wrap(std::move(working)), Access::wrap(diags)};
     } catch (const std::exception &e) {
         return SemanticResult{SemanticScene{},
@@ -109,9 +109,10 @@ RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
     try {
         const tessellation::TessellationPass pass{cfg};
         auto result = pass.lower(*input);
-        if (result.diags.hasErrors()) {
-            return RenderResult{RenderScene{}, Access::wrap(result.diags)};
-        }
+        // Errors and a usable scene genuinely coexist here: NH0500 reports an
+        // unknown shape and leaves that one node without a mesh binding, and the
+        // rest of the scene is still a scene. Returning it is what lets a caller
+        // decide whether to export anyway, exactly as the internal pass allows.
         return RenderResult{Access::wrap(std::move(result.scene)), Access::wrap(result.diags)};
     } catch (const std::exception &e) {
         return RenderResult{RenderScene{}, Access::error(codes::kErrTessBooleanFail, e.what())};
@@ -136,6 +137,11 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
 
         if (selectionApplies(cfg)) {
             runSelection(working, cfg, diags);
+            // The only place this function can return nothing: a failed
+            // selection has produced no render scene *yet*, so there is nothing
+            // to hand back but the reason. Stopping here rather than
+            // tessellating a scene the rules meant to prune is what `convert`
+            // does too.
             if (diags.hasErrors()) {
                 return RenderResult{RenderScene{}, Access::wrap(diags)};
             }
@@ -147,9 +153,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
         const tessellation::TessellationPass pass{cfg};
         auto result = pass.lower(working);
         diags.append(result.diags);
-        if (diags.hasErrors()) {
-            return RenderResult{RenderScene{}, Access::wrap(diags)};
-        }
+        // Tessellation errors come back *with* the scene — see `tessellate`.
         return RenderResult{Access::wrap(std::move(result.scene)), Access::wrap(diags)};
     } catch (const std::exception &e) {
         return RenderResult{RenderScene{}, Access::error(codes::kErrTessBooleanFail, e.what())};

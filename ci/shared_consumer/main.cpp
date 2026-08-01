@@ -107,9 +107,10 @@ int main() {
     }
 
     // And a failure that must arrive as a diagnostic rather than as an exception
-    // crossing the ABI.
+    // crossing the ABI. The handle still refers to a scene — an empty one —
+    // because the diagnostics, not `valid()`, are what report the failure.
     const auto missing = nodehammer::SemanticScene::read("/nodehammer/definitely/not/here.nhb");
-    if (!missing.diags.hasErrors() || missing.scene.valid()) {
+    if (!missing.diags.hasErrors() || missing.scene.nodeCount() != 0) {
         std::fprintf(stderr, "a failed read did not report an error\n");
         return 1;
     }

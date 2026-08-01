@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <detail/file_io.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 
@@ -81,6 +82,9 @@ TEST_CASE("DiagnosticList is an ordered range that survives being moved from", "
     REQUIRE(missing.diags.hasErrors());
     REQUIRE_FALSE(missing.diags.empty());
     REQUIRE(missing.diags.size() == 1);
+    // The importer's own diagnostic, verbatim — not one this layer synthesised.
+    // (`context` is empty precisely because the importer does not set one.)
+    REQUIRE(missing.diags.begin()->code == nh::codes::kErrImportFileNotFound);
 
     std::size_t seen = 0;
     for (const auto &d : missing.diags) {
@@ -114,6 +118,7 @@ TEST_CASE("Nothing throws across the boundary", "[api][handles]") {
 
     // A format this build does not have is a diagnostic, not a crash and not an
     // exception — the string-dispatched entry points cannot fail any earlier.
+    // No importer ran at all here, so there is genuinely no scene.
     const auto unknownFormat =
         nh::SemanticScene::read(dir / "x.nhb", nh::SemanticScene::ReadOptions{"not-a-format"});
     REQUIRE(unknownFormat.diags.hasErrors());
@@ -121,6 +126,15 @@ TEST_CASE("Nothing throws across the boundary", "[api][handles]") {
 
     const auto unknownExtension = nh::SemanticScene::read(dir / "x.wat");
     REQUIRE(unknownExtension.diags.hasErrors());
+
+    // An importer that *ran* and failed still hands back its scene: `valid()`
+    // reports that there is something to look at, and the diagnostics report
+    // that it is not worth much. Collapsing the two would throw away a partial
+    // import, which the importers are allowed to produce.
+    const auto missingFile = nh::SemanticScene::read(dir / "nope.nhb");
+    REQUIRE(missingFile.diags.hasErrors());
+    REQUIRE(missingFile.scene.valid());
+    REQUIRE(missingFile.scene.nodeCount() == 0);
 
     // Garbage bytes reach a FlatBuffers verifier that throws internally.
     const std::vector<std::byte> garbage(64, std::byte{0x7f});

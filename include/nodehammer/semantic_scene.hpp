@@ -34,10 +34,11 @@ struct SemanticResult;
 /// scene, so passing one around costs a pointer, and the verbs in build.hpp
 /// return new handles rather than mutating this one.
 ///
-/// A default-constructed handle refers to nothing (`valid() == false`), and so
-/// does the handle in the result of a failed read: across this whole API an
-/// error means no usable result, while warnings ride along with a valid one.
-/// Check `diags.hasErrors()`.
+/// **`diags` is what says whether to trust a result; `valid()` only says whether
+/// there is one to look at.** The two are independent on purpose. An importer
+/// may hand back a partly-imported geometry alongside errors, and this API does
+/// not decide on your behalf that such a scene is worth nothing — it is often
+/// exactly what you want to inspect. Always check `diags.hasErrors()`.
 class SemanticScene {
   public:
     /// Options for the read verbs. Nested because they appear in no signature
@@ -95,8 +96,12 @@ class SemanticScene {
     /// The scene as `.nhb` bytes. Empty when the handle is invalid.
     [[nodiscard]] NH_API std::vector<std::byte> toNhb() const;
 
-    /// True when this handle refers to a scene. False for a default-constructed
-    /// handle and for the handle returned by a failed read.
+    /// True when this handle refers to a scene at all. False only for a
+    /// default-constructed or moved-from handle, and for the few failures that
+    /// produce no scene whatsoever (an unresolvable format, say).
+    ///
+    /// Not a success check — a read that reported errors can still return a
+    /// scene, and does. Use `diags.hasErrors()` for that.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
     [[nodiscard]] NH_API std::size_t nodeCount() const noexcept;

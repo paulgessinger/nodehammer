@@ -26,18 +26,14 @@ using api::Access;
     return SemanticResult{SemanticScene{}, Access::error(code, message, context)};
 }
 
-/// Adopt an internal ImportResult under the API's one rule: an error means no
-/// usable result.
+/// Adopt an internal ImportResult, scene and all.
 ///
-/// The internal `ImportResult` deliberately allows partial success — a
-/// populated scene alongside errors — but nothing consumes it that way (the CLI
-/// stops on import errors), and letting it through would make `valid()` mean
-/// something different after a read than after a verb. Warnings still ride
-/// along with a valid scene, which is the case that actually occurs.
+/// Partial success is preserved on purpose: `ImportResult` documents that the
+/// scene may be populated even when `diags.hasErrors()`, and suppressing it here
+/// would decide on the caller's behalf that a partly-imported geometry is worth
+/// nothing. The diagnostics are what say whether to trust the result; `valid()`
+/// only says whether there is one to look at.
 [[nodiscard]] SemanticResult adopt(ir::ImportResult result) {
-    if (result.diags.hasErrors()) {
-        return SemanticResult{SemanticScene{}, Access::wrap(result.diags)};
-    }
     return SemanticResult{Access::wrap(std::move(result.scene)), Access::wrap(result.diags)};
 }
 

@@ -23,7 +23,8 @@ namespace nodehammer {
 struct RenderResult;
 
 /// A tessellated scene. Same handle contract as `SemanticScene`: read-only,
-/// cheap to copy, invalid when a read failed.
+/// cheap to copy, and carrying whatever the producing call made — check the
+/// accompanying diagnostics rather than `valid()` to learn whether to trust it.
 class RenderScene {
   public:
     struct WriteOptions {
@@ -66,7 +67,8 @@ class RenderScene {
     /// The scene as `.nhr` bytes. Empty when the handle is invalid.
     [[nodiscard]] NH_API std::vector<std::byte> toNhr() const;
 
-    /// True when this handle refers to a scene.
+    /// True when this handle refers to a scene at all — not a success check.
+    /// See `SemanticScene::valid`.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
     [[nodiscard]] NH_API std::size_t nodeCount() const noexcept;

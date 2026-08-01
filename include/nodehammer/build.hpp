@@ -13,11 +13,15 @@
 
 namespace nodehammer {
 
-// All four follow one contract: warnings ride along with a valid result, and an
-// *error* means the returned handle is invalid — the stage that failed produced
-// nothing usable, which is the same call the CLI makes when it stops rather
-// than exporting a scene it knows to be wrong. Always check
-// `result.diags.hasErrors()` before using the handle.
+// All four follow one contract, and it is the internal pipeline's: the result
+// carries whatever the stage produced *and* everything the stage had to say,
+// and the diagnostics are what tell you whether to use it. A tessellation that
+// meets an unknown shape reports NH0500 and returns a scene with that one node
+// unmeshed; discarding the rest would be this layer overruling a decision the
+// pass made deliberately. Always check `result.diags.hasErrors()` — whether the
+// handle is valid is a different question, and a weaker one.
+//
+// `build` carries the one unavoidable exception; see its declaration.
 
 /// Evaluate `[[selection_rules]]` and prune what they drop, garbage-collecting
 /// the logical volumes, shapes and materials that nothing references any more.
@@ -45,6 +49,11 @@ namespace nodehammer {
 ///
 /// Config *validation* is not part of this: it happens when the document is
 /// read and surfaces in that call's diagnostics (#41 §8).
+///
+/// The one place in this API where an error really does mean no result: a
+/// failed selection has produced no render scene *yet*, so there is nothing to
+/// return but the reason. Tessellation errors, by contrast, come back with the
+/// scene, as they do from `tessellate`.
 [[nodiscard]] NH_API RenderResult build(const SemanticScene &scene, const SceneConfig &config);
 
 } // namespace nodehammer
