@@ -804,6 +804,25 @@ if(NODEHAMMER_BUILD_SHARED)
         COMPONENT Development
     )
 
+    # Baked into the package config so a consumer's mismatched C runtime fails at
+    # configure time rather than as a segmentation fault on the first call that
+    # returns a container (see cmake/nodehammer-config.cmake.in). Derived from
+    # CMAKE_MSVC_RUNTIME_LIBRARY when it is set, and otherwise from the build
+    # type, which is what CMake's own default genex resolves to. Left empty off
+    # MSVC, where the check does not apply and the config skips it.
+    set(NODEHAMMER_MSVC_DEBUG_RUNTIME "")
+    if(MSVC)
+        if(CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "Debug")
+            set(NODEHAMMER_MSVC_DEBUG_RUNTIME ON)
+        elseif(CMAKE_MSVC_RUNTIME_LIBRARY)
+            set(NODEHAMMER_MSVC_DEBUG_RUNTIME OFF)
+        elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+            set(NODEHAMMER_MSVC_DEBUG_RUNTIME ON)
+        elseif(CMAKE_BUILD_TYPE)
+            set(NODEHAMMER_MSVC_DEBUG_RUNTIME OFF)
+        endif()
+    endif()
+
     include(CMakePackageConfigHelpers)
     configure_package_config_file(
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodehammer-config.cmake.in"

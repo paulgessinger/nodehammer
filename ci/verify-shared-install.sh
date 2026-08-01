@@ -67,7 +67,20 @@ rm -rf "$consumer_build"
 # CMAKE_PREFIX_PATH deliberately carries *only* nodehammer's install prefix: if
 # the package config needed a find_dependency() for zstd/flatbuffers/manifold,
 # this is where it would fail.
+#
+# The build type is the one configuration knob this has to pin, and only because
+# MSVC makes it a correctness requirement rather than a preference: the debug and
+# release C runtimes lay std:: containers out differently
+# (_ITERATOR_DEBUG_LEVEL adds a proxy pointer, so sizeof(std::string) is 40
+# against 32), and this API returns containers. Left unset, the Windows runner's
+# environment supplies CMAKE_BUILD_TYPE=Debug — CMake honours that env var — and
+# the consumer linked cleanly against the Release library, read an empty vector
+# out of formats(), and segfaulted freeing it. Testing a configuration the
+# platform does not support proves nothing; the package config now rejects it at
+# configure time, and this pins the supported one.
+consumer_build_type=${NH_CONSUMER_BUILD_TYPE:-Release}
 cmake -S ci/shared_consumer -B "$consumer_build" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$consumer_build_type" \
     -DCMAKE_PREFIX_PATH="$prefix"
 cmake --build "$consumer_build"
 
