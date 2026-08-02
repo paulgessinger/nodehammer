@@ -133,7 +133,7 @@ std::vector<std::byte> RenderScene::toNhr() const {
     }
 }
 
-bool RenderScene::valid() const noexcept { return api::sceneOf(*this) != nullptr; }
+bool RenderScene::valid() const noexcept { return impl_ != nullptr; }
 
 std::size_t RenderScene::nodeCount() const noexcept {
     const auto *scene = api::sceneOf(*this);

@@ -113,11 +113,21 @@ class SemanticScene {
     [[nodiscard]] NH_API std::size_t materialCount() const noexcept;
 
     /// Opaque state. `shared_ptr<const>` inside, value outside (#41 principle
-    /// 4); public because `Impl` being undefined here is what makes the handle
-    /// opaque, so privacy would add a friend declaration and protect nothing.
-    /// See `DiagnosticList::impl` for the full argument.
+    /// 4), private behind a constructor and a getter — see `DiagnosticList` for
+    /// the full argument.
     struct Impl;
-    std::shared_ptr<const Impl> impl;
+
+    SemanticScene() noexcept = default;
+
+    /// Adopt state the library built.
+    explicit SemanticScene(std::shared_ptr<const Impl> impl) noexcept;
+
+    /// The state behind a live handle. Throws `Error` when `valid()` is false,
+    /// since there is nothing to return a reference to.
+    [[nodiscard]] const Impl &impl() const;
+
+  private:
+    std::shared_ptr<const Impl> impl_;
 };
 
 /// Named after its type rather than a generic `scene`, so a structured binding

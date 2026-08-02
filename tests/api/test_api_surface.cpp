@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <api/handles.hpp>
 #include <detail/file_io.hpp>
 #include <diagnostic_codes.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
@@ -76,6 +77,27 @@ TEST_CASE("Handles are copyable values that share one immutable scene", "[api][h
     REQUIRE(emptyRender.meshCount() == 0);
     REQUIRE(emptyRender.materialCount() == 0);
     REQUIRE(emptyRender.triangleCount() == 0);
+}
+
+TEST_CASE("The state getter throws rather than binding a null reference", "[api][handles]") {
+    // The one part of the seam only an in-tree caller can ask about, hence the
+    // internal include: `impl()` is undecorated, so it is in no export table,
+    // and `Impl` is defined in no installed header. The library's own callers
+    // ask `valid()` first — this pins what happens to one that forgets, since
+    // that branch is otherwise unreached.
+    REQUIRE_THROWS_AS(nh::SemanticScene{}.impl(), nh::Error);
+    REQUIRE_THROWS_AS(nh::RenderScene{}.impl(), nh::Error);
+    REQUIRE_THROWS_AS(nh::Config{}.impl(), nh::Error);
+    REQUIRE_THROWS_AS(nh::SceneConfig{}.impl(), nh::Error);
+    REQUIRE_THROWS_AS(nh::OutputConfig{}.impl(), nh::Error);
+
+    // A slice of an empty `Config` is the one case where the two questions
+    // differ: it holds state, so it answers `impl()`, but the document behind
+    // that state is null — which is what `valid()` reports and what
+    // `api::configOf` turns into the built-in defaults.
+    const auto slice = nh::Config{}.scene();
+    REQUIRE_FALSE(slice.valid());
+    REQUIRE(slice.impl().cfg == nullptr);
 }
 
 TEST_CASE("DiagnosticList is an ordered range that survives being moved from", "[api][handles]") {

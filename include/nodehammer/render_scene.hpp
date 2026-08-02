@@ -75,9 +75,19 @@ class RenderScene {
     [[nodiscard]] NH_API std::size_t materialCount() const noexcept;
     [[nodiscard]] NH_API std::size_t triangleCount() const noexcept;
 
-    /// Opaque state — see `DiagnosticList::impl`.
+    /// Opaque state — see `DiagnosticList::Impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl;
+
+    RenderScene() noexcept = default;
+
+    /// Adopt state the library built.
+    explicit RenderScene(std::shared_ptr<const Impl> impl) noexcept;
+
+    /// The state behind a live handle. Throws `Error` when `valid()` is false.
+    [[nodiscard]] const Impl &impl() const;
+
+  private:
+    std::shared_ptr<const Impl> impl_;
 };
 
 struct RenderResult {

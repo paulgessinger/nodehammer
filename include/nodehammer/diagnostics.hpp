@@ -77,21 +77,38 @@ class DiagnosticList {
 
     /// Opaque state.
     ///
-    /// Public, and deliberately: what makes this handle opaque is that `Impl` is
-    /// never defined in an installed header, not the access specifier. A
-    /// consumer can copy or clear this pointer and nothing else — they cannot
-    /// construct an `Impl`, cannot dereference one, and clearing it only
-    /// produces the empty list a default-constructed one already is. Marking it
-    /// private would buy exactly that nothing, at the price of a friend
-    /// declaration on every handle so the library's own translation units could
-    /// reach past it.
+    /// What makes this handle opaque is that `Impl` is never *defined* in an
+    /// installed header — it exists only in `src/api/handles.hpp`, which is not
+    /// shipped. The member is private on top of that because the library needs
+    /// exactly two things from the state and neither of them is the member:
+    /// adopt a pointer the bridge just made, and read what one points at.
+    /// Publishing the pointer itself would also publish the power to replace or
+    /// clear it, and every handle here is immutable by contract.
+    ///
+    /// So: a constructor, and on the handles whose state is read from outside
+    /// the class, a getter returning `const Impl &`. Both are declared here and
+    /// *defined* in `handles.hpp`, which makes them undecorated and unexported —
+    /// a consumer can name them, but cannot form an argument for the one or use
+    /// the result of the other, and does not link either way. That is what
+    /// replaces the friend declaration privacy would otherwise need on every
+    /// handle.
     ///
     /// `shared_ptr<const>`, so every special member stays implicit: copying and
     /// destroying one never needs `Impl` complete. A `unique_ptr` would force an
     /// out-of-line destructor — six exported entry points and a deep copy, for a
     /// type nobody can mutate.
     struct Impl;
-    std::shared_ptr<const Impl> impl;
+
+    DiagnosticList() noexcept = default;
+
+    /// Adopt a list the library built. A null pointer is the empty list rather
+    /// than an error state, which is why this type has no getter to go with the
+    /// constructor: its own accessors read the member directly and all five
+    /// answer for null, and nothing outside the class reads a list's state.
+    explicit DiagnosticList(std::shared_ptr<const Impl> impl) noexcept;
+
+  private:
+    std::shared_ptr<const Impl> impl_;
 };
 
 /// The one exception this API throws.

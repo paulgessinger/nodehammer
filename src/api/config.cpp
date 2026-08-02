@@ -43,6 +43,19 @@ namespace {
     return ConfigResult{api::wrap(std::move(loaded.config)), api::wrap(std::move(diags))};
 }
 
+/// An aliasing pointer into a `Config`'s state: a slice shares ownership of the
+/// whole handle while pointing at just the AST, so slicing costs one control-
+/// block bump and no copy of the document.
+///
+/// Takes the state rather than the handle, since reaching a handle's state as a
+/// *pointer* — rather than through `impl()`, which hands out a reference — is
+/// something only a member can do, and both callers are members.
+[[nodiscard]] std::shared_ptr<const config::NHConfig>
+document(const std::shared_ptr<const Config::Impl> &state) {
+    return state ? std::shared_ptr<const config::NHConfig>{state, &state->cfg}
+                 : std::shared_ptr<const config::NHConfig>{};
+}
+
 [[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {
     std::string ext = path.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
@@ -107,23 +120,21 @@ std::span<const std::string_view> Config::formats() {
 }
 
 SceneConfig Config::scene() const {
-    SceneConfig slice;
-    slice.impl =
-        std::make_shared<const SceneConfig::Impl>(SceneConfig::Impl{api::documentOf(*this)});
-    return slice;
+    return SceneConfig{
+        std::make_shared<const SceneConfig::Impl>(SceneConfig::Impl{document(impl_)})};
 }
 
 OutputConfig Config::output() const {
-    OutputConfig slice;
-    slice.impl =
-        std::make_shared<const OutputConfig::Impl>(OutputConfig::Impl{api::documentOf(*this)});
-    return slice;
+    return OutputConfig{
+        std::make_shared<const OutputConfig::Impl>(OutputConfig::Impl{document(impl_)})};
 }
 
-bool Config::valid() const noexcept { return impl != nullptr; }
+bool Config::valid() const noexcept { return impl_ != nullptr; }
 
-bool SceneConfig::valid() const noexcept { return impl != nullptr && impl->cfg != nullptr; }
+// A slice of an empty `Config` holds state whose document is null, so both
+// halves have to be asked.
+bool SceneConfig::valid() const noexcept { return impl_ != nullptr && impl_->cfg != nullptr; }
 
-bool OutputConfig::valid() const noexcept { return impl != nullptr && impl->cfg != nullptr; }
+bool OutputConfig::valid() const noexcept { return impl_ != nullptr && impl_->cfg != nullptr; }
 
 } // namespace nodehammer

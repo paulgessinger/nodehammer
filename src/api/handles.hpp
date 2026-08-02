@@ -3,14 +3,18 @@
 // Where a public handle's `Impl` is defined, and the small helpers that build
 // and read one.
 //
-// There is no access mechanism here, because none is needed: each public class
-// stores its `shared_ptr<const Impl>` as a public member, and what makes the
-// handle opaque is that `Impl` is defined *here* — in a header that is never
-// installed — rather than in the class. So the bridge translation units simply
-// touch `handle.impl` like any other member, and these functions exist only to
-// keep the `make_shared` incantation and the null checks in one place.
+// This is also where the members that *mention* an `Impl` are defined — each
+// handle's adopting constructor and its `impl()` getter. They have to live in a
+// header that sees the definition, and this is the only one there is: it is
+// never installed, which is the whole reason the handles are opaque. The state
+// itself stays private in the public class, so the bridge's access to it is
+// those two members and nothing else — no friend declaration, and no way for a
+// caller to swap out state the handles promise never changes.
 //
-// Everything is inline and un-decorated, so none of it is exported.
+// Everything here is inline and un-decorated, so none of it is exported. A
+// consumer compiling against the installed headers sees the declarations and
+// finds no symbol behind them, which is correct: they have no `Impl` to pass in
+// and could do nothing with one handed back.
 
 #include <config/config_ast.hpp>
 #include <diagnostic_codes.hpp>
@@ -63,6 +67,65 @@ struct OutputConfig::Impl {
     std::shared_ptr<const config::NHConfig> cfg;
 };
 
+// ── The members that mention an Impl ─────────────────────────────────────────
+//
+// Each getter throws rather than dereferencing a null pointer, so "the handle
+// refers to nothing" has one answer per type instead of one per call site. The
+// verbs never reach it: `api::require` below asks first, because it can say
+// which verb was handed the empty handle and this cannot.
+
+inline DiagnosticList::DiagnosticList(std::shared_ptr<const Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+
+inline SemanticScene::SemanticScene(std::shared_ptr<const Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+
+inline const SemanticScene::Impl &SemanticScene::impl() const {
+    if (!impl_) {
+        throw Error{codes::kErrApiInvalidHandle, "the semantic scene handle refers to nothing"};
+    }
+    return *impl_;
+}
+
+inline RenderScene::RenderScene(std::shared_ptr<const Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+
+inline const RenderScene::Impl &RenderScene::impl() const {
+    if (!impl_) {
+        throw Error{codes::kErrApiInvalidHandle, "the render scene handle refers to nothing"};
+    }
+    return *impl_;
+}
+
+inline Config::Config(std::shared_ptr<const Impl> impl) noexcept : impl_(std::move(impl)) {}
+
+inline const Config::Impl &Config::impl() const {
+    if (!impl_) {
+        throw Error{codes::kErrApiInvalidHandle, "the config handle refers to nothing"};
+    }
+    return *impl_;
+}
+
+inline SceneConfig::SceneConfig(std::shared_ptr<const Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+
+inline const SceneConfig::Impl &SceneConfig::impl() const {
+    if (!impl_) {
+        throw Error{codes::kErrApiInvalidHandle, "the scene config slice refers to nothing"};
+    }
+    return *impl_;
+}
+
+inline OutputConfig::OutputConfig(std::shared_ptr<const Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+
+inline const OutputConfig::Impl &OutputConfig::impl() const {
+    if (!impl_) {
+        throw Error{codes::kErrApiInvalidHandle, "the output config slice refers to nothing"};
+    }
+    return *impl_;
+}
+
 namespace api {
 
 // ── Diagnostics ──────────────────────────────────────────────────────────────
@@ -73,13 +136,12 @@ namespace api {
 /// the internal header now uses the published struct — so this moves rather than
 /// converts, and an empty list allocates nothing.
 [[nodiscard]] inline DiagnosticList wrap(diagnostics::List &&src) {
-    DiagnosticList out;
     std::vector<Diagnostic> items = std::move(src).take();
-    if (!items.empty()) {
-        out.impl =
-            std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)});
+    if (items.empty()) {
+        return DiagnosticList{};
     }
-    return out;
+    return DiagnosticList{
+        std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)})};
 }
 
 /// For a list the caller still needs afterwards.
@@ -91,15 +153,13 @@ namespace api {
 // ── Scenes ───────────────────────────────────────────────────────────────────
 
 [[nodiscard]] inline SemanticScene wrap(ir::semantic::Scene scene) {
-    SemanticScene handle;
-    handle.impl =
-        std::make_shared<const SemanticScene::Impl>(SemanticScene::Impl{std::move(scene)});
-    return handle;
+    return SemanticScene{
+        std::make_shared<const SemanticScene::Impl>(SemanticScene::Impl{std::move(scene)})};
 }
 
 /// Null when the handle refers to nothing.
 [[nodiscard]] inline const ir::semantic::Scene *sceneOf(const SemanticScene &handle) noexcept {
-    return handle.impl ? &handle.impl->scene : nullptr;
+    return handle.valid() ? &handle.impl().scene : nullptr;
 }
 
 /// The scene behind a handle, or an `Error` naming the caller that was handed
@@ -107,29 +167,28 @@ namespace api {
 /// mistake with no result to report is what the exception channel is for.
 [[nodiscard]] inline const ir::semantic::Scene &require(const SemanticScene &handle,
                                                         std::string_view verb) {
-    if (!handle.impl) {
+    if (!handle.valid()) {
         throw Error{codes::kErrApiInvalidHandle, "the semantic scene handle refers to nothing",
                     verb};
     }
-    return handle.impl->scene;
+    return handle.impl().scene;
 }
 
 [[nodiscard]] inline RenderScene wrap(ir::render::Scene scene) {
-    RenderScene handle;
-    handle.impl = std::make_shared<const RenderScene::Impl>(RenderScene::Impl{std::move(scene)});
-    return handle;
+    return RenderScene{
+        std::make_shared<const RenderScene::Impl>(RenderScene::Impl{std::move(scene)})};
 }
 
 [[nodiscard]] inline const ir::render::Scene *sceneOf(const RenderScene &handle) noexcept {
-    return handle.impl ? &handle.impl->scene : nullptr;
+    return handle.valid() ? &handle.impl().scene : nullptr;
 }
 
 [[nodiscard]] inline const ir::render::Scene &require(const RenderScene &handle,
                                                       std::string_view verb) {
-    if (!handle.impl) {
+    if (!handle.valid()) {
         throw Error{codes::kErrApiInvalidHandle, "the render scene handle refers to nothing", verb};
     }
-    return handle.impl->scene;
+    return handle.impl().scene;
 }
 
 /// Rethrow whatever escaped an internal call as the one type that crosses this
@@ -185,13 +244,11 @@ namespace api {
 // ── Configs ──────────────────────────────────────────────────────────────────
 
 [[nodiscard]] inline Config wrap(config::NHConfig cfg) {
-    Config handle;
-    handle.impl = std::make_shared<const Config::Impl>(Config::Impl{std::move(cfg)});
-    return handle;
+    return Config{std::make_shared<const Config::Impl>(Config::Impl{std::move(cfg)})};
 }
 
 [[nodiscard]] inline const config::NHConfig *configOf(const Config &handle) noexcept {
-    return handle.impl ? &handle.impl->cfg : nullptr;
+    return handle.valid() ? &handle.impl().cfg : nullptr;
 }
 
 /// The document a slice was cut from. Unlike the scene handles this never
@@ -200,21 +257,12 @@ namespace api {
 /// already treats that as valid input.
 [[nodiscard]] inline const config::NHConfig &configOf(const SceneConfig &slice) noexcept {
     static const config::NHConfig kDefaults{};
-    return slice.impl && slice.impl->cfg ? *slice.impl->cfg : kDefaults;
+    return slice.valid() ? *slice.impl().cfg : kDefaults;
 }
 
 [[nodiscard]] inline const config::NHConfig &configOf(const OutputConfig &slice) noexcept {
     static const config::NHConfig kDefaults{};
-    return slice.impl && slice.impl->cfg ? *slice.impl->cfg : kDefaults;
-}
-
-/// An aliasing pointer into a `Config`'s Impl: a slice shares ownership of the
-/// whole handle while pointing at just the AST, so slicing costs one control-
-/// block bump and no copy of the document.
-[[nodiscard]] inline std::shared_ptr<const config::NHConfig>
-documentOf(const Config &handle) noexcept {
-    return handle.impl ? std::shared_ptr<const config::NHConfig>{handle.impl, &handle.impl->cfg}
-                       : std::shared_ptr<const config::NHConfig>{};
+    return slice.valid() ? *slice.impl().cfg : kDefaults;
 }
 
 } // namespace api

@@ -147,7 +147,7 @@ std::vector<std::byte> SemanticScene::toNhb() const {
     }
 }
 
-bool SemanticScene::valid() const noexcept { return api::sceneOf(*this) != nullptr; }
+bool SemanticScene::valid() const noexcept { return impl_ != nullptr; }
 
 std::size_t SemanticScene::nodeCount() const noexcept {
     const auto *scene = api::sceneOf(*this);

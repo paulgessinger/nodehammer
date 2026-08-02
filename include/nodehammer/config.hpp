@@ -34,9 +34,21 @@ class SceneConfig {
     /// provenance, not usability.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
-    /// Opaque state — see `DiagnosticList::impl`.
+    /// Opaque state — see `DiagnosticList::Impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl;
+
+    SceneConfig() noexcept = default;
+
+    /// Adopt state the library built.
+    explicit SceneConfig(std::shared_ptr<const Impl> impl) noexcept;
+
+    /// The state behind a slice that has one. Throws `Error` when there is no
+    /// state at all; note that a slice can hold state and still be `valid() ==
+    /// false`, since a slice of an empty `Config` is a slice of no document.
+    [[nodiscard]] const Impl &impl() const;
+
+  private:
+    std::shared_ptr<const Impl> impl_;
 };
 
 /// The half that changes only how a final scene is *serialized*: the
@@ -49,9 +61,18 @@ class OutputConfig {
     /// slice resolves to each format's built-in defaults.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
-    /// Opaque state — see `DiagnosticList::impl`.
+    /// Opaque state — see `SceneConfig::impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl;
+
+    OutputConfig() noexcept = default;
+
+    /// Adopt state the library built.
+    explicit OutputConfig(std::shared_ptr<const Impl> impl) noexcept;
+
+    [[nodiscard]] const Impl &impl() const;
+
+  private:
+    std::shared_ptr<const Impl> impl_;
 };
 
 /// A parsed TOML (or Lua) configuration.
@@ -103,9 +124,20 @@ class Config {
     /// True when this handle refers to a parsed document.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
-    /// Opaque state — see `DiagnosticList::impl`.
+    /// Opaque state — see `DiagnosticList::Impl`.
     struct Impl;
-    std::shared_ptr<const Impl> impl;
+
+    Config() noexcept = default;
+
+    /// Adopt state the library built.
+    explicit Config(std::shared_ptr<const Impl> impl) noexcept;
+
+    /// The document behind a live handle. Throws `Error` when `valid()` is
+    /// false.
+    [[nodiscard]] const Impl &impl() const;
+
+  private:
+    std::shared_ptr<const Impl> impl_;
 };
 
 struct ConfigResult {
