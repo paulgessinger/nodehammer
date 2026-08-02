@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <span>
 #include <string>
@@ -132,6 +133,22 @@ int main() {
     std::cout << "Config::checkString reported " << report.size()
               << " problem(s) without throwing\n";
 
+    // The file-taking face is a separate exported entry point from the string
+    // one, so calling only `checkString` would leave it annotated on trust.
+    const auto checkDir = std::filesystem::temp_directory_path() / "nh_shared_consumer_check";
+    std::error_code checkEc;
+    std::filesystem::create_directories(checkDir, checkEc);
+    const auto checkPath = checkDir / "config.toml";
+    {
+        std::ofstream out{checkPath};
+        out << "deduplicate_shapes = true\n";
+    }
+    if (!nodehammer::Config::check(checkPath).empty()) {
+        std::cerr << "Config::check reported something about a sound document\n";
+        return 1;
+    }
+    std::filesystem::remove_all(checkDir, checkEc);
+
     // The synthetic importer ignores its path, so the whole pipeline runs
     // without the consumer needing a geometry file to point at.
     const auto imported =
@@ -221,13 +238,31 @@ int main() {
         (void)nodehammer::SemanticScene::read("/nodehammer/definitely/not/here.nhb");
     } catch (const nodehammer::Error &e) {
         threw = true;
-        std::cout << "caught Error across the boundary: [" << e.code() << "] " << e.what() << '\n';
+        // Every accessor, not just the two that make a nice message: on Windows
+        // there is no export table to inspect, so calling one is the only thing
+        // that proves it carries its NH_API.
+        const nodehammer::Diagnostic asDiagnostic = e.diagnostic();
+        std::cout << "caught Error across the boundary: [" << e.code() << "] " << e.what()
+                  << " (context '" << e.context() << "', severity "
+                  << static_cast<int>(asDiagnostic.severity) << ", " << e.observed().size()
+                  << " observed)\n";
     } catch (const std::exception &e) {
         std::cerr << "caught the wrong type across the boundary: " << e.what() << '\n';
         return 1;
     }
     if (!threw) {
         std::cerr << "a failed read did not throw\n";
+        return 1;
+    }
+
+    // Both constructors: a consumer that wraps this library may want to raise
+    // the same type, and the four-argument one carries a list along.
+    nodehammer::DiagnosticList carried;
+    carried.add({nodehammer::Diagnostic::Severity::Warning, "NH0000", "constructed by a consumer"});
+    const nodehammer::Error plain{"NH0000", "constructed by a consumer"};
+    const nodehammer::Error withList{"NH0000", "constructed by a consumer", "context", carried};
+    if (plain.observed().size() != 0 || withList.observed().size() != carried.size()) {
+        std::cerr << "Error did not carry its observations across the boundary\n";
         return 1;
     }
 
