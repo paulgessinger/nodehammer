@@ -199,6 +199,15 @@ int main() {
         return 1;
     }
 
+    // The bytes-taking read, which is a separate exported symbol from the
+    // path-taking one — an overload set is only as covered as its least-called
+    // member.
+    const auto fromBytes = nodehammer::SemanticScene::read(std::span<const std::byte>{nhb});
+    if (fromBytes.scene.nodeCount() != imported.scene.nodeCount()) {
+        std::cerr << "SemanticScene::read(bytes) disagreed with the path overload\n";
+        return 1;
+    }
+
     // Counts: reached rather than checked, beyond the one invariant that a
     // scene with triangles has meshes and materials to bind them.
     std::cout << "semantic: " << imported.scene.nodeCount() << " nodes, "
@@ -225,6 +234,16 @@ int main() {
     rendered.scene.write(renderOut, config.config.output());
     if (!std::filesystem::exists(semanticOut) || !std::filesystem::exists(renderOut)) {
         std::cerr << "a write returned without producing a file\n";
+        return 1;
+    }
+
+    // And the render IR's own format, so `RenderScene::read`'s path overload is
+    // reached as well as its span one.
+    const auto nhrOut = outDir / "scene.nhr";
+    rendered.scene.write(nhrOut);
+    const auto fromFile = nodehammer::RenderScene::read(nhrOut);
+    if (fromFile.triangleCount() != rendered.scene.triangleCount()) {
+        std::cerr << "RenderScene::read(path) disagreed with the scene it was written from\n";
         return 1;
     }
     std::filesystem::remove_all(outDir, ec);
