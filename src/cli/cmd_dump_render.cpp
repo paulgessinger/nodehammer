@@ -41,8 +41,6 @@ void registerCmdDumpRender(CLI::App &app) {
             } else if (*inputOpt) {
                 auto [importResult, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
                 nodehammer::cli::printDiags(importResult.diags);
-                if (importResult.diags.hasErrors())
-                    return;
                 semScene = std::move(importResult.scene);
             } else {
                 std::println(stderr,

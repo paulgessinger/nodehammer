@@ -71,7 +71,7 @@ contains `Fatal`* — that a test can check.
 ## Codes
 
 A code names *what went wrong*. It does not name a channel, because the channel
-belongs to the call:
+belongs to the **call**:
 
 - `kFatal…` — failures **no** call can observe non-fatally. Always thrown, never
   in a list. A caller matching one against a diagnostic is writing dead code.
@@ -106,7 +106,9 @@ Consequences:
   rethrown as `Error` with a code. Every `catch` names what it caught; there are
   no bare `catch (...)`.
 
-### The collector exception that proves the rule
+### Two carve-outs, both named
+
+#### The collector
 
 A parser that promises *all the problems in a document* cannot fail on a bad
 document — collecting is its job. So `ConfigLoader` keeps an internal
@@ -121,6 +123,23 @@ This is not a hole in the doctrine, it is the doctrine: two promises, two
 channels, one implementation. `nodehammer validate-config` needs the second, and
 without it the public API could not express a command the CLI already ships.
 
+`Config::check(path)` and `Config::checkString(toml, baseDir)` are the public
+faces. `checkString` is named rather than overloaded because a string literal
+converts to both `path` and `string_view` — `check("cfg.toml")` would compile
+and check a *filename* as though it were a document.
+
+#### The asynchronous boundary
+
+A build driven from a frame loop or delivered over `postMessage` has no caller
+to unwind to: by the time it fails, the stack that asked for it is gone. There
+the fatal channel is *materialised* rather than abandoned —
+`SceneBuildResult::failure` is an `std::optional<Error>` holding what would have
+been thrown, and `scene` is non-null exactly when it is empty.
+
+The two channels stay as distinct here as anywhere else. What matters is that
+the failure does not get folded into `diags`, because then "the build could not
+run" and "the build has a hole in it" would again be one bit apart.
+
 ## Policies the library does not have
 
 **Strictness.** "Treat warnings as errors" is a decision about a returned list.
@@ -131,7 +150,9 @@ fail.
 **Thresholds.** One unmeshable node and ten thousand are both `Error`-severity
 diagnostics with a scene attached. Where "degraded" becomes "useless" is the
 caller's judgement; a library that decides "mostly failed means failed" invents
-a policy it cannot defend.
+a policy it cannot defend. `BuildPipeline` therefore hands back a partially
+tessellated scene and lets the viewer decide whether to show it, while `convert`
+declines to write one — the same facts, two callers, two judgements.
 
 ## How every failure adjudicates
 
@@ -170,7 +191,9 @@ contract. Once fatal failures throw:
 
 ## Invariants
 
-1. No returned `DiagnosticList` contains `Fatal`.
+1. No returned `DiagnosticList` contains `Fatal` — structurally, because
+   `diagnostics::List` has no `fatal()` method to put one there. The only
+   producer is `Error::diagnostic()`.
 2. Every entry point returns a valid result or throws. There are no invalid
    handles, and no result type has a "did it work" field.
 3. `Error::diagnostic()` yields severity `Fatal`.
@@ -178,3 +201,5 @@ contract. Once fatal failures throw:
    nothing by the failure being fatal.
 5. `kFatal…` codes never appear in a `DiagnosticList`.
 6. Every `catch` names its code; no bare `catch (...)` anywhere in the library.
+7. `hasErrors()` means the same thing at both layers: *is the result partial?*
+   It is never a test for whether a call worked.
