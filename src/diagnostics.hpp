@@ -1,52 +1,29 @@
 #pragma once
 
-// The internal diagnostics list, over the *public* Diagnostic type.
+// What is left of the internal diagnostics layer once the list is a value.
 //
-// `Diagnostic` is not redeclared here. After step 1 deleted the `to_json`
-// helpers the internal struct was field-for-field identical to the published
-// one, so the API layer was converting a struct into a byte-identical struct and
-// allocating three strings per item to do it. Dissolving the name rather than
-// renaming around it is the move #41 §1 already makes for `ConfigResult`, and it
-// means the connector amalgamation carries one definition instead of two.
+// There used to be two list types: a mutable accumulator in here and an opaque
+// handle in the public header, with a conversion between them. The split was
+// justified by the opacity — "it hands out its `std::vector` by reference; the
+// public one is opaque and immutable, and that coupling is exactly what it
+// exists to avoid" — so publishing the list dissolved the reason for it. One
+// type accumulates and is handed out.
+//
+// `diagnostics::List` remains as an alias while the tree still spells it that
+// way; the next commit finishes the rename and this goes.
 //
 // An internal header including a public one is the right direction: the public
 // vocabulary is the more fundamental of the two, and nothing here is reachable
 // from an installed header.
-//
-// What stays two types is the *list*, which is why this one is `List` rather
-// than `diagnostics::List`. It is a mutable accumulator that hands out its
-// `std::vector` by reference; the public one is opaque and immutable, and that
-// coupling is exactly what it exists to avoid. Sharing a name with the public
-// type was harmless while internal code could not see it — including its header
-// made the two collide, which is the resolution #41's open item anticipated.
 
 #include <nodehammer/diagnostics.hpp>
 
-#include <cstddef>
-#include <memory>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <vector>
 
-namespace nodehammer {
+namespace nodehammer::diagnostics {
 
-/// The public list's state.
-///
-/// Defined here rather than in the API seam because producing one stopped being
-/// a boundary operation: under docs/error-model.md every stage that fails
-/// fatally hands its observations to `Error`, and stages are everywhere.
-struct DiagnosticList::Impl {
-    std::vector<Diagnostic> items;
-};
-
-/// Adopt a list the library built. Defined here for the same reason the state
-/// is: this is where lists are made.
-inline DiagnosticList::DiagnosticList(std::shared_ptr<const Impl> impl) noexcept
-    : impl_(std::move(impl)) {}
-
-namespace diagnostics {
-
+using List = DiagnosticList;
 using Severity = Diagnostic::Severity;
 
 [[nodiscard]] constexpr std::string_view severityName(Severity s) noexcept {
@@ -65,78 +42,6 @@ using Severity = Diagnostic::Severity;
     return "unknown";
 }
 
-class List {
-  public:
-    void add(Diagnostic d) { items_.push_back(std::move(d)); }
-
-    // std::string_view overloads accept literals, constexpr constants, and std::string alike.
-    void debug(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({Severity::Debug, std::string{code}, std::string{message}, std::string{context}});
-    }
-    void info(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({Severity::Info, std::string{code}, std::string{message}, std::string{context}});
-    }
-    void warn(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({Severity::Warning, std::string{code}, std::string{message}, std::string{context}});
-    }
-    void error(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({Severity::Error, std::string{code}, std::string{message}, std::string{context}});
-    }
-
-    // No `fatal`. A stage that cannot deliver throws, and `Fatal` is what
-    // `Error::diagnostic()` stamps on the failure when a caller wants both
-    // channels in one report — so a list that could contain one would be a list
-    // claiming a result exists and does not (docs/error-model.md).
-
-    void append(const List &other) {
-        items_.reserve(items_.size() + other.items_.size());
-        for (const auto &d : other.items_) {
-            items_.push_back(d);
-        }
-    }
-
-    [[nodiscard]] bool hasErrors() const noexcept {
-        for (const auto &d : items_) {
-            if (d.severity >= Severity::Error) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    [[nodiscard]] const std::vector<Diagnostic> &items() const noexcept { return items_; }
-    [[nodiscard]] bool empty() const noexcept { return items_.empty(); }
-    [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
-
-    /// Hand the items over wholesale. Now that both layers share `Diagnostic`,
-    /// this is what lets the public list be produced by a move rather than by
-    /// copying every string — see `api::asHandle`.
-    [[nodiscard]] std::vector<Diagnostic> take() && noexcept { return std::move(items_); }
-
-  private:
-    std::vector<Diagnostic> items_;
-};
-
-/// Hand this list's items to the public one.
-///
-/// Both sides hold `std::vector<Diagnostic>` — the same type, since this header
-/// uses the published struct — so this moves rather than converts, and an empty
-/// list allocates nothing.
-[[nodiscard]] inline DiagnosticList asHandle(List &&src) {
-    std::vector<Diagnostic> items = std::move(src).take();
-    if (items.empty()) {
-        return DiagnosticList{};
-    }
-    return DiagnosticList{
-        std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)})};
-}
-
-/// For a list the caller still needs afterwards.
-[[nodiscard]] inline DiagnosticList asHandle(const List &src) {
-    List copy = src;
-    return asHandle(std::move(copy));
-}
-
 /// Give up, when a collecting stage collected something fatal to what it
 /// promised.
 ///
@@ -150,10 +55,10 @@ class List {
 /// undefined material references should say so once rather than three calls in a
 /// row. The whole list rides along on the exception, so nothing observed before
 /// the failure is lost by it being fatal.
-inline void throwIfErrors(const List &diags, std::string_view context) {
+inline void throwIfErrors(const DiagnosticList &diags, std::string_view context) {
     const Diagnostic *first = nullptr;
     std::string message;
-    for (const auto &d : diags.items()) {
+    for (const auto &d : diags) {
         if (d.severity < Severity::Error) {
             continue;
         }
@@ -176,9 +81,7 @@ inline void throwIfErrors(const List &diags, std::string_view context) {
     if (first == nullptr) {
         return;
     }
-    throw Error{first->code, message, first->context.empty() ? context : first->context,
-                asHandle(diags)};
+    throw Error{first->code, message, first->context.empty() ? context : first->context, diags};
 }
 
-} // namespace diagnostics
-} // namespace nodehammer
+} // namespace nodehammer::diagnostics

@@ -79,15 +79,14 @@ namespace {
     diagnostics::List diags = std::move(collected.diags);
     diags.append(config::ConfigValidator::validate(collected.config));
     diagnostics::throwIfErrors(diags, context);
-    return ConfigResult{api::asHandle(std::move(collected.config)),
-                        diagnostics::asHandle(std::move(diags))};
+    return ConfigResult{api::asHandle(std::move(collected.config)), std::move(diags)};
 }
 
 /// The same work, under the other promise: hand back everything observed.
 [[nodiscard]] DiagnosticList report(config::ConfigResult collected) {
     diagnostics::List diags = std::move(collected.diags);
     diags.append(config::ConfigValidator::validate(collected.config));
-    return diagnostics::asHandle(std::move(diags));
+    return diags;
 }
 
 /// Cut a slice from a document. The pointer aliases the handle's state, so a

@@ -81,8 +81,7 @@ struct Strictness {
         nodehammer::diagnostics::throwIfErrors(diags, stage);
         if (warningsAreFatal && !diags.empty()) {
             throw nodehammer::Error{nodehammer::codes::kErrConfigParse,
-                                    "warnings are errors under --strict", stage,
-                                    nodehammer::diagnostics::asHandle(diags)};
+                                    "warnings are errors under --strict", stage, diags};
         }
     }
 };

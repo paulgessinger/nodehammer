@@ -9,6 +9,7 @@
 
 #include <format>
 #include <print>
+#include <span>
 #include <string>
 #include <utility>
 
@@ -35,14 +36,10 @@ inline void printDiag(const Diagnostic &d) {
     errCon.println(stderr, "[{}][bold]{} {}[/]  {}", color, label, d.code, d.message);
 }
 
-inline void printDiags(const diagnostics::List &diags) {
-    for (const auto &d : diags.items()) {
-        printDiag(d);
-    }
-}
-
-/// The public list, which is what an `Error` carries.
-inline void printDiags(const DiagnosticList &diags) {
+/// One overload, taking a borrowed range: a `DiagnosticList` and the span an
+/// `Error` carries are the same sequence, and used to need two functions only
+/// because they were two types.
+inline void printDiags(std::span<const Diagnostic> diags) {
     for (const auto &d : diags) {
         printDiag(d);
     }
