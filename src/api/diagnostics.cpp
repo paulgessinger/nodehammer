@@ -36,4 +36,17 @@ const Diagnostic *DiagnosticList::end() const noexcept {
     return impl ? impl->items.data() + impl->items.size() : nullptr;
 }
 
+// ── Error ────────────────────────────────────────────────────────────────────
+
+Error::Error(std::string_view code, std::string_view message, std::string_view context)
+    : std::runtime_error(std::string{message}), code_(code), context_(context) {}
+
+const std::string &Error::code() const noexcept { return code_; }
+
+const std::string &Error::context() const noexcept { return context_; }
+
+Diagnostic Error::diagnostic() const {
+    return Diagnostic{Diagnostic::Severity::Error, code_, what(), context_};
+}
+
 } // namespace nodehammer

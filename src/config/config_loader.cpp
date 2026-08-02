@@ -78,7 +78,7 @@ void mergeToml(toml::table &dst, const toml::table &src) {
 ///     which would not terminate, so it is an error.
 void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
                               const IncludeFetcher &fetcher, std::set<std::string> &merged,
-                              std::set<std::string> onPath, diagnostics::DiagnosticList &diags) {
+                              std::set<std::string> onPath, diagnostics::List &diags) {
     const auto *includeNode = tbl.get("include");
     if (includeNode == nullptr) {
         return;
@@ -151,7 +151,7 @@ void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
 
 template <typename Range>
 void warnUnknownKeysImpl(const toml::table &tbl, const Range &known, std::string_view context,
-                         diagnostics::DiagnosticList &diags) {
+                         diagnostics::List &diags) {
     for (const auto &[key, _] : tbl) {
         bool found = false;
         for (auto k : known) {
@@ -171,25 +171,23 @@ void warnUnknownKeysImpl(const toml::table &tbl, const Range &known, std::string
 // converts to this span). This is the path the section parsers use so their
 // valid-key set stays identical to the writer's and the Lua front-end's.
 void warnUnknownKeys(const toml::table &tbl, std::span<const std::string_view> known,
-                     std::string_view context, diagnostics::DiagnosticList &diags) {
+                     std::string_view context, diagnostics::List &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
 }
 
 // Overload for the export section, whose valid keys depend on the format and are
 // assembled into a vector at parse time.
 void warnUnknownKeys(const toml::table &tbl, const std::vector<std::string_view> &known,
-                     std::string_view context, diagnostics::DiagnosticList &diags) {
+                     std::string_view context, diagnostics::List &diags) {
     warnUnknownKeysImpl(tbl, known, context, diags);
 }
 
 // ── Predicate parser (recursive) ─────────────────────────────────────────────
 
-std::optional<PredicateExpr> parsePredicate(const toml::table &tbl,
-                                            diagnostics::DiagnosticList &diags,
+std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, diagnostics::List &diags,
                                             std::string_view context);
 
-std::optional<PredicateExpr> parsePredicate(const toml::table &tbl,
-                                            diagnostics::DiagnosticList &diags,
+std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, diagnostics::List &diags,
                                             std::string_view context) {
     auto typeOpt = tbl["type"].value<std::string>();
     if (!typeOpt) {
@@ -296,7 +294,7 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl,
 // ── Section parsers ───────────────────────────────────────────────────────────
 
 /// [materials.<name>] — the table key is the material name.
-void parseMaterials(const toml::table &root, NHConfig &cfg, diagnostics::DiagnosticList &diags) {
+void parseMaterials(const toml::table &root, NHConfig &cfg, diagnostics::List &diags) {
     const auto *matsTable = root["materials"].as_table();
     if (matsTable == nullptr) {
         return;
@@ -389,8 +387,7 @@ void parseMaterials(const toml::table &root, NHConfig &cfg, diagnostics::Diagnos
 }
 
 /// [[selection_rules]] — action determined by presence of keep_if or drop_if key.
-void parseSelectionRules(const toml::table &root, NHConfig &cfg,
-                         diagnostics::DiagnosticList &diags) {
+void parseSelectionRules(const toml::table &root, NHConfig &cfg, diagnostics::List &diags) {
     const auto *arr = root["selection_rules"].as_array();
     if (arr == nullptr) {
         return;
@@ -514,7 +511,7 @@ nlohmann::json tomlToJson(const toml::node &node) {
 ExtrasMap parseExtras(const toml::table &tbl) { return tomlToJson(tbl); }
 
 /// [[rules]] — unified rule with optional material, tessellation, and extras.
-void parseRules(const toml::table &root, NHConfig &cfg, diagnostics::DiagnosticList &diags) {
+void parseRules(const toml::table &root, NHConfig &cfg, diagnostics::List &diags) {
     const auto *arr = root["rules"].as_array();
     if (arr == nullptr) {
         return;
@@ -618,7 +615,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, diagnostics::DiagnosticL
 // ── Top-level parse driver ────────────────────────────────────────────────────
 
 ConfigResult parseTable(const toml::table &tbl) {
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
     NHConfig cfg;
 
     warnUnknownKeys(tbl, keys::kTopLevelKeys, "<top-level>", diags);
@@ -810,7 +807,7 @@ IncludeFetcher filesystemFetcher() {
 // ── ConfigLoader ──────────────────────────────────────────────────────────────
 
 ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 
     // Read the root file and stage its bytes for `parseAndMerge`. The
     // canonical path doubles as the root key — using canonical form
@@ -863,7 +860,7 @@ std::string ConfigLoader::resolveIncludeKey(std::string_view parent_key, std::st
 
 ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
                                          std::string_view root_key, IncludeFetcher fetcher) {
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
     try {
         auto tbl = toml::parse(
             std::string_view{reinterpret_cast<const char *>(root_bytes.data()), root_bytes.size()},

@@ -149,7 +149,7 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
             // the first one for the persistent status-bar message.
             error_ = "scene build failed";
             for (const auto &d : built.diags.items()) {
-                if (d.severity >= diagnostics::DiagnosticSeverity::Error) {
+                if (d.severity >= diagnostics::Severity::Error) {
                     error_ = d.message;
                     break;
                 }

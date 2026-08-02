@@ -13,6 +13,7 @@
 // Everything is inline and un-decorated, so none of it is exported.
 
 #include <config/config_ast.hpp>
+#include <diagnostic_codes.hpp>
 #include <diagnostics.hpp>
 #include <ir/render.hpp>
 #include <ir/semantic.hpp>
@@ -23,6 +24,7 @@
 #include <nodehammer/render_scene.hpp>
 #include <nodehammer/semantic_scene.hpp>
 
+#include <exception>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -65,55 +67,25 @@ namespace api {
 
 // ── Diagnostics ──────────────────────────────────────────────────────────────
 
-// The severity enums are two spellings of one ladder, and the conversion is a
-// cast rather than a switch only because these asserts hold. If the internal
-// enum ever grows a level, this is where it fails.
-static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Debug) ==
-              static_cast<int>(Diagnostic::Severity::Debug));
-static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Info) ==
-              static_cast<int>(Diagnostic::Severity::Info));
-static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Warning) ==
-              static_cast<int>(Diagnostic::Severity::Warning));
-static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Error) ==
-              static_cast<int>(Diagnostic::Severity::Error));
-static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Fatal) ==
-              static_cast<int>(Diagnostic::Severity::Fatal));
-
-[[nodiscard]] inline Diagnostic::Severity severity(diagnostics::DiagnosticSeverity s) noexcept {
-    return static_cast<Diagnostic::Severity>(
-        static_cast<std::underlying_type_t<diagnostics::DiagnosticSeverity>>(s));
-}
-
-/// The one conversion from internal diagnostics to public ones.
+/// Hand the internal list's items to the public one.
 ///
-/// There is no builder here on purpose. A public `DiagnosticList` is immutable,
-/// so anything that accumulates has to accumulate somewhere else — and the
-/// internal `diagnostics::DiagnosticList` already *is* that somewhere, with
-/// `append` and the severity helpers. A second accumulator alongside it would be
-/// two ways to say the same thing.
-///
-/// An empty list allocates nothing, which is what every successful call returns.
-[[nodiscard]] inline DiagnosticList wrap(const diagnostics::DiagnosticList &src) {
+/// Both sides hold `std::vector<nodehammer::Diagnostic>` — the same type, since
+/// the internal header now uses the published struct — so this moves rather than
+/// converts, and an empty list allocates nothing.
+[[nodiscard]] inline DiagnosticList wrap(diagnostics::List &&src) {
     DiagnosticList out;
-    if (src.items().empty()) {
-        return out;
+    std::vector<Diagnostic> items = std::move(src).take();
+    if (!items.empty()) {
+        out.impl =
+            std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)});
     }
-    std::vector<Diagnostic> items;
-    items.reserve(src.items().size());
-    for (const auto &d : src.items()) {
-        items.push_back(Diagnostic{severity(d.severity), d.code, d.message, d.context});
-    }
-    out.impl = std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)});
     return out;
 }
 
-/// The single-error list a bridge failure returns — built through the internal
-/// list, so the one conversion above stays the only one.
-[[nodiscard]] inline DiagnosticList error(std::string_view code, std::string_view message,
-                                          std::string_view context = {}) {
-    diagnostics::DiagnosticList one;
-    one.error(code, message, context);
-    return wrap(one);
+/// For a list the caller still needs afterwards.
+[[nodiscard]] inline DiagnosticList wrap(const diagnostics::List &src) {
+    diagnostics::List copy = src;
+    return wrap(std::move(copy));
 }
 
 // ── Scenes ───────────────────────────────────────────────────────────────────
@@ -125,10 +97,21 @@ static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Fatal) ==
     return handle;
 }
 
-/// Null when the handle refers to nothing. Every verb checks this first — an
-/// invalid handle is a diagnostic, never a crash.
+/// Null when the handle refers to nothing.
 [[nodiscard]] inline const ir::semantic::Scene *sceneOf(const SemanticScene &handle) noexcept {
     return handle.impl ? &handle.impl->scene : nullptr;
+}
+
+/// The scene behind a handle, or an `Error` naming the caller that was handed
+/// nothing. Every verb starts here: an empty handle is a caller mistake, and a
+/// mistake with no result to report is what the exception channel is for.
+[[nodiscard]] inline const ir::semantic::Scene &require(const SemanticScene &handle,
+                                                        std::string_view verb) {
+    if (!handle.impl) {
+        throw Error{codes::kErrApiInvalidHandle, "the semantic scene handle refers to nothing",
+                    verb};
+    }
+    return handle.impl->scene;
 }
 
 [[nodiscard]] inline RenderScene wrap(ir::render::Scene scene) {
@@ -139,6 +122,64 @@ static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Fatal) ==
 
 [[nodiscard]] inline const ir::render::Scene *sceneOf(const RenderScene &handle) noexcept {
     return handle.impl ? &handle.impl->scene : nullptr;
+}
+
+[[nodiscard]] inline const ir::render::Scene &require(const RenderScene &handle,
+                                                      std::string_view verb) {
+    if (!handle.impl) {
+        throw Error{codes::kErrApiInvalidHandle, "the render scene handle refers to nothing", verb};
+    }
+    return handle.impl->scene;
+}
+
+/// Rethrow whatever escaped an internal call as the one type that crosses this
+/// API. Internal code throws `std::runtime_error` from the codecs and the file
+/// helpers; none of those types is part of the contract.
+[[noreturn]] inline void rethrow(const std::exception &e, std::string_view code,
+                                 std::string_view context = {}) {
+    throw Error{code, e.what(), context};
+}
+
+/// Turn reported errors into the exception.
+///
+/// Some internal entry points report an unreadable input as an error
+/// *diagnostic* rather than by throwing — every importer does, and so does the
+/// config loader. At the boundary those are the same thing as a thrown failure:
+/// input the call could not act on, with nothing usable produced. This is where
+/// the two internal spellings become one external one.
+///
+/// The code and context come from the first error, since that is what a caller
+/// would branch on; the message carries all of them, because a config with three
+/// undefined material references should say so once rather than three calls in a
+/// row.
+[[noreturn]] inline void throwReported(const diagnostics::List &diags, std::string_view fallback,
+                                       std::string_view context) {
+    const Diagnostic *first = nullptr;
+    std::string message;
+    for (const auto &d : diags.items()) {
+        if (d.severity < Diagnostic::Severity::Error) {
+            continue;
+        }
+        if (first == nullptr) {
+            first = &d;
+            message = d.message;
+            continue;
+        }
+        // Only once there is more than one does the message have to say which
+        // code each part belongs to; a single failure already carries its code
+        // on the exception.
+        if (message == first->message) {
+            message = first->code + ": " + first->message;
+        }
+        message += "; ";
+        message += d.code;
+        message += ": ";
+        message += d.message;
+    }
+    if (first == nullptr) {
+        throw Error{fallback, "the operation failed without saying why", context};
+    }
+    throw Error{first->code, message, first->context.empty() ? context : first->context};
 }
 
 // ── Configs ──────────────────────────────────────────────────────────────────
@@ -174,18 +215,6 @@ static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Fatal) ==
 documentOf(const Config &handle) noexcept {
     return handle.impl ? std::shared_ptr<const config::NHConfig>{handle.impl, &handle.impl->cfg}
                        : std::shared_ptr<const config::NHConfig>{};
-}
-
-[[nodiscard]] inline SceneConfig sceneSlice(std::shared_ptr<const config::NHConfig> cfg) {
-    SceneConfig slice;
-    slice.impl = std::make_shared<const SceneConfig::Impl>(SceneConfig::Impl{std::move(cfg)});
-    return slice;
-}
-
-[[nodiscard]] inline OutputConfig outputSlice(std::shared_ptr<const config::NHConfig> cfg) {
-    OutputConfig slice;
-    slice.impl = std::make_shared<const OutputConfig::Impl>(OutputConfig::Impl{std::move(cfg)});
-    return slice;
 }
 
 } // namespace api

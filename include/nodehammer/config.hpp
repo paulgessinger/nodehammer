@@ -11,6 +11,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -65,26 +66,32 @@ class OutputConfig {
 class Config {
   public:
     /// Read a config file. `.lua` dispatches to the scripting front end (only
-    /// in a build that has it — otherwise a diagnostic, since the format is not
+    /// in a build that has it — otherwise it throws, since the format is not
     /// known until the extension is looked at); anything else is TOML.
     ///
     /// `include = [...]` resolves against the file's own directory, and nested
     /// includes against theirs.
+    ///
+    /// Throws `Error` if the document does not load or does not validate: unlike
+    /// a scene there is no half-built config worth returning, so the loader's
+    /// errors become the exception and only its warnings ride back in `diags`.
     [[nodiscard]] NH_API static ConfigResult read(const std::filesystem::path &path);
 
     /// Parse TOML held in memory. `include = [...]` resolves against `baseDir`.
     ///
     /// An empty `baseDir` means the content has no location, so its includes
-    /// resolve against nothing and are reported as not found. It does **not**
-    /// mean the process's working directory: deciding where "here" is belongs
-    /// to the application, and a caller that wants the working directory says
-    /// so by passing it (#41 §11, amended after step 5b).
+    /// resolve against nothing — and an unresolvable include is a load error,
+    /// so this throws. It does **not** mean the process's working directory:
+    /// deciding where "here" is belongs to the application, and a caller that
+    /// wants the working directory says so by passing it (#41 §11, amended
+    /// after step 5b).
     [[nodiscard]] NH_API static ConfigResult parse(std::string_view toml,
                                                    const std::filesystem::path &baseDir = {});
 
     /// Config formats this build understands: "toml", plus "lua" where the
-    /// scripting front end is compiled in.
-    [[nodiscard]] NH_API static std::vector<std::string> formats();
+    /// scripting front end is compiled in. A view over library-lifetime storage
+    /// — see `SemanticScene::formats`.
+    [[nodiscard]] NH_API static std::span<const std::string_view> formats();
 
     /// The scene-affecting slice. Shares the parsed document with this handle
     /// rather than copying it.

@@ -229,9 +229,9 @@ void registerCmdConvert(CLI::App &app) {
             int warnings = 0, errors = 0;
             for (const auto *dl : {&importResult.diags, &tessResult.diags, &expResult.diags}) {
                 for (const auto &d : dl->items()) {
-                    if (d.severity >= nodehammer::diagnostics::DiagnosticSeverity::Error) {
+                    if (d.severity >= nodehammer::diagnostics::Severity::Error) {
                         ++errors;
-                    } else if (d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning) {
+                    } else if (d.severity == nodehammer::diagnostics::Severity::Warning) {
                         ++warnings;
                     }
                 }

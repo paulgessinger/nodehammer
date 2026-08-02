@@ -139,7 +139,7 @@ semantic::Scene SyntheticSceneBuilder::buildBooleanSubtraction() {
 
 ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     semantic::Scene scene;
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = semantic::Shape{shapeId, semantic::UnknownShape{"SyntheticUnknown"}};

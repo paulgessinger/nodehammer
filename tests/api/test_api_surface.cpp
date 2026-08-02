@@ -18,7 +18,9 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -55,12 +57,12 @@ TEST_CASE("Handles are copyable values that share one immutable scene", "[api][h
 
     const nh::SemanticScene empty;
     REQUIRE_FALSE(empty.valid());
+    // The observers answer for an empty handle rather than dereferencing; the
+    // verbs and the byte forms throw, which is the previous test case.
     REQUIRE(empty.nodeCount() == 0);
     REQUIRE(empty.logVolCount() == 0);
     REQUIRE(empty.shapeCount() == 0);
     REQUIRE(empty.materialCount() == 0);
-    // Everything is answerable on an invalid handle; nothing dereferences.
-    REQUIRE(empty.toNhb().empty());
 
     const auto scene = boxScene();
     const auto copy = scene;
@@ -74,34 +76,33 @@ TEST_CASE("Handles are copyable values that share one immutable scene", "[api][h
     REQUIRE(emptyRender.meshCount() == 0);
     REQUIRE(emptyRender.materialCount() == 0);
     REQUIRE(emptyRender.triangleCount() == 0);
-    REQUIRE(emptyRender.toNhr().empty());
 }
 
 TEST_CASE("DiagnosticList is an ordered range that survives being moved from", "[api][handles]") {
-    const auto missing = nh::SemanticScene::read(fs::path{"/definitely/not/here.nhb"});
-    REQUIRE(missing.diags.hasErrors());
-    REQUIRE_FALSE(missing.diags.empty());
-    REQUIRE(missing.diags.size() == 1);
-    // The importer's own diagnostic, verbatim — not one this layer synthesised.
-    // (`context` is empty precisely because the importer does not set one.)
-    REQUIRE(missing.diags.begin()->code == nh::codes::kErrImportFileNotFound);
+    // A scene that tessellates with something to say: the unknown shape reports
+    // NH0500 and the node comes back unmeshed, which is the case the diagnostic
+    // channel exists for — a result *and* a complaint about it.
+    const auto imported = nh::SemanticScene::read("", nh::SemanticScene::ReadOptions{"synthetic"});
+    const auto rendered = nh::build(imported.scene, {});
+    REQUIRE(rendered.scene.valid());
+    REQUIRE_FALSE(rendered.diags.empty());
 
     std::size_t seen = 0;
-    for (const auto &d : missing.diags) {
+    for (const auto &d : rendered.diags) {
         REQUIRE_FALSE(d.code.empty());
-        REQUIRE(d.severity >= nh::Diagnostic::Severity::Error);
         ++seen;
     }
-    REQUIRE(seen == missing.diags.size());
+    REQUIRE(seen == rendered.diags.size());
 
-    nh::DiagnosticList copy = missing.diags;
-    REQUIRE(copy.size() == missing.diags.size());
-    REQUIRE(copy.begin()->code == missing.diags.begin()->code);
+    nh::DiagnosticList copy = rendered.diags;
+    REQUIRE(copy.size() == rendered.diags.size());
+    REQUIRE(copy.begin()->code == rendered.diags.begin()->code);
+    const auto &missing = rendered;
 
     // A moved-from list is an empty range rather than a trap: begin() == end()
     // and every accessor still answers.
     const nh::DiagnosticList moved = std::move(copy);
-    REQUIRE(moved.size() == 1);
+    REQUIRE(moved.size() == missing.diags.size());
     REQUIRE(copy.empty());               // NOLINT(bugprone-use-after-move) — the point of the test
     REQUIRE(copy.size() == 0);           // NOLINT(bugprone-use-after-move)
     REQUIRE_FALSE(copy.hasErrors());     // NOLINT(bugprone-use-after-move)
@@ -113,52 +114,60 @@ TEST_CASE("DiagnosticList is an ordered range that survives being moved from", "
     REQUIRE_FALSE(fresh.hasErrors());
 }
 
-TEST_CASE("Nothing throws across the boundary", "[api][handles]") {
+TEST_CASE("Input the API cannot act on throws Error", "[api][handles]") {
     const auto dir = caseDir("errors");
 
-    // A format this build does not have is a diagnostic, not a crash and not an
-    // exception — the string-dispatched entry points cannot fail any earlier.
-    // No importer ran at all here, so there is genuinely no scene.
-    const auto unknownFormat =
-        nh::SemanticScene::read(dir / "x.nhb", nh::SemanticScene::ReadOptions{"not-a-format"});
-    REQUIRE(unknownFormat.diags.hasErrors());
-    REQUIRE_FALSE(unknownFormat.scene.valid());
+    // A format no backend claims. Necessarily a run-time failure rather than a
+    // link-time one: the format is a value, so nothing earlier could know.
+    REQUIRE_THROWS_AS(
+        nh::SemanticScene::read(dir / "x.nhb", nh::SemanticScene::ReadOptions{"not-a-format"}),
+        nh::Error);
+    REQUIRE_THROWS_AS(nh::SemanticScene::read(dir / "x.wat"), nh::Error);
 
-    const auto unknownExtension = nh::SemanticScene::read(dir / "x.wat");
-    REQUIRE(unknownExtension.diags.hasErrors());
+    // A file that will not open.
+    REQUIRE_THROWS_AS(nh::SemanticScene::read(dir / "nope.nhb"), nh::Error);
 
-    // An importer that *ran* and failed still hands back its scene: `valid()`
-    // reports that there is something to look at, and the diagnostics report
-    // that it is not worth much. Collapsing the two would throw away a partial
-    // import, which the importers are allowed to produce.
-    const auto missingFile = nh::SemanticScene::read(dir / "nope.nhb");
-    REQUIRE(missingFile.diags.hasErrors());
-    REQUIRE(missingFile.scene.valid());
-    REQUIRE(missingFile.scene.nodeCount() == 0);
-
-    // Garbage bytes reach a FlatBuffers verifier that throws internally.
+    // Bytes that are not a scene: the FlatBuffers verifier throws internally,
+    // and only `Error` may reach the caller.
     const std::vector<std::byte> garbage(64, std::byte{0x7f});
-    const auto badSemantic = nh::SemanticScene::read(std::span{garbage});
-    REQUIRE(badSemantic.diags.hasErrors());
-    const auto badRender = nh::RenderScene::read(std::span{garbage});
-    REQUIRE(badRender.diags.hasErrors());
-    REQUIRE_FALSE(badRender.scene.valid());
+    REQUIRE_THROWS_AS(nh::SemanticScene::read(std::span{garbage}), nh::Error);
+    REQUIRE_THROWS_AS(nh::RenderScene::read(std::span{garbage}), nh::Error);
 
-    // Writing an invalid handle reports rather than dereferences.
+    // A handle that refers to nothing, on every entry point that takes one.
     const nh::RenderScene emptyRender;
-    REQUIRE(emptyRender.write(dir / "out.glb").hasErrors());
     const nh::SemanticScene emptySemantic;
-    REQUIRE(emptySemantic.write(dir / "out.nhb").hasErrors());
+    REQUIRE_THROWS_AS(emptyRender.write(dir / "out.glb"), nh::Error);
+    REQUIRE_THROWS_AS(emptySemantic.write(dir / "out.nhb"), nh::Error);
+    REQUIRE_THROWS_AS(emptySemantic.toNhb(), nh::Error);
+    REQUIRE_THROWS_AS(emptyRender.toNhr(), nh::Error);
+    REQUIRE_THROWS_AS(nh::applySelection(emptySemantic, {}), nh::Error);
+    REQUIRE_THROWS_AS(nh::deduplicate(emptySemantic, {}), nh::Error);
+    REQUIRE_THROWS_AS(nh::tessellate(emptySemantic, {}), nh::Error);
+    REQUIRE_THROWS_AS(nh::build(emptySemantic, {}), nh::Error);
 
-    // So does every verb.
-    REQUIRE(nh::applySelection(emptySemantic, {}).diags.hasErrors());
-    REQUIRE(nh::deduplicate(emptySemantic, {}).diags.hasErrors());
-    REQUIRE(nh::tessellate(emptySemantic, {}).diags.hasErrors());
-    REQUIRE(nh::build(emptySemantic, {}).diags.hasErrors());
-
-    // Unwritable destination.
+    // An unwritable destination.
     const auto scene = boxScene();
-    REQUIRE(scene.write(fs::path{"/definitely/not/here/out.nhb"}).hasErrors());
+    REQUIRE_THROWS_AS(scene.write(fs::path{"/definitely/not/here/out.nhb"}), nh::Error);
+}
+
+TEST_CASE("Error carries a code, a context and its Diagnostic form", "[api][handles]") {
+    const auto dir = caseDir("error_payload");
+    try {
+        (void)nh::SemanticScene::read(dir / "nope.nhb");
+        FAIL("expected a throw");
+    } catch (const nh::Error &e) {
+        REQUIRE(e.code() == nh::codes::kErrImportFileNotFound);
+        REQUIRE_FALSE(std::string_view{e.what()}.empty());
+        REQUIRE_FALSE(e.context().empty());
+        const auto d = e.diagnostic();
+        REQUIRE(d.severity == nh::Diagnostic::Severity::Error);
+        REQUIRE(d.code == e.code());
+        REQUIRE(d.message == e.what());
+    }
+
+    // Catchable as a plain std::exception, so a caller that wants one handler
+    // for everything gets the message without knowing this type.
+    REQUIRE_THROWS_AS(nh::SemanticScene::read(dir / "nope.nhb"), std::exception);
 }
 
 TEST_CASE("formats() is the runtime capability query", "[api][handles]") {
@@ -167,7 +176,7 @@ TEST_CASE("formats() is the runtime capability query", "[api][handles]") {
     REQUIRE(std::ranges::find(semantic, "json") != semantic.end());
     REQUIRE(std::ranges::find(semantic, "synthetic") != semantic.end());
     // No duplicates: the importer and exporter registries overlap.
-    auto sortedSemantic = semantic;
+    std::vector<std::string_view> sortedSemantic{semantic.begin(), semantic.end()};
     std::ranges::sort(sortedSemantic);
     REQUIRE(std::ranges::adjacent_find(sortedSemantic) == sortedSemantic.end());
 
@@ -181,6 +190,10 @@ TEST_CASE("formats() is the runtime capability query", "[api][handles]") {
     for (const auto *name : {"nhr", "gltf", "obj"}) {
         REQUIRE(std::ranges::find(render, name) != render.end());
     }
+
+    // A view over library-lifetime storage, so two calls see the same bytes
+    // rather than two freshly-built containers.
+    REQUIRE(nh::RenderScene::formats().data() == render.data());
 }
 
 TEST_CASE("The scene handles round-trip through their own byte forms", "[api][handles]") {

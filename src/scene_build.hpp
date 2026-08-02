@@ -22,7 +22,7 @@ struct SceneBuildResult {
     /// `shared_ptr<const render::Scene>`. Keeping the producer's handle mutable
     /// was the one gap in that chain.
     std::shared_ptr<const ir::render::Scene> scene;
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 };
 
 /// Outcome of `prepareSceneForTessellation`. When `ok` is true, `config`
@@ -32,7 +32,7 @@ struct SceneBuildResult {
 struct ScenePrepResult {
     config::NHConfig config;
     ir::semantic::Scene scene;
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
     bool ok{false};
 };
 

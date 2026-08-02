@@ -45,13 +45,13 @@ static void resetManager() {
 /// noChildren) and tessellate it. Writes an OBJ to objName in the output dir.
 struct DispatchResult {
     TessellationOutput tess;
-    DiagnosticList dispatchDiags;
+    diagnostics::List dispatchDiags;
 };
 
 static DispatchResult dispatchAndTessellate(const TGeoShape *shape, const std::string &objName,
                                             const TessellationParams &params = {}) {
     ir::semantic::Scene scene;
-    DiagnosticList diags;
+    diagnostics::List diags;
     const ir::semantic::ShapeId shapeId = dispatchTGeoShape(shape, scene, diags);
 
     PrimitiveTessellator tess;

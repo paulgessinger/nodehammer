@@ -27,11 +27,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
 
 # ── MSVC: the consumer's C runtime has to match the library's ─────────────────
 # This API passes owning std:: types across the boundary — std::string inside
-# Diagnostic, std::vector out of formats() and toNhb(). On MSVC that is only
-# defined while both sides agree on the standard library's layout, and they do
-# not agree across the debug/release split: _ITERATOR_DEBUG_LEVEL is 2 under a
-# debug CRT and 0 otherwise, which adds a proxy pointer to every container, so
-# sizeof(std::string) is 40 against 32.
+# Diagnostic, std::vector out of toNhb() — and throws an exception across it.
+# On MSVC all of that is defined only while both sides agree on the standard
+# library's layout and on which heap frees what, and they do not agree across
+# the debug/release split (_ITERATOR_DEBUG_LEVEL is 2 under a debug CRT and 0
+# otherwise, which adds a proxy pointer to every container, so sizeof(std::string)
+# is 40 against 32) nor across the static/dynamic one (/MT and /MD each carry
+# their own heap).
 #
 # The failure that produces is silent and late. Everything compiles, everything
 # links, and the first call returns an empty vector because the caller read a
@@ -40,29 +42,40 @@ include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
 # the Release library — and it is worth a configure-time error rather than a
 # segmentation fault in somebody else's build.
 #
-# Only the single-config case is decidable here: a multi-config generator does
-# not choose until build time, so it gets nothing rather than a guess.
-if(MSVC AND CMAKE_BUILD_TYPE AND NOT "@NODEHAMMER_MSVC_DEBUG_RUNTIME@" STREQUAL "")
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-        set(_nh_consumer_debug_runtime ON)
-    else()
-        set(_nh_consumer_debug_runtime OFF)
-    endif()
-    if(NOT _nh_consumer_debug_runtime STREQUAL "@NODEHAMMER_MSVC_DEBUG_RUNTIME@")
-        if("@NODEHAMMER_MSVC_DEBUG_RUNTIME@")
-            set(_nh_built_against "debug")
+# The comparison is on the fully resolved runtime name rather than a debug flag,
+# so /MT against /MD is caught too. Only the single-config case is decidable
+# here: a multi-config generator does not choose until build time, so it gets
+# nothing rather than a guess.
+set(_nh_lib_runtime "@NODEHAMMER_MSVC_RUNTIME@")
+if(MSVC AND CMAKE_BUILD_TYPE AND NOT _nh_lib_runtime STREQUAL "")
+    # CMake documents configuration handling as case-insensitive, so normalise
+    # before classifying: -DCMAKE_BUILD_TYPE=debug is a debug build.
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" _nh_consumer_cfg)
+    if(CMAKE_MSVC_RUNTIME_LIBRARY)
+        string(REPLACE "$<$<CONFIG:Debug>:Debug>" "$<_NH_DEBUG_>"
+               _nh_consumer_runtime "${CMAKE_MSVC_RUNTIME_LIBRARY}")
+        if(_nh_consumer_cfg STREQUAL "debug")
+            string(REPLACE "$<_NH_DEBUG_>" "Debug" _nh_consumer_runtime "${_nh_consumer_runtime}")
         else()
-            set(_nh_built_against "release")
+            string(REPLACE "$<_NH_DEBUG_>" "" _nh_consumer_runtime "${_nh_consumer_runtime}")
         endif()
-        message(FATAL_ERROR
-            "nodehammer was built against the ${_nh_built_against} MSVC runtime, but this "
-            "project is configuring with CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}. Mixing debug "
-            "and release C runtimes is undefined on MSVC whenever std:: types cross a DLL "
-            "boundary, which nodehammer's API does (std::string inside Diagnostic, "
-            "std::vector out of formats() and toNhb()). Build against a matching "
-            "configuration.")
+    elseif(_nh_consumer_cfg STREQUAL "debug")
+        set(_nh_consumer_runtime "MultiThreadedDebugDLL")
+    else()
+        set(_nh_consumer_runtime "MultiThreadedDLL")
     endif()
-    unset(_nh_consumer_debug_runtime)
+
+    if(NOT _nh_consumer_runtime STREQUAL _nh_lib_runtime)
+        message(FATAL_ERROR
+            "nodehammer was built against the ${_nh_lib_runtime} MSVC runtime, but this "
+            "project resolves to ${_nh_consumer_runtime} (CMAKE_BUILD_TYPE="
+            "${CMAKE_BUILD_TYPE}). Mixing MSVC runtimes is undefined whenever std:: types "
+            "or exceptions cross a DLL boundary, which nodehammer's API does. Build "
+            "against a matching configuration.")
+    endif()
+    unset(_nh_consumer_cfg)
+    unset(_nh_consumer_runtime)
 endif()
+unset(_nh_lib_runtime)
 
 check_required_components(nodehammer)

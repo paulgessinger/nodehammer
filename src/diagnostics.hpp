@@ -1,71 +1,80 @@
 #pragma once
 
+// The internal diagnostics list, over the *public* Diagnostic type.
+//
+// `Diagnostic` is not redeclared here. After step 1 deleted the `to_json`
+// helpers the internal struct was field-for-field identical to the published
+// one, so the API layer was converting a struct into a byte-identical struct and
+// allocating three strings per item to do it. Dissolving the name rather than
+// renaming around it is the move #41 §1 already makes for `ConfigResult`, and it
+// means the connector amalgamation carries one definition instead of two.
+//
+// An internal header including a public one is the right direction: the public
+// vocabulary is the more fundamental of the two, and nothing here is reachable
+// from an installed header.
+//
+// What stays two types is the *list*, which is why this one is `List` rather
+// than `diagnostics::List`. It is a mutable accumulator that hands out its
+// `std::vector` by reference; the public one is opaque and immutable, and that
+// coupling is exactly what it exists to avoid. Sharing a name with the public
+// type was harmless while internal code could not see it — including its header
+// made the two collide, which is the resolution #41's open item anticipated.
+
+#include <nodehammer/diagnostics.hpp>
+
+#include <cstddef>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace nodehammer::diagnostics {
 
-enum class DiagnosticSeverity {
-    Debug,
-    Info,
-    Warning,
-    Error,
-    Fatal,
-};
+using Severity = Diagnostic::Severity;
 
-[[nodiscard]] constexpr std::string_view severityName(DiagnosticSeverity s) noexcept {
+[[nodiscard]] constexpr std::string_view severityName(Severity s) noexcept {
     switch (s) {
-    case DiagnosticSeverity::Debug:
+    case Severity::Debug:
         return "debug";
-    case DiagnosticSeverity::Info:
+    case Severity::Info:
         return "info";
-    case DiagnosticSeverity::Warning:
+    case Severity::Warning:
         return "warning";
-    case DiagnosticSeverity::Error:
+    case Severity::Error:
         return "error";
-    case DiagnosticSeverity::Fatal:
+    case Severity::Fatal:
         return "fatal";
     }
     return "unknown";
 }
 
-struct Diagnostic {
-    DiagnosticSeverity severity{DiagnosticSeverity::Info};
-    std::string code; ///< NH-series code, e.g. "NH0301"
-    std::string message;
-    std::string context; ///< Optional: node name, file path, etc.
+[[nodiscard]] constexpr bool isFatal(const Diagnostic &d) noexcept {
+    return d.severity == Severity::Fatal;
+}
 
-    [[nodiscard]] bool isFatal() const noexcept { return severity == DiagnosticSeverity::Fatal; }
-};
-
-class DiagnosticList {
+class List {
   public:
     void add(Diagnostic d) { items_.push_back(std::move(d)); }
 
     // std::string_view overloads accept literals, constexpr constants, and std::string alike.
     void debug(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({DiagnosticSeverity::Debug, std::string{code}, std::string{message},
-             std::string{context}});
+        add({Severity::Debug, std::string{code}, std::string{message}, std::string{context}});
     }
     void info(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({DiagnosticSeverity::Info, std::string{code}, std::string{message},
-             std::string{context}});
+        add({Severity::Info, std::string{code}, std::string{message}, std::string{context}});
     }
     void warn(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({DiagnosticSeverity::Warning, std::string{code}, std::string{message},
-             std::string{context}});
+        add({Severity::Warning, std::string{code}, std::string{message}, std::string{context}});
     }
     void error(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({DiagnosticSeverity::Error, std::string{code}, std::string{message},
-             std::string{context}});
+        add({Severity::Error, std::string{code}, std::string{message}, std::string{context}});
     }
     void fatal(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({DiagnosticSeverity::Fatal, std::string{code}, std::string{message},
-             std::string{context}});
+        add({Severity::Fatal, std::string{code}, std::string{message}, std::string{context}});
     }
 
-    void append(const DiagnosticList &other) {
+    void append(const List &other) {
+        items_.reserve(items_.size() + other.items_.size());
         for (const auto &d : other.items_) {
             items_.push_back(d);
         }
@@ -73,7 +82,7 @@ class DiagnosticList {
 
     [[nodiscard]] bool hasFatal() const noexcept {
         for (const auto &d : items_) {
-            if (d.isFatal()) {
+            if (isFatal(d)) {
                 return true;
             }
         }
@@ -82,7 +91,7 @@ class DiagnosticList {
 
     [[nodiscard]] bool hasErrors() const noexcept {
         for (const auto &d : items_) {
-            if (d.severity >= DiagnosticSeverity::Error) {
+            if (d.severity >= Severity::Error) {
                 return true;
             }
         }
@@ -92,6 +101,11 @@ class DiagnosticList {
     [[nodiscard]] const std::vector<Diagnostic> &items() const noexcept { return items_; }
     [[nodiscard]] bool empty() const noexcept { return items_.empty(); }
     [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
+
+    /// Hand the items over wholesale. Now that both layers share `Diagnostic`,
+    /// this is what lets the public list be produced by a move rather than by
+    /// copying every string — see `api::wrap`.
+    [[nodiscard]] std::vector<Diagnostic> take() && noexcept { return std::move(items_); }
 
   private:
     std::vector<Diagnostic> items_;

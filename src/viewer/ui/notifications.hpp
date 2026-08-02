@@ -45,7 +45,7 @@ class Notifications : public LogSink {
     /// appropriate kind. The toast text is prefixed with the NH code
     /// (e.g. "NH0007: rule sets material = 'support' …"). Info/Warning/
     /// Error/Fatal map to info/warning/error toasts respectively.
-    void diagnostic(const diagnostics::Diagnostic &d);
+    void diagnostic(const Diagnostic &d);
 
     /// Handle returned by `startProgress` and used to route subsequent
     /// `updateProgress` / `finishProgress` calls. 0 is reserved as "no

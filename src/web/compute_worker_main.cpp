@@ -96,10 +96,10 @@ EM_JS(void, nh_compute_emit_error, (const char *msg), {
 });
 // clang-format on
 
-void reportError(const DiagnosticList &diags, const char *fallback) {
+void reportError(const diagnostics::List &diags, const char *fallback) {
     std::string msg;
     for (const auto &d : diags.items()) {
-        if (d.severity >= DiagnosticSeverity::Error) {
+        if (d.severity >= Severity::Error) {
             if (!msg.empty()) {
                 msg += "; ";
             }

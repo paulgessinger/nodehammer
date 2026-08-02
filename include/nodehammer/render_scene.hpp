@@ -23,8 +23,7 @@ namespace nodehammer {
 struct RenderResult;
 
 /// A tessellated scene. Same handle contract as `SemanticScene`: read-only,
-/// cheap to copy, and carrying whatever the producing call made — check the
-/// accompanying diagnostics rather than `valid()` to learn whether to trust it.
+/// cheap to copy, produced by a call that either succeeds or throws.
 class RenderScene {
   public:
     struct WriteOptions {
@@ -48,8 +47,9 @@ class RenderScene {
     [[nodiscard]] NH_API static RenderResult read(std::span<const std::byte> nhr);
 
     /// Format names this build can read or write, in registration order and
-    /// without duplicates.
-    [[nodiscard]] NH_API static std::vector<std::string> formats();
+    /// without duplicates. A view over library-lifetime storage — see
+    /// `SemanticScene::formats`.
+    [[nodiscard]] NH_API static std::span<const std::string_view> formats();
 
     /// Write the scene.
     ///
@@ -64,11 +64,10 @@ class RenderScene {
                                               const OutputConfig &output = {},
                                               const WriteOptions &options = {}) const;
 
-    /// The scene as `.nhr` bytes. Empty when the handle is invalid.
+    /// The scene as `.nhr` bytes. Throws on an empty handle.
     [[nodiscard]] NH_API std::vector<std::byte> toNhr() const;
 
-    /// True when this handle refers to a scene at all — not a success check.
-    /// See `SemanticScene::valid`.
+    /// True when this handle refers to a scene at all. See `SemanticScene::valid`.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
     [[nodiscard]] NH_API std::size_t nodeCount() const noexcept;

@@ -18,12 +18,11 @@
 
 namespace {
 
-void printDiags(const nodehammer::diagnostics::DiagnosticList &diags) {
+void printDiags(const nodehammer::diagnostics::List &diags) {
     for (const auto &d : diags.items()) {
-        const char *sev = d.severity >= nodehammer::diagnostics::DiagnosticSeverity::Error ? "error"
-                          : d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning
-                              ? "warning"
-                              : "info";
+        const char *sev = d.severity >= nodehammer::diagnostics::Severity::Error     ? "error"
+                          : d.severity == nodehammer::diagnostics::Severity::Warning ? "warning"
+                                                                                     : "info";
         std::println(std::cerr, "[{}] {} {}", sev, d.code, d.message);
     }
 }

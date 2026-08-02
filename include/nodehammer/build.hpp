@@ -13,15 +13,14 @@
 
 namespace nodehammer {
 
-// All four follow one contract, and it is the internal pipeline's: the result
-// carries whatever the stage produced *and* everything the stage had to say,
-// and the diagnostics are what tell you whether to use it. A tessellation that
-// meets an unknown shape reports NH0500 and returns a scene with that one node
-// unmeshed; discarding the rest would be this layer overruling a decision the
-// pass made deliberately. Always check `result.diags.hasErrors()` — whether the
-// handle is valid is a different question, and a weaker one.
+// All four throw `Error` if handed a scene handle that refers to nothing —
+// that is a caller mistake, with no result to attach a reason to.
 //
-// `build` carries the one unavoidable exception; see its declaration.
+// Everything the *work* has to say comes back in `diags`, at any severity. A
+// tessellation that meets an unknown shape reports NH0500 and returns a scene
+// with that one node unmeshed; discarding the rest would be this layer
+// overruling a decision the pass made deliberately, so the caller decides
+// whether that scene is worth exporting. Check `result.diags.hasErrors()`.
 
 /// Evaluate `[[selection_rules]]` and prune what they drop, garbage-collecting
 /// the logical volumes, shapes and materials that nothing references any more.
@@ -48,12 +47,13 @@ namespace nodehammer {
 /// same order, and the same conditions, as `nodehammer convert`.
 ///
 /// Config *validation* is not part of this: it happens when the document is
-/// read and surfaces in that call's diagnostics (#41 §8).
+/// read, and a config that does not validate never reaches here (#41 §8).
 ///
-/// The one place in this API where an error really does mean no result: a
-/// failed selection has produced no render scene *yet*, so there is nothing to
-/// return but the reason. Tessellation errors, by contrast, come back with the
-/// scene, as they do from `tessellate`.
+/// Throws if selection fails — NH0401, the root itself dropped. That stage
+/// runs before tessellation, so no render scene exists to hand back with the
+/// reason attached, and tessellating a scene the rules meant to prune would be
+/// worse than stopping. `convert` stops there too. Tessellation's own errors,
+/// by contrast, come back with the scene, exactly as from `tessellate`.
 [[nodiscard]] NH_API RenderResult build(const SemanticScene &scene, const SceneConfig &config);
 
 } // namespace nodehammer

@@ -15,7 +15,7 @@ namespace nodehammer::ir {
 /// scene may be populated even when diags.hasErrors() is true.
 struct ImportResult {
     semantic::Scene scene;
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 };
 
 /// Pure interface for all geometry importers.

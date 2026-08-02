@@ -10,19 +10,16 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <exception>
 #include <format>
+#include <memory>
 #include <string>
 #include <utility>
 
 namespace nodehammer {
 namespace {
-
-[[nodiscard]] ConfigResult failure(std::string_view code, std::string_view message,
-                                   std::string_view context = {}) {
-    return ConfigResult{Config{}, api::error(code, message, context)};
-}
 
 /// Adopt an internal load, then validate — the one thing these wrappers add
 /// beyond dispatch and slicing.
@@ -32,15 +29,18 @@ namespace {
 /// question about a document nobody wrote. Validation *diagnostics* land in the
 /// same list as the load's, which is what makes `build` free of a validation
 /// step of its own (#41 §8).
-[[nodiscard]] ConfigResult adopt(config::ConfigResult loaded) {
+[[nodiscard]] ConfigResult adopt(config::ConfigResult loaded, const std::string &context) {
     // Accumulated in the internal list, which is the type that knows how to
     // append, and converted once at the end.
-    diagnostics::DiagnosticList diags = std::move(loaded.diags);
+    diagnostics::List diags = std::move(loaded.diags);
     if (diags.hasErrors()) {
-        return ConfigResult{Config{}, api::wrap(diags)};
+        api::throwReported(diags, codes::kErrConfigParse, context);
     }
     diags.append(config::ConfigValidator::validate(loaded.config));
-    return ConfigResult{api::wrap(std::move(loaded.config)), api::wrap(diags)};
+    if (diags.hasErrors()) {
+        api::throwReported(diags, codes::kErrConfigParse, context);
+    }
+    return ConfigResult{api::wrap(std::move(loaded.config)), api::wrap(std::move(diags))};
 }
 
 [[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {
@@ -54,7 +54,7 @@ namespace {
 
 ConfigResult Config::read(const std::filesystem::path &path) {
     if (!hasLuaExtension(path)) {
-        return adopt(config::ConfigLoader::loadFromFile(path));
+        return adopt(config::ConfigLoader::loadFromFile(path), path.string());
     }
 
 #if NH_WITH_LUA
@@ -70,39 +70,55 @@ ConfigResult Config::read(const std::filesystem::path &path) {
         const auto bytes = detail::file_io::readFile(canonical);
         source.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
     } catch (const std::exception &e) {
-        return failure(codes::kErrImportFileNotFound,
-                       std::format("could not read config file: {}", e.what()), path.string());
+        api::rethrow(e, codes::kErrImportFileNotFound, path.string());
     }
     try {
-        return adopt(lua::evalLuaConfig(source, canonical.string(), canonical.parent_path()));
+        return adopt(lua::evalLuaConfig(source, canonical.string(), canonical.parent_path()),
+                     path.string());
+    } catch (const Error &) {
+        throw;
     } catch (const std::exception &e) {
-        return failure(codes::kErrConfigParse, e.what(), path.string());
+        api::rethrow(e, codes::kErrConfigParse, path.string());
     }
 #else
-    return failure(codes::kErrApiBackendMissing,
-                   "this build has no Lua config front end; see formats()", path.string());
+    throw Error{codes::kErrApiBackendMissing,
+                "this build has no Lua config front end; see formats()", path.string()};
 #endif
 }
 
 ConfigResult Config::parse(std::string_view toml, const std::filesystem::path &baseDir) {
     try {
-        return adopt(config::ConfigLoader::loadFromString(toml, "<string>", baseDir));
+        return adopt(config::ConfigLoader::loadFromString(toml, "<string>", baseDir), "<string>");
+    } catch (const Error &) {
+        throw;
     } catch (const std::exception &e) {
-        return failure(codes::kErrConfigParse, e.what());
+        api::rethrow(e, codes::kErrConfigParse, "<string>");
     }
 }
 
-std::vector<std::string> Config::formats() {
-    std::vector<std::string> out{"toml"};
+std::span<const std::string_view> Config::formats() {
+    static constexpr std::string_view kToml{"toml"};
 #if NH_WITH_LUA
-    out.emplace_back("lua");
+    static constexpr std::array<std::string_view, 2> kFormats{kToml, std::string_view{"lua"}};
+#else
+    static constexpr std::array<std::string_view, 1> kFormats{kToml};
 #endif
-    return out;
+    return kFormats;
 }
 
-SceneConfig Config::scene() const { return api::sceneSlice(api::documentOf(*this)); }
+SceneConfig Config::scene() const {
+    SceneConfig slice;
+    slice.impl =
+        std::make_shared<const SceneConfig::Impl>(SceneConfig::Impl{api::documentOf(*this)});
+    return slice;
+}
 
-OutputConfig Config::output() const { return api::outputSlice(api::documentOf(*this)); }
+OutputConfig Config::output() const {
+    OutputConfig slice;
+    slice.impl =
+        std::make_shared<const OutputConfig::Impl>(OutputConfig::Impl{api::documentOf(*this)});
+    return slice;
+}
 
 bool Config::valid() const noexcept { return impl != nullptr; }
 

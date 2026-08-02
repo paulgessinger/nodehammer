@@ -1,12 +1,24 @@
 #pragma once
 
-// Diagnostics: how every verb reports what happened.
+// How this API reports what happened — two channels, for two different things.
 //
-// Nothing in this API throws. A verb returns its result *and* a DiagnosticList,
-// always both, and the list is always safe to inspect — a failed call returns an
-// invalid handle rather than an exceptional control path. Internal code does
-// throw (the FlatBuffers codecs in particular); the bridge catches at the
-// boundary and converts (#41 principle 5).
+//   `Error` is thrown for input the call cannot act on: a format no backend
+//   claims, a file that will not open, bytes that are not a scene, a handle that
+//   refers to nothing. There is no result in these cases, only a reason, and an
+//   exception is the one return path a caller cannot accidentally ignore.
+//
+//   `DiagnosticList` is returned alongside a result, and carries what the work
+//   *observed* while producing it — at any severity. Tessellation reporting
+//   NH0500 for one unmeshed node still hands back a scene, and whether that is
+//   usable is the caller's call to make, not this layer's.
+//
+// The split matters more than either half: collapsing it in one direction makes
+// every ignorable observation fatal, and in the other makes an unusable call
+// look like a successful one that happened to say something.
+//
+// Internal code throws its own types (the FlatBuffers codecs in particular);
+// those are caught at the boundary and rethrown as `Error`, so exactly one
+// exception type crosses the API.
 //
 // Tier A + Tier B: this header and semantic_scene.hpp are the whole of the
 // amalgamated connector surface, so it deliberately pulls in nothing but the
@@ -16,7 +28,9 @@
 
 #include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace nodehammer {
 
@@ -48,9 +62,11 @@ struct Diagnostic {
 /// since most calls succeed) owns nothing at all.
 class DiagnosticList {
   public:
-    /// True when any item is Error or Fatal — the one check a caller must not
-    /// skip, since a verb reports failure by returning an invalid handle and
-    /// saying why here.
+    /// True when any item is Error or Fatal.
+    ///
+    /// Not a failure check — a call that could not proceed threw. This says the
+    /// work reported something it considers serious about the result it *did*
+    /// produce, such as a shape it could not tessellate.
     [[nodiscard]] NH_API bool hasErrors() const noexcept;
 
     [[nodiscard]] NH_API bool empty() const noexcept;
@@ -76,6 +92,31 @@ class DiagnosticList {
     /// type nobody can mutate.
     struct Impl;
     std::shared_ptr<const Impl> impl;
+};
+
+/// The one exception this API throws.
+///
+/// Carries the same vocabulary as a `Diagnostic` — an NH-series code, a message
+/// and an optional context — because the failure is the same kind of thing and
+/// only the channel differs. `what()` is the message, so a caller that catches
+/// nothing more specific than `std::exception` still gets something useful.
+class NH_API_TYPE Error : public std::runtime_error {
+  public:
+    NH_API Error(std::string_view code, std::string_view message, std::string_view context = {});
+
+    /// The stable NH-series code, e.g. "NH0101".
+    [[nodiscard]] NH_API const std::string &code() const noexcept;
+
+    /// Where it happened — a path, a format name, a node. Often empty.
+    [[nodiscard]] NH_API const std::string &context() const noexcept;
+
+    /// The whole failure as a `Diagnostic`, for a caller that funnels both
+    /// channels into one report.
+    [[nodiscard]] NH_API Diagnostic diagnostic() const;
+
+  private:
+    std::string code_;
+    std::string context_;
 };
 
 } // namespace nodehammer

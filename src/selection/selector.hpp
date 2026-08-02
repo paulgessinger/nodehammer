@@ -14,7 +14,7 @@ namespace nodehammer::selection {
 struct SelectionResult {
     ankerl::unordered_dense::set<ir::semantic::NodeId> kept;
     ankerl::unordered_dense::set<ir::semantic::NodeId> dropped;
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 };
 
 // ── SelectionEngine ───────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ class SelectionEngine {
     ///
     /// If the root node is in the dropped set the scene is left unchanged and
     /// an NH0401 error is emitted.  Returns accumulated diagnostics.
-    diagnostics::DiagnosticList prune(ir::semantic::Scene &scene) const;
+    diagnostics::List prune(ir::semantic::Scene &scene) const;
 
   private:
     std::vector<config::SelectionRule> rules_;

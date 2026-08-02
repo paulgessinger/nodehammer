@@ -34,11 +34,10 @@ struct SemanticResult;
 /// scene, so passing one around costs a pointer, and the verbs in build.hpp
 /// return new handles rather than mutating this one.
 ///
-/// **`diags` is what says whether to trust a result; `valid()` only says whether
-/// there is one to look at.** The two are independent on purpose. An importer
-/// may hand back a partly-imported geometry alongside errors, and this API does
-/// not decide on your behalf that such a scene is worth nothing — it is often
-/// exactly what you want to inspect. Always check `diags.hasErrors()`.
+/// A call that could not read its input throws `Error`; there is no "invalid
+/// result" to inspect, so `valid()` is false only for a default-constructed or
+/// moved-from handle. `diags` carries what the import *observed* — an unknown
+/// shape, a missing material — alongside the scene it did produce.
 class SemanticScene {
   public:
     /// Options for the read verbs. Nested because they appear in no signature
@@ -47,8 +46,8 @@ class SemanticScene {
         /// Explicit input format — one of the names `formats()` reports, e.g.
         /// "synthetic", "json", "flatbuffer", or "tgeo"/"dd4hep" where the
         /// backend is present. Empty means "infer from the path extension". A
-        /// name this build does not have is reported as a diagnostic, not a link
-        /// error: the format is a value, so nothing earlier could have known.
+        /// name this build does not have throws rather than failing to link: the
+        /// format is a value, so nothing earlier could have known.
         std::string format;
     };
 
@@ -86,22 +85,26 @@ class SemanticScene {
     /// Format names this build can read or write, in registration order and
     /// without duplicates. The runtime capability query for the optional
     /// backends: `"tgeo"` appears here only in a build that has ROOT.
-    [[nodiscard]] NH_API static std::vector<std::string> formats();
+    ///
+    /// A view over storage that lives as long as the library, not a container
+    /// handed across the boundary — the set is fixed once the process starts, so
+    /// there is nothing to own and nothing to free.
+    [[nodiscard]] NH_API static std::span<const std::string_view> formats();
 
     /// Write the scene. Format from `options.format` when set, otherwise from
     /// the extension. A `.zst` suffix compresses.
     [[nodiscard]] NH_API DiagnosticList write(const std::filesystem::path &path,
                                               const WriteOptions &options = {}) const;
 
-    /// The scene as `.nhb` bytes. Empty when the handle is invalid.
+    /// The scene as `.nhb` bytes. Throws on an empty handle.
     [[nodiscard]] NH_API std::vector<std::byte> toNhb() const;
 
-    /// True when this handle refers to a scene at all. False only for a
-    /// default-constructed or moved-from handle, and for the few failures that
-    /// produce no scene whatsoever (an unresolvable format, say).
+    /// True when this handle refers to a scene at all — false only for a
+    /// default-constructed or moved-from one, since anything that could not
+    /// produce a scene threw instead of returning an empty handle.
     ///
-    /// Not a success check — a read that reported errors can still return a
-    /// scene, and does. Use `diags.hasErrors()` for that.
+    /// The observers below answer for an empty handle; everything that would
+    /// have to dereference one (`write`, `toNhb`, the verbs) throws.
     [[nodiscard]] NH_API bool valid() const noexcept;
 
     [[nodiscard]] NH_API std::size_t nodeCount() const noexcept;

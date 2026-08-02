@@ -230,7 +230,7 @@ SelectionResult SelectionEngine::dryRun(const ir::semantic::Scene &scene) const 
     return evaluate(scene);
 }
 
-diagnostics::DiagnosticList SelectionEngine::prune(ir::semantic::Scene &scene) const {
+diagnostics::List SelectionEngine::prune(ir::semantic::Scene &scene) const {
     auto selResult = evaluate(scene);
 
     // ── Hoist orphans: re-parent KeepIf nodes whose parent is DropIf ─────────────
@@ -272,7 +272,7 @@ diagnostics::DiagnosticList SelectionEngine::prune(ir::semantic::Scene &scene) c
 
     // Root-dropped guard: leave scene untouched and emit an error.
     if (selResult.dropped.contains(scene.rootId)) {
-        diagnostics::DiagnosticList diags;
+        diagnostics::List diags;
         diags.append(selResult.diags);
         diags.error(codes::kErrSelectionRootDropped,
                     "root node is in the dropped set; pruning is a no-op",

@@ -18,7 +18,7 @@ namespace nodehammer::config {
 /// the config can be used. On a fatal parse error, config is default-initialized.
 struct ConfigResult {
     NHConfig config;
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 };
 
 /// Synchronous byte fetcher used by `parseAndMerge` to look up the bytes

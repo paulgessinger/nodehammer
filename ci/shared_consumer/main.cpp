@@ -20,7 +20,9 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -36,7 +38,7 @@ int fail(const char *what, const nodehammer::DiagnosticList &diags) {
     return 1;
 }
 
-bool listed(const std::vector<std::string> &names, std::string_view needle) {
+bool listed(std::span<const std::string_view> names, std::string_view needle) {
     for (const auto &n : names) {
         if (n == needle) {
             return true;
@@ -94,7 +96,7 @@ int main() {
     const auto semanticFormats = nodehammer::SemanticScene::formats();
     std::printf("SemanticScene::formats() -> %zu entries\n", semanticFormats.size());
     for (const auto &f : semanticFormats) {
-        std::printf("  '%s' (len %zu)\n", f.c_str(), f.size());
+        std::printf("  '%.*s' (len %zu)\n", static_cast<int>(f.size()), f.data(), f.size());
     }
     std::fflush(stdout);
 
@@ -202,12 +204,22 @@ int main() {
     }
     std::filesystem::remove_all(outDir, ec);
 
-    // And a failure that must arrive as a diagnostic rather than as an exception
-    // crossing the ABI. The handle still refers to a scene — an empty one —
-    // because the diagnostics, not `valid()`, are what report the failure.
-    const auto missing = nodehammer::SemanticScene::read("/nodehammer/definitely/not/here.nhb");
-    if (!missing.diags.hasErrors() || missing.scene.nodeCount() != 0) {
-        std::fprintf(stderr, "a failed read did not report an error\n");
+    // An unreadable input has to arrive as a thrown `Error` — which is the only
+    // check here that exercises an exception crossing the library boundary, the
+    // thing that needs the type's identity to be exported (NH_API_TYPE) and the
+    // two sides' runtimes to agree.
+    bool threw = false;
+    try {
+        (void)nodehammer::SemanticScene::read("/nodehammer/definitely/not/here.nhb");
+    } catch (const nodehammer::Error &e) {
+        threw = true;
+        std::printf("caught Error across the boundary: [%s] %s\n", e.code().c_str(), e.what());
+    } catch (const std::exception &e) {
+        std::fprintf(stderr, "caught the wrong type across the boundary: %s\n", e.what());
+        return 1;
+    }
+    if (!threw) {
+        std::fprintf(stderr, "a failed read did not throw\n");
         return 1;
     }
 

@@ -69,14 +69,22 @@ TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api
     CAPTURE(path.string());
 
     const auto reference = nodehammer::config::ConfigLoader::loadFromFile(path);
-    const auto wrapped = nodehammer::Config::read(path);
 
-    // A load failure has to stay a load failure — and produce no config.
+    // A document that will not load has no half-built form worth returning, so
+    // the wrapper throws rather than handing back an empty `Config` nobody can
+    // tell apart from a valid one.
     if (reference.diags.hasErrors()) {
-        REQUIRE(listHasErrors(wrapped.diags));
-        REQUIRE_FALSE(wrapped.config.valid());
+        REQUIRE_THROWS_AS(nodehammer::Config::read(path), nodehammer::Error);
         return;
     }
+    // Same for a document that loads but does not validate.
+    const auto validation = nodehammer::config::ConfigValidator::validate(reference.config);
+    if (validation.hasErrors()) {
+        REQUIRE_THROWS_AS(nodehammer::Config::read(path), nodehammer::Error);
+        return;
+    }
+
+    const auto wrapped = nodehammer::Config::read(path);
 
     REQUIRE(wrapped.config.valid());
     const auto *parsed = api::configOf(wrapped.config);
@@ -84,10 +92,9 @@ TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api
     REQUIRE(nodehammer::config::configToToml(*parsed) ==
             nodehammer::config::configToToml(reference.config));
 
-    // Validation is the one thing the wrapper adds on top of the load, so its
-    // verdict has to match a direct call rather than being reinvented.
-    const auto validation = nodehammer::config::ConfigValidator::validate(reference.config);
-    REQUIRE(listHasErrors(wrapped.diags) == validation.hasErrors());
+    // Validation is the one thing the wrapper adds on top of the load. Its
+    // warnings ride back with the config; its errors threw, above.
+    REQUIRE_FALSE(listHasErrors(wrapped.diags));
 }
 
 TEST_CASE("Config::parse wraps loadFromString and roots includes at baseDir", "[api][config]") {
@@ -126,12 +133,10 @@ TEST_CASE("Config::parse with no baseDir resolves no includes", "[api][config]")
         out << "hoist_orphans = true\n";
     }
 
-    const auto result =
-        nodehammer::Config::parse("include = \"nh_api_unrooted_include_probe.toml\"\n");
+    REQUIRE_THROWS_AS(
+        nodehammer::Config::parse("include = \"nh_api_unrooted_include_probe.toml\"\n"),
+        nodehammer::Error);
     fs::remove(planted);
-
-    REQUIRE(listHasErrors(result.diags));
-    REQUIRE_FALSE(result.config.valid());
 }
 
 TEST_CASE("Config slices share one document and default to the built-in config", "[api][config]") {
@@ -171,9 +176,9 @@ TEST_CASE("Config::formats reports what this build can read", "[api][config]") {
     REQUIRE(std::ranges::find(formats, "lua") != formats.end());
 #else
     REQUIRE(std::ranges::find(formats, "lua") == formats.end());
-    // Without the backend, a .lua path is a diagnostic rather than a crash —
-    // the format is not known until the extension is looked at (#41 §5).
-    const auto result = nodehammer::Config::read(kConfigsDir / "does_not_exist.lua");
-    REQUIRE(result.diags.hasErrors());
+    // Without the backend a .lua path throws rather than crashing — the format
+    // is not known until the extension is looked at (#41 §5).
+    REQUIRE_THROWS_AS(nodehammer::Config::read(kConfigsDir / "does_not_exist.lua"),
+                      nodehammer::Error);
 #endif
 }

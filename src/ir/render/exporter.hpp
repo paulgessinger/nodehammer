@@ -91,7 +91,7 @@ struct ExportConfig {
 // ── ExportResult ──────────────────────────────────────────────────────────────
 
 struct ExportResult {
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 };
 
 // ── IRenderExporter ───────────────────────────────────────────────────────────

@@ -97,8 +97,8 @@ TEST_CASE("to_json: UnknownShape serialization", "[ir][json]") {
     REQUIRE(j["originalType"] == "TGeoArb8");
 }
 
-TEST_CASE("DiagnosticList: hasFatal and hasErrors", "[ir][diagnostics]") {
-    nodehammer::diagnostics::DiagnosticList list;
+TEST_CASE("diagnostics::List: hasFatal and hasErrors", "[ir][diagnostics]") {
+    nodehammer::diagnostics::List list;
     REQUIRE_FALSE(list.hasFatal());
     REQUIRE_FALSE(list.hasErrors());
 

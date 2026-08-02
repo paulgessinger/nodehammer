@@ -13,15 +13,15 @@
 namespace nodehammer::cli {
 
 /// Print diagnostics to stderr with colored severity.
-inline void printDiags(const diagnostics::DiagnosticList &diags) {
+inline void printDiags(const diagnostics::List &diags) {
     static detail::Console errCon{detail::ColorMode::Auto};
     for (const auto &d : diags.items()) {
         std::string_view color;
         std::string_view label;
-        if (d.severity >= diagnostics::DiagnosticSeverity::Error) {
+        if (d.severity >= diagnostics::Severity::Error) {
             color = "red";
             label = "error";
-        } else if (d.severity == diagnostics::DiagnosticSeverity::Warning) {
+        } else if (d.severity == diagnostics::Severity::Warning) {
             color = "yellow";
             label = "warn";
         } else {
