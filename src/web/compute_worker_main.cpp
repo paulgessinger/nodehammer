@@ -155,10 +155,14 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
 
     // (Re)seed the cache when new scene bytes arrive; otherwise require a hit.
     if (scene_bytes != nullptr && scene_len > 0) {
-        auto imported = FlatBufferImporter::importFromBytes(
-            "scene.nhb", std::as_bytes(std::span{scene_bytes, scene_len}));
-        if (imported.diags.hasErrors()) {
-            reportError(imported.diags, "compute: failed to deserialize semantic scene");
+        ImportResult imported;
+        try {
+            imported = FlatBufferImporter::importFromBytes(
+                "scene.nhb", std::as_bytes(std::span{scene_bytes, scene_len}));
+        } catch (const Error &e) {
+            nh_compute_emit_error(
+                (std::string{"compute: failed to deserialize semantic scene: "} + e.what())
+                    .c_str());
             return nullptr;
         }
         // No base directory: this TOML arrives over postMessage from a config

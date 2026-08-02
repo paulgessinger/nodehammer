@@ -39,7 +39,7 @@ void registerCmdDumpRender(CLI::App &app) {
             if (syntheticBoxOpt->count()) {
                 semScene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
             } else if (*inputOpt) {
-                auto [importResult, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
+                auto [importResult, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
                 nodehammer::cli::printDiags(importResult.diags);
                 if (importResult.diags.hasErrors())
                     return;

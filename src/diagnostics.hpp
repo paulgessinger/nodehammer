@@ -65,10 +65,6 @@ using Severity = Diagnostic::Severity;
     return "unknown";
 }
 
-[[nodiscard]] constexpr bool isFatal(const Diagnostic &d) noexcept {
-    return d.severity == Severity::Fatal;
-}
-
 class List {
   public:
     void add(Diagnostic d) { items_.push_back(std::move(d)); }
@@ -86,24 +82,17 @@ class List {
     void error(std::string_view code, std::string_view message, std::string_view context = {}) {
         add({Severity::Error, std::string{code}, std::string{message}, std::string{context}});
     }
-    void fatal(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({Severity::Fatal, std::string{code}, std::string{message}, std::string{context}});
-    }
+
+    // No `fatal`. A stage that cannot deliver throws, and `Fatal` is what
+    // `Error::diagnostic()` stamps on the failure when a caller wants both
+    // channels in one report — so a list that could contain one would be a list
+    // claiming a result exists and does not (docs/error-model.md).
 
     void append(const List &other) {
         items_.reserve(items_.size() + other.items_.size());
         for (const auto &d : other.items_) {
             items_.push_back(d);
         }
-    }
-
-    [[nodiscard]] bool hasFatal() const noexcept {
-        for (const auto &d : items_) {
-            if (isFatal(d)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     [[nodiscard]] bool hasErrors() const noexcept {

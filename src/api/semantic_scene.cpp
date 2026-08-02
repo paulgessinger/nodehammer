@@ -20,18 +20,10 @@ namespace {
 
 /// Adopt an internal ImportResult.
 ///
-/// An importer reports "could not read this" as an error *diagnostic* rather
-/// than by throwing — all six such sites in the tree do, and every one of them
-/// returns an empty scene alongside it. At the boundary that is an input error
-/// like any other, so it becomes an exception here and `read` either hands back
-/// a scene or explains why it cannot.
-///
-/// `ImportResult` does permit a populated scene alongside errors. Nothing
-/// produces one, and an importer that wanted to report a *lossy* import already
-/// has the channel for it: warnings plus the `DegradationFlags` the IR carries
-/// per node. Errors mean there is nothing to hand back.
-[[nodiscard]] SemanticResult adopt(ir::ImportResult result, std::string_view context) {
-    diagnostics::throwIfErrors(result.diags, context);
+/// Nothing to translate: an importer that could not read its input throws, so
+/// what arrives here is a scene and what was observed about it. The wrapper is
+/// two conversions.
+[[nodiscard]] SemanticResult adopt(ir::ImportResult result) {
     return SemanticResult{api::asHandle(std::move(result.scene)),
                           diagnostics::asHandle(std::move(result.diags))};
 }
@@ -59,7 +51,7 @@ SemanticResult SemanticScene::read(const std::filesystem::path &path, const Read
                     path.string()};
     }
     try {
-        return adopt(importer->import(path), path.string());
+        return adopt(importer->import(path));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
@@ -69,7 +61,7 @@ SemanticResult SemanticScene::read(const std::filesystem::path &path, const Read
 
 SemanticResult SemanticScene::read(std::span<const std::byte> nhb) {
     try {
-        return adopt(ir::FlatBufferImporter::importFromBytes("<memory>.nhb", nhb), "<memory>.nhb");
+        return adopt(ir::FlatBufferImporter::importFromBytes("<memory>.nhb", nhb));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
@@ -80,7 +72,7 @@ SemanticResult SemanticScene::read(std::span<const std::byte> nhb) {
 #if NH_WITH_TGEO
 SemanticResult SemanticScene::read(TGeoManager &manager) {
     try {
-        return adopt(ir::TGeoImporter{}.import(&manager), "TGeoManager");
+        return adopt(ir::TGeoImporter{}.import(&manager));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {

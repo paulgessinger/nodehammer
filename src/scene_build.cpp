@@ -59,9 +59,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     SceneBuildResult result;
 
     if (geometry_path.empty()) {
-        result.diags.error(codes::kFatalImportFormatUnknown,
-                           "buildSceneFromPaths: input path is empty", "");
-        return result;
+        throw Error{codes::kFatalImportFormatUnknown, "buildSceneFromPaths: input path is empty"};
     }
 
     config::NHConfig cfg;
@@ -74,17 +72,13 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     const auto importerRegistry = ir::ImporterRegistry::makeDefault();
     const auto *importer = importerRegistry.resolve(geometry_path);
     if (importer == nullptr) {
-        result.diags.error(codes::kFatalImportFormatUnknown,
-                           "buildSceneFromPaths: no importer for '" + geometry_path.string() + "'",
-                           geometry_path.string());
-        return result;
+        throw Error{codes::kFatalImportFormatUnknown,
+                    "buildSceneFromPaths: no importer for '" + geometry_path.string() + "'",
+                    geometry_path.string()};
     }
 
     auto importResult = importer->import(geometry_path);
     result.diags.append(importResult.diags);
-    if (importResult.diags.hasErrors()) {
-        return result;
-    }
 
     // Drive the shared BuildPipeline to completion — the same prep → (wedge) →
     // tessellate core the viewer backends use, so this synchronous shim is no

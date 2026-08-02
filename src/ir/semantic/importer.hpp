@@ -11,8 +11,10 @@
 
 namespace nodehammer::ir {
 
-/// Result of a single import call. Partial success is allowed:
-/// scene may be populated even when diags.hasErrors() is true.
+/// Result of a single import call. The scene is always valid: an importer that could not read its
+/// input throws `Error` rather than returning an empty scene beside an explanation, so `diags`
+/// carries only what was observed about a scene that exists — an unknown shape, a missing material
+/// (docs/error-model.md).
 struct ImportResult {
     semantic::Scene scene;
     diagnostics::List diags;

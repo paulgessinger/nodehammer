@@ -263,9 +263,11 @@ void registerCmdInspect(CLI::App &app) {
     // ── summary ──────────────────────────────────────────────────────────────
     auto *sumSub = sub->add_subcommand("summary", "Print a high-level summary");
     sumSub->callback([=] {
-        auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
-        nodehammer::cli::Pager pager;
-        printSummary(result, fmt);
+        nodehammer::cli::runOrExit("inspect summary", [&] {
+            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
+            nodehammer::cli::Pager pager;
+            printSummary(result, fmt);
+        });
     });
 
     // ── tree ───��───────────────���─────────────────────────────────────────────
@@ -276,33 +278,37 @@ void registerCmdInspect(CLI::App &app) {
         treeSub->add_option("--filter,-f", "Path glob filter (only show matching nodes)");
 
     treeSub->callback([=] {
-        auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
+        nodehammer::cli::runOrExit("inspect tree", [&] {
+            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
 
-        int maxDepth = -1;
-        depthOpt->results(maxDepth);
-        std::string filter;
-        if (*filterOpt) {
-            filterOpt->results(filter);
-        }
+            int maxDepth = -1;
+            depthOpt->results(maxDepth);
+            std::string filter;
+            if (*filterOpt) {
+                filterOpt->results(filter);
+            }
 
-        std::string colorStr;
-        colorOpt->results(colorStr);
+            std::string colorStr;
+            colorOpt->results(colorStr);
 
-        nodehammer::cli::Pager pager;
-        nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
-        printTree(result.scene, maxDepth, filter, con);
+            nodehammer::cli::Pager pager;
+            nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+            printTree(result.scene, maxDepth, filter, con);
+        });
     });
 
     // ── tags ────────────────────────────────────���───────────────────────────���
     auto *tagsSub = sub->add_subcommand("tags", "List all unique tags and their values");
     tagsSub->callback([=] {
-        auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
+        nodehammer::cli::runOrExit("inspect tags", [&] {
+            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
 
-        std::string colorStr;
-        colorOpt->results(colorStr);
+            std::string colorStr;
+            colorOpt->results(colorStr);
 
-        nodehammer::cli::Pager pager;
-        nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
-        printTags(result.scene, con);
+            nodehammer::cli::Pager pager;
+            nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+            printTags(result.scene, con);
+        });
     });
 }

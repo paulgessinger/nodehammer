@@ -7,6 +7,7 @@
 
 #include <diagnostics.hpp>
 
+#include <format>
 #include <print>
 #include <string>
 #include <utility>
@@ -74,15 +75,17 @@ template <typename Body> void runOrExit(std::string_view command, Body &&body) {
     std::exit(1);
 }
 
-/// Result of importOrExit: the import result plus the format name.
+/// Result of importFrom: the import result plus the format name.
 struct ImportWithFormat {
     ir::ImportResult result;
     std::string formatName;
 };
 
-/// Read --input and --input-format from CLI options, import the file,
-/// print errors, and exit on failure.
-inline ImportWithFormat importOrExit(CLI::Option *inputOpt, CLI::Option *formatOpt) {
+/// Read --input and --input-format from CLI options and import the file.
+///
+/// Throws rather than exiting: `runOrExit` is where a command ends, and a
+/// helper that called `exit` itself would be a second one.
+inline ImportWithFormat importFrom(CLI::Option *inputOpt, CLI::Option *formatOpt) {
     std::string inputPath, inputFmt;
     if (*inputOpt) {
         inputOpt->results(inputPath);
@@ -91,16 +94,14 @@ inline ImportWithFormat importOrExit(CLI::Option *inputOpt, CLI::Option *formatO
         formatOpt->results(inputFmt);
     }
     if (inputPath.empty()) {
-        std::println(stderr, "error: --input is required");
-        std::exit(1);
+        throw Error{codes::kFatalImportFormatUnknown, "--input is required"};
     }
 
     auto registry = ir::ImporterRegistry::makeDefault();
     const auto *imp = registry.resolve(inputPath, inputFmt);
     if (imp == nullptr) {
-        std::println(stderr, "[error] {} cannot determine input format for '{}'",
-                     codes::kFatalImportFormatUnknown, inputPath);
-        std::exit(1);
+        throw Error{codes::kFatalImportFormatUnknown,
+                    std::format("cannot determine input format for '{}'", inputPath), inputPath};
     }
     auto result = imp->import(inputPath);
     return {std::move(result), std::string{imp->formatName()}};

@@ -106,12 +106,11 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
         detOwner = dd4hep::Detector::make_unique("");
         detOwner->fromCompact(path.string());
     } catch (const std::exception &ex) {
-        ImportResult result;
-        result.diags.error(codes::kFatalTgeoOpenFailed,
-                           std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()));
         gErrorIgnoreLevel = savedRootLevel;
         dd4hep::setPrintLevel(savedDd4hepLevel);
-        return result;
+        throw Error{codes::kFatalTgeoOpenFailed,
+                    std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()),
+                    path.string()};
     }
 
     // Pass 1: full TGeo tree traversal — every node gets a semantic::Node.

@@ -276,22 +276,15 @@ void BuildSession::poll(ProjectFs *project) {
         pushWarning(d.message);
     }
 
-    auto imp = ir::FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
-    for (const auto &d : imp.diags.items()) {
-        if (d.severity < diagnostics::Severity::Error) {
-            pushWarning(d.message);
-        }
-    }
-    if (imp.diags.hasErrors()) {
-        std::string first = "geometry import failed";
-        for (const auto &d : imp.diags.items()) {
-            if (d.severity >= diagnostics::Severity::Error) {
-                first = d.message;
-                break;
-            }
-        }
-        enter_error(std::move(first));
+    ir::ImportResult imp;
+    try {
+        imp = ir::FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
+    } catch (const Error &e) {
+        enter_error(e.what());
         return;
+    }
+    for (const auto &d : imp.diags.items()) {
+        pushWarning(d.message);
     }
 
     auto inputs = std::make_unique<BuildSessionInputs>();

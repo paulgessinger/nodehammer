@@ -71,6 +71,22 @@ void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidate
     }
 }
 
+/// `--strict` as what it is: a policy the caller applies to a list it was
+/// handed, not a flag threaded into the library (docs/error-model.md). Without
+/// it, only an error is fatal to a conversion; with it, so is a warning.
+struct Strictness {
+    bool warningsAreFatal = false;
+
+    void operator()(const nodehammer::diagnostics::List &diags, std::string_view stage) const {
+        nodehammer::diagnostics::throwIfErrors(diags, stage);
+        if (warningsAreFatal && !diags.empty()) {
+            throw nodehammer::Error{nodehammer::codes::kErrConfigParse,
+                                    "warnings are errors under --strict", stage,
+                                    nodehammer::diagnostics::asHandle(diags)};
+        }
+    }
+};
+
 } // namespace
 
 void registerCmdConvert(CLI::App &app) {
@@ -107,7 +123,7 @@ void registerCmdConvert(CLI::App &app) {
             if (*fmtOutOpt) {
                 fmtOutOpt->results(outputFmt);
             }
-            const bool strict = strictOpt->count() > 0;
+            const Strictness demandClean{strictOpt->count() > 0};
             const bool showTiming = timingOpt->count() > 0;
 
             nodehammer::detail::TimingReport timings;
@@ -129,14 +145,10 @@ void registerCmdConvert(CLI::App &app) {
 
             // ── Import ─────────────────────────────────────────────────────────────
             nodehammer::detail::Timer importTimer;
-            auto [importResult, importFmt] = nodehammer::cli::importOrExit(inputOpt, fmtInOpt);
+            auto [importResult, importFmt] = nodehammer::cli::importFrom(inputOpt, fmtInOpt);
             timings.record("import", importTimer.elapsed());
             printDiags(importResult.diags);
-            if (importResult.diags.hasErrors() ||
-                (strict && !importResult.diags.empty() && !importResult.diags.hasErrors())) {
-                std::println(stderr, "convert: import failed");
-                std::exit(1);
-            }
+            demandClean(importResult.diags, "import");
 
             // ── Select ─────────────────────────────────────────────────────────────
             if (!cfg.selection.empty()) {
@@ -144,10 +156,7 @@ void registerCmdConvert(CLI::App &app) {
                 nodehammer::selection::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
                 auto selDiags = sel.prune(importResult.scene);
                 printDiags(selDiags);
-                if (selDiags.hasErrors()) {
-                    std::println(stderr, "convert: selection failed");
-                    std::exit(1);
-                }
+                demandClean(selDiags, "selection");
             }
 
             // ── Deduplicate shapes ─────────────────────────────────────────────────
@@ -194,10 +203,10 @@ void registerCmdConvert(CLI::App &app) {
             auto tessResult = pass.lower(importResult.scene);
             timings.record("tessellate", tessTimer.elapsed());
             printDiags(tessResult.diags);
-            if (tessResult.diags.hasErrors()) {
-                std::println(stderr, "convert: tessellation failed");
-                std::exit(1);
-            }
+            // Tessellation errors are partial results — a node without a mesh — so the
+            // library hands the scene back and lets the caller judge it. `convert`
+            // judges that a scene missing geometry is not worth writing.
+            demandClean(tessResult.diags, "tessellation");
 
             // ── Export (one pass per output path) ─────────────────────────────────
             const auto expRegistry = nodehammer::ir::RenderExporterRegistry::makeDefault();
@@ -218,10 +227,7 @@ void registerCmdConvert(CLI::App &app) {
                 auto expResult = exp->write(tessResult.scene, outputPath, ecfg);
                 timings.record(std::format("export[{}]", outputPath), expTimer.elapsed());
                 printDiags(expResult.diags);
-                if (expResult.diags.hasErrors()) {
-                    std::println(stderr, "convert: export to '{}' failed", outputPath);
-                    std::exit(1);
-                }
+                demandClean(expResult.diags, outputPath);
 
                 int warnings = 0, errors = 0;
                 for (const auto *dl : {&importResult.diags, &tessResult.diags, &expResult.diags}) {

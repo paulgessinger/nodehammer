@@ -232,7 +232,7 @@ void registerCmdDumpSemantic(CLI::App &app) {
             }
 
             // ── Import ─────────────────────────────────────────────────────────────
-            auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
+            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
             nodehammer::cli::printDiags(result.diags);
 
             // ── Select ─────────────────────────────────────────────────────────────
