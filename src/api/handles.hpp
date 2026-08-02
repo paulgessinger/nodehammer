@@ -157,14 +157,13 @@ namespace api {
         std::make_shared<const SemanticScene::Impl>(SemanticScene::Impl{std::move(scene)})};
 }
 
-/// Null when the handle refers to nothing.
-[[nodiscard]] inline const ir::semantic::Scene *sceneOf(const SemanticScene &handle) noexcept {
-    return handle.valid() ? &handle.impl().scene : nullptr;
-}
-
 /// The scene behind a handle, or an `Error` naming the caller that was handed
-/// nothing. Every verb starts here: an empty handle is a caller mistake, and a
-/// mistake with no result to report is what the exception channel is for.
+/// nothing. Every *verb* starts here — a handle's own observers ask `impl_`
+/// directly, being members. An empty handle is a caller mistake, and a mistake
+/// with no result to report is what the exception channel is for.
+///
+/// All this adds over `handle.impl()`, which throws on its own, is the verb: an
+/// exception that names the call the caller got wrong is worth one wrapper.
 [[nodiscard]] inline const ir::semantic::Scene &require(const SemanticScene &handle,
                                                         std::string_view verb) {
     if (!handle.valid()) {
@@ -177,10 +176,6 @@ namespace api {
 [[nodiscard]] inline RenderScene wrap(ir::render::Scene scene) {
     return RenderScene{
         std::make_shared<const RenderScene::Impl>(RenderScene::Impl{std::move(scene)})};
-}
-
-[[nodiscard]] inline const ir::render::Scene *sceneOf(const RenderScene &handle) noexcept {
-    return handle.valid() ? &handle.impl().scene : nullptr;
 }
 
 [[nodiscard]] inline const ir::render::Scene &require(const RenderScene &handle,
@@ -247,14 +242,14 @@ namespace api {
     return Config{std::make_shared<const Config::Impl>(Config::Impl{std::move(cfg)})};
 }
 
-[[nodiscard]] inline const config::NHConfig *configOf(const Config &handle) noexcept {
-    return handle.valid() ? &handle.impl().cfg : nullptr;
-}
-
-/// The document a slice was cut from. Unlike the scene handles this never
-/// returns null: a default-constructed slice legitimately means "no config
-/// file", which is the default-constructed AST, and every consumer of a slice
-/// already treats that as valid input.
+/// The document a slice was cut from. Unlike `require` this never throws: a
+/// slice with no document legitimately means "no config file", which is the
+/// default-constructed AST, and every consumer of a slice already treats that
+/// as valid input.
+///
+/// A slice is the one thing here whose state is read by something that is not
+/// one of its own members — the verbs in build.cpp and `RenderScene::write` —
+/// which is why these two survive and `sceneOf` did not.
 [[nodiscard]] inline const config::NHConfig &configOf(const SceneConfig &slice) noexcept {
     static const config::NHConfig kDefaults{};
     return slice.valid() ? *slice.impl().cfg : kDefaults;

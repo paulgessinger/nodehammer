@@ -43,17 +43,19 @@ namespace {
     return ConfigResult{api::wrap(std::move(loaded.config)), api::wrap(std::move(diags))};
 }
 
-/// An aliasing pointer into a `Config`'s state: a slice shares ownership of the
-/// whole handle while pointing at just the AST, so slicing costs one control-
-/// block bump and no copy of the document.
+/// Cut a slice from a document. The pointer aliases the handle's state, so a
+/// slice shares ownership of the whole thing while pointing at just the AST:
+/// slicing costs one control-block bump and no copy of the document.
 ///
 /// Takes the state rather than the handle, since reaching a handle's state as a
 /// *pointer* — rather than through `impl()`, which hands out a reference — is
-/// something only a member can do, and both callers are members.
-[[nodiscard]] std::shared_ptr<const config::NHConfig>
-document(const std::shared_ptr<const Config::Impl> &state) {
-    return state ? std::shared_ptr<const config::NHConfig>{state, &state->cfg}
-                 : std::shared_ptr<const config::NHConfig>{};
+/// something only a member can do, and both callers are members. `state` must
+/// be non-null, which is what makes a slice's own `cfg` non-null whenever it
+/// has state at all.
+template <typename Slice>
+[[nodiscard]] Slice slice(const std::shared_ptr<const Config::Impl> &state) {
+    return Slice{std::make_shared<const typename Slice::Impl>(
+        typename Slice::Impl{std::shared_ptr<const config::NHConfig>{state, &state->cfg}})};
 }
 
 [[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {
@@ -119,22 +121,20 @@ std::span<const std::string_view> Config::formats() {
     return kFormats;
 }
 
-SceneConfig Config::scene() const {
-    return SceneConfig{
-        std::make_shared<const SceneConfig::Impl>(SceneConfig::Impl{document(impl_)})};
-}
+// Slicing an empty handle yields an empty slice rather than a slice of nothing.
+// The two would answer every public question identically — `valid()` is false
+// and the resolvers fall back to the built-in defaults either way — but only
+// this one leaves a slice with a single way to mean "no document", so `cfg` is
+// non-null wherever a slice has state at all.
 
-OutputConfig Config::output() const {
-    return OutputConfig{
-        std::make_shared<const OutputConfig::Impl>(OutputConfig::Impl{document(impl_)})};
-}
+SceneConfig Config::scene() const { return impl_ ? slice<SceneConfig>(impl_) : SceneConfig{}; }
+
+OutputConfig Config::output() const { return impl_ ? slice<OutputConfig>(impl_) : OutputConfig{}; }
 
 bool Config::valid() const noexcept { return impl_ != nullptr; }
 
-// A slice of an empty `Config` holds state whose document is null, so both
-// halves have to be asked.
-bool SceneConfig::valid() const noexcept { return impl_ != nullptr && impl_->cfg != nullptr; }
+bool SceneConfig::valid() const noexcept { return impl_ != nullptr; }
 
-bool OutputConfig::valid() const noexcept { return impl_ != nullptr && impl_->cfg != nullptr; }
+bool OutputConfig::valid() const noexcept { return impl_ != nullptr; }
 
 } // namespace nodehammer

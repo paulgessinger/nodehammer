@@ -135,28 +135,26 @@ std::vector<std::byte> RenderScene::toNhr() const {
 
 bool RenderScene::valid() const noexcept { return impl_ != nullptr; }
 
+// Members, so they read the state directly — see the note in semantic_scene.cpp.
+
 std::size_t RenderScene::nodeCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    return scene != nullptr ? scene->nodes.size() : 0;
+    return impl_ ? impl_->scene.nodes.size() : 0;
 }
 
 std::size_t RenderScene::meshCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    return scene != nullptr ? scene->meshAssets.size() : 0;
+    return impl_ ? impl_->scene.meshAssets.size() : 0;
 }
 
 std::size_t RenderScene::materialCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    return scene != nullptr ? scene->materials.size() : 0;
+    return impl_ ? impl_->scene.materials.size() : 0;
 }
 
 std::size_t RenderScene::triangleCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    if (scene == nullptr) {
+    if (!impl_) {
         return 0;
     }
     std::size_t total = 0;
-    for (const auto &[id, mesh] : scene->meshAssets) {
+    for (const auto &[id, mesh] : impl_->scene.meshAssets) {
         total += mesh.indices.size() / 3;
     }
     return total;

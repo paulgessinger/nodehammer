@@ -149,24 +149,24 @@ std::vector<std::byte> SemanticScene::toNhb() const {
 
 bool SemanticScene::valid() const noexcept { return impl_ != nullptr; }
 
+// The observers are members, so they read the state rather than going through
+// a helper to ask whether there is any: `api::require` is for the verbs, which
+// are not members and have a caller to name.
+
 std::size_t SemanticScene::nodeCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    return scene != nullptr ? scene->nodes.size() : 0;
+    return impl_ ? impl_->scene.nodes.size() : 0;
 }
 
 std::size_t SemanticScene::logVolCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    return scene != nullptr ? scene->logVols.size() : 0;
+    return impl_ ? impl_->scene.logVols.size() : 0;
 }
 
 std::size_t SemanticScene::shapeCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    return scene != nullptr ? scene->shapes.size() : 0;
+    return impl_ ? impl_->scene.shapes.size() : 0;
 }
 
 std::size_t SemanticScene::materialCount() const noexcept {
-    const auto *scene = api::sceneOf(*this);
-    return scene != nullptr ? scene->materials.size() : 0;
+    return impl_ ? impl_->scene.materials.size() : 0;
 }
 
 } // namespace nodehammer

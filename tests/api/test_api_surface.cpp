@@ -91,13 +91,17 @@ TEST_CASE("The state getter throws rather than binding a null reference", "[api]
     REQUIRE_THROWS_AS(nh::SceneConfig{}.impl(), nh::Error);
     REQUIRE_THROWS_AS(nh::OutputConfig{}.impl(), nh::Error);
 
-    // A slice of an empty `Config` is the one case where the two questions
-    // differ: it holds state, so it answers `impl()`, but the document behind
-    // that state is null — which is what `valid()` reports and what
-    // `api::configOf` turns into the built-in defaults.
+    // Slicing an empty `Config` yields an empty slice, not a slice holding no
+    // document: one way to mean "no config file", so a slice that answers
+    // `impl()` always has a document behind it.
     const auto slice = nh::Config{}.scene();
     REQUIRE_FALSE(slice.valid());
-    REQUIRE(slice.impl().cfg == nullptr);
+    REQUIRE_THROWS_AS(slice.impl(), nh::Error);
+
+    // And a slice of a real document does have one.
+    const auto real = nh::Config::parse("").config.scene();
+    REQUIRE(real.valid());
+    REQUIRE(real.impl().cfg != nullptr);
 }
 
 TEST_CASE("DiagnosticList is an ordered range that survives being moved from", "[api][handles]") {

@@ -301,8 +301,8 @@ TEST_CASE("write honours the output slice, not just build", "[api][equivalence]"
     // And an omitted slice means exactly the format's built-in defaults —
     // pinned against the same resolution the CLI runs, over the same render
     // scene, so this compares the write path and nothing else.
-    const auto *internalScene = nh::api::sceneOf(rendered.scene);
-    REQUIRE(internalScene != nullptr);
+    REQUIRE(rendered.scene.valid());
+    const auto &internalScene = rendered.scene.impl().scene;
     const auto registry = nh::ir::RenderExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(defaulted, {});
     REQUIRE(exporter != nullptr);
@@ -310,7 +310,7 @@ TEST_CASE("write honours the output slice, not just build", "[api][equivalence]"
     const nh::config::NHConfig noConfig;
     REQUIRE_FALSE(
         exporter
-            ->write(*internalScene, expected, nh::pipeline::resolveExportConfig(noConfig, expected))
+            ->write(internalScene, expected, nh::pipeline::resolveExportConfig(noConfig, expected))
             .diags.hasErrors());
     REQUIRE(readBytes(defaulted) == readBytes(expected));
 }

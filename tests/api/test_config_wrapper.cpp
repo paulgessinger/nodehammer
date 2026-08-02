@@ -87,9 +87,8 @@ TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api
     const auto wrapped = nodehammer::Config::read(path);
 
     REQUIRE(wrapped.config.valid());
-    const auto *parsed = api::configOf(wrapped.config);
-    REQUIRE(parsed != nullptr);
-    REQUIRE(nodehammer::config::configToToml(*parsed) ==
+    const auto &parsed = wrapped.config.impl().cfg;
+    REQUIRE(nodehammer::config::configToToml(parsed) ==
             nodehammer::config::configToToml(reference.config));
 
     // Validation is the one thing the wrapper adds on top of the load. Its
@@ -111,14 +110,14 @@ TEST_CASE("Config::parse wraps loadFromString and roots includes at baseDir", "[
 
     REQUIRE_FALSE(reference.diags.hasErrors());
     REQUIRE_FALSE(listHasErrors(wrapped.diags));
-    REQUIRE(nodehammer::config::configToToml(*api::configOf(wrapped.config)) ==
+    REQUIRE(nodehammer::config::configToToml(wrapped.config.impl().cfg) ==
             nodehammer::config::configToToml(reference.config));
 
     // And the same content read straight off disk: `parse` + baseDir is
     // `read` minus the file read, which is what step 5b unified.
     const auto fromFile = nodehammer::Config::read(path);
-    REQUIRE(nodehammer::config::configToToml(*api::configOf(wrapped.config)) ==
-            nodehammer::config::configToToml(*api::configOf(fromFile.config)));
+    REQUIRE(nodehammer::config::configToToml(wrapped.config.impl().cfg) ==
+            nodehammer::config::configToToml(fromFile.config.impl().cfg));
 }
 
 TEST_CASE("Config::parse with no baseDir resolves no includes", "[api][config]") {
@@ -149,7 +148,7 @@ TEST_CASE("Config slices share one document and default to the built-in config",
     REQUIRE(output.valid());
     // Slicing shares rather than copies: both halves must be the same document.
     REQUIRE(&api::configOf(scene) == &api::configOf(output));
-    REQUIRE(&api::configOf(scene) == api::configOf(loaded.config));
+    REQUIRE(&api::configOf(scene) == &loaded.config.impl().cfg);
 
     // A slice outlives the handle it came from — it owns a share of the
     // document, so this is not a dangling read.

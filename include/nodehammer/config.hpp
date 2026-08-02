@@ -42,9 +42,8 @@ class SceneConfig {
     /// Adopt state the library built.
     explicit SceneConfig(std::shared_ptr<const Impl> impl) noexcept;
 
-    /// The state behind a slice that has one. Throws `Error` when there is no
-    /// state at all; note that a slice can hold state and still be `valid() ==
-    /// false`, since a slice of an empty `Config` is a slice of no document.
+    /// The document behind a slice that has one. Throws `Error` when `valid()`
+    /// is false.
     [[nodiscard]] const Impl &impl() const;
 
   private:
