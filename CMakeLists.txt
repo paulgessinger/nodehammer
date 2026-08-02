@@ -726,6 +726,33 @@ else()
     nh_apply_emscripten_exe_options(nodehammer)
 endif()
 
+# ── gcc 15: a false positive on copying a vector<SelectionRule> ───────────────
+# Copying a `SelectionRule` copies a `PredicateExpr`, which is a `std::variant`
+# holding `shared_ptr`s for the compound predicates. At -O3, gcc 15 inlines the
+# variant's copy constructor together with the destructor that only ever runs if
+# that construction *throws*, then reports the control-block pointer on that
+# unreachable path as maybe-uninitialized. NODEHAMMER_WERROR makes it fatal, and
+# `LCG 109` is the only configuration that compiles with this compiler.
+#
+# Declared as a list rather than as a `#pragma` in the offending function,
+# because which function is "offending" is an inlining decision and moves: the
+# first version of this suppression sat in src/api/build.cpp, and deleting an
+# unrelated dead `catch` in that file moved the report to scene_build.cpp. These
+# are the translation units that construct a `SelectionEngine`, which is where
+# the copy happens; if a sixth appears, it goes here.
+#
+# Scoped per source so a genuine maybe-uninitialized anywhere else still fails.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(
+        src/api/build.cpp
+        src/scene_build.cpp
+        src/selection/selector.cpp
+        src/cli/cmd_convert.cpp
+        src/cli/cmd_dump_semantic.cpp
+        PROPERTIES COMPILE_OPTIONS "-Wno-maybe-uninitialized"
+    )
+endif()
+
 # ── Tests ──────────────────────────────────────────────────────────────────────
 if(NODEHAMMER_BUILD_TESTS)
     enable_testing()

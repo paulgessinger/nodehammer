@@ -18,32 +18,11 @@ namespace {
 
 [[nodiscard]] bool dedupApplies(const config::NHConfig &cfg) { return cfg.deduplicateShapes; }
 
-// `SelectionEngine` takes its rules by value, so constructing one copies a
-// `vector<SelectionRule>`, and copying a `SelectionRule` copies a `PredicateExpr`
-// — a `std::variant` holding `shared_ptr`s for the compound predicates. At -O3,
-// GCC 15 inlines the variant's copy constructor together with the destructor
-// that only ever runs if that construction throws, then reports the
-// control-block pointer on that unreachable path as maybe-uninitialized. It is
-// the known false positive for `variant` + `shared_ptr`, and `-Werror` makes it
-// fatal on the LCG job — the one configuration that compiles with this gcc.
-//
-// Scoped to this one function on purpose, so it cannot mask a real report
-// elsewhere in the file, and guarded because the option does not exist under
-// clang. `cmd_convert.cpp` writes the identical construction and does not trip
-// it; what differs is only how much this small helper gets inlined into its two
-// callers, which is why suppressing beats restructuring around it.
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
 void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg,
                   diagnostics::List &diags) {
     const selection::SelectionEngine engine{cfg.selection, cfg.hoistOrphans};
     diags.append(engine.prune(scene));
 }
-#if defined(__GNUC__) && !defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 
 void runDedup(ir::semantic::Scene &scene) {
     scene.deduplicateMaterials();
