@@ -157,3 +157,59 @@ else()
                 "${CMAKE_CURRENT_BINARY_DIR}/bench_smoke.glb"
     )
 endif()
+
+# ── The public-API suite ──────────────────────────────────────────────────────
+#
+# The same code as everything above, linked the other way: against
+# nodehammer_shared rather than the archive. That single difference is the
+# target's whole reason to exist.
+#
+# nodehammer_lib carries NH_STATIC as PUBLIC — which collapses NH_API to nothing
+# — and nodehammer_shared carries NH_EXPORTS as PRIVATE, so a target linking the
+# shared library inherits *neither*. It therefore sees the same NH_API spelling
+# an installed consumer does (dllimport on Windows, default visibility
+# elsewhere) and resolves against the same export table. A member that is
+# missing its NH_API links fine everywhere else in this tree and fails here.
+#
+# ci/shared_consumer answers the neighbouring question — can somebody outside
+# the build tree use an *installed* nodehammer, with no dependency hints and no
+# source access — and it stays the authority on that. What it cannot be is a
+# test suite: it is one `main()` with an exit code, so a broken entry point
+# hides every entry point after it, and adding a case means adding another `if`
+# and another error message. This is where the assertions go.
+#
+# Gated because there is nothing to link against otherwise. NODEHAMMER_BUILD_SHARED
+# is a hard CMake error under Emscripten, so this is native-only by construction
+# and ci/build.sh turns it on for every native leg.
+if(NODEHAMMER_BUILD_SHARED)
+    add_executable(nodehammer_public_tests
+        public/test_public_build.cpp
+        public/test_public_config.cpp
+        public/test_public_diagnostics.cpp
+        public/test_public_render_scene.cpp
+        public/test_public_semantic_scene.cpp
+    )
+
+    # No nodehammer_lib, no fixtures directory, no TinyGLTF: this suite reaches
+    # the library only through <nodehammer/*.hpp>, and it builds every input it
+    # needs through the API itself. The include path still *reaches* src/ —
+    # nodehammer_shared propagates it in-tree via nh_core_common — but an
+    # internal header would not link, because internals are hidden in the shared
+    # object. The rule is enforced by the linker rather than by review.
+    target_link_libraries(nodehammer_public_tests PRIVATE
+        nodehammer_shared
+        Catch2::Catch2WithMain
+    )
+
+    nh_set_compiler_options(nodehammer_public_tests)
+
+    include(Catch)
+    # DL_PATHS puts the shared library on the loader's path for both the
+    # discovery run and the tests themselves. Only Windows needs it — the DLL
+    # sits in the runtime output directory with no rpath to record where it went
+    # — but stating it unconditionally costs nothing and keeps the reason in one
+    # place instead of behind an if(WIN32).
+    catch_discover_tests(nodehammer_public_tests
+        DL_PATHS $<TARGET_FILE_DIR:nodehammer_shared>
+    )
+endif()
