@@ -68,9 +68,6 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     if (!config_path.empty()) {
         auto loaded = config::ConfigLoader::loadFromFile(config_path);
         result.diags.append(loaded.diags);
-        if (loaded.diags.hasErrors()) {
-            return result;
-        }
         cfg = std::move(loaded.config);
     }
 

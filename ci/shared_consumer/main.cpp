@@ -120,6 +120,20 @@ int main() {
         return fail("Config::parse failed", config.diags);
     }
 
+    // The other promise over the same collector: a document that `parse` would
+    // have thrown about is `checkString`'s ordinary answer. Both are exported,
+    // so both are called here — that is what this consumer is for.
+    if (!nodehammer::Config::checkString("deduplicate_shapes = true\n").empty()) {
+        std::puts("Config::checkString reported something about a sound document");
+        return 1;
+    }
+    const auto report = nodehammer::Config::checkString("[[rules]]\nmatch = \"!!!\"\n");
+    if (!report.hasErrors()) {
+        std::puts("Config::checkString did not report a broken document");
+        return 1;
+    }
+    std::printf("Config::checkString reported %zu problem(s) without throwing\n", report.size());
+
     // The synthetic importer ignores its path, so the whole pipeline runs
     // without the consumer needing a geometry file to point at.
     const auto imported =

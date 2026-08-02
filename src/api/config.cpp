@@ -21,40 +21,6 @@
 namespace nodehammer {
 namespace {
 
-/// Adopt an internal load, then validate — the one thing these wrappers add
-/// beyond dispatch and slicing.
-///
-/// Validation is skipped after a failed load, matching `convert`: a load error
-/// leaves a default-constructed AST, and validating that would answer a
-/// question about a document nobody wrote. Validation *diagnostics* land in the
-/// same list as the load's, which is what makes `build` free of a validation
-/// step of its own (#41 §8).
-[[nodiscard]] ConfigResult adopt(config::ConfigResult loaded, const std::string &context) {
-    // Accumulated in the internal list, which is the type that knows how to
-    // append, and converted once at the end.
-    diagnostics::List diags = std::move(loaded.diags);
-    diagnostics::throwIfErrors(diags, context);
-    diags.append(config::ConfigValidator::validate(loaded.config));
-    diagnostics::throwIfErrors(diags, context);
-    return ConfigResult{api::asHandle(std::move(loaded.config)),
-                        diagnostics::asHandle(std::move(diags))};
-}
-
-/// Cut a slice from a document. The pointer aliases the handle's state, so a
-/// slice shares ownership of the whole thing while pointing at just the AST:
-/// slicing costs one control-block bump and no copy of the document.
-///
-/// Takes the state rather than the handle, since reaching a handle's state as a
-/// *pointer* — rather than through `impl()`, which hands out a reference — is
-/// something only a member can do, and both callers are members. `state` must
-/// be non-null, which is what makes a slice's own `cfg` non-null whenever it
-/// has state at all.
-template <typename Slice>
-[[nodiscard]] Slice slice(const std::shared_ptr<const Config::Impl> &state) {
-    return Slice{std::make_shared<const typename Slice::Impl>(
-        typename Slice::Impl{std::shared_ptr<const config::NHConfig>{state, &state->cfg}})};
-}
-
 [[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {
     std::string ext = path.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
@@ -62,11 +28,16 @@ template <typename Slice>
     return ext == ".lua";
 }
 
-} // namespace
-
-ConfigResult Config::read(const std::filesystem::path &path) {
+/// Collect a document, whichever front end owns its extension.
+///
+/// Both front ends collect rather than stop, so this reports a broken document
+/// instead of throwing about one — which is what lets `read` and `check` be the
+/// same work under two different promises. It still throws when there is no
+/// document to collect: a file that will not open, or `.lua` in a build with no
+/// Lua.
+[[nodiscard]] config::ConfigResult collect(const std::filesystem::path &path) {
     if (!hasLuaExtension(path)) {
-        return adopt(config::ConfigLoader::loadFromFile(path), path.string());
+        return config::ConfigLoader::collectFromFile(path);
     }
 
 #if NH_WITH_LUA
@@ -85,8 +56,7 @@ ConfigResult Config::read(const std::filesystem::path &path) {
         api::rethrowAsError(e, codes::kFatalImportFileNotFound, path.string());
     }
     try {
-        return adopt(lua::evalLuaConfig(source, canonical.string(), canonical.parent_path()),
-                     path.string());
+        return lua::evalLuaConfig(source, canonical.string(), canonical.parent_path());
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
@@ -98,14 +68,57 @@ ConfigResult Config::read(const std::filesystem::path &path) {
 #endif
 }
 
+/// Validate, and demand the whole thing be sound.
+///
+/// The one throw covers both stages on purpose: a document with a syntax error
+/// *and* an undefined material reference should say both once, rather than
+/// making the caller fix one, call again, and find the other. Validation
+/// diagnostics land in the same list as the load's, which is what makes `build`
+/// free of a validation step of its own (#41 §8).
+[[nodiscard]] ConfigResult demand(config::ConfigResult collected, const std::string &context) {
+    diagnostics::List diags = std::move(collected.diags);
+    diags.append(config::ConfigValidator::validate(collected.config));
+    diagnostics::throwIfErrors(diags, context);
+    return ConfigResult{api::asHandle(std::move(collected.config)),
+                        diagnostics::asHandle(std::move(diags))};
+}
+
+/// The same work, under the other promise: hand back everything observed.
+[[nodiscard]] DiagnosticList report(config::ConfigResult collected) {
+    diagnostics::List diags = std::move(collected.diags);
+    diags.append(config::ConfigValidator::validate(collected.config));
+    return diagnostics::asHandle(std::move(diags));
+}
+
+/// Cut a slice from a document. The pointer aliases the handle's state, so a
+/// slice shares ownership of the whole thing while pointing at just the AST:
+/// slicing costs one control-block bump and no copy of the document.
+///
+/// Takes the state rather than the handle, since reaching a handle's state as a
+/// *pointer* — rather than through `impl()`, which hands out a reference — is
+/// something only a member can do, and both callers are members. `state` must
+/// be non-null, which is what makes a slice's own `cfg` non-null whenever it
+/// has state at all.
+template <typename Slice>
+[[nodiscard]] Slice slice(const std::shared_ptr<const Config::Impl> &state) {
+    return Slice{std::make_shared<const typename Slice::Impl>(
+        typename Slice::Impl{std::shared_ptr<const config::NHConfig>{state, &state->cfg}})};
+}
+
+} // namespace
+
+ConfigResult Config::read(const std::filesystem::path &path) {
+    return demand(collect(path), path.string());
+}
+
 ConfigResult Config::parse(std::string_view toml, const std::filesystem::path &baseDir) {
-    try {
-        return adopt(config::ConfigLoader::loadFromString(toml, "<string>", baseDir), "<string>");
-    } catch (const Error &) {
-        throw;
-    } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrConfigParse, "<string>");
-    }
+    return demand(config::ConfigLoader::collectFromString(toml, "<string>", baseDir), "<string>");
+}
+
+DiagnosticList Config::check(const std::filesystem::path &path) { return report(collect(path)); }
+
+DiagnosticList Config::checkString(std::string_view toml, const std::filesystem::path &baseDir) {
+    return report(config::ConfigLoader::collectFromString(toml, "<string>", baseDir));
 }
 
 std::span<const std::string_view> Config::formats() {

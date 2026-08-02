@@ -23,56 +23,55 @@ void registerCmdDumpRender(CLI::App &app) {
         sub->add_flag("--synthetic-box", "Use a synthetic single-box scene as input");
 
     sub->callback([=] {
-        // ── Load config ────────────────────────────────────────────────────────
-        nodehammer::config::NHConfig cfg;
-        if (*configOpt) {
-            std::string cfgPath;
-            configOpt->results(cfgPath);
-            auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
-            nodehammer::cli::printDiags(loaded.diags);
-            if (loaded.diags.hasErrors()) {
+        nodehammer::cli::runOrExit("dump-render", [&] {
+            // ── Load config ────────────────────────────────────────────────────────
+            nodehammer::config::NHConfig cfg;
+            if (*configOpt) {
+                std::string cfgPath;
+                configOpt->results(cfgPath);
+                auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
+                nodehammer::cli::printDiags(loaded.diags);
+                cfg = std::move(loaded.config);
+            }
+
+            // ── Import scene ───────────────────────────────────────────────────────
+            nodehammer::ir::semantic::Scene semScene;
+            if (syntheticBoxOpt->count()) {
+                semScene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
+            } else if (*inputOpt) {
+                auto [importResult, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
+                nodehammer::cli::printDiags(importResult.diags);
+                if (importResult.diags.hasErrors())
+                    return;
+                semScene = std::move(importResult.scene);
+            } else {
+                std::println(stderr,
+                             "nodehammer dump-render: specify --input <file> or --synthetic-box");
                 return;
             }
-            cfg = std::move(loaded.config);
-        }
 
-        // ── Import scene ───────────────────────────────────────────────────────
-        nodehammer::ir::semantic::Scene semScene;
-        if (syntheticBoxOpt->count()) {
-            semScene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
-        } else if (*inputOpt) {
-            auto [importResult, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
-            nodehammer::cli::printDiags(importResult.diags);
-            if (importResult.diags.hasErrors())
-                return;
-            semScene = std::move(importResult.scene);
-        } else {
-            std::println(stderr,
-                         "nodehammer dump-render: specify --input <file> or --synthetic-box");
-            return;
-        }
+            // ── Deduplicate shapes ─────────────────────────────────────────────────
+            if (cfg.deduplicateShapes) {
+                semScene.deduplicateMaterials();
+                semScene.deduplicateShapes();
+                semScene.deduplicateLogVols();
+            }
 
-        // ── Deduplicate shapes ─────────────────────────────────────────────────
-        if (cfg.deduplicateShapes) {
-            semScene.deduplicateMaterials();
-            semScene.deduplicateShapes();
-            semScene.deduplicateLogVols();
-        }
+            // ── Tessellate ─────────────────────────────────────────────────────────
+            nodehammer::tessellation::TessellationPass pass{cfg};
+            auto passResult = pass.lower(semScene);
+            nodehammer::cli::printDiags(passResult.diags);
 
-        // ── Tessellate ─────────────────────────────────────────────────────────
-        nodehammer::tessellation::TessellationPass pass{cfg};
-        auto passResult = pass.lower(semScene);
-        nodehammer::cli::printDiags(passResult.diags);
-
-        // ── Serialize ──────────────────────────────────────────────────────────
-        nlohmann::json j = passResult.scene;
-        std::string jsonStr = j.dump(2);
-        std::string outPath;
-        if (*outputOpt) {
-            outputOpt->results(outPath);
-            nodehammer::detail::zstd_io::writeJsonToFile(outPath, jsonStr);
-        } else {
-            std::println("{}", jsonStr);
-        }
+            // ── Serialize ──────────────────────────────────────────────────────────
+            nlohmann::json j = passResult.scene;
+            std::string jsonStr = j.dump(2);
+            std::string outPath;
+            if (*outputOpt) {
+                outputOpt->results(outPath);
+                nodehammer::detail::zstd_io::writeJsonToFile(outPath, jsonStr);
+            } else {
+                std::println("{}", jsonStr);
+            }
+        });
     });
 }

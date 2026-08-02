@@ -22,42 +22,38 @@ void registerCmdConfigFlatten(CLI::App &app) {
                   "Skip ConfigValidator after parse (validation is on by default)");
 
     sub->callback([=] {
-        std::string configPath;
-        configOpt->results(configPath);
+        nodehammer::cli::runOrExit("config-flatten", [&] {
+            std::string configPath;
+            configOpt->results(configPath);
 
-        // ConfigLoader::loadFromFile already resolves the include tree
-        // recursively into a single NHConfig — that's exactly the merged
-        // form we want to serialise back out.
-        auto result = nodehammer::config::ConfigLoader::loadFromFile(configPath);
-        nodehammer::cli::printDiags(result.diags);
-        if (result.diags.hasErrors()) {
-            std::println(stderr, "config-flatten: parse failed");
-            std::exit(1);
-        }
+            // ConfigLoader::loadFromFile already resolves the include tree
+            // recursively into a single NHConfig — that's exactly the merged
+            // form we want to serialise back out.
+            auto result = nodehammer::config::ConfigLoader::loadFromFile(configPath);
+            nodehammer::cli::printDiags(result.diags);
 
-        if (*validate) {
-            auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
-            nodehammer::cli::printDiags(validationDiags);
-            if (validationDiags.hasErrors()) {
-                std::println(stderr, "config-flatten: validation failed");
-                std::exit(1);
+            if (*validate) {
+                auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
+                nodehammer::cli::printDiags(validationDiags);
+                nodehammer::diagnostics::throwIfErrors(validationDiags, configPath);
             }
-        }
 
-        const std::string toml = nodehammer::config::configToToml(result.config);
+            const std::string toml = nodehammer::config::configToToml(result.config);
 
-        if (*outOpt) {
-            std::string outPath;
-            outOpt->results(outPath);
-            std::ofstream out{outPath};
-            if (!out) {
-                std::println(stderr, "config-flatten: could not open '{}' for writing", outPath);
-                std::exit(1);
+            if (*outOpt) {
+                std::string outPath;
+                outOpt->results(outPath);
+                std::ofstream out{outPath};
+                if (!out) {
+                    std::println(stderr, "config-flatten: could not open '{}' for writing",
+                                 outPath);
+                    std::exit(1);
+                }
+                out << toml;
+                std::println(stderr, "config-flatten: wrote {} ({} bytes)", outPath, toml.size());
+            } else {
+                std::print("{}", toml);
             }
-            out << toml;
-            std::println(stderr, "config-flatten: wrote {} ({} bytes)", outPath, toml.size());
-        } else {
-            std::print("{}", toml);
-        }
+        });
     });
 }

@@ -255,23 +255,25 @@ void BuildSession::poll(ProjectFs *project) {
         return it->second.span();
     };
 
-    auto cfg =
-        config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
-    for (const auto &d : cfg.diags.items()) {
-        if (d.severity < diagnostics::Severity::Error) {
-            pushWarning(d.message);
-        }
-    }
-    if (cfg.diags.hasErrors()) {
-        std::string first = "config parse failed";
-        for (const auto &d : cfg.diags.items()) {
-            if (d.severity >= diagnostics::Severity::Error) {
-                first = d.message;
-                break;
+    // A build that cannot parse its config is over, and the session's way of
+    // being over is `enter_error` — so the exception is caught here rather than
+    // left to unwind past the UI. `what()` is the loader's whole complaint,
+    // which is what the hand-rolled first-error hunt used to reconstruct.
+    config::ConfigResult cfg;
+    try {
+        cfg =
+            config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
+    } catch (const Error &e) {
+        for (const auto &d : e.observed()) {
+            if (d.severity < diagnostics::Severity::Error) {
+                pushWarning(d.message);
             }
         }
-        enter_error(std::move(first));
+        enter_error(e.what());
         return;
+    }
+    for (const auto &d : cfg.diags.items()) {
+        pushWarning(d.message);
     }
 
     auto imp = ir::FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());

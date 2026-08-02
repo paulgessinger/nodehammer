@@ -9,27 +9,69 @@
 
 #include <print>
 #include <string>
+#include <utility>
 
 namespace nodehammer::cli {
 
-/// Print diagnostics to stderr with colored severity.
-inline void printDiags(const diagnostics::List &diags) {
+/// Print one diagnostic to stderr with coloured severity.
+inline void printDiag(const Diagnostic &d) {
     static detail::Console errCon{detail::ColorMode::Auto};
-    for (const auto &d : diags.items()) {
-        std::string_view color;
-        std::string_view label;
-        if (d.severity >= diagnostics::Severity::Error) {
-            color = "red";
-            label = "error";
-        } else if (d.severity == diagnostics::Severity::Warning) {
-            color = "yellow";
-            label = "warn";
-        } else {
-            color = "dim";
-            label = "info";
-        }
-        errCon.println(stderr, "[{}][bold]{} {}[/]  {}", color, label, d.code, d.message);
+    std::string_view color;
+    std::string_view label;
+    if (d.severity == diagnostics::Severity::Fatal) {
+        color = "red";
+        label = "fatal";
+    } else if (d.severity == diagnostics::Severity::Error) {
+        color = "red";
+        label = "error";
+    } else if (d.severity == diagnostics::Severity::Warning) {
+        color = "yellow";
+        label = "warn";
+    } else {
+        color = "dim";
+        label = "info";
     }
+    errCon.println(stderr, "[{}][bold]{} {}[/]  {}", color, label, d.code, d.message);
+}
+
+inline void printDiags(const diagnostics::List &diags) {
+    for (const auto &d : diags.items()) {
+        printDiag(d);
+    }
+}
+
+/// The public list, which is what an `Error` carries.
+inline void printDiags(const DiagnosticList &diags) {
+    for (const auto &d : diags) {
+        printDiag(d);
+    }
+}
+
+/// Run a command body, and turn a named failure into the one exit path a CLI
+/// has.
+///
+/// This is what replaces the per-stage `if (diags.hasErrors()) exit(1)` ladder
+/// every command used to carry: under docs/error-model.md a stage that could
+/// not deliver throws, so there is exactly one place per command that has to
+/// know what to do about it.
+///
+/// `Error::observed()` is printed first — for a failure that came from a
+/// collector it holds every problem found, not just the one the exception
+/// names. When it is empty the failure had nothing to collect, so the fatal
+/// diagnostic itself is printed instead.
+template <typename Body> void runOrExit(std::string_view command, Body &&body) {
+    try {
+        std::forward<Body>(body)();
+        return;
+    } catch (const Error &e) {
+        if (e.observed().empty()) {
+            printDiag(e.diagnostic());
+        } else {
+            printDiags(e.observed());
+        }
+        std::println(stderr, "{}: {}", command, e.what());
+    }
+    std::exit(1);
 }
 
 /// Result of importOrExit: the import result plus the format name.

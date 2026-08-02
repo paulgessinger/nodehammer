@@ -108,6 +108,35 @@ class Config {
     [[nodiscard]] NH_API static ConfigResult parse(std::string_view toml,
                                                    const std::filesystem::path &baseDir = {});
 
+    /// Report on a document instead of loading it.
+    ///
+    /// `read` promises a config, so a document that will not parse is fatal to
+    /// it. This promises a *report*, so the same document is simply its answer:
+    /// the returned list carries every problem the loader and the validator
+    /// found, at every severity, and an empty list means the document is sound.
+    /// It is the same work behind both — one collector, two promises
+    /// (docs/error-model.md).
+    ///
+    /// Still throws when there is no document to report on: a file that will not
+    /// open, or a `.lua` path in a build without the Lua front end. Those say
+    /// nothing about the document's contents, which is what this promised to
+    /// describe.
+    ///
+    /// This is what `nodehammer validate-config` does, available to a caller
+    /// that wants to check a config without committing to using it — an editor,
+    /// a CI step, a settings dialog.
+    [[nodiscard]] NH_API static DiagnosticList check(const std::filesystem::path &path);
+
+    /// The in-memory counterpart, as `parse` is to `read`.
+    ///
+    /// Named rather than overloaded because a string literal converts to both
+    /// `path` and `string_view`, so `check("cfg.toml")` would be ambiguous —
+    /// and a caller who guessed wrong would be checking a *filename* as though
+    /// it were a document. `read`/`parse` avoid this by being two verbs; this
+    /// pair cannot, so the text face says so in its name.
+    [[nodiscard]] NH_API static DiagnosticList
+    checkString(std::string_view toml, const std::filesystem::path &baseDir = {});
+
     /// Config formats this build understands: "toml", plus "lua" where the
     /// scripting front end is compiled in. A view over library-lifetime storage
     /// — see `SemanticScene::formats`.

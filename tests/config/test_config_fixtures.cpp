@@ -80,8 +80,8 @@ TEST_CASE("Fixture configs: table covers every top-level *.toml file", "[config]
 TEST_CASE("Fixture configs: load/validate outcome matches expectation", "[config][fixtures]") {
     const auto fixture = GENERATE(from_range(kFixtureCases));
     DYNAMIC_SECTION(fixture.name) {
-        auto result =
-            nodehammer::config::ConfigLoader::loadFromFile(fixturesDir / "configs" / fixture.name);
+        auto result = nodehammer::config::ConfigLoader::collectFromFile(fixturesDir / "configs" /
+                                                                        fixture.name);
 
         if (fixture.expect == Expect::LoadFails) {
             REQUIRE(result.diags.hasErrors());

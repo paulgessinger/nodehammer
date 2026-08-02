@@ -12,24 +12,29 @@ void registerCmdValidateConfig(CLI::App &app) {
     auto *configOpt = sub->add_option("-c,--config", "TOML config file")->required();
 
     sub->callback([=] {
-        std::string configPath;
-        configOpt->results(configPath);
+        nodehammer::cli::runOrExit("validate-config", [&] {
+            std::string configPath;
+            configOpt->results(configPath);
 
-        auto result = nodehammer::config::ConfigLoader::loadFromFile(configPath);
-        nodehammer::cli::printDiags(result.diags);
+            // The collecting face, deliberately: this command promises a report,
+            // so a document that will not parse is its answer rather than its
+            // failure (docs/error-model.md).
+            auto result = nodehammer::config::ConfigLoader::collectFromFile(configPath);
+            nodehammer::cli::printDiags(result.diags);
 
-        if (result.diags.hasErrors()) {
-            std::println(stderr, "config: INVALID (parse errors)");
-            return;
-        }
+            if (result.diags.hasErrors()) {
+                std::println(stderr, "config: INVALID (parse errors)");
+                return;
+            }
 
-        auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
-        nodehammer::cli::printDiags(validationDiags);
+            auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
+            nodehammer::cli::printDiags(validationDiags);
 
-        if (validationDiags.hasErrors()) {
-            std::println(stderr, "config: INVALID");
-        } else {
-            std::println("config: OK");
-        }
+            if (validationDiags.hasErrors()) {
+                std::println(stderr, "config: INVALID");
+            } else {
+                std::println("config: OK");
+            }
+        });
     });
 }

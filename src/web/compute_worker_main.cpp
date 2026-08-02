@@ -164,10 +164,16 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
         // No base directory: this TOML arrives over postMessage from a config
         // the main thread already flattened through `configToToml`, so it
         // carries no include, and the worker has no filesystem to root one at.
-        auto loaded = ConfigLoader::loadFromString(config_toml != nullptr ? config_toml : "",
-                                                   "<worker-config>");
-        if (loaded.diags.hasErrors()) {
-            reportError(loaded.diags, "compute: failed to parse config");
+        config::ConfigResult loaded;
+        try {
+            loaded = ConfigLoader::loadFromString(config_toml != nullptr ? config_toml : "",
+                                                  "<worker-config>");
+        } catch (const Error &e) {
+            // The worker boundary is where a fatal failure stops being an
+            // exception: there is no caller on this side of postMessage to
+            // unwind to, so it becomes a message.
+            nh_compute_emit_error(
+                (std::string{"compute: failed to parse config: "} + e.what()).c_str());
             return nullptr;
         }
         c.scene = std::move(imported.scene);
