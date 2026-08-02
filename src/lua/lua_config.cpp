@@ -70,7 +70,7 @@ std::optional<std::string> readFileToString(const std::filesystem::path &p) {
 // TOML loader's warnUnknownKeys, drawing on the same lists (config_keys.hpp) so a
 // typo'd or stale key is rejected identically on both front-ends.
 void warnUnknownKeys(const sol::table &t, std::span<const std::string_view> known,
-                     const std::string &ctx, diagnostics::List &diags) {
+                     const std::string &ctx, DiagnosticList &diags) {
     for (const auto &kv : t) {
         if (kv.first.get_type() != sol::type::string) {
             continue;
@@ -86,7 +86,7 @@ void warnUnknownKeys(const sol::table &t, std::span<const std::string_view> know
 // ── Predicate parsing (string or list-of-strings → OR) ───────────────────────
 
 std::optional<config::PredicateExpr>
-parseOnePredicate(const std::string &expr, const std::string &ctx, diagnostics::List &diags) {
+parseOnePredicate(const std::string &expr, const std::string &ctx, DiagnosticList &diags) {
     auto parsed = config::parsePredicateExpr(expr);
     if (!parsed) {
         diags.error(
@@ -102,7 +102,7 @@ parseOnePredicate(const std::string &expr, const std::string &ctx, diagnostics::
 // expression strings (OR'd together) — byte-identical to the TOML `match` /
 // `keep_if` scalar-or-array forms.
 std::optional<config::PredicateExpr>
-predicateFromLua(const sol::object &val, const std::string &ctx, diagnostics::List &diags) {
+predicateFromLua(const sol::object &val, const std::string &ctx, DiagnosticList &diags) {
     if (val.get_type() == sol::type::string) {
         return parseOnePredicate(val.as<std::string>(), ctx, diags);
     }
@@ -223,7 +223,7 @@ nlohmann::json jsonFromLua(const sol::object &o) {
 // ── Tessellation sub-table → Rule::Tessellation ──────────────────────────────
 
 config::Rule::Tessellation tessFromLua(const sol::table &t, const std::string &ctx,
-                                       diagnostics::List &diags) {
+                                       DiagnosticList &diags) {
     warnUnknownKeys(t, config::keys::kTessellationKeys, ctx, diags);
     config::Rule::Tessellation tess;
     if (const sol::optional<bool> v = t[config::keys::kSkipGeometry]) {
@@ -290,7 +290,7 @@ return readonly
 config::ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
                                    const std::filesystem::path &baseDir) {
     config::NHConfig cfg;
-    diagnostics::List diags;
+    DiagnosticList diags;
     const std::string chunkName{sourceName};
 
     try {

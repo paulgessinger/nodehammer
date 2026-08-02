@@ -97,8 +97,8 @@ TEST_CASE("to_json: UnknownShape serialization", "[ir][json]") {
     REQUIRE(j["originalType"] == "TGeoArb8");
 }
 
-TEST_CASE("diagnostics::List: hasErrors means the result is partial", "[ir][diagnostics]") {
-    nodehammer::diagnostics::List list;
+TEST_CASE("DiagnosticList: hasErrors means the result is partial", "[ir][diagnostics]") {
+    nodehammer::DiagnosticList list;
     REQUIRE_FALSE(list.hasErrors());
 
     list.warn("NH0301", "just a warning");
@@ -109,7 +109,7 @@ TEST_CASE("diagnostics::List: hasErrors means the result is partial", "[ir][diag
 
     // And there is no way to put a `Fatal` in one: that severity belongs to the
     // channel a list is not (docs/error-model.md).
-    static_assert([]<typename L = nodehammer::diagnostics::List>() {
+    static_assert([]<typename L = nodehammer::DiagnosticList>() {
         return !requires(L &l) { l.fatal("NH0503", "x"); };
     }());
 }

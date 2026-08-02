@@ -14,6 +14,6 @@ namespace nodehammer::ir {
 /// the returned shape's provenance (via UnknownShape.originalType), and still
 /// returns a valid ID — nodes are never silently omitted.
 [[nodiscard]] semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, semantic::Scene &scene,
-                                                  diagnostics::List &diags);
+                                                  DiagnosticList &diags);
 
 } // namespace nodehammer::ir

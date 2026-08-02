@@ -36,7 +36,7 @@ std::optional<std::string> readFile(const std::filesystem::path &p) {
     return ss.str();
 }
 
-bool hasUnknownKeyWarning(const diagnostics::List &diags) {
+bool hasUnknownKeyWarning(const DiagnosticList &diags) {
     for (const auto &d : diags.items()) {
         if (d.message.find("unknown key") != std::string::npos) {
             return true;
@@ -228,7 +228,7 @@ TEST_CASE("evalLuaConfig: include()/use() cannot escape the config root", "[conf
 }
 
 TEST_CASE("evalLuaConfig: invalid hex colors are reported, not silently decoded", "[config][lua]") {
-    const auto hasHexWarning = [](const diagnostics::List &diags) {
+    const auto hasHexWarning = [](const DiagnosticList &diags) {
         for (const auto &d : diags.items()) {
             if (d.message.find("invalid hex color") != std::string::npos) {
                 return true;

@@ -640,7 +640,7 @@ TEST_CASE("Trd tessellation produces manifold-compatible mesh", "[tessellation][
     auto out = tess.tessellate(trd, params);
     REQUIRE_FALSE(out.vertices.empty());
 
-    diagnostics::List diags;
+    DiagnosticList diags;
     auto m = meshToManifold(out, diags, "test/trd");
     for (const auto &d : diags.items()) {
         UNSCOPED_INFO(std::format("[{}] {}", d.code, d.message));

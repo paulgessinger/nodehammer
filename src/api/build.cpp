@@ -19,8 +19,7 @@ namespace {
 
 [[nodiscard]] bool dedupApplies(const config::NHConfig &cfg) { return cfg.deduplicateShapes; }
 
-void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg,
-                  diagnostics::List &diags) {
+void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg, DiagnosticList &diags) {
     const selection::SelectionEngine engine{cfg.selection, cfg.hoistOrphans};
     diags.append(engine.prune(scene));
 }
@@ -31,7 +30,7 @@ void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg,
 /// discarded them, so a caller had no way to tell "dedup ran" from "dedup did
 /// something". They are `Info` — the result is exactly what was asked for, and
 /// this is worth recording (docs/error-model.md).
-void runDedup(ir::semantic::Scene &scene, diagnostics::List &diags) {
+void runDedup(ir::semantic::Scene &scene, DiagnosticList &diags) {
     const auto materials = scene.deduplicateMaterials();
     const auto shapes = scene.deduplicateShapes();
     const auto logVols = scene.deduplicateLogVols();
@@ -53,7 +52,7 @@ SemanticResult applySelection(const SemanticScene &scene, const SceneConfig &con
     }
 
     ir::semantic::Scene working = input;
-    diagnostics::List diags;
+    DiagnosticList diags;
     runSelection(working, cfg, diags);
     // The scene comes back even when the diagnostics carry errors — a
     // root-dropped rule leaves `prune` a no-op and says so (NH0401), and
@@ -69,7 +68,7 @@ SemanticResult deduplicate(const SemanticScene &scene, const SceneConfig &config
     }
 
     ir::semantic::Scene working = input;
-    diagnostics::List diags;
+    DiagnosticList diags;
     runDedup(working, diags);
     return SemanticResult{api::asHandle(std::move(working)), std::move(diags)};
 }
@@ -94,7 +93,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     // through the public verbs: same order, same conditions, one copy of the
     // scene instead of three.
     ir::semantic::Scene working = input;
-    diagnostics::List diags;
+    DiagnosticList diags;
 
     if (selectionApplies(cfg)) {
         runSelection(working, cfg, diags);

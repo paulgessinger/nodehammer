@@ -1,16 +1,15 @@
 #pragma once
 
-// What is left of the internal diagnostics layer once the list is a value.
+// What is left of the internal diagnostics layer once the list is a value: a
+// severity alias, a name for each severity, and the one operation that turns a
+// collection into the exception.
 //
-// There used to be two list types: a mutable accumulator in here and an opaque
+// There used to be two list types — a mutable accumulator here and an opaque
 // handle in the public header, with a conversion between them. The split was
-// justified by the opacity — "it hands out its `std::vector` by reference; the
+// justified by the opacity ("it hands out its `std::vector` by reference; the
 // public one is opaque and immutable, and that coupling is exactly what it
-// exists to avoid" — so publishing the list dissolved the reason for it. One
-// type accumulates and is handed out.
-//
-// `diagnostics::List` remains as an alias while the tree still spells it that
-// way; the next commit finishes the rename and this goes.
+// exists to avoid"), so publishing the list dissolved the reason for it. One
+// type accumulates and is handed out, and it is `nodehammer::DiagnosticList`.
 //
 // An internal header including a public one is the right direction: the public
 // vocabulary is the more fundamental of the two, and nothing here is reachable
@@ -23,7 +22,6 @@
 
 namespace nodehammer::diagnostics {
 
-using List = DiagnosticList;
 using Severity = Diagnostic::Severity;
 
 [[nodiscard]] constexpr std::string_view severityName(Severity s) noexcept {

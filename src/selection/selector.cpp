@@ -230,7 +230,7 @@ SelectionResult SelectionEngine::dryRun(const ir::semantic::Scene &scene) const 
     return evaluate(scene);
 }
 
-diagnostics::List SelectionEngine::prune(ir::semantic::Scene &scene) const {
+DiagnosticList SelectionEngine::prune(ir::semantic::Scene &scene) const {
     auto selResult = evaluate(scene);
 
     // ── Hoist orphans: re-parent KeepIf nodes whose parent is DropIf ─────────────
