@@ -45,7 +45,8 @@ SemanticResult applySelection(const SemanticScene &scene, const SceneConfig &con
     // The scene comes back even when the diagnostics carry errors — a
     // root-dropped rule leaves `prune` a no-op and says so (NH0401), and
     // handing back nothing would hide the scene the caller still has.
-    return SemanticResult{api::asHandle(std::move(working)), api::asHandle(std::move(diags))};
+    return SemanticResult{api::asHandle(std::move(working)),
+                          diagnostics::asHandle(std::move(diags))};
 }
 
 SemanticResult deduplicate(const SemanticScene &scene, const SceneConfig &config) {
@@ -70,7 +71,7 @@ RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
     // rest of the scene is still a scene. Returning it is what lets a caller
     // decide whether to export anyway, exactly as the internal pass allows.
     return RenderResult{api::asHandle(std::move(result.scene)),
-                        api::asHandle(std::move(result.diags))};
+                        diagnostics::asHandle(std::move(result.diags))};
 }
 
 RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
@@ -101,7 +102,8 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     auto result = pass.lower(working);
     diags.append(result.diags);
     // Tessellation errors come back *with* the scene — see `tessellate`.
-    return RenderResult{api::asHandle(std::move(result.scene)), api::asHandle(std::move(diags))};
+    return RenderResult{api::asHandle(std::move(result.scene)),
+                        diagnostics::asHandle(std::move(diags))};
 }
 
 } // namespace nodehammer

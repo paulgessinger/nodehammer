@@ -33,14 +33,11 @@ namespace {
     // Accumulated in the internal list, which is the type that knows how to
     // append, and converted once at the end.
     diagnostics::List diags = std::move(loaded.diags);
-    if (diags.hasErrors()) {
-        api::throwReportedErrors(diags, codes::kErrConfigParse, context);
-    }
+    diagnostics::throwIfErrors(diags, context);
     diags.append(config::ConfigValidator::validate(loaded.config));
-    if (diags.hasErrors()) {
-        api::throwReportedErrors(diags, codes::kErrConfigParse, context);
-    }
-    return ConfigResult{api::asHandle(std::move(loaded.config)), api::asHandle(std::move(diags))};
+    diagnostics::throwIfErrors(diags, context);
+    return ConfigResult{api::asHandle(std::move(loaded.config)),
+                        diagnostics::asHandle(std::move(diags))};
 }
 
 /// Cut a slice from a document. The pointer aliases the handle's state, so a

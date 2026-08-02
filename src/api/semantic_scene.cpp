@@ -31,11 +31,9 @@ namespace {
 /// has the channel for it: warnings plus the `DegradationFlags` the IR carries
 /// per node. Errors mean there is nothing to hand back.
 [[nodiscard]] SemanticResult adopt(ir::ImportResult result, std::string_view context) {
-    if (result.diags.hasErrors()) {
-        api::throwReportedErrors(result.diags, codes::kFatalImportFileNotFound, context);
-    }
+    diagnostics::throwIfErrors(result.diags, context);
     return SemanticResult{api::asHandle(std::move(result.scene)),
-                          api::asHandle(std::move(result.diags))};
+                          diagnostics::asHandle(std::move(result.diags))};
 }
 
 void appendUnique(std::vector<std::string> &out, std::string_view name) {
@@ -126,12 +124,10 @@ DiagnosticList SemanticScene::write(const std::filesystem::path &path,
     }
     try {
         auto result = exporter->write(scene, path, ir::SemanticExportConfig{});
-        // Exporters, like importers, report "could not write this" as an error
-        // diagnostic. Nothing was produced, so it becomes the exception.
-        if (result.diags.hasErrors()) {
-            api::throwReportedErrors(result.diags, codes::kFatalExportWriteFailed, path.string());
-        }
-        return api::asHandle(std::move(result.diags));
+        // Exporters, like importers, still report "could not write this" as an
+        // error diagnostic; the next commit moves the throw to where it happens.
+        diagnostics::throwIfErrors(result.diags, path.string());
+        return diagnostics::asHandle(std::move(result.diags));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {

@@ -115,10 +115,8 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
         pipeline::resolveExportConfig(api::documentOf(output), path, options.format);
     try {
         auto result = exporter->write(scene, path, resolved);
-        if (result.diags.hasErrors()) {
-            api::throwReportedErrors(result.diags, codes::kFatalExportWriteFailed, path.string());
-        }
-        return api::asHandle(std::move(result.diags));
+        diagnostics::throwIfErrors(result.diags, path.string());
+        return diagnostics::asHandle(std::move(result.diags));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
