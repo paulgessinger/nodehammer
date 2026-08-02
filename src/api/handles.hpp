@@ -84,48 +84,36 @@ static_assert(static_cast<int>(diagnostics::DiagnosticSeverity::Fatal) ==
         static_cast<std::underlying_type_t<diagnostics::DiagnosticSeverity>>(s));
 }
 
-/// Convert an internal list to public items. Accumulate these, then `seal` once
-/// — a `DiagnosticList` is immutable, so it is built as a vector and frozen
-/// rather than appended to in place.
-[[nodiscard]] inline std::vector<Diagnostic> items(const diagnostics::DiagnosticList &src) {
-    std::vector<Diagnostic> out;
-    out.reserve(src.items().size());
-    for (const auto &d : src.items()) {
-        out.push_back(Diagnostic{severity(d.severity), d.code, d.message, d.context});
-    }
-    return out;
-}
-
-inline void appendTo(std::vector<Diagnostic> &dst, const diagnostics::DiagnosticList &src) {
-    dst.reserve(dst.size() + src.items().size());
-    for (const auto &d : src.items()) {
-        dst.push_back(Diagnostic{severity(d.severity), d.code, d.message, d.context});
-    }
-}
-
-/// Freeze accumulated items into the public list. An empty list allocates
-/// nothing — which is what every successful call returns.
-[[nodiscard]] inline DiagnosticList seal(std::vector<Diagnostic> items) {
-    DiagnosticList out;
-    if (!items.empty()) {
-        out.impl =
-            std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)});
-    }
-    return out;
-}
-
+/// The one conversion from internal diagnostics to public ones.
+///
+/// There is no builder here on purpose. A public `DiagnosticList` is immutable,
+/// so anything that accumulates has to accumulate somewhere else — and the
+/// internal `diagnostics::DiagnosticList` already *is* that somewhere, with
+/// `append` and the severity helpers. A second accumulator alongside it would be
+/// two ways to say the same thing.
+///
+/// An empty list allocates nothing, which is what every successful call returns.
 [[nodiscard]] inline DiagnosticList wrap(const diagnostics::DiagnosticList &src) {
-    return seal(items(src));
+    DiagnosticList out;
+    if (src.items().empty()) {
+        return out;
+    }
+    std::vector<Diagnostic> items;
+    items.reserve(src.items().size());
+    for (const auto &d : src.items()) {
+        items.push_back(Diagnostic{severity(d.severity), d.code, d.message, d.context});
+    }
+    out.impl = std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)});
+    return out;
 }
 
-/// The single-error list a bridge failure returns. Spelled out here so no verb
-/// has to remember the three-line dance.
+/// The single-error list a bridge failure returns — built through the internal
+/// list, so the one conversion above stays the only one.
 [[nodiscard]] inline DiagnosticList error(std::string_view code, std::string_view message,
                                           std::string_view context = {}) {
-    std::vector<Diagnostic> one;
-    one.push_back(Diagnostic{Diagnostic::Severity::Error, std::string{code}, std::string{message},
-                             std::string{context}});
-    return seal(std::move(one));
+    diagnostics::DiagnosticList one;
+    one.error(code, message, context);
+    return wrap(one);
 }
 
 // ── Scenes ───────────────────────────────────────────────────────────────────

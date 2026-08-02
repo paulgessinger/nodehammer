@@ -33,12 +33,14 @@ namespace {
 /// same list as the load's, which is what makes `build` free of a validation
 /// step of its own (#41 §8).
 [[nodiscard]] ConfigResult adopt(config::ConfigResult loaded) {
-    std::vector<Diagnostic> diags = api::items(loaded.diags);
-    if (loaded.diags.hasErrors()) {
-        return ConfigResult{Config{}, api::seal(std::move(diags))};
+    // Accumulated in the internal list, which is the type that knows how to
+    // append, and converted once at the end.
+    diagnostics::DiagnosticList diags = std::move(loaded.diags);
+    if (diags.hasErrors()) {
+        return ConfigResult{Config{}, api::wrap(diags)};
     }
-    api::appendTo(diags, config::ConfigValidator::validate(loaded.config));
-    return ConfigResult{api::wrap(std::move(loaded.config)), api::seal(std::move(diags))};
+    diags.append(config::ConfigValidator::validate(loaded.config));
+    return ConfigResult{api::wrap(std::move(loaded.config)), api::wrap(diags)};
 }
 
 [[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {

@@ -7,7 +7,7 @@ namespace nodehammer {
 // complete, so none of them has to be written here — or exported.
 //
 // A null `impl` is the empty list, not an error state: it is what a
-// default-constructed list holds, what `api::seal` produces for no items,
+// default-constructed list holds, what `api::wrap` produces for an empty one,
 // and what a moved-from list is left with. Every accessor below answers for it.
 
 bool DiagnosticList::hasErrors() const noexcept {
