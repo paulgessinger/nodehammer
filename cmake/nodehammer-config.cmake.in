@@ -27,45 +27,48 @@ include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
 
 # ── MSVC: the consumer's C runtime has to match the library's ─────────────────
 # This API passes owning std:: types across the boundary — std::string inside
-# Diagnostic, std::vector out of toNhb() — and throws an exception across it.
-# On MSVC all of that is defined only while both sides agree on the standard
-# library's layout and on which heap frees what, and they do not agree across
-# the debug/release split (_ITERATOR_DEBUG_LEVEL is 2 under a debug CRT and 0
-# otherwise, which adds a proxy pointer to every container, so sizeof(std::string)
-# is 40 against 32) nor across the static/dynamic one (/MT and /MD each carry
-# their own heap).
+# Diagnostic, std::vector out of toNhb() — and throws an exception across it. On
+# MSVC that is defined only while both sides agree on the standard library's
+# layout and on which heap frees what, and they agree across neither the
+# debug/release split (_ITERATOR_DEBUG_LEVEL is 2 under a debug CRT and 0
+# otherwise, adding a proxy pointer to every container, so sizeof(std::string) is
+# 40 against 32) nor the static/dynamic one (/MT and /MD each carry their own
+# heap).
 #
-# The failure that produces is silent and late. Everything compiles, everything
+# The failure that produces is silent and late: everything compiles, everything
 # links, and the first call returns an empty vector because the caller read a
-# 32-byte object as 40; the process then dies freeing it. That is what CI's
-# consumer hit — a Debug build picking up an env-set CMAKE_BUILD_TYPE against
-# the Release library — and it is worth a configure-time error rather than a
-# segmentation fault in somebody else's build.
+# 32-byte object as 40, then dies freeing it. That is what CI's consumer hit —
+# a Debug build picking up an env-set CMAKE_BUILD_TYPE against the Release
+# library.
 #
-# The comparison is on the fully resolved runtime name rather than a debug flag,
-# so /MT against /MD is caught too. Only the single-config case is decidable
-# here: a multi-config generator does not choose until build time, so it gets
-# nothing rather than a guess.
-set(_nh_lib_runtime "@NODEHAMMER_MSVC_RUNTIME@")
-if(MSVC AND CMAKE_BUILD_TYPE AND NOT _nh_lib_runtime STREQUAL "")
+# Deliberately conservative about when it fires. The library's runtime was
+# resolved by CMake at generate time and is exact; the consumer's is only
+# checked when it is a plain string, because a generator expression cannot be
+# evaluated here and guessing at its shape is what made an earlier version of
+# this reject a correct build. Undecidable means silent, not fatal.
+set(_nh_runtime_file "${CMAKE_CURRENT_LIST_DIR}/nodehammer-msvc-runtime.txt")
+if(MSVC AND CMAKE_BUILD_TYPE AND EXISTS "${_nh_runtime_file}")
+    file(READ "${_nh_runtime_file}" _nh_lib_runtime)
+    string(STRIP "${_nh_lib_runtime}" _nh_lib_runtime)
+
     # CMake documents configuration handling as case-insensitive, so normalise
     # before classifying: -DCMAKE_BUILD_TYPE=debug is a debug build.
     string(TOLOWER "${CMAKE_BUILD_TYPE}" _nh_consumer_cfg)
-    if(CMAKE_MSVC_RUNTIME_LIBRARY)
-        string(REPLACE "$<$<CONFIG:Debug>:Debug>" "$<_NH_DEBUG_>"
-               _nh_consumer_runtime "${CMAKE_MSVC_RUNTIME_LIBRARY}")
+    if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+        # CMake's default when the variable is unset.
         if(_nh_consumer_cfg STREQUAL "debug")
-            string(REPLACE "$<_NH_DEBUG_>" "Debug" _nh_consumer_runtime "${_nh_consumer_runtime}")
+            set(_nh_consumer_runtime "MultiThreadedDebugDLL")
         else()
-            string(REPLACE "$<_NH_DEBUG_>" "" _nh_consumer_runtime "${_nh_consumer_runtime}")
+            set(_nh_consumer_runtime "MultiThreadedDLL")
         endif()
-    elseif(_nh_consumer_cfg STREQUAL "debug")
-        set(_nh_consumer_runtime "MultiThreadedDebugDLL")
+    elseif(NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "\\$<")
+        set(_nh_consumer_runtime "${CMAKE_MSVC_RUNTIME_LIBRARY}")
     else()
-        set(_nh_consumer_runtime "MultiThreadedDLL")
+        set(_nh_consumer_runtime "")   # a genex; not decidable here
     endif()
 
-    if(NOT _nh_consumer_runtime STREQUAL _nh_lib_runtime)
+    if(_nh_lib_runtime AND _nh_consumer_runtime
+       AND NOT _nh_consumer_runtime STREQUAL _nh_lib_runtime)
         message(FATAL_ERROR
             "nodehammer was built against the ${_nh_lib_runtime} MSVC runtime, but this "
             "project resolves to ${_nh_consumer_runtime} (CMAKE_BUILD_TYPE="
@@ -75,7 +78,8 @@ if(MSVC AND CMAKE_BUILD_TYPE AND NOT _nh_lib_runtime STREQUAL "")
     endif()
     unset(_nh_consumer_cfg)
     unset(_nh_consumer_runtime)
+    unset(_nh_lib_runtime)
 endif()
-unset(_nh_lib_runtime)
+unset(_nh_runtime_file)
 
 check_required_components(nodehammer)

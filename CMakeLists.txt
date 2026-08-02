@@ -852,41 +852,25 @@ if(NODEHAMMER_BUILD_SHARED)
     # configure time rather than as a segmentation fault on the first call that
     # returns a container (see cmake/nodehammer-config.cmake.in).
     #
-    # The *fully evaluated* runtime, not a debug flag. Two reasons a boolean was
-    # wrong: CMAKE_MSVC_RUNTIME_LIBRARY is usually a generator expression
-    # ("MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"), so matching its text for
-    # "Debug" reports a Release build as debug; and /MT and /MD are different
-    # runtimes even when neither is a debug one, so a static-CRT library and a
-    # dynamic-CRT consumer would pass a debug-only check and then free a returned
-    # container through the wrong heap. Empty off MSVC, where the config skips it.
-    set(NODEHAMMER_MSVC_RUNTIME "")
+    # Evaluated by CMake rather than parsed by us. `CMAKE_MSVC_RUNTIME_LIBRARY`
+    # is normally a generator expression, and its shape varies by who set it —
+    # CMake's own default is "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" while
+    # Conan writes "$<$<CONFIG:Release>:MultiThreadedDLL>". A hand-rolled
+    # substitution for one of those spellings reported the other as a mismatch
+    # and blocked a legitimate build, which is worse than the failure it exists
+    # to catch. `file(GENERATE)` resolves whatever is there, exactly.
+    #
+    # The full runtime name, not a debug flag: /MT and /MD are different heaps
+    # even when neither is a debug runtime, so a static-CRT library and a
+    # dynamic-CRT consumer must not pass.
     if(MSVC)
-        if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-            set(_nh_cfg_debug ON)
-        else()
-            set(_nh_cfg_debug OFF)
-        endif()
-        if(CMAKE_MSVC_RUNTIME_LIBRARY)
-            # Resolve the genex ourselves for the configuration being installed;
-            # $<CONFIG:Debug> is the only condition the documented values use.
-            string(REPLACE "$<$<CONFIG:Debug>:Debug>" "$<_NH_DEBUG_>"
-                   _nh_runtime "${CMAKE_MSVC_RUNTIME_LIBRARY}")
-            if(_nh_cfg_debug)
-                string(REPLACE "$<_NH_DEBUG_>" "Debug" _nh_runtime "${_nh_runtime}")
-            else()
-                string(REPLACE "$<_NH_DEBUG_>" "" _nh_runtime "${_nh_runtime}")
-            endif()
-            set(NODEHAMMER_MSVC_RUNTIME "${_nh_runtime}")
-            unset(_nh_runtime)
-        elseif(CMAKE_BUILD_TYPE)
-            # CMake's own default when the variable is unset.
-            if(_nh_cfg_debug)
-                set(NODEHAMMER_MSVC_RUNTIME "MultiThreadedDebugDLL")
-            else()
-                set(NODEHAMMER_MSVC_RUNTIME "MultiThreadedDLL")
-            endif()
-        endif()
-        unset(_nh_cfg_debug)
+        set(_nh_runtime_stamp "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-msvc-runtime.txt")
+        file(GENERATE OUTPUT "${_nh_runtime_stamp}"
+             CONTENT "$<TARGET_PROPERTY:nodehammer_shared,MSVC_RUNTIME_LIBRARY>")
+        install(FILES "${_nh_runtime_stamp}"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
+            COMPONENT Development
+        )
     endif()
 
     include(CMakePackageConfigHelpers)
