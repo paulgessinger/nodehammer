@@ -73,14 +73,12 @@ NHConfig noDedupConfig() {
 
 TEST_CASE("prepareScene: no wedge param leaves geometry uncut", "[scene_build][wedgecut]") {
     auto prep = prepareSceneForTessellationFromInputs(noDedupConfig(), makeStraddlingScene());
-    REQUIRE(prep.ok);
     CHECK_FALSE(hasBooleanSubtraction(prep.scene));
 }
 
 TEST_CASE("prepareScene: wedge param applies the Boolean cut", "[scene_build][wedgecut]") {
     auto prep = prepareSceneForTessellationFromInputs(noDedupConfig(), makeStraddlingScene(),
                                                       WedgeCutParams{0.0, 90.0});
-    REQUIRE(prep.ok);
     // The straddling box becomes a BooleanSubtraction(box, wedge) shape.
     CHECK(hasBooleanSubtraction(prep.scene));
 }
@@ -88,6 +86,5 @@ TEST_CASE("prepareScene: wedge param applies the Boolean cut", "[scene_build][we
 TEST_CASE("prepareScene: degenerate wedge is a no-op", "[scene_build][wedgecut]") {
     auto prep = prepareSceneForTessellationFromInputs(noDedupConfig(), makeStraddlingScene(),
                                                       WedgeCutParams{45.0, 45.0});
-    REQUIRE(prep.ok);
     CHECK_FALSE(hasBooleanSubtraction(prep.scene));
 }

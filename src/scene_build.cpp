@@ -25,17 +25,11 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Sce
 
     auto validDiags = config::ConfigValidator::validate(prep.config);
     prep.diags.append(validDiags);
-    if (validDiags.hasErrors()) {
-        return prep;
-    }
+    diagnostics::throwIfErrors(validDiags, "prepareSceneForTessellation");
 
     if (!prep.config.selection.empty()) {
         selection::SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
-        auto selDiags = sel.prune(prep.scene);
-        prep.diags.append(selDiags);
-        if (selDiags.hasErrors()) {
-            return prep;
-        }
+        prep.diags.append(sel.prune(prep.scene));
     }
 
     if (prep.config.deduplicateShapes) {
@@ -50,7 +44,6 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Sce
         (void)tessellation::applyWedgeCut(prep.scene, *wedgeCut);
     }
 
-    prep.ok = true;
     return prep;
 }
 

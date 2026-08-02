@@ -45,7 +45,6 @@ std::vector<std::byte> runComputePipeline(std::span<const std::byte> sceneBytes,
 
     ScenePrepResult prep = prepareSceneForTessellationFromInputs(
         std::move(loaded.config), std::move(imported.scene), std::nullopt);
-    REQUIRE(prep.ok);
 
     if (wedge) {
         WedgeCutJob job;

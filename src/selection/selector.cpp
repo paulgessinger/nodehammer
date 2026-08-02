@@ -270,14 +270,14 @@ diagnostics::List SelectionEngine::prune(ir::semantic::Scene &scene) const {
         }
     }
 
-    // Root-dropped guard: leave scene untouched and emit an error.
+    // Root-dropped guard. Fatal rather than reported: `prune` promises the
+    // scene with the rules applied, and the scene it would hand back is the one
+    // with the rules *not* applied — a result that contradicts the call. The
+    // caller's own scene is left untouched, since nothing has been removed yet.
     if (selResult.dropped.contains(scene.rootId)) {
-        diagnostics::List diags;
-        diags.append(selResult.diags);
-        diags.error(codes::kFatalSelectionRootDropped,
+        throw Error{codes::kFatalSelectionRootDropped,
                     "root node is in the dropped set; pruning is a no-op",
-                    scene.nodes.at(scene.rootId).name);
-        return diags;
+                    scene.nodes.at(scene.rootId).name, diagnostics::asHandle(selResult.diags)};
     }
 
     // 1. Remove dropped nodes.

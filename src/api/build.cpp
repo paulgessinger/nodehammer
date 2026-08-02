@@ -5,6 +5,7 @@
 #include <tessellation/tessellation_pass.hpp>
 
 #include <exception>
+#include <format>
 #include <utility>
 
 namespace nodehammer {
@@ -24,10 +25,22 @@ void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg,
     diags.append(engine.prune(scene));
 }
 
-void runDedup(ir::semantic::Scene &scene) {
-    scene.deduplicateMaterials();
-    scene.deduplicateShapes();
-    scene.deduplicateLogVols();
+/// Deduplicate, and say how much it merged.
+///
+/// The counts were being computed and dropped: the CLI printed them and the API
+/// discarded them, so a caller had no way to tell "dedup ran" from "dedup did
+/// something". They are `Info` — the result is exactly what was asked for, and
+/// this is worth recording (docs/error-model.md).
+void runDedup(ir::semantic::Scene &scene, diagnostics::List &diags) {
+    const auto materials = scene.deduplicateMaterials();
+    const auto shapes = scene.deduplicateShapes();
+    const auto logVols = scene.deduplicateLogVols();
+    if (materials == 0 && shapes == 0 && logVols == 0) {
+        return;
+    }
+    diags.info(codes::kInfoDedupMerged,
+               std::format("deduplication merged {} shapes, {} logical volumes and {} materials",
+                           shapes, logVols, materials));
 }
 
 } // namespace
@@ -57,8 +70,10 @@ SemanticResult deduplicate(const SemanticScene &scene, const SceneConfig &config
     }
 
     ir::semantic::Scene working = input;
-    runDedup(working);
-    return SemanticResult{api::asHandle(std::move(working)), DiagnosticList{}};
+    diagnostics::List diags;
+    runDedup(working, diags);
+    return SemanticResult{api::asHandle(std::move(working)),
+                          diagnostics::asHandle(std::move(diags))};
 }
 
 RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
@@ -86,16 +101,9 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
 
     if (selectionApplies(cfg)) {
         runSelection(working, cfg, diags);
-        // Selection failing is the one stage whose failure leaves nothing to
-        // hand back: there is no render scene to attach the reason to, because
-        // tessellation has not run and running it on a scene the rules meant to
-        // prune would be worse than stopping. `convert` stops here too.
-        if (diags.hasErrors()) {
-            throw Error{codes::kFatalSelectionRootDropped, diags.items().front().message, "build"};
-        }
     }
     if (dedupApplies(cfg)) {
-        runDedup(working);
+        runDedup(working, diags);
     }
 
     const tessellation::TessellationPass pass{cfg};

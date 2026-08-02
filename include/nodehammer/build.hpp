@@ -27,6 +27,10 @@ namespace nodehammer {
 ///
 /// A config with no selection rules is a no-op, matching the CLI: "no rules"
 /// means no filtering, not "keep everything and rebuild".
+///
+/// Throws NH0401 if the rules drop the root: the scene that would come back is
+/// the one with the rules *not* applied, which is not what this promised. Same
+/// answer from `build`, since the engine decides it rather than each verb.
 [[nodiscard]] NH_API SemanticResult applySelection(const SemanticScene &scene,
                                                    const SceneConfig &config);
 
@@ -49,11 +53,10 @@ namespace nodehammer {
 /// Config *validation* is not part of this: it happens when the document is
 /// read, and a config that does not validate never reaches here (#41 §8).
 ///
-/// Throws if selection fails — NH0401, the root itself dropped. That stage
-/// runs before tessellation, so no render scene exists to hand back with the
-/// reason attached, and tessellating a scene the rules meant to prune would be
-/// worse than stopping. `convert` stops there too. Tessellation's own errors,
-/// by contrast, come back with the scene, exactly as from `tessellate`.
+/// Throws exactly what the three verbs throw, because it runs the same stages:
+/// NH0401 if the rules drop the root. Tessellation's own errors, by contrast,
+/// come back with the scene — a node without a mesh is a partial result, not a
+/// failure, and which of those is acceptable is the caller's call to make.
 [[nodiscard]] NH_API RenderResult build(const SemanticScene &scene, const SceneConfig &config);
 
 } // namespace nodehammer
