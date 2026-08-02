@@ -224,13 +224,11 @@ void registerCmdConvert(CLI::App &app) {
 
                 std::println("Writing {} ...", outputPath);
                 nodehammer::detail::Timer expTimer;
-                auto expResult = exp->write(tessResult.scene, outputPath, ecfg);
+                exp->write(tessResult.scene, outputPath, ecfg);
                 timings.record(std::format("export[{}]", outputPath), expTimer.elapsed());
-                printDiags(expResult.diags);
-                demandClean(expResult.diags, outputPath);
 
                 int warnings = 0, errors = 0;
-                for (const auto *dl : {&importResult.diags, &tessResult.diags, &expResult.diags}) {
+                for (const auto *dl : {&importResult.diags, &tessResult.diags}) {
                     for (const auto &d : dl->items()) {
                         if (d.severity >= nodehammer::diagnostics::Severity::Error) {
                             ++errors;

@@ -101,8 +101,7 @@ std::span<const std::string_view> SemanticScene::formats() {
     return views;
 }
 
-DiagnosticList SemanticScene::write(const std::filesystem::path &path,
-                                    const WriteOptions &options) const {
+void SemanticScene::write(const std::filesystem::path &path, const WriteOptions &options) const {
     const auto &scene = api::sceneOrThrow(*this, "SemanticScene::write");
     const auto registry = ir::SemanticExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(path, options.format);
@@ -115,11 +114,7 @@ DiagnosticList SemanticScene::write(const std::filesystem::path &path,
                     path.string()};
     }
     try {
-        auto result = exporter->write(scene, path, ir::SemanticExportConfig{});
-        // Exporters, like importers, still report "could not write this" as an
-        // error diagnostic; the next commit moves the throw to where it happens.
-        diagnostics::throwIfErrors(result.diags, path.string());
-        return diagnostics::asHandle(std::move(result.diags));
+        exporter->write(scene, path, ir::SemanticExportConfig{});
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {

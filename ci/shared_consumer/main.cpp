@@ -155,9 +155,9 @@ int main() {
     // of the private static dependencies the shared library must have absorbed.
     const std::vector<std::byte> bytes = rendered.scene.toNhr();
     const auto reread = nodehammer::RenderScene::read(bytes);
-    if (reread.diags.hasErrors() ||
-        reread.scene.triangleCount() != rendered.scene.triangleCount()) {
-        return fail("RenderScene byte round-trip failed", reread.diags);
+    if (reread.triangleCount() != rendered.scene.triangleCount()) {
+        std::puts("RenderScene byte round-trip failed");
+        return 1;
     }
 
     // ── Every remaining exported entry point ─────────────────────────────────
@@ -204,16 +204,12 @@ int main() {
     std::filesystem::create_directories(outDir, ec);
     const auto semanticOut = outDir / "scene.nhb";
     const auto renderOut = outDir / "scene.glb";
-    const auto semanticDiags = imported.scene.write(semanticOut);
-    if (semanticDiags.hasErrors()) {
-        return fail("SemanticScene::write failed", semanticDiags);
-    }
-    const auto renderDiags = rendered.scene.write(renderOut, config.config.output());
-    if (renderDiags.hasErrors()) {
-        return fail("RenderScene::write failed", renderDiags);
-    }
+    // Neither returns anything: they wrote the file or they threw, so the file
+    // existing afterwards is the whole check.
+    imported.scene.write(semanticOut);
+    rendered.scene.write(renderOut, config.config.output());
     if (!std::filesystem::exists(semanticOut) || !std::filesystem::exists(renderOut)) {
-        std::fprintf(stderr, "a write reported success but produced no file\n");
+        std::fprintf(stderr, "a write returned without producing a file\n");
         return 1;
     }
     std::filesystem::remove_all(outDir, ec);

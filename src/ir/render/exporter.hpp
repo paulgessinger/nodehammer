@@ -88,12 +88,6 @@ struct ExportConfig {
     }
 };
 
-// ── ExportResult ──────────────────────────────────────────────────────────────
-
-struct ExportResult {
-    diagnostics::List diags;
-};
-
 // ── IRenderExporter ───────────────────────────────────────────────────────────
 
 class IRenderExporter {
@@ -108,9 +102,8 @@ class IRenderExporter {
 
     /// Write the scene to path. Format (GLB vs GLTF vs OBJ) may be inferred from
     /// config.format or from the path extension.
-    [[nodiscard]] virtual ExportResult write(const render::Scene &scene,
-                                             const std::filesystem::path &path,
-                                             const ExportConfig &config) const = 0;
+    virtual void write(const render::Scene &scene, const std::filesystem::path &path,
+                       const ExportConfig &config) const = 0;
 };
 
 // ── RenderExporterRegistry ────────────────────────────────────────────────────

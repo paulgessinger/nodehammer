@@ -13,8 +13,8 @@ class GltfExporter final : public IRenderExporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
-    [[nodiscard]] ExportResult write(const render::Scene &scene, const std::filesystem::path &path,
-                                     const ExportConfig &config) const override;
+    void write(const render::Scene &scene, const std::filesystem::path &path,
+               const ExportConfig &config) const override;
 };
 
 } // namespace nodehammer::ir

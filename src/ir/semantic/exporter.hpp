@@ -13,10 +13,6 @@ namespace nodehammer::ir {
 
 struct SemanticExportConfig {};
 
-struct SemanticExportResult {
-    diagnostics::List diags;
-};
-
 /// Pure interface for semantic scene exporters (JSON/NHB/...).
 class ISemanticExporter {
   public:
@@ -30,9 +26,12 @@ class ISemanticExporter {
     [[nodiscard]] virtual std::vector<std::string> supportedExtensions() const = 0;
 
     /// Write semantic scene to path.
-    [[nodiscard]] virtual SemanticExportResult write(const semantic::Scene &scene,
-                                                     const std::filesystem::path &path,
-                                                     const SemanticExportConfig &config) const = 0;
+    ///
+    /// Returns nothing: an exporter that cannot write throws, and no exporter in
+    /// the tree has ever had a non-fatal observation to make about a file it
+    /// wrote successfully (docs/error-model.md).
+    virtual void write(const semantic::Scene &scene, const std::filesystem::path &path,
+                       const SemanticExportConfig &config) const = 0;
 };
 
 class SemanticExporterRegistry {

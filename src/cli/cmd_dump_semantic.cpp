@@ -315,11 +315,7 @@ void registerCmdDumpSemantic(CLI::App &app) {
                 }
 
                 nodehammer::ir::SemanticExportConfig exportCfg;
-                auto exportResult = exporter->write(result.scene, outPath, exportCfg);
-                nodehammer::cli::printDiags(exportResult.diags);
-                if (exportResult.diags.hasErrors()) {
-                    std::println(stderr, "dump-semantic: export failed");
-                }
+                exporter->write(result.scene, outPath, exportCfg);
             }
         });
     });

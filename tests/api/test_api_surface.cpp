@@ -237,7 +237,7 @@ TEST_CASE("The scene handles round-trip through their own byte forms", "[api][ha
     // ... and through a file, in both formats the semantic exporters claim.
     for (const auto *ext : {".nhb", ".json"}) {
         const auto path = dir / ("scene" + std::string{ext});
-        REQUIRE_FALSE(scene.write(path).hasErrors());
+        scene.write(path);
         REQUIRE(fs::exists(path));
         const auto loaded = nh::SemanticScene::read(path);
         REQUIRE_FALSE(loaded.diags.hasErrors());
@@ -249,20 +249,18 @@ TEST_CASE("The scene handles round-trip through their own byte forms", "[api][ha
     REQUIRE(rendered.scene.triangleCount() > 0);
 
     const auto nhr = dir / "scene.nhr";
-    REQUIRE_FALSE(rendered.scene.write(nhr).hasErrors());
+    rendered.scene.write(nhr);
     const auto reloaded = nh::RenderScene::read(nhr);
-    REQUIRE_FALSE(reloaded.diags.hasErrors());
-    REQUIRE(reloaded.scene.triangleCount() == rendered.scene.triangleCount());
-    REQUIRE(reloaded.scene.toNhr() == rendered.scene.toNhr());
+    REQUIRE(reloaded.triangleCount() == rendered.scene.triangleCount());
+    REQUIRE(reloaded.toNhr() == rendered.scene.toNhr());
 
     // The compressed spelling is the same format, so the extension check has to
     // see through the `.zst` suffix rather than only the last extension.
     const auto compressed = dir / "scene.nhr.zst";
-    REQUIRE_FALSE(rendered.scene.write(compressed).hasErrors());
+    rendered.scene.write(compressed);
     REQUIRE(fs::file_size(compressed) > 0);
     const auto fromZst = nh::RenderScene::read(compressed);
-    REQUIRE_FALSE(fromZst.diags.hasErrors());
-    REQUIRE(fromZst.scene.toNhr() == rendered.scene.toNhr());
+    REQUIRE(fromZst.toNhr() == rendered.scene.toNhr());
 }
 
 TEST_CASE("version() reports the linked library, not just the header", "[api][handles]") {

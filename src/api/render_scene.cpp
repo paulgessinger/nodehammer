@@ -44,10 +44,10 @@ void appendUnique(std::vector<std::string> &out, std::string_view name) {
 
 } // namespace
 
-RenderResult RenderScene::read(const std::filesystem::path &path) {
+RenderScene RenderScene::read(const std::filesystem::path &path) {
     try {
         const auto bytes = detail::zstd_io::readBytesFromFile(path);
-        return RenderResult{api::asHandle(ir::renderSceneFromBytes(bytes)), DiagnosticList{}};
+        return api::asHandle(ir::renderSceneFromBytes(bytes));
     } catch (const std::exception &e) {
         // `renderSceneFromBytes` throws on a failed verify and the reader throws
         // on a missing file; both are input this call cannot act on, and neither
@@ -56,9 +56,9 @@ RenderResult RenderScene::read(const std::filesystem::path &path) {
     }
 }
 
-RenderResult RenderScene::read(std::span<const std::byte> nhr) {
+RenderScene RenderScene::read(std::span<const std::byte> nhr) {
     try {
-        return RenderResult{api::asHandle(ir::renderSceneFromBytes(nhr)), DiagnosticList{}};
+        return api::asHandle(ir::renderSceneFromBytes(nhr));
     } catch (const std::exception &e) {
         api::rethrowAsError(e, codes::kFatalImportFileNotFound, "<memory>.nhr");
     }
@@ -79,8 +79,8 @@ std::span<const std::string_view> RenderScene::formats() {
     return views;
 }
 
-DiagnosticList RenderScene::write(const std::filesystem::path &path, const OutputConfig &output,
-                                  const WriteOptions &options) const {
+void RenderScene::write(const std::filesystem::path &path, const OutputConfig &output,
+                        const WriteOptions &options) const {
     const auto &scene = api::sceneOrThrow(*this, "RenderScene::write");
 
     // The render IR's own format is not in the exporter registry — nothing in
@@ -91,7 +91,7 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
         try {
             const auto bytes = ir::renderSceneToBytes(scene);
             detail::zstd_io::writeBytesToFile(path, bytes);
-            return DiagnosticList{};
+            return;
         } catch (const std::exception &e) {
             api::rethrowAsError(e, codes::kFatalExportWriteFailed, path.string());
         }
@@ -114,9 +114,7 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
     const auto resolved =
         pipeline::resolveExportConfig(api::documentOf(output), path, options.format);
     try {
-        auto result = exporter->write(scene, path, resolved);
-        diagnostics::throwIfErrors(result.diags, path.string());
-        return diagnostics::asHandle(std::move(result.diags));
+        exporter->write(scene, path, resolved);
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {

@@ -159,8 +159,7 @@ void referenceExport(const fs::path &nhb, const nh::config::NHConfig &cfg, const
     const auto *exporter = registry.resolve(out, {});
     REQUIRE(exporter != nullptr);
     const auto resolved = nh::pipeline::resolveExportConfig(cfg, out, {});
-    const auto result = exporter->write(lowered.scene, out, resolved);
-    REQUIRE_FALSE(result.diags.hasErrors());
+    exporter->write(lowered.scene, out, resolved);
 }
 
 } // namespace
@@ -200,8 +199,7 @@ TEST_CASE("Public verbs export byte-identically to the internal pipeline", "[api
     REQUIRE(rendered.scene.valid());
 
     const auto viaApi = dir / "api" / ("out" + std::string{extension});
-    const auto writeDiags = rendered.scene.write(viaApi, cfg.config.output());
-    REQUIRE_FALSE(writeDiags.hasErrors());
+    rendered.scene.write(viaApi, cfg.config.output());
 
     REQUIRE(readBytes(viaApi) == readBytes(reference));
 
@@ -294,8 +292,8 @@ TEST_CASE("write honours the output slice, not just build", "[api][equivalence]"
 
     const auto tuned = dir / "tuned.glb";
     const auto defaulted = dir / "defaulted.glb";
-    REQUIRE_FALSE(rendered.scene.write(tuned, cfg.config.output()).hasErrors());
-    REQUIRE_FALSE(rendered.scene.write(defaulted).hasErrors());
+    rendered.scene.write(tuned, cfg.config.output());
+    rendered.scene.write(defaulted);
     REQUIRE(readBytes(tuned) != readBytes(defaulted));
 
     // And an omitted slice means exactly the format's built-in defaults —
@@ -308,9 +306,6 @@ TEST_CASE("write honours the output slice, not just build", "[api][equivalence]"
     REQUIRE(exporter != nullptr);
     const auto expected = dir / "expected.glb";
     const nh::config::NHConfig noConfig;
-    REQUIRE_FALSE(
-        exporter
-            ->write(internalScene, expected, nh::pipeline::resolveExportConfig(noConfig, expected))
-            .diags.hasErrors());
+    exporter->write(internalScene, expected, nh::pipeline::resolveExportConfig(noConfig, expected));
     REQUIRE(readBytes(defaulted) == readBytes(expected));
 }

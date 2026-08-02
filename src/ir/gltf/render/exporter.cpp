@@ -77,9 +77,8 @@ std::string_view GltfExporter::formatName() const noexcept { return "gltf"; }
 
 std::vector<std::string> GltfExporter::supportedExtensions() const { return {".glb", ".gltf"}; }
 
-ExportResult GltfExporter::write(const render::Scene &scene, const std::filesystem::path &path,
-                                 const ExportConfig &config) const {
-    ExportResult result;
+void GltfExporter::write(const render::Scene &scene, const std::filesystem::path &path,
+                         const ExportConfig &config) const {
 
     tinygltf::Model model;
     model.asset.version = "2.0";
@@ -566,14 +565,11 @@ ExportResult GltfExporter::write(const render::Scene &scene, const std::filesyst
                                                 /*prettyPrint=*/false,
                                                 /*writeBinary=*/isBinary,
                                                 /*isBinary=*/isBinary);
-    if (!ok) {
-        result.diags.error(codes::kFatalExportWriteFailed,
-                           std::format("failed to write glTF to '{}'", path.string()),
-                           path.string());
-    }
-
     (void)err;
-    return result;
+    if (!ok) {
+        throw Error{codes::kFatalExportWriteFailed,
+                    std::format("failed to write glTF to '{}'", path.string()), path.string()};
+    }
 }
 
 } // namespace nodehammer::ir
