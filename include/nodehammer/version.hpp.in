@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/api.hpp>
+#include <nodehammer/visibility.hpp>
 
 #include <string_view>
 

@@ -448,7 +448,7 @@ endfunction()
 # A shared build compiles the core twice, once per variant. On Windows that is
 # unavoidable — __declspec(dllexport) is codegen-affecting, so a DLL's objects
 # are not valid inside a static library. Elsewhere NH_API only ever *raises*
-# visibility (include/nodehammer/api.hpp), so one object serves both and an
+# visibility (include/nodehammer/visibility.hpp), so one object serves both and an
 # OBJECT library compiles the core once.
 #
 # The trade: shared objects cannot carry NH_STATIC, so the archive's *public*
@@ -502,7 +502,7 @@ target_compile_definitions(nodehammer_lib PUBLIC ${NH_CORE_DEFINES} ${NH_APP_DEF
 # installed, so this never reaches a package config.
 target_compile_features(nodehammer_lib INTERFACE cxx_std_23)
 
-# NH_STATIC collapses NH_API to nothing (include/nodehammer/api.hpp). PUBLIC so
+# NH_STATIC collapses NH_API to nothing (include/nodehammer/visibility.hpp). PUBLIC so
 # every in-tree consumer — CLI, viewer, tests — inherits it and no target has to
 # remember; without it they would see the dllimport spelling on Windows and fail
 # to link against the archive.

@@ -6,8 +6,8 @@
 // Tier A only — the connector tier has no config surface at all, which is why
 // the Lua front end needs no carve-out here (#41 §6).
 
-#include <nodehammer/api.hpp>
 #include <nodehammer/diagnostics.hpp>
+#include <nodehammer/visibility.hpp>
 
 #include <filesystem>
 #include <memory>

@@ -1,6 +1,11 @@
 #pragma once
 
-// Visibility decoration for the public API.
+// Visibility decoration for the public API — the two macros that decide what
+// leaves the shared library, and nothing else.
+//
+// Named for what it holds rather than for the API it decorates: a header called
+// `api.hpp` reads like the place the API *is*, which is semantic_scene.hpp,
+// render_scene.hpp, config.hpp, diagnostics.hpp and build.hpp between them.
 //
 // The add-on to the public/internal split, not the split itself: what keeps
 // internals unreachable is physical, since `include/nodehammer/` holds only

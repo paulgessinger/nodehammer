@@ -6,10 +6,10 @@
 // belongs to neither, and because making `tessellate` a member of SemanticScene
 // would put SceneConfig and RenderScene into the connector header (#41 §4).
 
-#include <nodehammer/api.hpp>
 #include <nodehammer/config.hpp>
 #include <nodehammer/render_scene.hpp>
 #include <nodehammer/semantic_scene.hpp>
+#include <nodehammer/visibility.hpp>
 
 namespace nodehammer {
 

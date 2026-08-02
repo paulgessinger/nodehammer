@@ -8,8 +8,8 @@
 // into a header that must not know they exist. Cross-type verbs live in
 // build.hpp instead (#41 §4).
 
-#include <nodehammer/api.hpp>
 #include <nodehammer/diagnostics.hpp>
+#include <nodehammer/visibility.hpp>
 
 #include <cstddef>
 #include <filesystem>

@@ -24,7 +24,7 @@
 // amalgamated connector surface, so it deliberately pulls in nothing but the
 // visibility macro and the standard library.
 
-#include <nodehammer/api.hpp>
+#include <nodehammer/visibility.hpp>
 
 #include <cstddef>
 #include <memory>

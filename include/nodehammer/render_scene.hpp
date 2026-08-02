@@ -7,9 +7,9 @@
 // Tier A only — it needs OutputConfig, and through the exporters it reaches
 // tinygltf, neither of which belongs in the connector amalgamation.
 
-#include <nodehammer/api.hpp>
 #include <nodehammer/config.hpp>
 #include <nodehammer/diagnostics.hpp>
+#include <nodehammer/visibility.hpp>
 
 #include <cstddef>
 #include <filesystem>
