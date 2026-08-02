@@ -26,7 +26,7 @@ ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const
         result.scene = std::move(scene);
     } catch (const std::exception &ex) {
         result.diags.error(
-            codes::kErrImportFileNotFound,
+            codes::kFatalImportFileNotFound,
             std::format("failed to load FlatBuffer '{}': {}", path.string(), ex.what()));
     }
 
@@ -53,7 +53,7 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
         scene.computeOriginalPaths();
         result.scene = std::move(scene);
     } catch (const std::exception &ex) {
-        result.diags.error(codes::kErrImportFileNotFound,
+        result.diags.error(codes::kFatalImportFileNotFound,
                            std::format("failed to load FlatBuffer '{}': {}", filename, ex.what()));
     }
 

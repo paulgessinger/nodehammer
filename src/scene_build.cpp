@@ -59,7 +59,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     SceneBuildResult result;
 
     if (geometry_path.empty()) {
-        result.diags.error(codes::kErrImportFormatUnknown,
+        result.diags.error(codes::kFatalImportFormatUnknown,
                            "buildSceneFromPaths: input path is empty", "");
         return result;
     }
@@ -77,7 +77,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     const auto importerRegistry = ir::ImporterRegistry::makeDefault();
     const auto *importer = importerRegistry.resolve(geometry_path);
     if (importer == nullptr) {
-        result.diags.error(codes::kErrImportFormatUnknown,
+        result.diags.error(codes::kFatalImportFormatUnknown,
                            "buildSceneFromPaths: no importer for '" + geometry_path.string() + "'",
                            geometry_path.string());
         return result;

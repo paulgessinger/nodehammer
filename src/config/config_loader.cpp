@@ -116,7 +116,7 @@ void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
 
         auto bytes = fetcher(absKey);
         if (!bytes) {
-            diags.error(codes::kErrImportFileNotFound,
+            diags.error(codes::kFatalImportFileNotFound,
                         std::format("include not found: '{}'", absKey), "<include>");
             continue;
         }
@@ -819,7 +819,7 @@ ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
         canonical = std::filesystem::canonical(path);
         root_bytes = detail::file_io::readFile(canonical);
     } catch (const std::exception &e) {
-        diags.error(codes::kErrImportFileNotFound,
+        diags.error(codes::kFatalImportFileNotFound,
                     std::format("could not read config file: {}", e.what()), path.string());
         return ConfigResult{{}, std::move(diags)};
     }

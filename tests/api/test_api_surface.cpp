@@ -182,11 +182,12 @@ TEST_CASE("Error carries a code, a context and its Diagnostic form", "[api][hand
         (void)nh::SemanticScene::read(dir / "nope.nhb");
         FAIL("expected a throw");
     } catch (const nh::Error &e) {
-        REQUIRE(e.code() == nh::codes::kErrImportFileNotFound);
+        REQUIRE(e.code() == nh::codes::kFatalImportFileNotFound);
         REQUIRE_FALSE(std::string_view{e.what()}.empty());
         REQUIRE_FALSE(e.context().empty());
         const auto d = e.diagnostic();
-        REQUIRE(d.severity == nh::Diagnostic::Severity::Error);
+        // Fatal, and the only place it appears: a returned list never carries it.
+        REQUIRE(d.severity == nh::Diagnostic::Severity::Fatal);
         REQUIRE(d.code == e.code());
         REQUIRE(d.message == e.what());
     }

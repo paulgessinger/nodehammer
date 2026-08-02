@@ -217,7 +217,7 @@ class WorkerBackend final : public IWebBackend {
             // cooperative path would hit too, so report it rather than fall back.
             char *err = nh_worker_take_error();
             result_.scene = nullptr;
-            result_.diags.error(::nodehammer::codes::kErrComputeWorker,
+            result_.diags.error(::nodehammer::codes::kFatalComputeWorker,
                                 err != nullptr ? err : "compute worker failed");
             std::free(err);
             nh_worker_reset();
@@ -235,7 +235,7 @@ class WorkerBackend final : public IWebBackend {
                     std::make_shared<::nodehammer::ir::render::Scene>(std::move(rendered));
             } catch (const std::exception &ex) {
                 result_.scene = nullptr;
-                result_.diags.error(::nodehammer::codes::kErrComputeWorker,
+                result_.diags.error(::nodehammer::codes::kFatalComputeWorker,
                                     std::string{"failed to decode render scene: "} + ex.what());
             }
             std::free(reinterpret_cast<void *>(static_cast<uintptr_t>(ptr)));

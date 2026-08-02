@@ -21,7 +21,7 @@ ExportResult ObjExporter::write(const render::Scene &scene, const std::filesyste
 
     if (!config.bakeUnitScale) {
         result.diags.error(
-            codes::kErrExportWriteFailed,
+            codes::kFatalExportWriteFailed,
             "OBJ export requires bake_unit_scale = true (OBJ has no scene graph for root scaling)",
             path.string());
         return result;
@@ -29,7 +29,7 @@ ExportResult ObjExporter::write(const render::Scene &scene, const std::filesyste
 
     std::ofstream objFile{path};
     if (!objFile) {
-        result.diags.error(codes::kErrExportWriteFailed,
+        result.diags.error(codes::kFatalExportWriteFailed,
                            std::format("failed to open '{}' for writing", path.string()),
                            path.string());
         return result;
@@ -38,7 +38,7 @@ ExportResult ObjExporter::write(const render::Scene &scene, const std::filesyste
     const auto mtlPath = path.parent_path() / (path.stem().string() + ".mtl");
     std::ofstream mtlFile{mtlPath};
     if (!mtlFile) {
-        result.diags.error(codes::kErrExportWriteFailed,
+        result.diags.error(codes::kFatalExportWriteFailed,
                            std::format("failed to open '{}' for writing", mtlPath.string()),
                            mtlPath.string());
         return result;

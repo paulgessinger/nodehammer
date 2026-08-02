@@ -82,7 +82,7 @@ inline SemanticScene::SemanticScene(std::shared_ptr<const Impl> impl) noexcept
 
 inline const SemanticScene::Impl &SemanticScene::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the semantic scene handle refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the semantic scene handle refers to nothing"};
     }
     return *impl_;
 }
@@ -92,7 +92,7 @@ inline RenderScene::RenderScene(std::shared_ptr<const Impl> impl) noexcept
 
 inline const RenderScene::Impl &RenderScene::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the render scene handle refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the render scene handle refers to nothing"};
     }
     return *impl_;
 }
@@ -101,7 +101,7 @@ inline Config::Config(std::shared_ptr<const Impl> impl) noexcept : impl_(std::mo
 
 inline const Config::Impl &Config::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the config handle refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the config handle refers to nothing"};
     }
     return *impl_;
 }
@@ -111,7 +111,7 @@ inline SceneConfig::SceneConfig(std::shared_ptr<const Impl> impl) noexcept
 
 inline const SceneConfig::Impl &SceneConfig::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the scene config slice refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the scene config slice refers to nothing"};
     }
     return *impl_;
 }
@@ -121,7 +121,7 @@ inline OutputConfig::OutputConfig(std::shared_ptr<const Impl> impl) noexcept
 
 inline const OutputConfig::Impl &OutputConfig::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the output config slice refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the output config slice refers to nothing"};
     }
     return *impl_;
 }
@@ -186,7 +186,7 @@ namespace api {
 [[nodiscard]] inline const ir::semantic::Scene &sceneOrThrow(const SemanticScene &handle,
                                                              std::string_view verb) {
     if (!handle.valid()) {
-        throw Error{codes::kErrApiInvalidHandle, "the semantic scene handle refers to nothing",
+        throw Error{codes::kFatalApiInvalidHandle, "the semantic scene handle refers to nothing",
                     verb};
     }
     return handle.impl().scene;
@@ -200,7 +200,8 @@ namespace api {
 [[nodiscard]] inline const ir::render::Scene &sceneOrThrow(const RenderScene &handle,
                                                            std::string_view verb) {
     if (!handle.valid()) {
-        throw Error{codes::kErrApiInvalidHandle, "the render scene handle refers to nothing", verb};
+        throw Error{codes::kFatalApiInvalidHandle, "the render scene handle refers to nothing",
+                    verb};
     }
     return handle.impl().scene;
 }

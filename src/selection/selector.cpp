@@ -274,7 +274,7 @@ diagnostics::List SelectionEngine::prune(ir::semantic::Scene &scene) const {
     if (selResult.dropped.contains(scene.rootId)) {
         diagnostics::List diags;
         diags.append(selResult.diags);
-        diags.error(codes::kErrSelectionRootDropped,
+        diags.error(codes::kFatalSelectionRootDropped,
                     "root node is in the dropped set; pruning is a no-op",
                     scene.nodes.at(scene.rootId).name);
         return diags;

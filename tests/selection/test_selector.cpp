@@ -293,7 +293,7 @@ TEST_CASE("SelectionEngine: prune with root dropped is a no-op and emits NH0401"
 
     bool hasRootErr = false;
     for (const auto &d : diags.items()) {
-        if (d.code == codes::kErrSelectionRootDropped) {
+        if (d.code == codes::kFatalSelectionRootDropped) {
             hasRootErr = true;
         }
     }

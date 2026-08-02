@@ -85,7 +85,7 @@ ConfigResult Config::read(const std::filesystem::path &path) {
         const auto bytes = detail::file_io::readFile(canonical);
         source.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrImportFileNotFound, path.string());
+        api::rethrowAsError(e, codes::kFatalImportFileNotFound, path.string());
     }
     try {
         return adopt(lua::evalLuaConfig(source, canonical.string(), canonical.parent_path()),
@@ -96,7 +96,7 @@ ConfigResult Config::read(const std::filesystem::path &path) {
         api::rethrowAsError(e, codes::kErrConfigParse, path.string());
     }
 #else
-    throw Error{codes::kErrApiBackendMissing,
+    throw Error{codes::kFatalApiBackendMissing,
                 "this build has no Lua config front end; see formats()", path.string()};
 #endif
 }

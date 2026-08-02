@@ -43,12 +43,22 @@ const Diagnostic *DiagnosticList::end() const noexcept {
 Error::Error(std::string_view code, std::string_view message, std::string_view context)
     : std::runtime_error(std::string{message}), code_(code), context_(context) {}
 
+Error::Error(std::string_view code, std::string_view message, std::string_view context,
+             DiagnosticList observed)
+    : std::runtime_error(std::string{message}), code_(code), context_(context),
+      observed_(std::move(observed)) {}
+
 const std::string &Error::code() const noexcept { return code_; }
 
 const std::string &Error::context() const noexcept { return context_; }
 
+const DiagnosticList &Error::observed() const noexcept { return observed_; }
+
+// `Fatal`, not `Error`: this is the one diagnostic in the system that reports a
+// call which produced nothing, and the severity is what distinguishes it from
+// the `Error`-severity entries that accompany a partial result.
 Diagnostic Error::diagnostic() const {
-    return Diagnostic{Diagnostic::Severity::Error, code_, what(), context_};
+    return Diagnostic{Diagnostic::Severity::Fatal, code_, what(), context_};
 }
 
 } // namespace nodehammer

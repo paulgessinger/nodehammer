@@ -210,7 +210,7 @@ void registerCmdConvert(CLI::App &app) {
             const auto *exp = expRegistry.resolve(outputPath, outputFmt);
             if (!exp) {
                 std::println(stderr, "[error] {} cannot determine output format for '{}'",
-                             nodehammer::codes::kErrExportWriteFailed, outputPath);
+                             nodehammer::codes::kFatalExportWriteFailed, outputPath);
                 std::exit(1);
             }
 

@@ -90,7 +90,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
         // tessellation has not run and running it on a scene the rules meant to
         // prune would be worse than stopping. `convert` stops here too.
         if (diags.hasErrors()) {
-            throw Error{codes::kErrSelectionRootDropped, diags.items().front().message, "build"};
+            throw Error{codes::kFatalSelectionRootDropped, diags.items().front().message, "build"};
         }
     }
     if (dedupApplies(cfg)) {

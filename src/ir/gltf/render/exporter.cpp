@@ -567,7 +567,7 @@ ExportResult GltfExporter::write(const render::Scene &scene, const std::filesyst
                                                 /*writeBinary=*/isBinary,
                                                 /*isBinary=*/isBinary);
     if (!ok) {
-        result.diags.error(codes::kErrExportWriteFailed,
+        result.diags.error(codes::kFatalExportWriteFailed,
                            std::format("failed to write glTF to '{}'", path.string()),
                            path.string());
     }

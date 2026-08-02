@@ -23,7 +23,7 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
         result.scene.computeWorldTransforms();
         result.scene.computeOriginalPaths();
     } catch (const std::exception &ex) {
-        result.diags.error(codes::kErrTgeoOpenFailed,
+        result.diags.error(codes::kFatalTgeoOpenFailed,
                            std::format("failed to load JSON '{}': {}", path.string(), ex.what()));
     }
 

@@ -25,7 +25,7 @@ SemanticFlatbufferExporter::write(const semantic::Scene &scene, const std::files
         detail::zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}));
     } catch (const std::exception &ex) {
         result.diags.error(
-            codes::kErrExportWriteFailed,
+            codes::kFatalExportWriteFailed,
             std::format("failed to write FlatBuffer '{}': {}", path.string(), ex.what()),
             path.string());
     }

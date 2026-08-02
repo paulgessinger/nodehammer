@@ -5,5 +5,6 @@
         "-DNODEHAMMER_WITH_VIEWER=ON"
     ],
     "cmake.buildBeforeRun": true,
-    "git.detectWorktrees": true
+    "git.detectWorktrees": true,
+    "sonarlint.pathToCompileCommands": "${workspaceFolder}/build/RelWithDebInfo/compile_commands.json"
 }

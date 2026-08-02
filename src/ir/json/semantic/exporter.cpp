@@ -26,7 +26,7 @@ SemanticJsonExporter::write(const semantic::Scene &scene, const std::filesystem:
         const std::string jsonStr = j.dump(-1);
         detail::zstd_io::writeJsonToFile(path, jsonStr);
     } catch (const std::exception &ex) {
-        result.diags.error(codes::kErrExportWriteFailed,
+        result.diags.error(codes::kFatalExportWriteFailed,
                            std::format("failed to write JSON '{}': {}", path.string(), ex.what()),
                            path.string());
     }

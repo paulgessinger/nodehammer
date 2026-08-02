@@ -57,7 +57,7 @@ inline ImportWithFormat importOrExit(CLI::Option *inputOpt, CLI::Option *formatO
     const auto *imp = registry.resolve(inputPath, inputFmt);
     if (imp == nullptr) {
         std::println(stderr, "[error] {} cannot determine input format for '{}'",
-                     codes::kErrImportFormatUnknown, inputPath);
+                     codes::kFatalImportFormatUnknown, inputPath);
         std::exit(1);
     }
     auto result = imp->import(inputPath);

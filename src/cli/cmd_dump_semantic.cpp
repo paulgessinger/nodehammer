@@ -315,7 +315,7 @@ void registerCmdDumpSemantic(CLI::App &app) {
 
             if (exporter == nullptr) {
                 std::println(stderr, "[error] {} cannot determine output format for '{}'",
-                             nodehammer::codes::kErrExportWriteFailed, outPath);
+                             nodehammer::codes::kFatalExportWriteFailed, outPath);
                 return;
             }
 
