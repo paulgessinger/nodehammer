@@ -104,7 +104,7 @@ class List {
 
     /// Hand the items over wholesale. Now that both layers share `Diagnostic`,
     /// this is what lets the public list be produced by a move rather than by
-    /// copying every string — see `api::wrap`.
+    /// copying every string — see `api::asHandle`.
     [[nodiscard]] std::vector<Diagnostic> take() && noexcept { return std::move(items_); }
 
   private:

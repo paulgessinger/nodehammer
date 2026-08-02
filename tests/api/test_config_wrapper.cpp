@@ -147,8 +147,8 @@ TEST_CASE("Config slices share one document and default to the built-in config",
     REQUIRE(scene.valid());
     REQUIRE(output.valid());
     // Slicing shares rather than copies: both halves must be the same document.
-    REQUIRE(&api::configOf(scene) == &api::configOf(output));
-    REQUIRE(&api::configOf(scene) == &loaded.config.impl().cfg);
+    REQUIRE(&api::documentOf(scene) == &api::documentOf(output));
+    REQUIRE(&api::documentOf(scene) == &loaded.config.impl().cfg);
 
     // A slice outlives the handle it came from — it owns a share of the
     // document, so this is not a dangling read.
@@ -158,13 +158,13 @@ TEST_CASE("Config slices share one document and default to the built-in config",
         detached = temporaryHandle.config.scene();
     }
     REQUIRE(detached.valid());
-    REQUIRE_FALSE(api::configOf(detached).materials.empty());
+    REQUIRE_FALSE(api::documentOf(detached).materials.empty());
 
     // A default-constructed slice is usable and means "no config file".
     const nodehammer::SceneConfig none;
     REQUIRE_FALSE(none.valid());
     const nodehammer::config::NHConfig defaults;
-    REQUIRE(nodehammer::config::configToToml(api::configOf(none)) ==
+    REQUIRE(nodehammer::config::configToToml(api::documentOf(none)) ==
             nodehammer::config::configToToml(defaults));
 }
 

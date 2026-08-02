@@ -32,9 +32,10 @@ namespace {
 /// per node. Errors mean there is nothing to hand back.
 [[nodiscard]] SemanticResult adopt(ir::ImportResult result, std::string_view context) {
     if (result.diags.hasErrors()) {
-        api::throwReported(result.diags, codes::kErrImportFileNotFound, context);
+        api::throwReportedErrors(result.diags, codes::kErrImportFileNotFound, context);
     }
-    return SemanticResult{api::wrap(std::move(result.scene)), api::wrap(std::move(result.diags))};
+    return SemanticResult{api::asHandle(std::move(result.scene)),
+                          api::asHandle(std::move(result.diags))};
 }
 
 void appendUnique(std::vector<std::string> &out, std::string_view name) {
@@ -64,7 +65,7 @@ SemanticResult SemanticScene::read(const std::filesystem::path &path, const Read
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrImportFileNotFound, path.string());
+        api::rethrowAsError(e, codes::kErrImportFileNotFound, path.string());
     }
 }
 
@@ -74,7 +75,7 @@ SemanticResult SemanticScene::read(std::span<const std::byte> nhb) {
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrImportFileNotFound, "<memory>.nhb");
+        api::rethrowAsError(e, codes::kErrImportFileNotFound, "<memory>.nhb");
     }
 }
 
@@ -85,7 +86,7 @@ SemanticResult SemanticScene::read(TGeoManager &manager) {
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrTgeoOpenFailed);
+        api::rethrowAsError(e, codes::kErrTgeoOpenFailed);
     }
 }
 #endif
@@ -112,7 +113,7 @@ std::span<const std::string_view> SemanticScene::formats() {
 
 DiagnosticList SemanticScene::write(const std::filesystem::path &path,
                                     const WriteOptions &options) const {
-    const auto &scene = api::require(*this, "SemanticScene::write");
+    const auto &scene = api::sceneOrThrow(*this, "SemanticScene::write");
     const auto registry = ir::SemanticExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(path, options.format);
     if (exporter == nullptr) {
@@ -128,29 +129,29 @@ DiagnosticList SemanticScene::write(const std::filesystem::path &path,
         // Exporters, like importers, report "could not write this" as an error
         // diagnostic. Nothing was produced, so it becomes the exception.
         if (result.diags.hasErrors()) {
-            api::throwReported(result.diags, codes::kErrExportWriteFailed, path.string());
+            api::throwReportedErrors(result.diags, codes::kErrExportWriteFailed, path.string());
         }
-        return api::wrap(std::move(result.diags));
+        return api::asHandle(std::move(result.diags));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrExportWriteFailed, path.string());
+        api::rethrowAsError(e, codes::kErrExportWriteFailed, path.string());
     }
 }
 
 std::vector<std::byte> SemanticScene::toNhb() const {
-    const auto &scene = api::require(*this, "SemanticScene::toNhb");
+    const auto &scene = api::sceneOrThrow(*this, "SemanticScene::toNhb");
     try {
         return ir::semanticSceneToBytes(scene);
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrExportWriteFailed);
+        api::rethrowAsError(e, codes::kErrExportWriteFailed);
     }
 }
 
 bool SemanticScene::valid() const noexcept { return impl_ != nullptr; }
 
 // The observers are members, so they read the state rather than going through
-// a helper to ask whether there is any: `api::require` is for the verbs, which
+// a helper to ask whether there is any: `api::sceneOrThrow` is for the verbs, which
 // are not members and have a caller to name.
 
 std::size_t SemanticScene::nodeCount() const noexcept {

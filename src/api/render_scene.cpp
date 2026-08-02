@@ -46,20 +46,20 @@ void appendUnique(std::vector<std::string> &out, std::string_view name) {
 RenderResult RenderScene::read(const std::filesystem::path &path) {
     try {
         const auto bytes = detail::zstd_io::readBytesFromFile(path);
-        return RenderResult{api::wrap(ir::renderSceneFromBytes(bytes)), DiagnosticList{}};
+        return RenderResult{api::asHandle(ir::renderSceneFromBytes(bytes)), DiagnosticList{}};
     } catch (const std::exception &e) {
         // `renderSceneFromBytes` throws on a failed verify and the reader throws
         // on a missing file; both are input this call cannot act on, and neither
         // internal type is part of the contract.
-        api::rethrow(e, codes::kErrImportFileNotFound, path.string());
+        api::rethrowAsError(e, codes::kErrImportFileNotFound, path.string());
     }
 }
 
 RenderResult RenderScene::read(std::span<const std::byte> nhr) {
     try {
-        return RenderResult{api::wrap(ir::renderSceneFromBytes(nhr)), DiagnosticList{}};
+        return RenderResult{api::asHandle(ir::renderSceneFromBytes(nhr)), DiagnosticList{}};
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrImportFileNotFound, "<memory>.nhr");
+        api::rethrowAsError(e, codes::kErrImportFileNotFound, "<memory>.nhr");
     }
 }
 
@@ -80,7 +80,7 @@ std::span<const std::string_view> RenderScene::formats() {
 
 DiagnosticList RenderScene::write(const std::filesystem::path &path, const OutputConfig &output,
                                   const WriteOptions &options) const {
-    const auto &scene = api::require(*this, "RenderScene::write");
+    const auto &scene = api::sceneOrThrow(*this, "RenderScene::write");
 
     // The render IR's own format is not in the exporter registry — nothing in
     // the CLI writes one — so it is dispatched here, ahead of the registry that
@@ -91,7 +91,7 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
             detail::zstd_io::writeBytesToFile(path, bytes);
             return DiagnosticList{};
         } catch (const std::exception &e) {
-            api::rethrow(e, codes::kErrExportWriteFailed, path.string());
+            api::rethrowAsError(e, codes::kErrExportWriteFailed, path.string());
         }
     }
 
@@ -110,26 +110,26 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
     // defaults, then the matching `[export.<fmt>]` table field by field, then
     // GLB's table-level fallback to `[export.gltf]` (#41 §3).
     const auto resolved =
-        pipeline::resolveExportConfig(api::configOf(output), path, options.format);
+        pipeline::resolveExportConfig(api::documentOf(output), path, options.format);
     try {
         auto result = exporter->write(scene, path, resolved);
         if (result.diags.hasErrors()) {
-            api::throwReported(result.diags, codes::kErrExportWriteFailed, path.string());
+            api::throwReportedErrors(result.diags, codes::kErrExportWriteFailed, path.string());
         }
-        return api::wrap(std::move(result.diags));
+        return api::asHandle(std::move(result.diags));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrExportWriteFailed, path.string());
+        api::rethrowAsError(e, codes::kErrExportWriteFailed, path.string());
     }
 }
 
 std::vector<std::byte> RenderScene::toNhr() const {
-    const auto &scene = api::require(*this, "RenderScene::toNhr");
+    const auto &scene = api::sceneOrThrow(*this, "RenderScene::toNhr");
     try {
         return ir::renderSceneToBytes(scene);
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrExportWriteFailed);
+        api::rethrowAsError(e, codes::kErrExportWriteFailed);
     }
 }
 

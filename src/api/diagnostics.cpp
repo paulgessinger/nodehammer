@@ -9,7 +9,7 @@ namespace nodehammer {
 // in handles.hpp is the only other thing that touches it.
 //
 // A null `impl_` is the empty list, not an error state: it is what a
-// default-constructed list holds, what `api::wrap` produces for an empty one,
+// default-constructed list holds, what `api::asHandle` produces for an empty one,
 // and what a moved-from list is left with. Every accessor below answers for it.
 
 bool DiagnosticList::hasErrors() const noexcept {

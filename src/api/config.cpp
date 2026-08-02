@@ -34,13 +34,13 @@ namespace {
     // append, and converted once at the end.
     diagnostics::List diags = std::move(loaded.diags);
     if (diags.hasErrors()) {
-        api::throwReported(diags, codes::kErrConfigParse, context);
+        api::throwReportedErrors(diags, codes::kErrConfigParse, context);
     }
     diags.append(config::ConfigValidator::validate(loaded.config));
     if (diags.hasErrors()) {
-        api::throwReported(diags, codes::kErrConfigParse, context);
+        api::throwReportedErrors(diags, codes::kErrConfigParse, context);
     }
-    return ConfigResult{api::wrap(std::move(loaded.config)), api::wrap(std::move(diags))};
+    return ConfigResult{api::asHandle(std::move(loaded.config)), api::asHandle(std::move(diags))};
 }
 
 /// Cut a slice from a document. The pointer aliases the handle's state, so a
@@ -85,7 +85,7 @@ ConfigResult Config::read(const std::filesystem::path &path) {
         const auto bytes = detail::file_io::readFile(canonical);
         source.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrImportFileNotFound, path.string());
+        api::rethrowAsError(e, codes::kErrImportFileNotFound, path.string());
     }
     try {
         return adopt(lua::evalLuaConfig(source, canonical.string(), canonical.parent_path()),
@@ -93,7 +93,7 @@ ConfigResult Config::read(const std::filesystem::path &path) {
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrConfigParse, path.string());
+        api::rethrowAsError(e, codes::kErrConfigParse, path.string());
     }
 #else
     throw Error{codes::kErrApiBackendMissing,
@@ -107,7 +107,7 @@ ConfigResult Config::parse(std::string_view toml, const std::filesystem::path &b
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrow(e, codes::kErrConfigParse, "<string>");
+        api::rethrowAsError(e, codes::kErrConfigParse, "<string>");
     }
 }
 
