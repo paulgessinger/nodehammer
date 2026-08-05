@@ -36,14 +36,16 @@ void registerCmdConfigLua(CLI::App &app) {
             std::ostringstream buf;
             buf << in.rdbuf();
 
-            // The script's include()/use() paths resolve relative to the script's
-            // own directory, so pass that as the base.
-            const std::filesystem::path scriptPath{configPath};
-            const std::filesystem::path baseDir = scriptPath.has_parent_path()
-                                                      ? scriptPath.parent_path()
-                                                      : std::filesystem::path{"."};
+            // The path the user typed is the root key, so include()/use()
+            // resolve against the script's own directory — and a bare name
+            // roots at the working directory, which is the application-level
+            // choice this command is entitled to make on the user's behalf
+            // because they named the path relative to it.
+            const std::string rootKey =
+                std::filesystem::path{configPath}.lexically_normal().generic_string();
 
-            auto result = nodehammer::lua::evalLuaConfig(buf.str(), configPath, baseDir);
+            auto result = nodehammer::lua::evalLuaConfig(
+                buf.str(), rootKey, nodehammer::config::ConfigLoader::filesystemFetcher());
             nodehammer::cli::printDiags(result.diags);
             if (result.diags.hasErrors()) {
                 std::println(stderr, "config-lua: evaluation failed");

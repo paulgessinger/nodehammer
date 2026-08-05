@@ -12,12 +12,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <format>
-#include <fstream>
 #include <memory>
 #include <optional>
 #include <set>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -54,16 +52,6 @@ namespace {
 bool isPresent(const sol::object &o) {
     const sol::type t = o.get_type();
     return t != sol::type::lua_nil && t != sol::type::none;
-}
-
-std::optional<std::string> readFileToString(const std::filesystem::path &p) {
-    std::ifstream in(p, std::ios::binary);
-    if (!in) {
-        return std::nullopt;
-    }
-    std::ostringstream ss;
-    ss << in.rdbuf();
-    return ss.str();
 }
 
 // Warn on any string key not in the section's allowlist — the Lua mirror of the
@@ -287,11 +275,11 @@ return readonly
 
 } // namespace
 
-config::ConfigResult evalLuaConfig(std::string_view src, std::string_view sourceName,
-                                   const std::filesystem::path &baseDir) {
+config::ConfigResult evalLuaConfig(std::string_view src, std::string_view rootKey,
+                                   config::IncludeFetcher fetcher) {
     config::NHConfig cfg;
     DiagnosticList diags;
-    const std::string chunkName{sourceName};
+    const std::string chunkName{rootKey};
 
     try {
         sol::state lua;
@@ -310,12 +298,17 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view source
             },
             LUA_MASKCOUNT, kInstructionBudget);
 
-        // Include-resolution state. `dirStack.back()` is the directory of the
-        // currently-executing chunk, so nested include()/use() resolve relative
-        // to the including file (mirrors the TOML loader's parent-relative keys).
-        // `root` is the canonical baseDir; include()/use() may not escape it.
-        const std::filesystem::path root = std::filesystem::weakly_canonical(baseDir);
-        std::vector<std::filesystem::path> dirStack{root};
+        // Include-resolution state. `keyStack.back()` is the key of the
+        // currently-executing chunk, so nested include()/use() resolve against
+        // the file that asked for them — `resolveIncludeKey` takes the parent
+        // directory of that key, which is the same walk the TOML loader does.
+        //
+        // `rootDir` is the directory the root key sits in, and nothing may
+        // resolve outside it. That test is on keys rather than on the
+        // filesystem: there may not *be* a filesystem (a `.lua` inside a
+        // .nhproj), and the guard has to hold identically either way.
+        const std::string rootDir = std::filesystem::path{rootKey}.parent_path().generic_string();
+        std::vector<std::string> keyStack{chunkName};
         std::set<std::string> includeStack;                    // on-stack cycle guard for include()
         std::unordered_map<std::string, sol::object> useCache; // run-once cache for use()
         std::set<std::string> useStack;                        // in-progress guard for use()
@@ -343,31 +336,46 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view source
             return r;
         };
 
-        // Resolve an include()/use() target under the config root. Rejects
-        // absolute paths and any result that escapes `root` (e.g. via `..`),
+        // Resolve an include()/use() target to a key under the config root.
+        // Rejects absolute paths and anything that escapes `rootDir` via `..`,
         // emitting a diagnostic and returning nullopt.
+        //
+        // `resolveIncludeKey` normalises lexically, so an escape shows up as a
+        // key that is no longer under the root prefix — which is why the check
+        // can be a string comparison and needs to touch no filesystem. When the
+        // root key has no directory at all (`"<string>"`), `rootDir` is empty
+        // and the prefix test degenerates to "must not start with ..", which is
+        // the same rule.
         auto resolveUnder = [&](const std::string &rel,
-                                const std::string &ctx) -> std::optional<std::filesystem::path> {
+                                const std::string &ctx) -> std::optional<std::string> {
             if (std::filesystem::path(rel).is_absolute()) {
                 diags.error(codes::kErrConfigParse,
                             std::format("{}: absolute paths are not allowed ('{}')", ctx, rel),
                             ctx);
                 return std::nullopt;
             }
-            const std::filesystem::path abs =
-                std::filesystem::weakly_canonical(dirStack.back() / rel);
-            const std::string rootStr = root.generic_string();
-            const std::string absStr = abs.generic_string();
-            const bool under = absStr.size() >= rootStr.size() &&
-                               absStr.compare(0, rootStr.size(), rootStr) == 0 &&
-                               (absStr.size() == rootStr.size() || absStr[rootStr.size()] == '/');
+            const std::string key = config::ConfigLoader::resolveIncludeKey(keyStack.back(), rel);
+            const bool under = rootDir.empty() ? !key.starts_with("..")
+                                               : (key.size() > rootDir.size() &&
+                                                  key.compare(0, rootDir.size(), rootDir) == 0 &&
+                                                  key[rootDir.size()] == '/');
             if (!under) {
                 diags.error(codes::kErrConfigParse,
                             std::format("{}: '{}' resolves outside the config root", ctx, rel),
                             ctx);
                 return std::nullopt;
             }
-            return abs;
+            return key;
+        };
+
+        // Bytes for a resolved key, as text. The fetcher is the front end's
+        // only contact with anything outside the script.
+        auto fetchText = [&](const std::string &key) -> std::optional<std::string> {
+            const auto bytes = fetcher(key);
+            if (!bytes) {
+                return std::nullopt;
+            }
+            return std::string{reinterpret_cast<const char *>(bytes->data()), bytes->size()};
         };
 
         // ── config { hoist_orphans=, deduplicate_shapes= } ───────────────────
@@ -577,37 +585,36 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view source
 
         // ── include(path) — run a fragment into the shared cfg ───────────────
         lua.set_function("include", [&](const std::string &rel) {
-            const auto abs = resolveUnder(rel, "include");
-            if (!abs) {
+            const auto key = resolveUnder(rel, "include");
+            if (!key) {
                 return;
             }
-            const std::string key = abs->generic_string();
-            if (includeStack.contains(key)) {
+            if (includeStack.contains(*key)) {
                 diags.error(codes::kErrConfigParse,
-                            std::format("include cycle detected: '{}'", rel), key);
+                            std::format("include cycle detected: '{}'", rel), *key);
                 return;
             }
-            auto contents = readFileToString(*abs);
+            auto contents = fetchText(*key);
             if (!contents) {
                 diags.error(codes::kFatalImportFileNotFound,
-                            std::format("include target not found: '{}'", rel), key);
+                            std::format("include target not found: '{}'", rel), *key);
                 return;
             }
-            includeStack.insert(key);
-            dirStack.push_back(abs->parent_path());
+            includeStack.insert(*key);
+            keyStack.push_back(*key);
             bool ok = false;
-            runChunk(*contents, key, ok);
-            dirStack.pop_back();
-            includeStack.erase(key);
+            runChunk(*contents, *key, ok);
+            keyStack.pop_back();
+            includeStack.erase(*key);
         });
 
         // ── use(path) — import a library value, cached + deep-frozen ──────────
         lua.set_function("use", [&](const std::string &rel) -> sol::object {
-            const auto abs = resolveUnder(rel, "use");
-            if (!abs) {
+            const auto resolved = resolveUnder(rel, "use");
+            if (!resolved) {
                 return sol::lua_nil;
             }
-            const std::string key = abs->generic_string();
+            const std::string key = *resolved;
             if (const auto it = useCache.find(key); it != useCache.end()) {
                 return it->second;
             }
@@ -616,17 +623,17 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view source
                             key);
                 return sol::lua_nil;
             }
-            auto contents = readFileToString(*abs);
+            auto contents = fetchText(key);
             if (!contents) {
                 diags.error(codes::kFatalImportFileNotFound,
                             std::format("use target not found: '{}'", rel), key);
                 return sol::lua_nil;
             }
             useStack.insert(key);
-            dirStack.push_back(abs->parent_path());
+            keyStack.push_back(key);
             bool ok = false;
             sol::object mod = runChunk(*contents, key, ok);
-            dirStack.pop_back();
+            keyStack.pop_back();
             useStack.erase(key);
             if (!ok) {
                 return sol::lua_nil;

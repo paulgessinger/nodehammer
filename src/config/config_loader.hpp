@@ -90,6 +90,21 @@ struct ConfigLoader {
                                                       std::string_view root_key,
                                                       IncludeFetcher fetcher);
 
+    /// The on-disk fetcher: keys are filesystem paths, read and cached so the
+    /// spans stay valid for the whole walk. Named here rather than kept private
+    /// because the Lua front end resolves its `include()` / `use()` through the
+    /// same seam, and a second implementation of "read the file named by this
+    /// key" is exactly the drift this class exists to avoid.
+    [[nodiscard]] static IncludeFetcher filesystemFetcher();
+
+    /// The fetcher for a load with no location: it resolves nothing, so an
+    /// include is reported as not found rather than looked up somewhere the
+    /// caller never named — in particular, not against the process's working
+    /// directory. Deciding that the working directory is the right base is an
+    /// application-level choice, so it is made by a caller passing that
+    /// directory in, never here.
+    [[nodiscard]] static IncludeFetcher unrootedFetcher();
+
     /// Read only the top-level `include = [...]` array of a TOML buffer —
     /// does NOT recurse. Used by the BuildSession's include-graph walk
     /// to discover the next round of keys to resolve. Returns the raw,

@@ -754,30 +754,26 @@ ConfigResult parseTable(const toml::table &tbl) {
     return ConfigResult{std::move(cfg), std::move(diags)};
 }
 
-// ── The filesystem include fetcher ───────────────────────────────────────────
+} // namespace
+
+// ── The include fetchers ─────────────────────────────────────────────────────
 //
-// The one place includes are read from disk. Both filesystem-rooted entry
-// points below share it, so "how does an include become bytes" has a single
-// answer — a second fetcher here is exactly the drift that would let the two
+// The one place includes are read from disk. Every filesystem-rooted entry
+// point shares it — both TOML faces here, and the Lua front end through
+// `ConfigLoader::filesystemFetcher()` — so "how does an include become bytes"
+// has a single answer. A second fetcher is exactly the drift that would let two
 // entry points disagree about cycles, caching, or what counts as missing.
 //
-// It is not itself rooted anywhere: `resolveIncludeKey` has already joined
-// each key against its parent's directory by the time the fetcher sees it, so
-// rooting is entirely a property of the root key the caller passes to
-// `parseAndMerge`.
-// The fetcher for a load that was given no base directory. It resolves
-// nothing, so an include in such a config is reported as unresolvable rather
-// than being looked up somewhere the caller never named — in particular, not
-// against the process's working directory. Deciding that the working directory
-// is the right base is an application-level choice (see cmd_config_lua.cpp,
-// which makes it for the Lua front end), so it is made by the caller passing
-// that directory in, never here.
-IncludeFetcher unrootedFetcher() {
+// Neither is itself rooted anywhere: `resolveIncludeKey` has already joined each
+// key against its parent's directory by the time a fetcher sees it, so rooting
+// is entirely a property of the root key the caller passes in.
+
+IncludeFetcher ConfigLoader::unrootedFetcher() {
     return
         [](std::string_view) -> std::optional<std::span<const std::byte>> { return std::nullopt; };
 }
 
-IncludeFetcher filesystemFetcher() {
+IncludeFetcher ConfigLoader::filesystemFetcher() {
     // Cache so the fetcher returns stable spans across `parseAndMerge`'s
     // walk. Lifetime is tied to the lambda-captured `shared_ptr`, which
     // outlives the `parseAndMerge` call.
@@ -801,8 +797,6 @@ IncludeFetcher filesystemFetcher() {
         }
     };
 }
-
-} // namespace
 
 // ── ConfigLoader ──────────────────────────────────────────────────────────────
 
@@ -895,7 +889,8 @@ ConfigResult ConfigLoader::collectFromString(std::string_view content, std::stri
     // is ever read from a location the caller did not choose.
     const std::string root_key = (baseDir / std::filesystem::path{sourceName}).generic_string();
     return collectAndMerge(std::as_bytes(std::span{content.data(), content.size()}), root_key,
-                           baseDir.empty() ? unrootedFetcher() : filesystemFetcher());
+                           baseDir.empty() ? ConfigLoader::unrootedFetcher()
+                                           : ConfigLoader::filesystemFetcher());
 }
 
 // ── The faces that promise a config ──────────────────────────────────────────

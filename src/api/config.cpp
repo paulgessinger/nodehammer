@@ -56,7 +56,12 @@ namespace {
         api::rethrowAsError(e, codes::kFatalImportFileNotFound, path.string());
     }
     try {
-        return lua::evalLuaConfig(source, canonical.string(), canonical.parent_path());
+        // The canonical path *is* the root key, so `include()` resolves against
+        // the directory the script was found in — the same rule `loadFromFile`
+        // applies to a TOML root, and for the same reason: it is derived from
+        // the caller's own path rather than invented here.
+        return lua::evalLuaConfig(source, canonical.generic_string(),
+                                  config::ConfigLoader::filesystemFetcher());
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
