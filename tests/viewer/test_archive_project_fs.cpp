@@ -270,7 +270,7 @@ TEST_CASE("ArchiveProjectFs drives a headless scene build via BuildSession",
 
     using nodehammer::viewer::BuildPhase;
     for (int i = 0; i < 100; ++i) {
-        session.poll(&fs);
+        session.refresh(fs);
         const auto p = session.phase();
         if (p == BuildPhase::ResolvedReady || p == BuildPhase::Error ||
             p == BuildPhase::WaitingForUser) {

@@ -6,11 +6,11 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
-#include <iterator>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -36,11 +36,9 @@ bool endsWithCi(std::string_view s, std::string_view suffix) {
     return true;
 }
 
-bool isTomlKey(std::string_view key) { return endsWithCi(key, ".toml"); }
-
-// A Lua config's include set is *computed*, so there is no `include = [...]` to
-// peek at and no static walk that could find its fragments. It is discovered by
-// running the script instead — see the fetcher below.
+// The only extension test the session still needs. There is no `isTomlKey`
+// any more: TOML used to be the format whose includes could be *peeked* ahead
+// of parsing, and nothing peeks now.
 bool isLuaKey(std::string_view key) { return endsWithCi(key, ".lua"); }
 
 /// FNV-1a 64-bit over an arbitrary byte range.
@@ -54,6 +52,76 @@ void fnv1a(std::uint64_t &h, std::span<const std::byte> bytes) {
 /// Order-independent, content-addressed hash of the resolved input byte set.
 /// Sorting the keys makes it stable regardless of resolve order, and folding the
 /// key in (with its length) keeps two files from aliasing across a boundary.
+/// The one thing that talks to the project during a refresh.
+///
+/// It exists so that "what could not be supplied" is *recorded* rather than
+/// inferred afterwards from diagnostics. `ProjectFs` already separates "the
+/// project does not have this" from "the backend broke", and only the first is
+/// something a user can fix by adding a file — a distinction that would be lost
+/// if the session went looking for `kFatalImportFileNotFound` in a thrown
+/// exception, since the loader raises that code for its own reasons too.
+///
+/// It doubles as the config loader's `IncludeFetcher`, so the roots and the
+/// include closure come through one door and land in one map — which is then
+/// exactly what `input_hash` is taken over.
+class ProjectFetch {
+  public:
+    explicit ProjectFetch(const ProjectFs &project) : project_(&project) {}
+
+    /// Resolve a key once, remembering the outcome. Repeats are served from
+    /// `pulled`, so a diamond include neither re-reads nor double-reports.
+    std::optional<std::span<const std::byte>> operator()(std::string_view key) {
+        const std::string k{key};
+        if (const auto it = pulled.find(k); it != pulled.end()) {
+            return it->second.span();
+        }
+        if (unresolved_.contains(k)) {
+            return std::nullopt;
+        }
+        auto r = project_->resolve(k);
+        switch (r.status) {
+        case ResolveStatus::Ready: {
+            auto [ins, _] = pulled.emplace(k, std::move(r.file.bytes));
+            return ins->second.span();
+        }
+        case ResolveStatus::Missing:
+            unresolved_.insert(k);
+            missing.push_back(r.missing_key.empty() ? k : r.missing_key);
+            return std::nullopt;
+        case ResolveStatus::Error:
+            unresolved_.insert(k);
+            failed.push_back(k);
+            if (failure.empty()) {
+                failure = r.error.empty() ? ("resolve failed: " + k) : r.error;
+            }
+            return std::nullopt;
+        }
+        return std::nullopt;
+    }
+
+    /// A view of this fetcher for the config loader. Valid only for the
+    /// refresh that owns it, which is the only place it is handed out.
+    config::IncludeFetcher asIncludeFetcher() {
+        return [this](std::string_view key) { return (*this)(key); };
+    }
+
+    /// Every key that resolved, by key. Node-based, so spans handed out earlier
+    /// stay valid as later ones are inserted.
+    std::unordered_map<std::string, ByteBuffer> pulled;
+    std::vector<std::string> missing; ///< the user can fix these by adding a file
+    std::vector<std::string> failed;  ///< the backend broke; the user cannot
+    std::string failure;              ///< first hard failure's message
+
+  private:
+    const ProjectFs *project_;
+    std::set<std::string> unresolved_;
+};
+
+/// A resolved buffer as text, for the front ends that take a string.
+std::string_view asText(std::span<const std::byte> bytes) {
+    return std::string_view{reinterpret_cast<const char *>(bytes.data()), bytes.size()};
+}
+
 std::uint64_t hashInputs(const std::unordered_map<std::string, ByteBuffer> &bytes_by_key) {
     std::vector<const std::string *> keys;
     keys.reserve(bytes_by_key.size());
@@ -81,46 +149,22 @@ struct BuildSession::Impl {
     BuildPhase phase{BuildPhase::Idle};
     std::vector<std::string> missing;
 
-    /// Bytes-by-key collected during the walk. Each value is a
-    /// `ByteBuffer` handle — refcounted, so the bytes survive a project
-    /// mutation even if the backend drops its own reference.
-    std::unordered_map<std::string, ByteBuffer> bytes_by_key;
-
-    /// Keys to attempt to resolve next. Populated initially with the
-    /// config + input keys; expanded as configs land and their includes
-    /// are peeked.
-    std::deque<std::string> work_queue;
-
-    /// Keys we've already enqueued into `work_queue` (or finished). Used
-    /// for cycle detection and to avoid re-enqueuing during repeated
-    /// polls before the bytes land.
-    std::set<std::string> seen;
-
-    /// Generation of the project at the time of the last poll. Used to
-    /// detect mutations between polls (e.g. user dropped a missing
-    /// include) and re-walk.
+    /// Generation of the project at the time of the last refresh. Used to
+    /// detect mutations between refreshes (e.g. the user dropped a missing
+    /// include) and re-derive.
     std::uint64_t last_project_generation{0};
-    bool force_walk{false};
+    bool force_refresh{false};
 
-    /// Once all bytes are gathered, we run parse + import once and
-    /// stash the result here for the App to consume.
+    /// The result of the last successful refresh, stashed for the App to
+    /// consume. No byte cache sits beside it: each refresh reads what it
+    /// needs from the project and hands the collected bytes to the hash,
+    /// so there is nothing to keep coherent between refreshes.
     std::unique_ptr<BuildSessionInputs> inputs;
 
-    void resetWalk() {
-        bytes_by_key.clear();
-        work_queue.clear();
-        seen.clear();
+    void markStale() {
         missing.clear();
         inputs.reset();
-        if (config_key.empty() || geometry_key.empty()) {
-            phase = BuildPhase::Idle;
-        } else {
-            phase = BuildPhase::Walking;
-            work_queue.push_back(config_key);
-            work_queue.push_back(geometry_key);
-            seen.insert(config_key);
-            seen.insert(geometry_key);
-        }
+        phase = (config_key.empty() || geometry_key.empty()) ? BuildPhase::Idle : BuildPhase::Stale;
     }
 };
 
@@ -130,13 +174,13 @@ BuildSession::~BuildSession() = default;
 void BuildSession::setRootKeys(std::string config_key, std::string geometry_key) {
     impl_->config_key = std::move(config_key);
     impl_->geometry_key = std::move(geometry_key);
-    impl_->resetWalk();
-    impl_->force_walk = true;
+    impl_->markStale();
+    impl_->force_refresh = true;
 }
 
 void BuildSession::invalidate() {
-    impl_->resetWalk();
-    impl_->force_walk = true;
+    impl_->markStale();
+    impl_->force_refresh = true;
 }
 
 BuildPhase BuildSession::phase() const { return impl_->phase; }
@@ -157,25 +201,22 @@ std::unique_ptr<BuildSessionInputs> BuildSession::takeInputs() {
 const std::string &BuildSession::rootConfigKey() const { return impl_->config_key; }
 const std::string &BuildSession::rootGeometryKey() const { return impl_->geometry_key; }
 
-void BuildSession::poll(ProjectFs *project) {
-    if (project == nullptr || impl_->config_key.empty() || impl_->geometry_key.empty()) {
+void BuildSession::refresh(ProjectFs &project) {
+    if (impl_->config_key.empty() || impl_->geometry_key.empty()) {
         impl_->phase = BuildPhase::Idle;
         return;
     }
 
-    const auto cur_gen = project->generation();
+    const auto cur_gen = project.generation();
     const bool gen_changed = cur_gen != impl_->last_project_generation;
     impl_->last_project_generation = cur_gen;
 
-    if (impl_->force_walk || gen_changed) {
-        // Fresh walk. Throw away any prior partial state and start over.
-        // (The Consumed → invalidate cycle uses this path: when a project
-        // mutation lands, the App's setRootKeys / invalidate forces it.)
-        impl_->resetWalk();
-        impl_->force_walk = false;
+    if (impl_->force_refresh || gen_changed) {
+        impl_->markStale();
+        impl_->force_refresh = false;
     }
 
-    if (impl_->phase != BuildPhase::Walking) {
+    if (impl_->phase != BuildPhase::Stale) {
         return;
     }
 
@@ -183,144 +224,49 @@ void BuildSession::poll(ProjectFs *project) {
         impl_->phase = BuildPhase::Error;
         pushError(std::move(msg));
     };
-
-    // One-pass attempt to drain the work queue. Pending keys go to the
-    // back; if any remain pending after a full pass, we yield. Missing/
-    // Error short-circuit the walk.
-    std::deque<std::string> retry;
-    bool any_pending = false;
-    while (!impl_->work_queue.empty()) {
-        const auto key = std::move(impl_->work_queue.front());
-        impl_->work_queue.pop_front();
-
-        // Already resolved during this pass (e.g. via include expansion)?
-        if (impl_->bytes_by_key.contains(key)) {
-            continue;
-        }
-
-        auto result = project->resolve(key);
-        switch (result.status) {
-        case ResolveStatus::Ready: {
-            // The ByteBuffer pins the bytes by refcount; they stay
-            // valid even if the backend later replaces or drops its
-            // own reference.
-            auto buf = result.file.bytes;
-            // Discover and enqueue nested includes for any TOML key.
-            if (isTomlKey(key)) {
-                auto rels = config::ConfigLoader::peekIncludesFromBytes(buf.span());
-                for (const auto &rel : rels) {
-                    auto abs = config::ConfigLoader::resolveIncludeKey(key, rel);
-                    if (impl_->seen.insert(abs).second) {
-                        impl_->work_queue.push_back(abs);
-                    }
-                }
-            }
-            impl_->bytes_by_key.emplace(key, std::move(buf));
-            break;
-        }
-        case ResolveStatus::Pending:
-            any_pending = true;
-            retry.push_back(key);
-            break;
-        case ResolveStatus::Missing:
-            impl_->missing.push_back(result.missing_key.empty() ? key : result.missing_key);
-            // Keep the key on the retry list so a subsequent project
-            // mutation (user drops the missing file) lets us pick it up
-            // without restarting the whole walk.
-            retry.push_back(key);
-            break;
-        case ResolveStatus::Error:
-            enter_error(result.error.empty() ? ("resolve failed: " + key) : result.error);
-            return;
-        }
-    }
-    impl_->work_queue = std::move(retry);
-
-    if (!impl_->missing.empty()) {
+    auto wait_for = [&](std::vector<std::string> keys) {
+        impl_->missing = std::move(keys);
         impl_->phase = BuildPhase::WaitingForUser;
-        return;
-    }
-    if (any_pending) {
-        impl_->phase = BuildPhase::Walking;
-        return;
-    }
-
-    // All bytes in hand. Parse the config (with the bytes map as the
-    // synchronous fetcher) and import the geometry.
-    auto cfg_it = impl_->bytes_by_key.find(impl_->config_key);
-    auto in_it = impl_->bytes_by_key.find(impl_->geometry_key);
-    if (cfg_it == impl_->bytes_by_key.end() || in_it == impl_->bytes_by_key.end()) {
-        enter_error("internal: bytes missing for known root keys");
-        return;
-    }
-
-    auto fetcher = [this](std::string_view k) -> std::optional<std::span<const std::byte>> {
-        auto it = impl_->bytes_by_key.find(std::string{k});
-        if (it == impl_->bytes_by_key.end()) {
-            return std::nullopt;
-        }
-        return it->second.span();
     };
 
-    // A build that cannot parse its config is over, and the session's way of
-    // being over is `enter_error` — so the exception is caught here rather than
-    // left to unwind past the UI. `what()` is the loader's whole complaint,
-    // which is what the hand-rolled first-error hunt used to reconstruct.
-    // A Lua config resolves its own includes as it runs, straight out of the
-    // project. It cannot use `bytes_by_key`: the walk above only enqueued the
-    // two root keys, because `peekIncludesFromBytes` has nothing to read in a
-    // script whose includes are decided at run time.
-    //
-    // Resolving inside the evaluation is safe because no backend is
-    // asynchronous — every `ProjectFs` answers Ready or Missing, never Pending,
-    // now that projects are ZIP working sets rather than on-demand URL fetches.
-    // A key that is missing is collected rather than thrown on, so the session
-    // can name every missing fragment at once and re-run when the user supplies
-    // them; the sandbox opens no `io`, `os` or `package`, so re-running a script
-    // is the same script.
-    std::unordered_map<std::string, ByteBuffer> lua_bytes; // pins spans for the eval
-    std::vector<std::string> lua_missing;
-    auto lua_fetcher = [&](std::string_view k) -> std::optional<std::span<const std::byte>> {
-        const std::string key{k};
-        if (const auto it = lua_bytes.find(key); it != lua_bytes.end()) {
-            return it->second.span();
-        }
-        auto r = project->resolve(key);
-        if (r.status != ResolveStatus::Ready) {
-            lua_missing.push_back(r.missing_key.empty() ? key : r.missing_key);
-            return std::nullopt;
-        }
-        auto [ins, _] = lua_bytes.emplace(key, std::move(r.file.bytes));
-        return ins->second.span();
-    };
+    ProjectFetch fetch{project};
 
+    // The two roots. Not a walk — there is nothing to expand here, because a
+    // config's includes are found by the fetcher while parsing and the geometry
+    // is a single self-contained blob.
+    const auto cfg_bytes = fetch(impl_->config_key);
+    const auto geo_bytes = fetch(impl_->geometry_key);
+    if (!fetch.failed.empty()) {
+        enter_error(fetch.failure);
+        return;
+    }
+    // A missing *geometry* is no reason to stop here. Includes are discovered by
+    // parsing now, so returning before the parse would name the geometry alone
+    // and leave the fragments behind it for the next refresh — one round trip
+    // per layer, where the walk this replaced named them together. Only an
+    // absent config forces the early exit, because there is nothing to parse;
+    // anything still missing rides along and is reported after the parse.
+    if (!cfg_bytes) {
+        wait_for(std::move(fetch.missing));
+        return;
+    }
+
+    // Parse the config, resolving its includes through the same fetcher. Which
+    // front end runs is the extension's business; both take a root key and a
+    // fetcher, and both report a missing include by asking the fetcher for it
+    // and being told no.
     config::ConfigResult cfg;
+    std::string parse_failure;
     try {
         if (isLuaKey(impl_->config_key)) {
-            const auto sp = cfg_it->second.span();
-            cfg = lua::evalLuaConfig(
-                std::string_view{reinterpret_cast<const char *>(sp.data()), sp.size()},
-                impl_->config_key, lua_fetcher);
-            if (!lua_missing.empty()) {
-                // Not an error: the script named files the project does not have
-                // yet, which is the same situation the walk reports for TOML.
-                impl_->missing = std::move(lua_missing);
-                impl_->phase = BuildPhase::WaitingForUser;
-                return;
-            }
+            cfg =
+                lua::evalLuaConfig(asText(*cfg_bytes), impl_->config_key, fetch.asIncludeFetcher());
+            // The Lua face collects rather than throws, because naming every
+            // problem in a script is its job. Here we wanted a config.
             diagnostics::throwIfErrors(cfg.diags, impl_->config_key);
-            // The fragments are build inputs like any other, so they belong in
-            // the map `input_hash` is taken over. Without this a script's
-            // fragments would be invisible to the hash — the root config and the
-            // geometry are all the walk enqueued — and editing `materials.lua`
-            // would produce a hash identical to the previous build's, which the
-            // controller reads as "same content" and answers by keeping the
-            // scene it already has.
-            impl_->bytes_by_key.insert(std::make_move_iterator(lua_bytes.begin()),
-                                       std::make_move_iterator(lua_bytes.end()));
         } else {
-            cfg = config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key,
-                                                      fetcher);
+            cfg = config::ConfigLoader::parseAndMerge(*cfg_bytes, impl_->config_key,
+                                                      fetch.asIncludeFetcher());
         }
     } catch (const Error &e) {
         for (const auto &d : e.observed()) {
@@ -328,7 +274,23 @@ void BuildSession::poll(ProjectFs *project) {
                 pushWarning(d.message);
             }
         }
-        enter_error(e.what());
+        parse_failure = e.what();
+    }
+
+    // What the fetcher could not supply outranks the parse failure, because a
+    // missing include is *why* the parse failed. Telling someone "config parse
+    // failed" when they simply have not added `materials.toml` yet describes the
+    // symptom and hides the fix.
+    if (!fetch.failed.empty()) {
+        enter_error(fetch.failure);
+        return;
+    }
+    if (!fetch.missing.empty()) {
+        wait_for(std::move(fetch.missing));
+        return;
+    }
+    if (!parse_failure.empty()) {
+        enter_error(std::move(parse_failure));
         return;
     }
     for (const auto &d : cfg.diags.items()) {
@@ -337,7 +299,7 @@ void BuildSession::poll(ProjectFs *project) {
 
     ir::ImportResult imp;
     try {
-        imp = ir::FlatBufferImporter::importFromBytes(impl_->geometry_key, in_it->second.span());
+        imp = ir::FlatBufferImporter::importFromBytes(impl_->geometry_key, *geo_bytes);
     } catch (const Error &e) {
         enter_error(e.what());
         return;
@@ -351,7 +313,9 @@ void BuildSession::poll(ProjectFs *project) {
     inputs->import = std::move(imp);
     inputs->config_key = impl_->config_key;
     inputs->geometry_key = impl_->geometry_key;
-    inputs->input_hash = hashInputs(impl_->bytes_by_key);
+    // Everything the refresh read, which is exactly the roots plus the include
+    // closure the config actually reached for.
+    inputs->input_hash = hashInputs(fetch.pulled);
     impl_->inputs = std::move(inputs);
     impl_->phase = BuildPhase::ResolvedReady;
 }

@@ -171,8 +171,8 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
     // the new selection. The build-job completion above swaps the scene over
     // when the new build lands.
     if (project != nullptr) {
-        project->poll();
-        session_.poll(project);
+        project->poll();            // drain change signals raised on a watcher thread
+        session_.refresh(*project); // re-derive if the project moved
 
         if (!in_progress_ && session_.phase() == BuildPhase::ResolvedReady) {
             if (auto inputs = session_.takeInputs()) {
