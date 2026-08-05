@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <set>
 #include <span>
 #include <string>
@@ -308,6 +309,15 @@ void BuildSession::poll(ProjectFs *project) {
                 return;
             }
             diagnostics::throwIfErrors(cfg.diags, impl_->config_key);
+            // The fragments are build inputs like any other, so they belong in
+            // the map `input_hash` is taken over. Without this a script's
+            // fragments would be invisible to the hash — the root config and the
+            // geometry are all the walk enqueued — and editing `materials.lua`
+            // would produce a hash identical to the previous build's, which the
+            // controller reads as "same content" and answers by keeping the
+            // scene it already has.
+            impl_->bytes_by_key.insert(std::make_move_iterator(lua_bytes.begin()),
+                                       std::make_move_iterator(lua_bytes.end()));
         } else {
             cfg = config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key,
                                                       fetcher);

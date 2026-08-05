@@ -275,3 +275,34 @@ TEST_CASE("BuildSession reports a Lua fragment the project does not have",
     REQUIRE(inputs);
     REQUIRE(inputs->config.config.materials.size() == 1);
 }
+
+TEST_CASE("BuildSession input_hash covers a Lua config's fragments", "[viewer][build_session]") {
+    // The fragments are what the script's output actually depends on, and the
+    // walk never enqueued them — so if they miss the hash, editing a fragment
+    // yields a hash identical to the previous build's, which BuildController
+    // reads as "same content" and answers by keeping the scene it already has.
+    auto geom = minimalNhbZstBytes();
+
+    const auto hashFor = [&](std::string_view fragment) {
+        auto bag = std::make_unique<BagProjectFs>();
+        bag->addBytes("scene.lua", stringBytes("include(\"materials.lua\")\n"));
+        bag->addBytes("materials.lua", stringBytes(fragment));
+        bag->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+
+        BuildSession session;
+        session.setRootKeys("scene.lua", "scene.nhb.zst");
+        pollUntilSettled(session, *bag);
+        REQUIRE(session.phase() == BuildPhase::ResolvedReady);
+        auto inputs = session.takeInputs();
+        REQUIRE(inputs);
+        return inputs->input_hash;
+    };
+
+    const auto a = hashFor("material(\"silicon\", { metallic = 1.0 })\n");
+    const auto b = hashFor("material(\"silicon\", { metallic = 0.0 })\n");
+    REQUIRE(a != b);
+
+    // ...and unchanged content still hashes the same, or every poll would look
+    // like an edit.
+    REQUIRE(hashFor("material(\"silicon\", { metallic = 1.0 })\n") == a);
+}
