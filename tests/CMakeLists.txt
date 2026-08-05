@@ -215,6 +215,20 @@ if(NODEHAMMER_BUILD_SHARED)
         target_link_libraries(nodehammer_public_tests PRIVATE ROOT::Geom)
     endif()
 
+    # DD4hep is the other shape of conditional backend, and needs neither of the
+    # things TGeo needed: no DD4hep headers, because there is no
+    # `read(dd4hep::Detector &)` to call, and no DD4hep link, because the only way
+    # in is a format name and a path. What it does need is a compact file — the
+    # backend has no in-memory entry point, so the suite's usual "every input
+    # comes from the synthetic importer" cannot reach it, and this is the single
+    # exception to that.
+    if(NODEHAMMER_WITH_DD4HEP)
+        target_sources(nodehammer_public_tests PRIVATE public/test_public_dd4hep.cpp)
+        target_compile_definitions(nodehammer_public_tests PRIVATE
+            NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
+        )
+    endif()
+
     nh_set_compiler_options(nodehammer_public_tests)
 
     include(Catch)
