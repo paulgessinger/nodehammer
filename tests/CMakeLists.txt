@@ -201,6 +201,20 @@ if(NODEHAMMER_BUILD_SHARED)
         Catch2::Catch2WithMain
     )
 
+    # The one entry point in the public surface whose *export* is conditional:
+    # `SemanticScene::read(TGeoManager &)` is declared in every build and defined
+    # only where ROOT is present. Reaching it needs ROOT here too — a consumer
+    # holding a TGeoManager necessarily has it, so linking it is what the real
+    # call site looks like rather than a concession to the test.
+    #
+    # ROOT::Geom is already found at the top level under the same option, and
+    # nodehammer_shared carries it PRIVATE, so this is the declaration that makes
+    # the ROOT headers reachable from tests/public/ rather than a second lookup.
+    if(NODEHAMMER_WITH_TGEO)
+        target_sources(nodehammer_public_tests PRIVATE public/test_public_tgeo.cpp)
+        target_link_libraries(nodehammer_public_tests PRIVATE ROOT::Geom)
+    endif()
+
     nh_set_compiler_options(nodehammer_public_tests)
 
     include(Catch)
