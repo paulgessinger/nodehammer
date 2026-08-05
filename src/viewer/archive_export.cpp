@@ -1,12 +1,16 @@
 #include <viewer/archive_export.hpp>
 
 #include <config/config_loader.hpp>
+#include <lua/lua_config.hpp>
 #include <viewer/project_fs.hpp>
 
 #include <algorithm>
 #include <deque>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -28,23 +32,25 @@ namespace nodehammer::viewer {
 
 namespace {
 
-/// Case-insensitive ".toml" suffix test (matches the BuildSession include gate).
-bool isTomlKey(std::string_view key) {
-    static constexpr std::string_view kExt = ".toml";
-    if (key.size() < kExt.size()) {
+/// Case-insensitive suffix test (matches the BuildSession include gate).
+bool hasExtCi(std::string_view key, std::string_view ext) {
+    if (key.size() < ext.size()) {
         return false;
     }
-    for (std::size_t i = 0; i < kExt.size(); ++i) {
-        char a = key[key.size() - kExt.size() + i];
+    for (std::size_t i = 0; i < ext.size(); ++i) {
+        char a = key[key.size() - ext.size() + i];
         if (a >= 'A' && a <= 'Z') {
             a = static_cast<char>(a - 'A' + 'a');
         }
-        if (a != kExt[i]) {
+        if (a != ext[i]) {
             return false;
         }
     }
     return true;
 }
+
+bool isTomlKey(std::string_view key) { return hasExtCi(key, ".toml"); }
+bool isLuaKey(std::string_view key) { return hasExtCi(key, ".lua"); }
 
 /// Resolve `key` and, on Ready, copy its bytes into `ws` under the same key.
 /// Returns the resolved bytes for further inspection (include peek), or nullopt
@@ -102,14 +108,46 @@ void collectClosure(const ProjectFs &fs, ZipWorkingSet &ws, std::string_view con
         const std::string key = std::move(queue.front());
         queue.pop_front();
         auto bytes = takeInto(fs, ws, key, skipped);
-        if (!bytes || !isTomlKey(key)) {
+        if (!bytes) {
             continue;
         }
-        for (const auto &rel : config::ConfigLoader::peekIncludesFromBytes(bytes->span())) {
-            auto abs = config::ConfigLoader::resolveIncludeKey(key, rel);
-            if (seen.insert(abs).second) {
-                queue.push_back(std::move(abs));
+        if (isTomlKey(key)) {
+            for (const auto &rel : config::ConfigLoader::peekIncludesFromBytes(bytes->span())) {
+                auto abs = config::ConfigLoader::resolveIncludeKey(key, rel);
+                if (seen.insert(abs).second) {
+                    queue.push_back(std::move(abs));
+                }
             }
+        } else if (isLuaKey(key)) {
+            // A script's include set is computed, so there is nothing to peek
+            // at: the closure is discovered by running it. The fetcher both
+            // serves each fragment and packs it, so what ends up in the archive
+            // is exactly what the script reached for — no more (a fragment the
+            // script never took would be dead weight) and no less (a missing one
+            // would make the archive unopenable).
+            //
+            // Diagnostics are ignored on purpose. A script that fails to
+            // evaluate still had a reason to ask for the files it asked for, and
+            // packing them is what lets the user open the archive somewhere else
+            // and fix it. Reporting the failure is the build's job, not the
+            // exporter's.
+            std::unordered_map<std::string, ByteBuffer> pinned;
+            auto fetcher = [&](std::string_view k) -> std::optional<std::span<const std::byte>> {
+                const std::string sub{k};
+                if (const auto it = pinned.find(sub); it != pinned.end()) {
+                    return it->second.span();
+                }
+                auto taken = takeInto(fs, ws, sub, skipped);
+                if (!taken) {
+                    return std::nullopt;
+                }
+                auto [ins, _] = pinned.emplace(sub, std::move(*taken));
+                return ins->second.span();
+            };
+            const auto sp = bytes->span();
+            (void)lua::evalLuaConfig(
+                std::string_view{reinterpret_cast<const char *>(sp.data()), sp.size()}, key,
+                fetcher);
         }
     }
     // Geometry is a single self-contained blob — no include expansion.

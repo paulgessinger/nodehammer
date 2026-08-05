@@ -162,3 +162,33 @@ TEST_CASE("ArchiveProjectFs save does not bump generation", "[viewer][archive_ex
     REQUIRE_FALSE(fs.dirty());
     REQUIRE(fs.generation() == gen_edit); // the save itself did not bump
 }
+
+TEST_CASE("buildArchiveWorkingSet captures a Lua config's computed closure",
+          "[viewer][archive_export]") {
+    // The closure of a script cannot be read off its source: `include()` is a
+    // call, and here the argument is built at run time. Running it against a
+    // fetcher that packs what it serves is what makes the archive complete —
+    // and the unreferenced sibling still has to stay out, so this is discovery
+    // rather than a sweep.
+    TempDir dir{"lua_closure"};
+    dir.write("scene.lua", R"LUA(
+local part = "materials"
+include(part .. ".lua")
+)LUA");
+    dir.write("materials.lua", "local P = use(\"lib/palette.lua\")\nmaterial(\"m\", {})\n");
+    dir.write("lib/palette.lua", "return { silicon = \"#808080\" }\n");
+    dir.write("unrelated.lua", "material(\"nope\", {})\n");
+    dir.write("scene.nhb.zst", "GEOMETRY-BLOB");
+
+    FilesystemProjectFs fs{dir.root};
+    REQUIRE_FALSE(fs.listingIsComplete()); // filesystem → closure path
+
+    auto ws = buildArchiveWorkingSet(fs, "scene.lua", "scene.nhb.zst");
+    auto out = ZipWorkingSet::openFromBytes(ws.serialize());
+
+    REQUIRE(out.contains("scene.lua"));
+    REQUIRE(out.contains("materials.lua"));   // reached by a computed include()
+    REQUIRE(out.contains("lib/palette.lua")); // reached by use() one level deeper
+    REQUIRE(out.contains("scene.nhb.zst"));
+    REQUIRE_FALSE(out.contains("unrelated.lua"));
+}

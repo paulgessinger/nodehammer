@@ -7,6 +7,7 @@
 #include <viewer/bag_project_fs.hpp>
 #include <viewer/build_session.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
@@ -206,4 +207,71 @@ TEST_CASE("BuildSession enters Error on malformed FlatBuffer geometry", "[viewer
 
     REQUIRE(session.phase() == BuildPhase::Error);
     REQUIRE(sink.hasErrors());
+}
+
+// ── Lua configs ──────────────────────────────────────────────────────────────
+//
+// A `.lua` config has no `include = [...]` to walk, so the session cannot
+// pre-resolve its fragments: it discovers them by running the script against a
+// fetcher backed by the project. These cases pin that the discovery is real
+// (fragments the walk never enqueued still arrive) and that a fragment the
+// project does not have lands in the same WaitingForUser state a missing TOML
+// include does, rather than failing the build outright.
+
+TEST_CASE("BuildSession resolves a Lua config's computed includes", "[viewer][build_session]") {
+    auto bag = std::make_unique<BagProjectFs>();
+    bag->addBytes("scene.lua", stringBytes(R"LUA(
+config { deduplicate_shapes = true }
+include("materials.lua")
+for i = 1, 3 do
+  rule { match = ('path ~= "**/Layer%d*"'):format(i), material = "silicon" }
+end
+)LUA"));
+    // Reachable only by running the script — nothing enqueued this key.
+    bag->addBytes("materials.lua", stringBytes("material(\"silicon\", { metallic = 1.0 })\n"));
+    auto geom = minimalNhbZstBytes();
+    bag->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+
+    BuildSession session;
+    session.setRootKeys("scene.lua", "scene.nhb.zst");
+    pollUntilSettled(session, *bag);
+
+    REQUIRE(session.phase() == BuildPhase::ResolvedReady);
+    auto inputs = session.takeInputs();
+    REQUIRE(inputs);
+    REQUIRE_FALSE(inputs->config.diags.hasErrors());
+    REQUIRE(inputs->config.config.deduplicateShapes);
+    REQUIRE(inputs->config.config.materials.size() == 1);
+    REQUIRE(inputs->config.config.rules.size() == 3);
+}
+
+TEST_CASE("BuildSession reports a Lua fragment the project does not have",
+          "[viewer][build_session]") {
+    auto bag = std::make_unique<BagProjectFs>();
+    bag->addBytes("scene.lua", stringBytes("include(\"absent.lua\")\n"));
+    auto geom = minimalNhbZstBytes();
+    bag->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+
+    BuildSession session;
+    session.setRootKeys("scene.lua", "scene.nhb.zst");
+    pollUntilSettled(session, *bag);
+
+    // Waiting, not Error: the user can still drop the fragment in, exactly as
+    // for a missing TOML include.
+    REQUIRE(session.phase() == BuildPhase::WaitingForUser);
+    const auto missing = session.missing();
+    REQUIRE(std::ranges::find(missing, "absent.lua") != missing.end());
+
+    // Supplying it lets the same session finish, which is what makes re-running
+    // the script the right recovery rather than a restart. Polled explicitly:
+    // `pollUntilSettled` treats WaitingForUser as settled and would never ask
+    // the session again, which is exactly what the App's frame loop does not do.
+    bag->addBytes("absent.lua", stringBytes("material(\"m\", {})\n"));
+    for (int i = 0; i < kPollBudget && session.phase() != BuildPhase::ResolvedReady; ++i) {
+        session.poll(bag.get());
+    }
+    REQUIRE(session.phase() == BuildPhase::ResolvedReady);
+    auto inputs = session.takeInputs();
+    REQUIRE(inputs);
+    REQUIRE(inputs->config.config.materials.size() == 1);
 }
