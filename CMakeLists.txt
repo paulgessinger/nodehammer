@@ -304,21 +304,29 @@ set(NH_CORE_INCLUDE_DIRS "")
 # inside the helper: they are configuration, not target description, and must
 # run exactly once.
 
-# Lua config front-end: a build-gated source rather than a library of its own.
-# The constraint was only ever "no lua under Emscripten", which a gate satisfies,
-# while a separate target could not put the engine *inside* the shared library
-# for step 6's `Config::read` (docs/config-scripting-lua.md, #41 §6).
+# Lua config front-end: a source in the core rather than a library of its own,
+# because a separate target could not put the engine *inside* the shared library
+# for `Config::read`'s `.lua` branch (docs/config-scripting-lua.md, #41 §6).
+#
+# Unconditional, Emscripten included. The gate here used to say "no lua under
+# Emscripten", which read like a constraint and was a build accident: the
+# interpreter compiles and runs there once Conan builds it as C++, and the one
+# thing the gate reliably produced was a public API that varied by platform —
+# `Config::formats()` answering "toml" in a browser and "toml, lua" on a desktop
+# for the same source tree. See conanfile.py's `configure` for why C++ and not C.
+#
+# The wasm bundles do not pay for this. Nothing in the viewer or the compute
+# worker calls `Config::read` on a path, so static-lib dead-strip leaves the
+# interpreter out of both — the cost lands on the call site that wants it, which
+# is the property that makes shipping it everywhere reasonable.
 #
 # lua_config.cpp silences -Wconversion/-Wsign-conversion via a scoped #pragma
 # (sol2's proxy conversions are not clean under them), kept in the TU so it
-# cannot leak to the sources it now shares a target with.
-if(NOT EMSCRIPTEN)
-    list(APPEND NH_CORE_SOURCES src/lua/lua_config.cpp)
-    # lua_config.hpp exposes only config::ConfigResult, so the interpreter and
-    # its binding stay inside the core's implementation.
-    list(APPEND NH_CORE_PRIVATE_DEPS lua::lua sol2::sol2)
-    list(APPEND NH_CORE_DEFINES NH_WITH_LUA=1)
-endif()
+# cannot leak to the sources it shares a target with.
+list(APPEND NH_CORE_SOURCES src/lua/lua_config.cpp)
+# lua_config.hpp exposes only config::ConfigResult, so the interpreter and its
+# binding stay inside the core's implementation.
+list(APPEND NH_CORE_PRIVATE_DEPS lua::lua sol2::sol2)
 
 if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
     find_package(ROOT REQUIRED COMPONENTS Geom)
@@ -492,8 +500,8 @@ if(NH_CORE_INCLUDE_DIRS)
     target_include_directories(nodehammer_lib SYSTEM PUBLIC ${NH_CORE_INCLUDE_DIRS})
 endif()
 
-# In-tree code gates on NH_WITH_TGEO / NH_WITH_LUA / NH_WITH_VIEWER, so the
-# archive propagates them.
+# In-tree code gates on NH_WITH_TGEO / NH_WITH_VIEWER, so the archive
+# propagates them.
 target_compile_definitions(nodehammer_lib PUBLIC ${NH_CORE_DEFINES} ${NH_APP_DEFINES})
 
 # In-tree consumers — CLI, viewer, tests, benchmarks — are C++23 code and reach
@@ -636,11 +644,10 @@ nh_set_compiler_options(nodehammer_cli)
 
 # The `config-lua` subcommand: evaluates a Lua config script into an NHConfig
 # and emits flattened TOML (Option A of docs/config-scripting-lua.md). The
-# engine itself is in the core; only the dispatcher is CLI-side, and only
-# natively — NH_WITH_LUA comes from the core's PUBLIC defines.
-if(NOT EMSCRIPTEN)
-    target_sources(nodehammer_cli PRIVATE src/cli/cmd_config_lua.cpp)
-endif()
+# engine itself is in the core; only the dispatcher is CLI-side. Unconditional
+# now that the core carries the interpreter everywhere — the wasm CLI runs under
+# node with NODERAWFS, so it has both an interpreter and files to point it at.
+target_sources(nodehammer_cli PRIVATE src/cli/cmd_config_lua.cpp)
 
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
 # When the viewer is on, we build a per-backend sokol STATIC lib + a viewer

@@ -10,9 +10,7 @@ void registerCmdValidateConfig(CLI::App &app);
 void registerCmdConfigFlatten(CLI::App &app);
 void registerCmdDumpSemantic(CLI::App &app);
 void registerCmdDumpRender(CLI::App &app);
-#ifdef NH_WITH_LUA
 void registerCmdConfigLua(CLI::App &app);
-#endif
 #ifdef NH_WITH_VIEWER
 void registerCmdViewer(CLI::App &app);
 #endif
@@ -36,9 +34,7 @@ int main(int argc, char **argv) {
     registerCmdConfigFlatten(app);
     registerCmdDumpSemantic(app);
     registerCmdDumpRender(app);
-#ifdef NH_WITH_LUA
     registerCmdConfigLua(app);
-#endif
 #ifdef NH_WITH_VIEWER
     registerCmdViewer(app);
 

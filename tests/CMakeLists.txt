@@ -10,6 +10,7 @@ add_executable(nodehammer_tests
     config/test_config_validator.cpp
     config/test_config_fixtures.cpp
     config/test_predicate_parser.cpp
+    config/test_lua_config.cpp
     import/test_synthetic_importer.cpp
     selection/test_predicate.cpp
     selection/test_selector.cpp
@@ -43,12 +44,6 @@ if(NOT EMSCRIPTEN)
         viewer/test_filesystem_project_fs.cpp
         viewer/test_native_bag_project_fs.cpp
     )
-endif()
-
-# The Lua config front-end is compiled into nodehammer_lib, but only natively;
-# its test follows the same gate.
-if(NOT EMSCRIPTEN)
-    target_sources(nodehammer_tests PRIVATE config/test_lua_config.cpp)
 endif()
 
 # ZipWorkingSet and the project manifest are unconditional in the core and
@@ -155,6 +150,34 @@ else()
                 "${CMAKE_SOURCE_DIR}/fixtures/configs/odd.toml"
                 "${CMAKE_SOURCE_DIR}/odd.nhb.zst"
                 "${CMAKE_CURRENT_BINARY_DIR}/bench_smoke.glb"
+    )
+endif()
+
+# ── Lua under a browser's filesystem ─────────────────────────────────────────
+#
+# nodehammer_tests links -sNODERAWFS (nh_apply_emscripten_exe_options), which
+# gives the wasm module the host's real filesystem so fixture paths resolve. No
+# browser has that, so the Lua cases passing there establish less than they
+# appear to: `include()` reads files, and reading files is exactly the part that
+# differs between node and a tab.
+#
+# This target is the same library linked without NODERAWFS — MEMFS only, which
+# is what a browser has — with a main() that stages its own inputs. Separate
+# executable rather than a case in the suite because it is a *link*
+# configuration, and one binary cannot have two.
+if(EMSCRIPTEN)
+    add_executable(nodehammer_wasm_lua_smoke wasm_lua_smoke.cpp)
+    target_link_libraries(nodehammer_wasm_lua_smoke PRIVATE nodehammer_lib)
+    # Deliberately not nh_apply_emscripten_exe_options: that is the helper that
+    # adds NODERAWFS, and its absence is the entire point of this target.
+    target_link_options(nodehammer_wasm_lua_smoke PRIVATE
+        "-sEXIT_RUNTIME=1"
+        "-sALLOW_MEMORY_GROWTH=1"
+    )
+    nh_set_compiler_options(nodehammer_wasm_lua_smoke)
+    add_test(
+        NAME nodehammer_wasm_lua_smoke
+        COMMAND "${NODEHAMMER_NODE_EXECUTABLE}" "$<TARGET_FILE:nodehammer_wasm_lua_smoke>"
     )
 endif()
 

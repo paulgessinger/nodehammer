@@ -208,13 +208,13 @@ material = "nope"
 TEST_CASE("Config::formats reports what this build can read", "[api][config]") {
     const auto formats = nodehammer::Config::formats();
     REQUIRE(std::ranges::find(formats, "toml") != formats.end());
-#if NH_WITH_LUA
+    // No longer conditional: the interpreter is in every build, wasm included,
+    // so a caller reading this list gets the same answer everywhere.
     REQUIRE(std::ranges::find(formats, "lua") != formats.end());
-#else
-    REQUIRE(std::ranges::find(formats, "lua") == formats.end());
-    // Without the backend a .lua path throws rather than crashing — the format
-    // is not known until the extension is looked at (#41 §5).
+
+    // A `.lua` path that is not there fails as a missing *file*, which is the
+    // distinction that made the old build-gated arm worth having: there is no
+    // longer a way to be told "this build cannot read that" for a config.
     REQUIRE_THROWS_AS(nodehammer::Config::read(kConfigsDir / "does_not_exist.lua"),
                       nodehammer::Error);
-#endif
 }

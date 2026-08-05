@@ -57,15 +57,20 @@ class Nodehammer(ConanFile):
         # — and static-lib dead-strip keeps it out of any binary that does not
         # reference it.
         self.requires("miniz/3.0.2")
-        # Lua scripting config front-end (the `config-lua` CLI command). Lua is
-        # a small C interpreter; sol2 is its header-only C++ binding (and pulls
-        # lua transitively, but we pin lua explicitly for parity with the CMake
-        # find_package). Native-only: the front-end is a build-gated source in
-        # nodehammer_lib, never compiled into the wasm closure — so skip the
-        # deps entirely under Emscripten and keep them out of the .wasm.
-        if self.settings.os != "Emscripten":
-            self.requires("lua/5.4.6")
-            self.requires("sol2/3.5.0")
+        # Lua scripting config front-end: the `config-lua` CLI command and
+        # `Config::read`'s `.lua` branch. Lua is a small C interpreter; sol2 is
+        # its header-only C++ binding (and pulls lua transitively, but we pin lua
+        # explicitly for parity with the CMake find_package).
+        #
+        # Unconditional for the same reason miniz is: which formats a library can
+        # read is a property of the library, not of the platform it happens to be
+        # built for. Gated, `Config::formats()` answered differently in a browser
+        # than on a desktop — for a build accident rather than a constraint, since
+        # the interpreter compiles and runs perfectly well under Emscripten (see
+        # `configure`). Static-lib dead-strip keeps it out of any binary that
+        # never calls the `.lua` path, which today is both wasm bundles.
+        self.requires("lua/5.4.6")
+        self.requires("sol2/3.5.0")
         # Viewer-only runtime dep. PlatformFolders resolves the OS-appropriate
         # cache / config directory on native; not needed on web. Skip under
         # Emscripten — the wasm viewer never links it and the package fails to
@@ -95,6 +100,24 @@ class Nodehammer(ConanFile):
 
     def configure(self):
         self.settings.compiler.cppstd = "23"
+        # Lua raises errors with setjmp/longjmp when the interpreter is built as
+        # C. Emscripten implements that as JS-based SjLj, which is mutually
+        # exclusive with the native wasm exceptions this project compiles and
+        # links with everywhere (profiles/emscripten) — so the archive asks for
+        # `emscripten_longjmp` and the final link, being wasm EH, has no such
+        # symbol. That is the whole of what "no lua in the wasm build" ever was.
+        #
+        # Built as C++, LUAI_THROW is a real `throw`: there is no longjmp left to
+        # support, and the profile's -fwasm-exceptions reaches the interpreter
+        # like any other C++ source. Its exported symbols keep C linkage
+        # (lua.h declares its own extern "C" under a C++ compiler), so sol2 and
+        # src/lua/lua_config.cpp are unaffected.
+        #
+        # Scoped to Emscripten deliberately. Native builds have shipped on the C
+        # interpreter with nothing to fix, and `compile_as_cpp` is part of lua's
+        # package_id, so widening this would rebuild it everywhere for no gain.
+        if self.settings.os == "Emscripten":
+            self.options["lua"].compile_as_cpp = True
 
     def layout(self):
         cmake_layout(self)

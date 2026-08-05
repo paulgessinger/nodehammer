@@ -85,9 +85,9 @@ class OutputConfig {
 /// resolution logic of their own (#41 §11).
 class Config {
   public:
-    /// Read a config file. `.lua` dispatches to the scripting front end (only
-    /// in a build that has it — otherwise it throws, since the format is not
-    /// known until the extension is looked at); anything else is TOML.
+    /// Read a config file. `.lua` dispatches to the scripting front end;
+    /// anything else is TOML. Both front ends are in every build, so this is a
+    /// choice of parser rather than a capability question.
     ///
     /// `include = [...]` resolves against the file's own directory, and nested
     /// includes against theirs.
@@ -118,9 +118,8 @@ class Config {
     /// (docs/error-model.md).
     ///
     /// Still throws when there is no document to report on: a file that will not
-    /// open, or a `.lua` path in a build without the Lua front end. Those say
-    /// nothing about the document's contents, which is what this promised to
-    /// describe.
+    /// open says nothing about a document's contents, which is what this
+    /// promised to describe.
     ///
     /// This is what `nodehammer validate-config` does, available to a caller
     /// that wants to check a config without committing to using it — an editor,
@@ -137,9 +136,10 @@ class Config {
     [[nodiscard]] NH_API static DiagnosticList
     checkString(std::string_view toml, const std::filesystem::path &baseDir = {});
 
-    /// Config formats this build understands: "toml", plus "lua" where the
-    /// scripting front end is compiled in. A view over library-lifetime storage
-    /// — see `SemanticScene::formats`.
+    /// Config formats this build understands: "toml" and "lua". Constant, unlike
+    /// `SemanticScene::formats` — both front ends are compiled in
+    /// unconditionally, so it is a build-independent answer given by the same
+    /// query every type answers. A view over library-lifetime storage.
     [[nodiscard]] NH_API static std::span<const std::string_view> formats();
 
     /// The scene-affecting slice. Shares the parsed document with this handle

@@ -1,10 +1,15 @@
 # Scripted configuration (Lua) — design exploration
 
 **Status:** Option A implemented — the `config-lua` CLI command (backed by
-`src/lua/lua_config.cpp`, a native-only source compiled into `nodehammer_lib`)
-evaluates a Lua script into an `NHConfig` and emits flattened TOML. Option B (embedding the engine so scripts run inside
-the app/browser) remains future work. This document captures the design space so
-the remaining trade-offs stay mapped.
+`src/lua/lua_config.cpp`, compiled into `nodehammer_lib`) evaluates a Lua script
+into an `NHConfig` and emits flattened TOML, and `Config::read` dispatches `.lua`
+by extension.
+
+Option B is **half done**: the engine now ships in every build, wasm included, so
+scripts already execute inside the wasm module — see §4. What is still missing is
+not the engine but the two things in-browser execution needs around it, both
+recorded in §9 and §10.6. This document captures the design space so the
+remaining trade-offs stay mapped.
 
 The existing TOML config is described operationally in
 [predicate-expressions.md](predicate-expressions.md); the parser lives in
@@ -112,6 +117,34 @@ to B without users rewriting anything.
 win at near-zero risk and no wasm bloat), keep the door open to B. The one
 decision that forces the choice: *must config scripts execute inside the
 app/browser?* → B. *Is a build-time generation step acceptable?* → A.
+
+### 4.1 What shipping the engine everywhere actually cost
+
+The "no engine in wasm" half of A turned out to be a build accident rather than a
+constraint, and it has been removed: `src/lua/lua_config.cpp` and the interpreter
+are unconditional in `nodehammer_lib` on every platform.
+
+- **The one real obstacle was exception handling, not size.** Lua raises errors
+  with `setjmp`/`longjmp`, which Emscripten implements as JS-based SjLj —
+  mutually exclusive with the native wasm exceptions this project uses
+  everywhere. Building the interpreter as C++ (`lua/*:compile_as_cpp=True`, set
+  for Emscripten in `conanfile.py`) makes `LUAI_THROW` a real `throw`, and the
+  problem disappears rather than being worked around.
+- **"Costs binary size everywhere" is not what happens.** Nothing in the viewer
+  or the compute worker calls `Config::read` on a path, so static-lib dead-strip
+  leaves the interpreter out of both wasm bundles entirely. The cost lands on
+  whichever call site asks for it — which is the property that makes shipping it
+  unconditionally reasonable, and which should be re-checked if the viewer ever
+  gains a "load config file" path.
+- **What the gate did cost** was a public API that varied by platform:
+  `Config::formats()` answered `["toml"]` in a browser and `["toml", "lua"]` on a
+  desktop, for the same source tree. It is now constant.
+
+`tests/wasm_lua_smoke.cpp` is the standing check: the same library linked
+*without* `-sNODERAWFS`, so the only filesystem is MEMFS as in a real tab,
+driving `Config::read` on scripts it stages itself. `nodehammer_tests` cannot
+answer that question, because it links NODERAWFS and therefore reads the host's
+files.
 
 ---
 
@@ -518,4 +551,19 @@ anything.
    helpers, `include`/`use`, a sandbox, and a `.lua`-detection dispatch in
    `ConfigLoader`. Option B is the same plus shipping the engine in every target
    (incl. wasm build/CMake/Conan wiring) and the sandbox hardening that in-browser
-   execution demands.
+   execution demands. ~~The engine half is the one that sounded expensive.~~
+   Done, and it was the cheap half — see §4.1. What is left is item 6.
+6. **`include()` / `use()` do not go through a fetcher, and for a project they
+   have to.** `evalLuaConfig(src, sourceName, baseDir)` resolves them with
+   `std::ifstream` against a real directory, sandboxed by
+   `weakly_canonical` under a root. That is the right model for the CLI and it
+   works under MEMFS, so a browser caller who stages files can use it today. It
+   is the wrong model for a `.nhproj`: the TOML path resolves includes through an
+   `IncludeFetcher` precisely so `BuildSession` and `archive_export` can serve
+   them out of a ZIP working set (#41 §11, delivered in #52), and Lua bypasses
+   that seam entirely. So a `.lua` inside a project archive loads, but its
+   includes cannot resolve. Closing this means giving the Lua front end the
+   fetcher `ConfigLoader` already takes — a change to `src/lua/lua_config.cpp`'s
+   two read sites and its signature, not to the build. It is the last thing
+   between here and Option B in the shared viewer, alongside §9's instruction
+   hook.
