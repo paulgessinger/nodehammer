@@ -24,3 +24,16 @@ repos:
     rev: v6.2.0
     hooks:
       - id: reuse
+
+  - repo: local
+    hooks:
+      # Closure (Release wasm only) renames unquoted properties, so a plain
+      # `Module.HEAPU8` in an EM_JS body silently becomes a dangling `h.$c`.
+      # Nothing else in the build sees this: RelWithDebInfo skips Closure and
+      # the failure surfaces only when that handler runs in a browser.
+      - id: em-js-closure
+        name: quoted Module[...] access in EM_JS
+        entry: scripts/check_em_js_closure.py
+        language: python
+        types_or: [c++, c]
+        exclude: '^third_party/'

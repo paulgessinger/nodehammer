@@ -48,7 +48,7 @@ EM_JS(int, nh_worker_probe, (), {
 // Create the worker and wire its onmessage. Returns 1 on success.
 EM_JS(int, nh_worker_create, (), {
     try {
-        if (Module.__nhWorker && Module.__nhWorker.worker) return 1;
+        if (Module['__nhWorker'] && Module['__nhWorker'].worker) return 1;
         var st = {
             worker: null,
             status: 0,      // 0 idle, 1 building, 2 done, 3 error
@@ -90,7 +90,7 @@ EM_JS(int, nh_worker_create, (), {
             st.status = 3;
         };
         st.worker = w;
-        Module.__nhWorker = st;
+        Module['__nhWorker'] = st;
         return 1;
     } catch (e) { return 0; }
 });
@@ -100,7 +100,7 @@ EM_JS(int, nh_worker_create, (), {
 EM_JS(void, nh_worker_post, (unsigned epoch, const uint8_t *scene_ptr, unsigned scene_len,
                              const char *config_toml, int has_wedge, double start_deg,
                              double end_deg, double margin), {
-    var st = Module.__nhWorker;
+    var st = Module['__nhWorker'];
     st.status = 1; st.error = ""; st.resultPtr = 0; st.resultLen = 0;
     st.phase = 1; st.processed = 0; st.total = 0;
     // Quoted keys: this object is read by the non-Closure'd compute_worker.js,
@@ -121,17 +121,17 @@ EM_JS(void, nh_worker_post, (unsigned epoch, const uint8_t *scene_ptr, unsigned 
     st.worker.postMessage(msg, transfer);
 });
 
-EM_JS(int, nh_worker_status, (), { var st = Module.__nhWorker; return st ? st.status : 0; });
-EM_JS(int, nh_worker_phase, (), { var st = Module.__nhWorker; return st ? st.phase : 0; });
-EM_JS(double, nh_worker_processed, (), { var st = Module.__nhWorker; return st ? st.processed : 0; });
-EM_JS(double, nh_worker_total, (), { var st = Module.__nhWorker; return st ? st.total : 0; });
-EM_JS(unsigned, nh_worker_result_ptr, (), { var st = Module.__nhWorker; return st ? st.resultPtr : 0; });
-EM_JS(unsigned, nh_worker_result_len, (), { var st = Module.__nhWorker; return st ? st.resultLen : 0; });
-EM_JS(int, nh_worker_fatal, (), { var st = Module.__nhWorker; return (st && st.fatal) ? 1 : 0; });
+EM_JS(int, nh_worker_status, (), { var st = Module['__nhWorker']; return st ? st.status : 0; });
+EM_JS(int, nh_worker_phase, (), { var st = Module['__nhWorker']; return st ? st.phase : 0; });
+EM_JS(double, nh_worker_processed, (), { var st = Module['__nhWorker']; return st ? st.processed : 0; });
+EM_JS(double, nh_worker_total, (), { var st = Module['__nhWorker']; return st ? st.total : 0; });
+EM_JS(unsigned, nh_worker_result_ptr, (), { var st = Module['__nhWorker']; return st ? st.resultPtr : 0; });
+EM_JS(unsigned, nh_worker_result_len, (), { var st = Module['__nhWorker']; return st ? st.resultLen : 0; });
+EM_JS(int, nh_worker_fatal, (), { var st = Module['__nhWorker']; return (st && st.fatal) ? 1 : 0; });
 
 // Copy out the pending error message (malloc'd; caller frees). Empty if none.
 EM_JS(char *, nh_worker_take_error, (), {
-    var st = Module.__nhWorker;
+    var st = Module['__nhWorker'];
     var s = (st && st.error) ? st.error : "";
     var len = lengthBytesUTF8(s) + 1;
     var p = _malloc(len);
@@ -141,7 +141,7 @@ EM_JS(char *, nh_worker_take_error, (), {
 
 // Reset transient state after C++ has consumed a result/error.
 EM_JS(void, nh_worker_reset, (), {
-    var st = Module.__nhWorker;
+    var st = Module['__nhWorker'];
     if (st) { st.status = 0; st.resultPtr = 0; st.resultLen = 0; st.error = ""; }
 });
 // clang-format on
