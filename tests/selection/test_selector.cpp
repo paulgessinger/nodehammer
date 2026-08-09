@@ -275,7 +275,7 @@ TEST_CASE("SelectionEngine: prune keeps source daughter logVol closure", "[selec
     REQUIRE(scene.logVols.contains(sensorLv));
 }
 
-TEST_CASE("SelectionEngine: prune with root dropped is a no-op and emits NH0401",
+TEST_CASE("SelectionEngine: prune throws NH0401 when the rules drop the root",
           "[selection][selector]") {
     auto [scene, rootId, trackerId, sensorId] = makeThreeLevelScene();
 
@@ -286,18 +286,16 @@ TEST_CASE("SelectionEngine: prune with root dropped is a no-op and emits NH0401"
     SelectionEngine eng{{dropAll}};
 
     const std::size_t nodesBefore = scene.nodes.size();
-    auto diags = eng.prune(scene);
-
-    REQUIRE(scene.nodes.size() == nodesBefore); // scene untouched
-    REQUIRE(diags.hasErrors());
-
-    bool hasRootErr = false;
-    for (const auto &d : diags.items()) {
-        if (d.code == codes::kErrSelectionRootDropped) {
-            hasRootErr = true;
-        }
+    try {
+        (void)eng.prune(scene);
+        FAIL("expected a throw");
+    } catch (const nodehammer::Error &e) {
+        // Fatal because the scene `prune` could return is the one with the
+        // rules *not* applied — see docs/error-model.md. The caller's scene is
+        // left untouched, since nothing was removed before the guard fired.
+        REQUIRE(e.code() == codes::kFatalSelectionRootDropped);
+        REQUIRE(scene.nodes.size() == nodesBefore);
     }
-    REQUIRE(hasRootErr);
 }
 
 TEST_CASE("SelectionEngine: prune produces structurally sound scene", "[selection][selector]") {

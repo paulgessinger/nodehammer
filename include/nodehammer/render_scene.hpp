@@ -40,11 +40,16 @@ class RenderScene {
     };
 
     /// Read `.nhr` (optionally `.nhr.zst`).
-    [[nodiscard]] NH_API static RenderResult read(const std::filesystem::path &path);
+    ///
+    /// Returns the scene rather than a `RenderResult`: reading `.nhr` either
+    /// produces the scene or throws, and there is nothing non-fatal to observe
+    /// on the way. A result type here could only ever have carried an empty
+    /// list (docs/error-model.md).
+    [[nodiscard]] NH_API static RenderScene read(const std::filesystem::path &path);
 
     /// Read `.nhr` bytes directly — the form that crosses the browser's worker
     /// boundary.
-    [[nodiscard]] NH_API static RenderResult read(std::span<const std::byte> nhr);
+    [[nodiscard]] NH_API static RenderScene read(std::span<const std::byte> nhr);
 
     /// Format names this build can read or write, in registration order and
     /// without duplicates. A view over library-lifetime storage — see
@@ -60,9 +65,10 @@ class RenderScene {
     /// `[export.gltf]` — are the same single implementation the CLI uses, so a
     /// config that sets `unit_scale` cannot be honoured by `build` and ignored
     /// here (#41 §3).
-    [[nodiscard]] NH_API DiagnosticList write(const std::filesystem::path &path,
-                                              const OutputConfig &output = {},
-                                              const WriteOptions &options = {}) const;
+    ///
+    /// Returns nothing — see `SemanticScene::write`.
+    NH_API void write(const std::filesystem::path &path, const OutputConfig &output = {},
+                      const WriteOptions &options = {}) const;
 
     /// The scene as `.nhr` bytes. Throws on an empty handle.
     [[nodiscard]] NH_API std::vector<std::byte> toNhr() const;

@@ -25,8 +25,12 @@ namespace nodehammer::tessellation {
 /// inline in prep); phases advance `Preparing → Cutting → Tessellating →
 /// Finalizing`; the wedge counters count placements and the tessellation
 /// counters count nodes; the result-packaging tail appends the tessellation
-/// diagnostics to prep's and gates the scene on `hasErrors()`; and prep copies
-/// its inputs so the caller's pristine scene is never mutated.
+/// diagnostics to prep's and hands the scene back whatever they say, since a
+/// node the pass could not mesh is a partial result rather than a failed build
+/// (docs/error-model.md); a prep that *cannot* deliver throws, and the throw
+/// becomes `SceneBuildResult::failure` because a frame-driven state machine has
+/// no caller to unwind to; and prep copies its inputs so the caller's pristine
+/// scene is never mutated.
 class BuildPipeline {
   public:
     /// Canonical phase enum — the single source of truth shared with

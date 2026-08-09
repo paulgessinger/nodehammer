@@ -21,26 +21,73 @@
 namespace nodehammer {
 namespace {
 
-/// Adopt an internal load, then validate — the one thing these wrappers add
-/// beyond dispatch and slicing.
+[[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {
+    std::string ext = path.extension().string();
+    std::transform(ext.begin(), ext.end(), ext.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return ext == ".lua";
+}
+
+/// Collect a document, whichever front end owns its extension.
 ///
-/// Validation is skipped after a failed load, matching `convert`: a load error
-/// leaves a default-constructed AST, and validating that would answer a
-/// question about a document nobody wrote. Validation *diagnostics* land in the
-/// same list as the load's, which is what makes `build` free of a validation
-/// step of its own (#41 §8).
-[[nodiscard]] ConfigResult adopt(config::ConfigResult loaded, const std::string &context) {
-    // Accumulated in the internal list, which is the type that knows how to
-    // append, and converted once at the end.
-    diagnostics::List diags = std::move(loaded.diags);
-    if (diags.hasErrors()) {
-        api::throwReportedErrors(diags, codes::kErrConfigParse, context);
+/// Both front ends collect rather than stop, so this reports a broken document
+/// instead of throwing about one — which is what lets `read` and `check` be the
+/// same work under two different promises. It still throws when there is no
+/// document to collect: a file that will not open, or `.lua` in a build with no
+/// Lua.
+[[nodiscard]] config::ConfigResult collect(const std::filesystem::path &path) {
+    if (!hasLuaExtension(path)) {
+        return config::ConfigLoader::collectFromFile(path);
     }
-    diags.append(config::ConfigValidator::validate(loaded.config));
-    if (diags.hasErrors()) {
-        api::throwReportedErrors(diags, codes::kErrConfigParse, context);
+
+#if NH_WITH_LUA
+    // Canonicalise first, then take the parent: that is what roots `include()`
+    // and `use()`, and it is derived from the caller's own path rather than
+    // invented. A bare `cfg.lua` therefore roots at the directory the file was
+    // actually found in, without this layer ever deciding what "here" means
+    // (#41 §11, conventions from step 5b).
+    std::filesystem::path canonical;
+    std::string source;
+    try {
+        canonical = std::filesystem::canonical(path);
+        const auto bytes = detail::file_io::readFile(canonical);
+        source.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
+    } catch (const std::exception &e) {
+        api::rethrowAsError(e, codes::kFatalImportFileNotFound, path.string());
     }
-    return ConfigResult{api::asHandle(std::move(loaded.config)), api::asHandle(std::move(diags))};
+    try {
+        return lua::evalLuaConfig(source, canonical.string(), canonical.parent_path());
+    } catch (const Error &) {
+        throw;
+    } catch (const std::exception &e) {
+        api::rethrowAsError(e, codes::kErrConfigParse, path.string());
+    }
+#else
+    throw Error{codes::kFatalApiBackendMissing,
+                "this build has no Lua config front end; see formats()", path.string()};
+#endif
+}
+
+/// Validate, and demand the whole thing be sound.
+///
+/// The one throw covers both stages on purpose: a document with a syntax error
+/// *and* an undefined material reference should say both once, rather than
+/// making the caller fix one, call again, and find the other. Validation
+/// diagnostics land in the same list as the load's, which is what makes `build`
+/// free of a validation step of its own (#41 §8).
+[[nodiscard]] ConfigResult demand(config::ConfigResult collected, const std::string &context) {
+    diagnostics::List diags = std::move(collected.diags);
+    diags.append(config::ConfigValidator::validate(collected.config));
+    diagnostics::throwIfErrors(diags, context);
+    return ConfigResult{api::asHandle(std::move(collected.config)),
+                        diagnostics::asHandle(std::move(diags))};
+}
+
+/// The same work, under the other promise: hand back everything observed.
+[[nodiscard]] DiagnosticList report(config::ConfigResult collected) {
+    diagnostics::List diags = std::move(collected.diags);
+    diags.append(config::ConfigValidator::validate(collected.config));
+    return diagnostics::asHandle(std::move(diags));
 }
 
 /// Cut a slice from a document. The pointer aliases the handle's state, so a
@@ -58,57 +105,20 @@ template <typename Slice>
         typename Slice::Impl{std::shared_ptr<const config::NHConfig>{state, &state->cfg}})};
 }
 
-[[nodiscard]] bool hasLuaExtension(const std::filesystem::path &path) {
-    std::string ext = path.extension().string();
-    std::transform(ext.begin(), ext.end(), ext.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return ext == ".lua";
-}
-
 } // namespace
 
 ConfigResult Config::read(const std::filesystem::path &path) {
-    if (!hasLuaExtension(path)) {
-        return adopt(config::ConfigLoader::loadFromFile(path), path.string());
-    }
-
-#if NH_WITH_LUA
-    // Canonicalise first, then take the parent: that is what roots `include()`
-    // and `use()`, and it is derived from the caller's own path rather than
-    // invented. A bare `cfg.lua` therefore roots at the directory the file was
-    // actually found in, without this layer ever deciding what "here" means
-    // (#41 §11, conventions from step 5b).
-    std::filesystem::path canonical;
-    std::string source;
-    try {
-        canonical = std::filesystem::canonical(path);
-        const auto bytes = detail::file_io::readFile(canonical);
-        source.assign(reinterpret_cast<const char *>(bytes.data()), bytes.size());
-    } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrImportFileNotFound, path.string());
-    }
-    try {
-        return adopt(lua::evalLuaConfig(source, canonical.string(), canonical.parent_path()),
-                     path.string());
-    } catch (const Error &) {
-        throw;
-    } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrConfigParse, path.string());
-    }
-#else
-    throw Error{codes::kErrApiBackendMissing,
-                "this build has no Lua config front end; see formats()", path.string()};
-#endif
+    return demand(collect(path), path.string());
 }
 
 ConfigResult Config::parse(std::string_view toml, const std::filesystem::path &baseDir) {
-    try {
-        return adopt(config::ConfigLoader::loadFromString(toml, "<string>", baseDir), "<string>");
-    } catch (const Error &) {
-        throw;
-    } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrConfigParse, "<string>");
-    }
+    return demand(config::ConfigLoader::collectFromString(toml, "<string>", baseDir), "<string>");
+}
+
+DiagnosticList Config::check(const std::filesystem::path &path) { return report(collect(path)); }
+
+DiagnosticList Config::checkString(std::string_view toml, const std::filesystem::path &baseDir) {
+    return report(config::ConfigLoader::collectFromString(toml, "<string>", baseDir));
 }
 
 std::span<const std::string_view> Config::formats() {

@@ -116,7 +116,7 @@ void resolveIncludesFromBytes(toml::table &tbl, std::string_view parent_key,
 
         auto bytes = fetcher(absKey);
         if (!bytes) {
-            diags.error(codes::kErrImportFileNotFound,
+            diags.error(codes::kFatalImportFileNotFound,
                         std::format("include not found: '{}'", absKey), "<include>");
             continue;
         }
@@ -806,26 +806,27 @@ IncludeFetcher filesystemFetcher() {
 
 // ── ConfigLoader ──────────────────────────────────────────────────────────────
 
-ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
-    diagnostics::List diags;
-
-    // Read the root file and stage its bytes for `parseAndMerge`. The
+ConfigResult ConfigLoader::collectFromFile(const std::filesystem::path &path) {
+    // Read the root file and stage its bytes for `collectAndMerge`. The
     // canonical path doubles as the root key — using canonical form
     // keeps `resolveIncludeKey`'s output in the same canonical-path
     // space, so the visited set deduplicates predictably.
+    //
+    // A file that will not open is fatal even to the collecting face: there is
+    // no document, so there is nothing to report *on*, and an empty report
+    // would say the file was fine.
     std::filesystem::path canonical;
     std::vector<std::byte> root_bytes;
     try {
         canonical = std::filesystem::canonical(path);
         root_bytes = detail::file_io::readFile(canonical);
     } catch (const std::exception &e) {
-        diags.error(codes::kErrImportFileNotFound,
-                    std::format("could not read config file: {}", e.what()), path.string());
-        return ConfigResult{{}, std::move(diags)};
+        throw Error{codes::kFatalImportFileNotFound,
+                    std::format("could not read config file: {}", e.what()), path.string()};
     }
 
-    return parseAndMerge(std::span<const std::byte>{root_bytes}, canonical.string(),
-                         filesystemFetcher());
+    return collectAndMerge(std::span<const std::byte>{root_bytes}, canonical.string(),
+                           filesystemFetcher());
 }
 
 std::vector<std::string> ConfigLoader::peekIncludesFromBytes(std::span<const std::byte> bytes) {
@@ -858,8 +859,8 @@ std::string ConfigLoader::resolveIncludeKey(std::string_view parent_key, std::st
     return joined.generic_string();
 }
 
-ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
-                                         std::string_view root_key, IncludeFetcher fetcher) {
+ConfigResult ConfigLoader::collectAndMerge(std::span<const std::byte> root_bytes,
+                                           std::string_view root_key, IncludeFetcher fetcher) {
     diagnostics::List diags;
     try {
         auto tbl = toml::parse(
@@ -884,8 +885,8 @@ ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
     return ConfigResult{{}, std::move(diags)};
 }
 
-ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName,
-                                          const std::filesystem::path &baseDir) {
+ConfigResult ConfigLoader::collectFromString(std::string_view content, std::string_view sourceName,
+                                             const std::filesystem::path &baseDir) {
     // The root key is what `resolveIncludeKey` takes the parent directory of,
     // so joining `baseDir` onto the source name is what roots the include tree
     // there. An empty `baseDir` leaves the key equal to `sourceName`, which
@@ -893,8 +894,36 @@ ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_
     // directory — and those get a fetcher that resolves nothing, so no include
     // is ever read from a location the caller did not choose.
     const std::string root_key = (baseDir / std::filesystem::path{sourceName}).generic_string();
-    return parseAndMerge(std::as_bytes(std::span{content.data(), content.size()}), root_key,
-                         baseDir.empty() ? unrootedFetcher() : filesystemFetcher());
+    return collectAndMerge(std::as_bytes(std::span{content.data(), content.size()}), root_key,
+                           baseDir.empty() ? unrootedFetcher() : filesystemFetcher());
+}
+
+// ── The faces that promise a config ──────────────────────────────────────────
+//
+// Each is its collecting twin plus the one decision the twin declines to make:
+// that what was collected is fatal to a caller who asked for a config rather
+// than for a report. `throwIfErrors` carries the whole collection on the
+// exception, so nothing observed is lost by the failure being fatal.
+
+namespace {
+[[nodiscard]] ConfigResult demandConfig(ConfigResult collected, std::string_view context) {
+    diagnostics::throwIfErrors(collected.diags, context);
+    return collected;
+}
+} // namespace
+
+ConfigResult ConfigLoader::loadFromFile(const std::filesystem::path &path) {
+    return demandConfig(collectFromFile(path), path.string());
+}
+
+ConfigResult ConfigLoader::loadFromString(std::string_view content, std::string_view sourceName,
+                                          const std::filesystem::path &baseDir) {
+    return demandConfig(collectFromString(content, sourceName, baseDir), sourceName);
+}
+
+ConfigResult ConfigLoader::parseAndMerge(std::span<const std::byte> root_bytes,
+                                         std::string_view root_key, IncludeFetcher fetcher) {
+    return demandConfig(collectAndMerge(root_bytes, root_key, std::move(fetcher)), root_key);
 }
 
 } // namespace nodehammer::config

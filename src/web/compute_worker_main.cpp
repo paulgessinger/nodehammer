@@ -96,19 +96,10 @@ EM_JS(void, nh_compute_emit_error, (const char *msg), {
 });
 // clang-format on
 
-void reportError(const diagnostics::List &diags, const char *fallback) {
-    std::string msg;
-    for (const auto &d : diags.items()) {
-        if (d.severity >= Severity::Error) {
-            if (!msg.empty()) {
-                msg += "; ";
-            }
-            msg += d.code;
-            msg += ": ";
-            msg += d.message;
-        }
-    }
-    nh_compute_emit_error(msg.empty() ? fallback : msg.c_str());
+/// The worker's one exit for a failure: this side of `postMessage` has no
+/// caller to unwind to, so an `Error` becomes a message (docs/error-model.md).
+void reportFailure(const Error &e, const char *what) {
+    nh_compute_emit_error((std::string{what} + ": [" + e.code() + "] " + e.what()).c_str());
 }
 
 // Cached pristine inputs, reused across builds with the same epoch so a wedge
@@ -155,19 +146,27 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
 
     // (Re)seed the cache when new scene bytes arrive; otherwise require a hit.
     if (scene_bytes != nullptr && scene_len > 0) {
-        auto imported = FlatBufferImporter::importFromBytes(
-            "scene.nhb", std::as_bytes(std::span{scene_bytes, scene_len}));
-        if (imported.diags.hasErrors()) {
-            reportError(imported.diags, "compute: failed to deserialize semantic scene");
+        ImportResult imported;
+        try {
+            imported = FlatBufferImporter::importFromBytes(
+                "scene.nhb", std::as_bytes(std::span{scene_bytes, scene_len}));
+        } catch (const Error &e) {
+            reportFailure(e, "compute: failed to deserialize semantic scene");
             return nullptr;
         }
         // No base directory: this TOML arrives over postMessage from a config
         // the main thread already flattened through `configToToml`, so it
         // carries no include, and the worker has no filesystem to root one at.
-        auto loaded = ConfigLoader::loadFromString(config_toml != nullptr ? config_toml : "",
-                                                   "<worker-config>");
-        if (loaded.diags.hasErrors()) {
-            reportError(loaded.diags, "compute: failed to parse config");
+        config::ConfigResult loaded;
+        try {
+            loaded = ConfigLoader::loadFromString(config_toml != nullptr ? config_toml : "",
+                                                  "<worker-config>");
+        } catch (const Error &e) {
+            // The worker boundary is where a fatal failure stops being an
+            // exception: there is no caller on this side of postMessage to
+            // unwind to, so it becomes a message.
+            nh_compute_emit_error(
+                (std::string{"compute: failed to parse config: "} + e.what()).c_str());
             return nullptr;
         }
         c.scene = std::move(imported.scene);
@@ -231,8 +230,8 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
         }
     }
     SceneBuildResult result = pipe.take();
-    if (result.scene == nullptr) {
-        reportError(result.diags, "compute: build failed");
+    if (result.failure) {
+        reportFailure(*result.failure, "compute: build failed");
         return nullptr;
     }
 

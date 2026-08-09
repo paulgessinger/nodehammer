@@ -161,10 +161,8 @@ ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
     gErrorIgnoreLevel = savedLevel;
 
     if (mgr == nullptr) {
-        ImportResult result;
-        result.diags.error(codes::kErrTgeoOpenFailed,
-                           std::format("failed to open ROOT file '{}'", path.string()));
-        return result;
+        throw Error{codes::kFatalTgeoOpenFailed,
+                    std::format("failed to open ROOT file '{}'", path.string()), path.string()};
     }
 
     return traverseTGeoManager(mgr, path.string()).result;
@@ -172,9 +170,7 @@ ImportResult TGeoImporter::import(const std::filesystem::path &path) const {
 
 ImportResult TGeoImporter::import(TGeoManager *mgr) const {
     if (mgr == nullptr) {
-        ImportResult result;
-        result.diags.error(codes::kErrTgeoOpenFailed, "null TGeoManager pointer");
-        return result;
+        throw Error{codes::kFatalTgeoOpenFailed, "null TGeoManager pointer", "TGeoImporter"};
     }
     return traverseTGeoManager(mgr, mgr->GetName()).result;
 }

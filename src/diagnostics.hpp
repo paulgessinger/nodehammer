@@ -23,12 +23,29 @@
 #include <nodehammer/diagnostics.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
-namespace nodehammer::diagnostics {
+namespace nodehammer {
+
+/// The public list's state.
+///
+/// Defined here rather than in the API seam because producing one stopped being
+/// a boundary operation: under docs/error-model.md every stage that fails
+/// fatally hands its observations to `Error`, and stages are everywhere.
+struct DiagnosticList::Impl {
+    std::vector<Diagnostic> items;
+};
+
+/// Adopt a list the library built. Defined here for the same reason the state
+/// is: this is where lists are made.
+inline DiagnosticList::DiagnosticList(std::shared_ptr<const Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+
+namespace diagnostics {
 
 using Severity = Diagnostic::Severity;
 
@@ -48,10 +65,6 @@ using Severity = Diagnostic::Severity;
     return "unknown";
 }
 
-[[nodiscard]] constexpr bool isFatal(const Diagnostic &d) noexcept {
-    return d.severity == Severity::Fatal;
-}
-
 class List {
   public:
     void add(Diagnostic d) { items_.push_back(std::move(d)); }
@@ -69,24 +82,17 @@ class List {
     void error(std::string_view code, std::string_view message, std::string_view context = {}) {
         add({Severity::Error, std::string{code}, std::string{message}, std::string{context}});
     }
-    void fatal(std::string_view code, std::string_view message, std::string_view context = {}) {
-        add({Severity::Fatal, std::string{code}, std::string{message}, std::string{context}});
-    }
+
+    // No `fatal`. A stage that cannot deliver throws, and `Fatal` is what
+    // `Error::diagnostic()` stamps on the failure when a caller wants both
+    // channels in one report — so a list that could contain one would be a list
+    // claiming a result exists and does not (docs/error-model.md).
 
     void append(const List &other) {
         items_.reserve(items_.size() + other.items_.size());
         for (const auto &d : other.items_) {
             items_.push_back(d);
         }
-    }
-
-    [[nodiscard]] bool hasFatal() const noexcept {
-        for (const auto &d : items_) {
-            if (isFatal(d)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     [[nodiscard]] bool hasErrors() const noexcept {
@@ -111,4 +117,68 @@ class List {
     std::vector<Diagnostic> items_;
 };
 
-} // namespace nodehammer::diagnostics
+/// Hand this list's items to the public one.
+///
+/// Both sides hold `std::vector<Diagnostic>` — the same type, since this header
+/// uses the published struct — so this moves rather than converts, and an empty
+/// list allocates nothing.
+[[nodiscard]] inline DiagnosticList asHandle(List &&src) {
+    std::vector<Diagnostic> items = std::move(src).take();
+    if (items.empty()) {
+        return DiagnosticList{};
+    }
+    return DiagnosticList{
+        std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)})};
+}
+
+/// For a list the caller still needs afterwards.
+[[nodiscard]] inline DiagnosticList asHandle(const List &src) {
+    List copy = src;
+    return asHandle(std::move(copy));
+}
+
+/// Give up, when a collecting stage collected something fatal to what it
+/// promised.
+///
+/// Some stages report rather than stop — the config loader above all, since
+/// naming every problem in a document is the whole job. That is not a second
+/// way of failing: it is one failure that happens to know several things. This
+/// is where the collection becomes the exception.
+///
+/// The code and context come from the first error, since that is what a caller
+/// would branch on; the message carries all of them, because a config with three
+/// undefined material references should say so once rather than three calls in a
+/// row. The whole list rides along on the exception, so nothing observed before
+/// the failure is lost by it being fatal.
+inline void throwIfErrors(const List &diags, std::string_view context) {
+    const Diagnostic *first = nullptr;
+    std::string message;
+    for (const auto &d : diags.items()) {
+        if (d.severity < Severity::Error) {
+            continue;
+        }
+        if (first == nullptr) {
+            first = &d;
+            message = d.message;
+            continue;
+        }
+        // Only once there is more than one does the message have to say which
+        // code each part belongs to; a single failure already carries its code
+        // on the exception.
+        if (message == first->message) {
+            message = first->code + ": " + first->message;
+        }
+        message += "; ";
+        message += d.code;
+        message += ": ";
+        message += d.message;
+    }
+    if (first == nullptr) {
+        return;
+    }
+    throw Error{first->code, message, first->context.empty() ? context : first->context,
+                asHandle(diags)};
+}
+
+} // namespace diagnostics
+} // namespace nodehammer

@@ -217,114 +217,106 @@ void registerCmdDumpSemantic(CLI::App &app) {
         sub->add_flag("--size-report", "Print estimated FlatBuffer payload breakdown to stderr");
 
     sub->callback([=] {
-        // ── Load config (optional) ─────────────────────────────────────────────
-        nodehammer::config::NHConfig cfg;
-        if (*configOpt) {
-            std::string cfgPath;
-            configOpt->results(cfgPath);
-            auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
-            nodehammer::cli::printDiags(loaded.diags);
-            if (loaded.diags.hasErrors()) {
-                std::println(stderr, "dump-semantic: config load failed");
-                return;
-            }
-            cfg = std::move(loaded.config);
-            auto validDiags = nodehammer::config::ConfigValidator::validate(cfg);
-            nodehammer::cli::printDiags(validDiags);
-            if (validDiags.hasErrors()) {
-                std::println(stderr, "dump-semantic: config validation failed");
-                return;
-            }
-        }
-
-        // ── Import ─────────────────────────────────────────────────────────────
-        auto [result, fmt] = nodehammer::cli::importOrExit(inputOpt, formatOpt);
-        nodehammer::cli::printDiags(result.diags);
-
-        // ── Select ─────────────────────────────────────────────────────────────
-        if (!cfg.selection.empty()) {
-            nodehammer::selection::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
-            auto selDiags = sel.prune(result.scene);
-            nodehammer::cli::printDiags(selDiags);
-        }
-
-        // ── Deduplicate shapes ─────────────────────────────────────────────────
-        if (cfg.deduplicateShapes) {
-            result.scene.deduplicateMaterials();
-            result.scene.deduplicateShapes();
-            result.scene.deduplicateLogVols();
-        }
-
-        if (sizeReportOpt->count() > 0) {
-            auto report = nodehammer::ir::semanticFlatbufferSizeReport(result.scene);
-            std::print(stderr, "{}", nodehammer::ir::formatSemanticFlatbufferSizeReport(report));
-        }
-
-        // ── Output ─────────────────────────────────────────────────────────────
-        if (richOpt->count() > 0) {
-            int maxDepth = -1;
-            depthOpt->results(maxDepth);
-            std::string filter;
-            if (*filterOpt) {
-                filterOpt->results(filter);
-            }
-            std::string colorStr;
-            colorOpt->results(colorStr);
-
-            nodehammer::cli::Pager pager;
-            nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
-            printRichTree(result.scene, maxDepth, filter, con);
-        } else {
-            std::string outPath;
-            if (*outputOpt) {
-                outputOpt->results(outPath);
+        nodehammer::cli::runOrExit("dump-semantic", [&] {
+            // ── Load config (optional) ─────────────────────────────────────────────
+            nodehammer::config::NHConfig cfg;
+            if (*configOpt) {
+                std::string cfgPath;
+                configOpt->results(cfgPath);
+                auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
+                nodehammer::cli::printDiags(loaded.diags);
+                cfg = std::move(loaded.config);
+                auto validDiags = nodehammer::config::ConfigValidator::validate(cfg);
+                nodehammer::cli::printDiags(validDiags);
+                nodehammer::diagnostics::throwIfErrors(validDiags, cfgPath);
             }
 
-            // No output file: allow JSON to stream to stdout, but require -o for
-            // binary formats (e.g. nhb) to avoid writing opaque bytes to terminal.
-            if (outPath.empty()) {
-                std::string outputFmt;
-                outputFmtOpt->results(outputFmt);
-                if (outputFmt != "json") {
-                    std::println(stderr, "dump-semantic: {} output requires -o/--output",
-                                 outputFmt);
+            // ── Import ─────────────────────────────────────────────────────────────
+            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
+            nodehammer::cli::printDiags(result.diags);
+
+            // ── Select ─────────────────────────────────────────────────────────────
+            if (!cfg.selection.empty()) {
+                nodehammer::selection::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
+                auto selDiags = sel.prune(result.scene);
+                nodehammer::cli::printDiags(selDiags);
+            }
+
+            // ── Deduplicate shapes ─────────────────────────────────────────────────
+            if (cfg.deduplicateShapes) {
+                result.scene.deduplicateMaterials();
+                result.scene.deduplicateShapes();
+                result.scene.deduplicateLogVols();
+            }
+
+            if (sizeReportOpt->count() > 0) {
+                auto report = nodehammer::ir::semanticFlatbufferSizeReport(result.scene);
+                std::print(stderr, "{}",
+                           nodehammer::ir::formatSemanticFlatbufferSizeReport(report));
+            }
+
+            // ── Output ─────────────────────────────────────────────────────────────
+            if (richOpt->count() > 0) {
+                int maxDepth = -1;
+                depthOpt->results(maxDepth);
+                std::string filter;
+                if (*filterOpt) {
+                    filterOpt->results(filter);
+                }
+                std::string colorStr;
+                colorOpt->results(colorStr);
+
+                nodehammer::cli::Pager pager;
+                nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
+                printRichTree(result.scene, maxDepth, filter, con);
+            } else {
+                std::string outPath;
+                if (*outputOpt) {
+                    outputOpt->results(outPath);
+                }
+
+                // No output file: allow JSON to stream to stdout, but require -o for
+                // binary formats (e.g. nhb) to avoid writing opaque bytes to terminal.
+                if (outPath.empty()) {
+                    std::string outputFmt;
+                    outputFmtOpt->results(outputFmt);
+                    if (outputFmt != "json") {
+                        std::println(stderr, "dump-semantic: {} output requires -o/--output",
+                                     outputFmt);
+                        return;
+                    }
+                    nlohmann::json j = result.scene;
+                    std::println("{}", j.dump(-1));
                     return;
                 }
-                nlohmann::json j = result.scene;
-                std::println("{}", j.dump(-1));
-                return;
-            }
 
-            auto exporters = nodehammer::ir::SemanticExporterRegistry::makeDefault();
-            const nodehammer::ir::ISemanticExporter *exporter = nullptr;
+                auto exporters = nodehammer::ir::SemanticExporterRegistry::makeDefault();
+                const nodehammer::ir::ISemanticExporter *exporter = nullptr;
 
-            // Preserve prior behavior:
-            // 1) explicit --output-format wins
-            // 2) otherwise infer from extension (including compound extensions)
-            // 3) otherwise fallback to JSON
-            if (*outputFmtOpt) {
-                std::string outputFmt;
-                outputFmtOpt->results(outputFmt);
-                exporter = exporters.resolve(outPath, outputFmt);
-            } else {
-                exporter = exporters.resolve(outPath);
-                if (exporter == nullptr) {
-                    exporter = exporters.findByFormat("json");
+                // Preserve prior behavior:
+                // 1) explicit --output-format wins
+                // 2) otherwise infer from extension (including compound extensions)
+                // 3) otherwise fallback to JSON
+                if (*outputFmtOpt) {
+                    std::string outputFmt;
+                    outputFmtOpt->results(outputFmt);
+                    exporter = exporters.resolve(outPath, outputFmt);
+                } else {
+                    exporter = exporters.resolve(outPath);
+                    if (exporter == nullptr) {
+                        exporter = exporters.findByFormat("json");
+                    }
                 }
-            }
 
-            if (exporter == nullptr) {
-                std::println(stderr, "[error] {} cannot determine output format for '{}'",
-                             nodehammer::codes::kErrExportWriteFailed, outPath);
-                return;
-            }
+                if (exporter == nullptr) {
+                    std::println(stderr, "[error] {} cannot determine output format for '{}'",
+                                 nodehammer::codes::kFatalExportWriteFailed, outPath);
+                    return;
+                }
 
-            nodehammer::ir::SemanticExportConfig exportCfg;
-            auto exportResult = exporter->write(result.scene, outPath, exportCfg);
-            nodehammer::cli::printDiags(exportResult.diags);
-            if (exportResult.diags.hasErrors()) {
-                std::println(stderr, "dump-semantic: export failed");
+                nodehammer::ir::SemanticExportConfig exportCfg;
+                exporter->write(result.scene, outPath, exportCfg);
             }
-        }
+        });
     });
 }

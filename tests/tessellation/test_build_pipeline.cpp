@@ -12,6 +12,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <diagnostic_codes.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 #include <scene_build.hpp>
 #include <tessellation/build_pipeline.hpp>
@@ -78,7 +79,6 @@ std::shared_ptr<const NHConfig> emptyConfig() { return std::make_shared<const NH
 ir::render::Scene referenceBuild(const ir::semantic::Scene &scene,
                                  std::optional<WedgeCutParams> wedge) {
     ScenePrepResult prep = prepareSceneForTessellationFromInputs(NHConfig{}, scene, wedge);
-    REQUIRE(prep.ok);
     TessellationPass pass{prep.config};
     TessellationPassResult tess = pass.lower(prep.scene);
     REQUIRE_FALSE(tess.diags.hasErrors());
@@ -206,9 +206,10 @@ TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Idle); // take() resets
 }
 
-TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pipeline]") {
+TEST_CASE("BuildPipeline: a fatal prep failure arrives as a value", "[build_pipeline]") {
     // A rule referencing an undefined material fails ConfigValidator, so prep
-    // returns !ok and the pipeline lands on the failure branch.
+    // throws — and the pipeline is driven from a frame loop with no call to
+    // unwind, so the exception lands in `failure` instead (docs/error-model.md).
     ir::semantic::Scene scene = SyntheticSceneBuilder::buildSingleBox();
     NHConfig cfg;
     Rule rule;
@@ -221,8 +222,12 @@ TEST_CASE("BuildPipeline: error propagation takes the failure path", "[build_pip
     while (!pipe.advance(kSpin)) {
     }
     SceneBuildResult r = pipe.take();
+    REQUIRE(r.failure.has_value());
     REQUIRE(r.scene == nullptr);
-    REQUIRE(r.diags.hasErrors());
+    REQUIRE(r.failure->code() == nodehammer::codes::kErrUndefinedMaterialRef);
+    // The two channels stay apart: what could not be done is in `failure`, and
+    // the diagnostics are what was observed on the way there.
+    REQUIRE(r.failure->observed().hasErrors());
 }
 
 TEST_CASE("BuildPipeline: degenerate and absent wedge skip Cutting", "[build_pipeline]") {

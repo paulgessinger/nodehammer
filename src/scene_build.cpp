@@ -25,17 +25,11 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Sce
 
     auto validDiags = config::ConfigValidator::validate(prep.config);
     prep.diags.append(validDiags);
-    if (validDiags.hasErrors()) {
-        return prep;
-    }
+    diagnostics::throwIfErrors(validDiags, "prepareSceneForTessellation");
 
     if (!prep.config.selection.empty()) {
         selection::SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
-        auto selDiags = sel.prune(prep.scene);
-        prep.diags.append(selDiags);
-        if (selDiags.hasErrors()) {
-            return prep;
-        }
+        prep.diags.append(sel.prune(prep.scene));
     }
 
     if (prep.config.deduplicateShapes) {
@@ -50,7 +44,6 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Sce
         (void)tessellation::applyWedgeCut(prep.scene, *wedgeCut);
     }
 
-    prep.ok = true;
     return prep;
 }
 
@@ -59,35 +52,26 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     SceneBuildResult result;
 
     if (geometry_path.empty()) {
-        result.diags.error(codes::kErrImportFormatUnknown,
-                           "buildSceneFromPaths: input path is empty", "");
-        return result;
+        throw Error{codes::kFatalImportFormatUnknown, "buildSceneFromPaths: input path is empty"};
     }
 
     config::NHConfig cfg;
     if (!config_path.empty()) {
         auto loaded = config::ConfigLoader::loadFromFile(config_path);
         result.diags.append(loaded.diags);
-        if (loaded.diags.hasErrors()) {
-            return result;
-        }
         cfg = std::move(loaded.config);
     }
 
     const auto importerRegistry = ir::ImporterRegistry::makeDefault();
     const auto *importer = importerRegistry.resolve(geometry_path);
     if (importer == nullptr) {
-        result.diags.error(codes::kErrImportFormatUnknown,
-                           "buildSceneFromPaths: no importer for '" + geometry_path.string() + "'",
-                           geometry_path.string());
-        return result;
+        throw Error{codes::kFatalImportFormatUnknown,
+                    "buildSceneFromPaths: no importer for '" + geometry_path.string() + "'",
+                    geometry_path.string()};
     }
 
     auto importResult = importer->import(geometry_path);
     result.diags.append(importResult.diags);
-    if (importResult.diags.hasErrors()) {
-        return result;
-    }
 
     // Drive the shared BuildPipeline to completion — the same prep → (wedge) →
     // tessellate core the viewer backends use, so this synchronous shim is no

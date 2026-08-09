@@ -97,20 +97,19 @@ TEST_CASE("to_json: UnknownShape serialization", "[ir][json]") {
     REQUIRE(j["originalType"] == "TGeoArb8");
 }
 
-TEST_CASE("diagnostics::List: hasFatal and hasErrors", "[ir][diagnostics]") {
+TEST_CASE("diagnostics::List: hasErrors means the result is partial", "[ir][diagnostics]") {
     nodehammer::diagnostics::List list;
-    REQUIRE_FALSE(list.hasFatal());
     REQUIRE_FALSE(list.hasErrors());
 
     list.warn("NH0301", "just a warning");
-    REQUIRE_FALSE(list.hasFatal());
     REQUIRE_FALSE(list.hasErrors());
 
     list.error("NH0500", "an error");
-    REQUIRE_FALSE(list.hasFatal());
     REQUIRE(list.hasErrors());
 
-    list.fatal("NH0503", "fatal");
-    REQUIRE(list.hasFatal());
-    REQUIRE(list.hasErrors());
+    // And there is no way to put a `Fatal` in one: that severity belongs to the
+    // channel a list is not (docs/error-model.md).
+    static_assert([]<typename L = nodehammer::diagnostics::List>() {
+        return !requires(L &l) { l.fatal("NH0503", "x"); };
+    }());
 }

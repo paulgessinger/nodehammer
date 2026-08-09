@@ -20,22 +20,12 @@ namespace {
 
 /// Adopt an internal ImportResult.
 ///
-/// An importer reports "could not read this" as an error *diagnostic* rather
-/// than by throwing — all six such sites in the tree do, and every one of them
-/// returns an empty scene alongside it. At the boundary that is an input error
-/// like any other, so it becomes an exception here and `read` either hands back
-/// a scene or explains why it cannot.
-///
-/// `ImportResult` does permit a populated scene alongside errors. Nothing
-/// produces one, and an importer that wanted to report a *lossy* import already
-/// has the channel for it: warnings plus the `DegradationFlags` the IR carries
-/// per node. Errors mean there is nothing to hand back.
-[[nodiscard]] SemanticResult adopt(ir::ImportResult result, std::string_view context) {
-    if (result.diags.hasErrors()) {
-        api::throwReportedErrors(result.diags, codes::kErrImportFileNotFound, context);
-    }
+/// Nothing to translate: an importer that could not read its input throws, so
+/// what arrives here is a scene and what was observed about it. The wrapper is
+/// two conversions.
+[[nodiscard]] SemanticResult adopt(ir::ImportResult result) {
     return SemanticResult{api::asHandle(std::move(result.scene)),
-                          api::asHandle(std::move(result.diags))};
+                          diagnostics::asHandle(std::move(result.diags))};
 }
 
 void appendUnique(std::vector<std::string> &out, std::string_view name) {
@@ -53,7 +43,7 @@ SemanticResult SemanticScene::read(const std::filesystem::path &path, const Read
         // The string-dispatched entry point necessarily fails here rather than
         // at link time: "dd4hep" is a value, not a type, so nothing earlier
         // could have known this build lacks the backend (#41 §5).
-        throw Error{codes::kErrImportFormatUnknown,
+        throw Error{codes::kFatalImportFormatUnknown,
                     options.format.empty()
                         ? std::format("no importer claims the extension of '{}'", path.string())
                         : std::format("no importer named '{}' in this build; see formats()",
@@ -61,32 +51,32 @@ SemanticResult SemanticScene::read(const std::filesystem::path &path, const Read
                     path.string()};
     }
     try {
-        return adopt(importer->import(path), path.string());
+        return adopt(importer->import(path));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrImportFileNotFound, path.string());
+        api::rethrowAsError(e, codes::kFatalImportFileNotFound, path.string());
     }
 }
 
 SemanticResult SemanticScene::read(std::span<const std::byte> nhb) {
     try {
-        return adopt(ir::FlatBufferImporter::importFromBytes("<memory>.nhb", nhb), "<memory>.nhb");
+        return adopt(ir::FlatBufferImporter::importFromBytes("<memory>.nhb", nhb));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrImportFileNotFound, "<memory>.nhb");
+        api::rethrowAsError(e, codes::kFatalImportFileNotFound, "<memory>.nhb");
     }
 }
 
 #if NH_WITH_TGEO
 SemanticResult SemanticScene::read(TGeoManager &manager) {
     try {
-        return adopt(ir::TGeoImporter{}.import(&manager), "TGeoManager");
+        return adopt(ir::TGeoImporter{}.import(&manager));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrTgeoOpenFailed);
+        api::rethrowAsError(e, codes::kFatalTgeoOpenFailed);
     }
 }
 #endif
@@ -111,13 +101,12 @@ std::span<const std::string_view> SemanticScene::formats() {
     return views;
 }
 
-DiagnosticList SemanticScene::write(const std::filesystem::path &path,
-                                    const WriteOptions &options) const {
+void SemanticScene::write(const std::filesystem::path &path, const WriteOptions &options) const {
     const auto &scene = api::sceneOrThrow(*this, "SemanticScene::write");
     const auto registry = ir::SemanticExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(path, options.format);
     if (exporter == nullptr) {
-        throw Error{codes::kErrExportWriteFailed,
+        throw Error{codes::kFatalExportWriteFailed,
                     options.format.empty()
                         ? std::format("no exporter claims the extension of '{}'", path.string())
                         : std::format("no exporter named '{}' in this build; see formats()",
@@ -125,17 +114,11 @@ DiagnosticList SemanticScene::write(const std::filesystem::path &path,
                     path.string()};
     }
     try {
-        auto result = exporter->write(scene, path, ir::SemanticExportConfig{});
-        // Exporters, like importers, report "could not write this" as an error
-        // diagnostic. Nothing was produced, so it becomes the exception.
-        if (result.diags.hasErrors()) {
-            api::throwReportedErrors(result.diags, codes::kErrExportWriteFailed, path.string());
-        }
-        return api::asHandle(std::move(result.diags));
+        exporter->write(scene, path, ir::SemanticExportConfig{});
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrExportWriteFailed, path.string());
+        api::rethrowAsError(e, codes::kFatalExportWriteFailed, path.string());
     }
 }
 
@@ -144,7 +127,7 @@ std::vector<std::byte> SemanticScene::toNhb() const {
     try {
         return ir::semanticSceneToBytes(scene);
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrExportWriteFailed);
+        api::rethrowAsError(e, codes::kFatalExportWriteFailed);
     }
 }
 

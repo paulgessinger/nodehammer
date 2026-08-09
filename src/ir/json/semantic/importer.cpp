@@ -22,9 +22,12 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
         result.scene = j.get<semantic::Scene>();
         result.scene.computeWorldTransforms();
         result.scene.computeOriginalPaths();
+    } catch (const Error &) {
+        throw;
     } catch (const std::exception &ex) {
-        result.diags.error(codes::kErrTgeoOpenFailed,
-                           std::format("failed to load JSON '{}': {}", path.string(), ex.what()));
+        throw Error{codes::kFatalImportFileNotFound,
+                    std::format("failed to load JSON '{}': {}", path.string(), ex.what()),
+                    path.string()};
     }
 
     return result;

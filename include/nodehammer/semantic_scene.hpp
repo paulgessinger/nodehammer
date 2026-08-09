@@ -93,8 +93,12 @@ class SemanticScene {
 
     /// Write the scene. Format from `options.format` when set, otherwise from
     /// the extension. A `.zst` suffix compresses.
-    [[nodiscard]] NH_API DiagnosticList write(const std::filesystem::path &path,
-                                              const WriteOptions &options = {}) const;
+    ///
+    /// Returns nothing, and that is the whole contract: it either wrote the file
+    /// or threw saying why. No exporter in the tree has a non-fatal observation
+    /// to make about a file it wrote successfully, so a `DiagnosticList` here
+    /// could only ever have come back empty (docs/error-model.md).
+    NH_API void write(const std::filesystem::path &path, const WriteOptions &options = {}) const;
 
     /// The scene as `.nhb` bytes. Throws on an empty handle.
     [[nodiscard]] NH_API std::vector<std::byte> toNhb() const;

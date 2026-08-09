@@ -12,9 +12,16 @@
 
 namespace nodehammer::pipeline {
 
-/// Outcome of buildSceneFromPaths. On any pipeline-stage failure, scene is
-/// null and diags carries the reason. Warnings can accompany a successful
-/// build, so callers should always render diags regardless of success.
+/// Outcome of an asynchronous build.
+///
+/// The one place a fatal failure is a *value* rather than an exception: it
+/// arrives from another thread of control — a worker thread, a `postMessage`
+/// callback — where there is no call left to unwind. So the exception channel is
+/// materialised as `failure` rather than collapsed into the diagnostics; the two
+/// stay as distinct here as they are everywhere else (docs/error-model.md).
+///
+/// `scene` is non-null exactly when `failure` is empty. `diags` carries the
+/// non-fatal observations either way, so callers should always render it.
 struct SceneBuildResult {
     /// Const because the scene is shared, never owned exclusively: the viewer
     /// hands the same pointer to `SceneRenderer::beginUpload` while holding it
@@ -23,17 +30,19 @@ struct SceneBuildResult {
     /// was the one gap in that chain.
     std::shared_ptr<const ir::render::Scene> scene;
     diagnostics::List diags;
+
+    /// Set when the build could not produce a scene. Holds what would have been
+    /// thrown, including everything observed before it.
+    std::optional<Error> failure;
 };
 
-/// Outcome of `prepareSceneForTessellation`. When `ok` is true, `config`
-/// + `scene` are ready to be fed into a `TessellationJob`; when false,
-/// `diags` describes why we stopped before reaching the tessellation
-/// stage.
+/// Outcome of `prepareSceneForTessellation`: a config and scene ready to feed a
+/// `TessellationJob`, plus what prep observed. There is no `ok` — prep throws
+/// when it cannot deliver, so a result that exists is a result that is ready.
 struct ScenePrepResult {
     config::NHConfig config;
     ir::semantic::Scene scene;
     diagnostics::List diags;
-    bool ok{false};
 };
 
 /// Synchronous drive-to-completion shim for headless callers

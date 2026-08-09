@@ -79,16 +79,26 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         // Deferred-wedge prep (invariant #1): the wedge is always run as a
         // separate WedgeCutJob below, never inline in prep. Prep copies its
         // inputs by value, so the pristine scene stays untouched (invariant #5).
-        s.prep = pipeline::prepareSceneForTessellationFromInputs(*s.preset_config, *s.preset_scene,
-                                                                 std::nullopt);
-        s.preset_config.reset();
-        s.preset_scene.reset();
-        if (!s.prep.ok) {
+        //
+        // This is the boundary the doctrine's asynchronous carve-out describes:
+        // prep throws, and there is no caller here to unwind to — `advance` is
+        // driven from a frame loop that wants a state machine, not a stack. So
+        // the failure becomes `SceneBuildResult::failure`, which is the same
+        // channel by other means (docs/error-model.md).
+        try {
+            s.prep = pipeline::prepareSceneForTessellationFromInputs(*s.preset_config,
+                                                                     *s.preset_scene, std::nullopt);
+        } catch (const Error &e) {
+            s.preset_config.reset();
+            s.preset_scene.reset();
             s.result.scene = nullptr;
             s.result.diags = std::move(s.prep.diags);
+            s.result.failure = e;
             s.phase = Phase::Done;
             return true;
         }
+        s.preset_config.reset();
+        s.preset_scene.reset();
         if (s.wedge_cut) {
             s.wedge_job.start(s.prep.scene, *s.wedge_cut);
             s.phase = Phase::Cutting;
@@ -120,14 +130,16 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         return false;
     case Phase::Finalizing: {
         // Result-packaging tail (invariant #4): append tessellation diags to
-        // prep's, gate the scene on hasErrors(), and hand back a shared scene.
+        // prep's and hand back a shared scene.
+        //
+        // The scene comes back even when tessellation reported errors. Those are
+        // partial results — a node the pass could not mesh — and whether a scene
+        // with a hole in it is worth looking at is the viewer's judgement, not
+        // this driver's. It was throwing the whole build away over one unknown
+        // shape, and saying so only in a list nobody had to read.
         TessellationPassResult tess = s.tess_job.take();
         s.prep.diags.append(tess.diags);
-        if (tess.diags.hasErrors()) {
-            s.result.scene = nullptr;
-        } else {
-            s.result.scene = std::make_shared<ir::render::Scene>(std::move(tess.scene));
-        }
+        s.result.scene = std::make_shared<ir::render::Scene>(std::move(tess.scene));
         s.result.diags = std::move(s.prep.diags);
         s.prep = {};
         s.phase = Phase::Done;

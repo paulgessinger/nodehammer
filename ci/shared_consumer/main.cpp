@@ -9,8 +9,9 @@
 // flatbuffers, manifold, toml++) really are inside the shared object rather than
 // left for someone else to link.
 //
-// Deliberately C++20 and <cstdio>: the installed headers must not require the
-// C++23 the library itself is built with.
+// Deliberately C++20 and <iostream>: the installed headers must not require the
+// C++23 the library itself is built with, and this file must not either — so no
+// `std::print`, and no `std::format`.
 
 #include <nodehammer/build.hpp>
 #include <nodehammer/config.hpp>
@@ -19,9 +20,9 @@
 #include <nodehammer/version.hpp>
 
 #include <cstddef>
-#include <cstdio>
 #include <exception>
 #include <filesystem>
+#include <iostream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -30,10 +31,9 @@
 namespace {
 
 int fail(const char *what, const nodehammer::DiagnosticList &diags) {
-    std::fprintf(stderr, "%s\n", what);
+    std::cerr << what << '\n';
     for (const auto &d : diags) {
-        std::fprintf(stderr, "  [%s] %s (%s)\n", d.code.c_str(), d.message.c_str(),
-                     d.context.c_str());
+        std::cerr << "  [" << d.code << "] " << d.message << " (" << d.context << ")\n";
     }
     return 1;
 }
@@ -56,22 +56,20 @@ bool listed(std::span<const std::string_view> names, std::string_view needle) {
 // pointer when `_ITERATOR_DEBUG_LEVEL != 0`, so the two sides can differ in
 // `sizeof` while compiling and linking cleanly.
 void reportAbi() {
-    std::printf("consumer abi: sizeof(string)=%zu sizeof(vector<string>)=%zu"
-                " sizeof(vector<byte>)=%zu",
-                sizeof(std::string), sizeof(std::vector<std::string>),
-                sizeof(std::vector<std::byte>));
+    std::cout << "consumer abi: sizeof(string)=" << sizeof(std::string)
+              << " sizeof(vector<string>)=" << sizeof(std::vector<std::string>)
+              << " sizeof(vector<byte>)=" << sizeof(std::vector<std::byte>);
 #if defined(_MSC_VER)
-    std::printf(" _MSC_VER=%d _ITERATOR_DEBUG_LEVEL=%d _MSVC_STL_VERSION=%d", _MSC_VER,
-                _ITERATOR_DEBUG_LEVEL, _MSVC_STL_VERSION);
+    std::cout << " _MSC_VER=" << _MSC_VER << " _ITERATOR_DEBUG_LEVEL=" << _ITERATOR_DEBUG_LEVEL
+              << " _MSVC_STL_VERSION=" << _MSVC_STL_VERSION;
 #if defined(_DEBUG)
-    std::printf(" _DEBUG");
+    std::cout << " _DEBUG";
 #endif
 #if defined(NDEBUG)
-    std::printf(" NDEBUG");
+    std::cout << " NDEBUG";
 #endif
 #endif
-    std::printf(" __cplusplus=%ld\n", static_cast<long>(__cplusplus));
-    std::fflush(stdout);
+    std::cout << " __cplusplus=" << static_cast<long>(__cplusplus) << std::endl;
 }
 
 int main() {
@@ -81,9 +79,8 @@ int main() {
     // install and a library from another.
     const std::string_view linked = nodehammer::version();
     if (linked != nodehammer::VERSION) {
-        std::fprintf(stderr, "version mismatch: header says %.*s, library says %.*s\n",
-                     static_cast<int>(nodehammer::VERSION.size()), nodehammer::VERSION.data(),
-                     static_cast<int>(linked.size()), linked.data());
+        std::cerr << "version mismatch: header says " << nodehammer::VERSION << ", library says "
+                  << linked << '\n';
         return 1;
     }
 
@@ -94,19 +91,19 @@ int main() {
     // boundary, what came back is the evidence, and reporting only "missing a
     // format" hides whether the vector was short, empty, or garbage.
     const auto semanticFormats = nodehammer::SemanticScene::formats();
-    std::printf("SemanticScene::formats() -> %zu entries\n", semanticFormats.size());
+    std::cout << "SemanticScene::formats() -> " << semanticFormats.size() << " entries\n";
     for (const auto &f : semanticFormats) {
-        std::printf("  '%.*s' (len %zu)\n", static_cast<int>(f.size()), f.data(), f.size());
+        std::cout << "  '" << f << "' (len " << f.size() << ")\n";
     }
-    std::fflush(stdout);
+    std::cout << std::flush;
 
     if (!listed(semanticFormats, "synthetic") || !listed(semanticFormats, "flatbuffer")) {
-        std::fprintf(stderr, "SemanticScene::formats() is missing a built-in format\n");
+        std::cerr << "SemanticScene::formats() is missing a built-in format\n";
         return 1;
     }
     if (!listed(nodehammer::Config::formats(), "toml") ||
         !listed(nodehammer::RenderScene::formats(), "gltf")) {
-        std::fprintf(stderr, "a built-in format is missing from formats()\n");
+        std::cerr << "a built-in format is missing from formats()\n";
         return 1;
     }
 
@@ -119,6 +116,21 @@ int main() {
     if (config.diags.hasErrors() || !config.config.valid()) {
         return fail("Config::parse failed", config.diags);
     }
+
+    // The other promise over the same collector: a document that `parse` would
+    // have thrown about is `checkString`'s ordinary answer. Both are exported,
+    // so both are called here — that is what this consumer is for.
+    if (!nodehammer::Config::checkString("deduplicate_shapes = true\n").empty()) {
+        std::cerr << "Config::checkString reported something about a sound document\n";
+        return 1;
+    }
+    const auto report = nodehammer::Config::checkString("[[rules]]\nmatch = \"!!!\"\n");
+    if (!report.hasErrors()) {
+        std::cerr << "Config::checkString did not report a broken document\n";
+        return 1;
+    }
+    std::cout << "Config::checkString reported " << report.size()
+              << " problem(s) without throwing\n";
 
     // The synthetic importer ignores its path, so the whole pipeline runs
     // without the consumer needing a geometry file to point at.
@@ -133,7 +145,7 @@ int main() {
         return fail("build failed", rendered.diags);
     }
     if (rendered.scene.triangleCount() == 0) {
-        std::fprintf(stderr, "build produced no triangles\n");
+        std::cerr << "build produced no triangles\n";
         return 1;
     }
 
@@ -141,9 +153,9 @@ int main() {
     // of the private static dependencies the shared library must have absorbed.
     const std::vector<std::byte> bytes = rendered.scene.toNhr();
     const auto reread = nodehammer::RenderScene::read(bytes);
-    if (reread.diags.hasErrors() ||
-        reread.scene.triangleCount() != rendered.scene.triangleCount()) {
-        return fail("RenderScene byte round-trip failed", reread.diags);
+    if (reread.triangleCount() != rendered.scene.triangleCount()) {
+        std::cerr << "RenderScene byte round-trip failed\n";
+        return 1;
     }
 
     // ── Every remaining exported entry point ─────────────────────────────────
@@ -160,26 +172,26 @@ int main() {
         return fail("a pipeline verb failed", lowered.diags);
     }
     if (lowered.scene.triangleCount() != rendered.scene.triangleCount()) {
-        std::fprintf(stderr, "the decomposed pipeline disagreed with build()\n");
+        std::cerr << "the decomposed pipeline disagreed with build()\n";
         return 1;
     }
 
     const std::vector<std::byte> nhb = imported.scene.toNhb();
     if (nhb.empty()) {
-        std::fprintf(stderr, "toNhb() produced nothing\n");
+        std::cerr << "toNhb() produced nothing\n";
         return 1;
     }
 
     // Counts: reached rather than checked, beyond the one invariant that a
     // scene with triangles has meshes and materials to bind them.
-    std::printf("semantic: %zu nodes, %zu logVols, %zu shapes, %zu materials\n",
-                imported.scene.nodeCount(), imported.scene.logVolCount(),
-                imported.scene.shapeCount(), imported.scene.materialCount());
-    std::printf("render:   %zu nodes, %zu meshes, %zu materials, %zu triangles\n",
-                rendered.scene.nodeCount(), rendered.scene.meshCount(),
-                rendered.scene.materialCount(), rendered.scene.triangleCount());
+    std::cout << "semantic: " << imported.scene.nodeCount() << " nodes, "
+              << imported.scene.logVolCount() << " logVols, " << imported.scene.shapeCount()
+              << " shapes, " << imported.scene.materialCount() << " materials\n";
+    std::cout << "render:   " << rendered.scene.nodeCount() << " nodes, "
+              << rendered.scene.meshCount() << " meshes, " << rendered.scene.materialCount()
+              << " materials, " << rendered.scene.triangleCount() << " triangles\n";
     if (rendered.scene.meshCount() == 0 || rendered.scene.materialCount() == 0) {
-        std::fprintf(stderr, "a scene with triangles reported no meshes or materials\n");
+        std::cerr << "a scene with triangles reported no meshes or materials\n";
         return 1;
     }
 
@@ -190,16 +202,12 @@ int main() {
     std::filesystem::create_directories(outDir, ec);
     const auto semanticOut = outDir / "scene.nhb";
     const auto renderOut = outDir / "scene.glb";
-    const auto semanticDiags = imported.scene.write(semanticOut);
-    if (semanticDiags.hasErrors()) {
-        return fail("SemanticScene::write failed", semanticDiags);
-    }
-    const auto renderDiags = rendered.scene.write(renderOut, config.config.output());
-    if (renderDiags.hasErrors()) {
-        return fail("RenderScene::write failed", renderDiags);
-    }
+    // Neither returns anything: they wrote the file or they threw, so the file
+    // existing afterwards is the whole check.
+    imported.scene.write(semanticOut);
+    rendered.scene.write(renderOut, config.config.output());
     if (!std::filesystem::exists(semanticOut) || !std::filesystem::exists(renderOut)) {
-        std::fprintf(stderr, "a write reported success but produced no file\n");
+        std::cerr << "a write returned without producing a file\n";
         return 1;
     }
     std::filesystem::remove_all(outDir, ec);
@@ -213,17 +221,17 @@ int main() {
         (void)nodehammer::SemanticScene::read("/nodehammer/definitely/not/here.nhb");
     } catch (const nodehammer::Error &e) {
         threw = true;
-        std::printf("caught Error across the boundary: [%s] %s\n", e.code().c_str(), e.what());
+        std::cout << "caught Error across the boundary: [" << e.code() << "] " << e.what() << '\n';
     } catch (const std::exception &e) {
-        std::fprintf(stderr, "caught the wrong type across the boundary: %s\n", e.what());
+        std::cerr << "caught the wrong type across the boundary: " << e.what() << '\n';
         return 1;
     }
     if (!threw) {
-        std::fprintf(stderr, "a failed read did not throw\n");
+        std::cerr << "a failed read did not throw\n";
         return 1;
     }
 
-    std::printf("nodehammer %.*s: %zu nodes, %zu triangles\n", static_cast<int>(linked.size()),
-                linked.data(), rendered.scene.nodeCount(), rendered.scene.triangleCount());
+    std::cout << "nodehammer " << linked << ": " << rendered.scene.nodeCount() << " nodes, "
+              << rendered.scene.triangleCount() << " triangles" << std::endl;
     return 0;
 }

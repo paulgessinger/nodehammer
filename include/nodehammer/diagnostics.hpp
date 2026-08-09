@@ -121,19 +121,35 @@ class NH_API_TYPE Error : public std::runtime_error {
   public:
     NH_API Error(std::string_view code, std::string_view message, std::string_view context = {});
 
+    /// For a call that had already observed things when it gave up.
+    NH_API Error(std::string_view code, std::string_view message, std::string_view context,
+                 DiagnosticList observed);
+
     /// The stable NH-series code, e.g. "NH0101".
     [[nodiscard]] NH_API const std::string &code() const noexcept;
 
     /// Where it happened — a path, a format name, a node. Often empty.
     [[nodiscard]] NH_API const std::string &context() const noexcept;
 
-    /// The whole failure as a `Diagnostic`, for a caller that funnels both
-    /// channels into one report.
+    /// Everything the call recorded before it failed, at every severity —
+    /// including the error this exception reports, when the failure came from a
+    /// stage that collects rather than stops.
+    ///
+    /// Without this a fatal failure would destroy the warnings that led up to
+    /// it: a config with two dubious keys and one undefined material reference
+    /// has three things to say, and the exception names one of them. Copying it
+    /// is a pointer bump, so carrying it costs the exception nothing.
+    [[nodiscard]] NH_API const DiagnosticList &observed() const noexcept;
+
+    /// The failure itself as a `Diagnostic`, for a caller that funnels both
+    /// channels into one report. Severity `Fatal` — the one place that level
+    /// appears, since a `DiagnosticList` this library returns never carries it.
     [[nodiscard]] NH_API Diagnostic diagnostic() const;
 
   private:
     std::string code_;
     std::string context_;
+    DiagnosticList observed_;
 };
 
 } // namespace nodehammer

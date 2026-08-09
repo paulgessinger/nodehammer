@@ -68,7 +68,10 @@ TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api
     const auto &path = GENERATE_REF(from_range(configs));
     CAPTURE(path.string());
 
-    const auto reference = nodehammer::config::ConfigLoader::loadFromFile(path);
+    // The collecting face is the reference: this test walks every fixture,
+    // including the ones that do not parse, and needs the report rather than
+    // the throw to decide what `Config::read` should have done.
+    const auto reference = nodehammer::config::ConfigLoader::collectFromFile(path);
 
     // A document that will not load has no half-built form worth returning, so
     // the wrapper throws rather than handing back an empty `Config` nobody can
@@ -166,6 +169,40 @@ TEST_CASE("Config slices share one document and default to the built-in config",
     const nodehammer::config::NHConfig defaults;
     REQUIRE(nodehammer::config::configToToml(api::documentOf(none)) ==
             nodehammer::config::configToToml(defaults));
+}
+
+TEST_CASE("Config::check reports what Config::read throws", "[api][config]") {
+    // The pair the error model is built on: one collector, two promises. `read`
+    // owes a config and so cannot return a broken one; `check` owes a report,
+    // and a broken document is that report's content.
+    constexpr std::string_view bad = R"(
+[[rules]]
+match = "!!! not an expression"
+)";
+    const auto report = nodehammer::Config::checkString(bad);
+    REQUIRE(report.hasErrors());
+    REQUIRE_THROWS_AS(nodehammer::Config::parse(bad), nodehammer::Error);
+
+    // No Fatal in a returned list, ever — that severity belongs to the channel
+    // this call deliberately did not use.
+    for (const auto &d : report) {
+        REQUIRE(d.severity != nodehammer::Diagnostic::Severity::Fatal);
+    }
+
+    // Validation failures are reported too, not just parse ones: `check` is the
+    // whole of what `read` demands.
+    const auto undefinedMaterial = nodehammer::Config::checkString(R"(
+[[rules]]
+material = "nope"
+)");
+    REQUIRE(undefinedMaterial.hasErrors());
+
+    // A sound document reports nothing to complain about.
+    const auto clean = nodehammer::Config::check(kConfigsDir / "full_example.toml");
+    REQUIRE_FALSE(clean.hasErrors());
+
+    // And a file that is not there is not a document to report on.
+    REQUIRE_THROWS_AS(nodehammer::Config::check(kConfigsDir / "nope.toml"), nodehammer::Error);
 }
 
 TEST_CASE("Config::formats reports what this build can read", "[api][config]") {

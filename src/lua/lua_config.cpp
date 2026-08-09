@@ -589,7 +589,7 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view source
             }
             auto contents = readFileToString(*abs);
             if (!contents) {
-                diags.error(codes::kErrImportFileNotFound,
+                diags.error(codes::kFatalImportFileNotFound,
                             std::format("include target not found: '{}'", rel), key);
                 return;
             }
@@ -618,7 +618,7 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view source
             }
             auto contents = readFileToString(*abs);
             if (!contents) {
-                diags.error(codes::kErrImportFileNotFound,
+                diags.error(codes::kFatalImportFileNotFound,
                             std::format("use target not found: '{}'", rel), key);
                 return sol::lua_nil;
             }

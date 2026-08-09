@@ -38,10 +38,6 @@
 
 namespace nodehammer {
 
-struct DiagnosticList::Impl {
-    std::vector<Diagnostic> items;
-};
-
 struct SemanticScene::Impl {
     ir::semantic::Scene scene;
 };
@@ -74,15 +70,12 @@ struct OutputConfig::Impl {
 // verbs never reach it: `api::sceneOrThrow` below asks first, because it can say
 // which verb was handed the empty handle and this cannot.
 
-inline DiagnosticList::DiagnosticList(std::shared_ptr<const Impl> impl) noexcept
-    : impl_(std::move(impl)) {}
-
 inline SemanticScene::SemanticScene(std::shared_ptr<const Impl> impl) noexcept
     : impl_(std::move(impl)) {}
 
 inline const SemanticScene::Impl &SemanticScene::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the semantic scene handle refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the semantic scene handle refers to nothing"};
     }
     return *impl_;
 }
@@ -92,7 +85,7 @@ inline RenderScene::RenderScene(std::shared_ptr<const Impl> impl) noexcept
 
 inline const RenderScene::Impl &RenderScene::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the render scene handle refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the render scene handle refers to nothing"};
     }
     return *impl_;
 }
@@ -101,7 +94,7 @@ inline Config::Config(std::shared_ptr<const Impl> impl) noexcept : impl_(std::mo
 
 inline const Config::Impl &Config::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the config handle refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the config handle refers to nothing"};
     }
     return *impl_;
 }
@@ -111,7 +104,7 @@ inline SceneConfig::SceneConfig(std::shared_ptr<const Impl> impl) noexcept
 
 inline const SceneConfig::Impl &SceneConfig::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the scene config slice refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the scene config slice refers to nothing"};
     }
     return *impl_;
 }
@@ -121,7 +114,7 @@ inline OutputConfig::OutputConfig(std::shared_ptr<const Impl> impl) noexcept
 
 inline const OutputConfig::Impl &OutputConfig::impl() const {
     if (!impl_) {
-        throw Error{codes::kErrApiInvalidHandle, "the output config slice refers to nothing"};
+        throw Error{codes::kFatalApiInvalidHandle, "the output config slice refers to nothing"};
     }
     return *impl_;
 }
@@ -133,40 +126,19 @@ namespace api {
 //   asHandle(value)        an internal value → the public handle for it.
 //                          Overloaded, since there is one handle type per
 //                          internal type and nothing to choose between them.
+//                          The diagnostics overload lives in src/diagnostics.hpp,
+//                          where the failure channel needs it too.
 //   sceneOrThrow(h, verb)  a public handle → the scene inside it, or `Error`
 //                          naming the verb that was handed an empty handle.
 //   documentOf(slice)      a config slice → the parsed document, or the
 //                          built-in defaults.
-//   rethrowAsError(...)    an internal exception → the one type that crosses
-//                          this API.
-//   throwReportedErrors()  reported error *diagnostics* → the same.
+//   rethrowAsError(...)    a third-party exception → a failure this library can
+//                          name.
 //
 // The suffix carries the failure mode, which is the thing a reader at the call
 // site actually needs: `…OrThrow` throws on an empty handle, `…Of` cannot fail,
 // and `throw…` never returns. Nothing here is a bare verb whose behaviour you
 // have to come back to this file to learn.
-
-// ── Diagnostics ──────────────────────────────────────────────────────────────
-
-/// Hand the internal list's items to the public one.
-///
-/// Both sides hold `std::vector<nodehammer::Diagnostic>` — the same type, since
-/// the internal header now uses the published struct — so this moves rather than
-/// converts, and an empty list allocates nothing.
-[[nodiscard]] inline DiagnosticList asHandle(diagnostics::List &&src) {
-    std::vector<Diagnostic> items = std::move(src).take();
-    if (items.empty()) {
-        return DiagnosticList{};
-    }
-    return DiagnosticList{
-        std::make_shared<const DiagnosticList::Impl>(DiagnosticList::Impl{std::move(items)})};
-}
-
-/// For a list the caller still needs afterwards.
-[[nodiscard]] inline DiagnosticList asHandle(const diagnostics::List &src) {
-    diagnostics::List copy = src;
-    return asHandle(std::move(copy));
-}
 
 // ── Scenes ───────────────────────────────────────────────────────────────────
 
@@ -186,7 +158,7 @@ namespace api {
 [[nodiscard]] inline const ir::semantic::Scene &sceneOrThrow(const SemanticScene &handle,
                                                              std::string_view verb) {
     if (!handle.valid()) {
-        throw Error{codes::kErrApiInvalidHandle, "the semantic scene handle refers to nothing",
+        throw Error{codes::kFatalApiInvalidHandle, "the semantic scene handle refers to nothing",
                     verb};
     }
     return handle.impl().scene;
@@ -200,7 +172,8 @@ namespace api {
 [[nodiscard]] inline const ir::render::Scene &sceneOrThrow(const RenderScene &handle,
                                                            std::string_view verb) {
     if (!handle.valid()) {
-        throw Error{codes::kErrApiInvalidHandle, "the render scene handle refers to nothing", verb};
+        throw Error{codes::kFatalApiInvalidHandle, "the render scene handle refers to nothing",
+                    verb};
     }
     return handle.impl().scene;
 }
@@ -211,48 +184,6 @@ namespace api {
 [[noreturn]] inline void rethrowAsError(const std::exception &e, std::string_view code,
                                         std::string_view context = {}) {
     throw Error{code, e.what(), context};
-}
-
-/// Turn reported errors into the exception.
-///
-/// Some internal entry points report an unreadable input as an error
-/// *diagnostic* rather than by throwing — every importer does, and so does the
-/// config loader. At the boundary those are the same thing as a thrown failure:
-/// input the call could not act on, with nothing usable produced. This is where
-/// the two internal spellings become one external one.
-///
-/// The code and context come from the first error, since that is what a caller
-/// would branch on; the message carries all of them, because a config with three
-/// undefined material references should say so once rather than three calls in a
-/// row.
-[[noreturn]] inline void throwReportedErrors(const diagnostics::List &diags,
-                                             std::string_view fallback, std::string_view context) {
-    const Diagnostic *first = nullptr;
-    std::string message;
-    for (const auto &d : diags.items()) {
-        if (d.severity < Diagnostic::Severity::Error) {
-            continue;
-        }
-        if (first == nullptr) {
-            first = &d;
-            message = d.message;
-            continue;
-        }
-        // Only once there is more than one does the message have to say which
-        // code each part belongs to; a single failure already carries its code
-        // on the exception.
-        if (message == first->message) {
-            message = first->code + ": " + first->message;
-        }
-        message += "; ";
-        message += d.code;
-        message += ": ";
-        message += d.message;
-    }
-    if (first == nullptr) {
-        throw Error{fallback, "the operation failed without saying why", context};
-    }
-    throw Error{first->code, message, first->context.empty() ? context : first->context};
 }
 
 // ── Configs ──────────────────────────────────────────────────────────────────

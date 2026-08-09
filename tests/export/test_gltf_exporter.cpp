@@ -40,8 +40,7 @@ TEST_CASE("GltfExporter: single box -> GLB magic bytes", "[export][gltf]") {
     nodehammer::ir::ExportConfig cfg;
     cfg.format = nodehammer::ir::ExportConfig::Format::GLB;
 
-    auto result = exp.write(buildBoxRenderScene(), out, cfg);
-    CHECK_FALSE(result.diags.hasErrors());
+    exp.write(buildBoxRenderScene(), out, cfg);
     REQUIRE(std::filesystem::exists(out));
 
     // GLB magic = "glTF" = 0x46546C67 (little-endian)
@@ -146,8 +145,7 @@ TEST_CASE("GltfExporter: write as GLTF (text)", "[export][gltf]") {
     nodehammer::ir::ExportConfig cfg;
     cfg.format = nodehammer::ir::ExportConfig::Format::GLTF;
 
-    auto result = exp.write(buildBoxRenderScene(), out, cfg);
-    CHECK_FALSE(result.diags.hasErrors());
+    exp.write(buildBoxRenderScene(), out, cfg);
     REQUIRE(std::filesystem::exists(out));
 
     // GLTF JSON starts with '{'
@@ -169,8 +167,7 @@ TEST_CASE("ObjExporter: single box -> OBJ + MTL files exist", "[export][obj]") {
     nodehammer::ir::ExportConfig cfg;
     cfg.bakeUnitScale = true;
 
-    auto result = exp.write(buildBoxRenderScene(), out, cfg);
-    CHECK_FALSE(result.diags.hasErrors());
+    exp.write(buildBoxRenderScene(), out, cfg);
     CHECK(std::filesystem::exists(out));
     CHECK(std::filesystem::exists(mtl));
 

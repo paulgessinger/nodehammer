@@ -18,10 +18,13 @@ namespace nodehammer::lua {
 /// script path). `baseDir` roots the relative paths passed to `include()` /
 /// `use()`; nested includes resolve relative to the including file.
 ///
-/// The returned ConfigResult is always valid to inspect: Lua errors (syntax or
-/// runtime), unparseable predicate expressions, and DSL misuse are reported
-/// through `diags` (check `diags.hasErrors()`). On a fatal error the config may
-/// be only partially built.
+/// A *collecting* face, like `ConfigLoader::collectFromString`: Lua errors
+/// (syntax or runtime), unparseable predicate expressions and DSL misuse are
+/// reported through `diags` rather than thrown, because naming every problem in
+/// a script is the job. The config may be only partially built when they are
+/// present. A caller that promised a config rather than a report runs
+/// `diagnostics::throwIfErrors` over the result — which is what `Config::read`
+/// does (docs/error-model.md).
 ///
 /// This is the Option-A core of the scripting front-end: the `config-lua` CLI
 /// command wraps it with `configToToml`. The same entry point can later back an

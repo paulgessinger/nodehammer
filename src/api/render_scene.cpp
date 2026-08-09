@@ -18,6 +18,7 @@ namespace {
 
 constexpr std::string_view kNhr = "nhr";
 
+// @TODO: Potentially unify this with other occurrences
 [[nodiscard]] std::string lowerExtension(const std::filesystem::path &path) {
     std::string ext = path.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(),
@@ -43,23 +44,23 @@ void appendUnique(std::vector<std::string> &out, std::string_view name) {
 
 } // namespace
 
-RenderResult RenderScene::read(const std::filesystem::path &path) {
+RenderScene RenderScene::read(const std::filesystem::path &path) {
     try {
         const auto bytes = detail::zstd_io::readBytesFromFile(path);
-        return RenderResult{api::asHandle(ir::renderSceneFromBytes(bytes)), DiagnosticList{}};
+        return api::asHandle(ir::renderSceneFromBytes(bytes));
     } catch (const std::exception &e) {
         // `renderSceneFromBytes` throws on a failed verify and the reader throws
         // on a missing file; both are input this call cannot act on, and neither
         // internal type is part of the contract.
-        api::rethrowAsError(e, codes::kErrImportFileNotFound, path.string());
+        api::rethrowAsError(e, codes::kFatalImportFileNotFound, path.string());
     }
 }
 
-RenderResult RenderScene::read(std::span<const std::byte> nhr) {
+RenderScene RenderScene::read(std::span<const std::byte> nhr) {
     try {
-        return RenderResult{api::asHandle(ir::renderSceneFromBytes(nhr)), DiagnosticList{}};
+        return api::asHandle(ir::renderSceneFromBytes(nhr));
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrImportFileNotFound, "<memory>.nhr");
+        api::rethrowAsError(e, codes::kFatalImportFileNotFound, "<memory>.nhr");
     }
 }
 
@@ -78,27 +79,28 @@ std::span<const std::string_view> RenderScene::formats() {
     return views;
 }
 
-DiagnosticList RenderScene::write(const std::filesystem::path &path, const OutputConfig &output,
-                                  const WriteOptions &options) const {
+void RenderScene::write(const std::filesystem::path &path, const OutputConfig &output,
+                        const WriteOptions &options) const {
     const auto &scene = api::sceneOrThrow(*this, "RenderScene::write");
 
     // The render IR's own format is not in the exporter registry — nothing in
     // the CLI writes one — so it is dispatched here, ahead of the registry that
     // would otherwise report it as unknown.
+    // @TODO: Change the above and include it in the registry, so the CLI can write it too.
     if (options.format == kNhr || (options.format.empty() && isNhrPath(path))) {
         try {
             const auto bytes = ir::renderSceneToBytes(scene);
             detail::zstd_io::writeBytesToFile(path, bytes);
-            return DiagnosticList{};
+            return;
         } catch (const std::exception &e) {
-            api::rethrowAsError(e, codes::kErrExportWriteFailed, path.string());
+            api::rethrowAsError(e, codes::kFatalExportWriteFailed, path.string());
         }
     }
 
     const auto registry = ir::RenderExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(path, options.format);
     if (exporter == nullptr) {
-        throw Error{codes::kErrExportWriteFailed,
+        throw Error{codes::kFatalExportWriteFailed,
                     options.format.empty()
                         ? std::format("no exporter claims the extension of '{}'", path.string())
                         : std::format("no exporter named '{}' in this build; see formats()",
@@ -112,15 +114,11 @@ DiagnosticList RenderScene::write(const std::filesystem::path &path, const Outpu
     const auto resolved =
         pipeline::resolveExportConfig(api::documentOf(output), path, options.format);
     try {
-        auto result = exporter->write(scene, path, resolved);
-        if (result.diags.hasErrors()) {
-            api::throwReportedErrors(result.diags, codes::kErrExportWriteFailed, path.string());
-        }
-        return api::asHandle(std::move(result.diags));
+        exporter->write(scene, path, resolved);
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrExportWriteFailed, path.string());
+        api::rethrowAsError(e, codes::kFatalExportWriteFailed, path.string());
     }
 }
 
@@ -129,7 +127,7 @@ std::vector<std::byte> RenderScene::toNhr() const {
     try {
         return ir::renderSceneToBytes(scene);
     } catch (const std::exception &e) {
-        api::rethrowAsError(e, codes::kErrExportWriteFailed);
+        api::rethrowAsError(e, codes::kFatalExportWriteFailed);
     }
 }
 

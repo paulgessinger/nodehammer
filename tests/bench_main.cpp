@@ -65,12 +65,7 @@ int main(int argc, char **argv) {
     const auto reloaded = nodehammer::config::ConfigLoader::loadFromFile(config_path);
     const auto ecfg = nodehammer::pipeline::resolveExportConfig(reloaded.config, output_path);
 
-    auto expResult = exp->write(*built.scene, output_path.string(), ecfg);
-    printDiags(expResult.diags);
-    if (expResult.diags.hasErrors()) {
-        std::println(std::cerr, "bench: export to '{}' failed", output_path.string());
-        return 1;
-    }
+    exp->write(*built.scene, output_path.string(), ecfg);
 
     return 0;
 }

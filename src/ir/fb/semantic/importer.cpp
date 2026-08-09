@@ -24,10 +24,15 @@ ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const
         scene.computeWorldTransforms();
         scene.computeOriginalPaths();
         result.scene = std::move(scene);
+    } catch (const Error &) {
+        throw;
     } catch (const std::exception &ex) {
-        result.diags.error(
-            codes::kErrImportFileNotFound,
-            std::format("failed to load FlatBuffer '{}': {}", path.string(), ex.what()));
+        // The codec and the file reader both throw, and neither type is part of
+        // any contract. There is no scene to hand back, so this is the fatal
+        // channel — see docs/error-model.md.
+        throw Error{codes::kFatalImportFileNotFound,
+                    std::format("failed to load FlatBuffer '{}': {}", path.string(), ex.what()),
+                    path.string()};
     }
 
     return result;
@@ -52,9 +57,12 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
         scene.computeWorldTransforms();
         scene.computeOriginalPaths();
         result.scene = std::move(scene);
+    } catch (const Error &) {
+        throw;
     } catch (const std::exception &ex) {
-        result.diags.error(codes::kErrImportFileNotFound,
-                           std::format("failed to load FlatBuffer '{}': {}", filename, ex.what()));
+        throw Error{codes::kFatalImportFileNotFound,
+                    std::format("failed to load FlatBuffer '{}': {}", filename, ex.what()),
+                    std::string{filename}};
     }
 
     return result;

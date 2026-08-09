@@ -102,13 +102,20 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
     }
     if (in_progress_ && job_.poll()) {
         auto built = job_.take();
+        // Both channels, in order: what the build observed, then — if it could
+        // not deliver at all — the failure itself, which arrives as a value here
+        // because the build ran on another thread of control
+        // (docs/error-model.md).
         for (const auto &d : built.diags.items()) {
             std::println(stderr, "scene_build: {} {}", d.code, d.message);
             if (notifications_ != nullptr) {
                 notifications_->diagnostic(d);
             }
         }
-        if (built.scene) {
+        if (built.failure && notifications_ != nullptr) {
+            notifications_->diagnostic(built.failure->diagnostic());
+        }
+        if (!built.failure) {
             const auto build_ms = std::chrono::duration<double, std::milli>(
                                       std::chrono::steady_clock::now() - start_time_)
                                       .count();
@@ -145,15 +152,12 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
             }
             error_.clear();
         } else {
-            // Errors are already surfaced as toasts via diagnostic() above; stash
-            // the first one for the persistent status-bar message.
-            error_ = "scene build failed";
-            for (const auto &d : built.diags.items()) {
-                if (d.severity >= diagnostics::Severity::Error) {
-                    error_ = d.message;
-                    break;
-                }
-            }
+            // Already surfaced as a toast above; this is the persistent
+            // status-bar copy, and `what()` is the whole reason rather than the
+            // first line of a list someone had to search.
+            std::println(stderr, "scene_build: {} {}", built.failure->code(),
+                         built.failure->what());
+            error_ = built.failure->what();
             if (progress_handle_ != 0 && notifications_ != nullptr) {
                 notifications_->cancelProgress(progress_handle_);
                 progress_handle_ = 0;

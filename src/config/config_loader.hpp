@@ -14,8 +14,13 @@
 
 namespace nodehammer::config {
 
-/// Returned by ConfigLoader. Always valid — check diags.hasErrors() to determine whether
-/// the config can be used. On a fatal parse error, config is default-initialized.
+/// A config and what was observed producing it.
+///
+/// What `diags` may contain depends on which face produced it: the `load…`
+/// faces promise a config and throw rather than return a broken one, so theirs
+/// carries warnings only. The `collect…` faces promise a *report*, so theirs
+/// carries everything, and `config` is whatever could be salvaged
+/// (docs/error-model.md).
 struct ConfigResult {
     NHConfig config;
     diagnostics::List diags;
@@ -32,6 +37,12 @@ using IncludeFetcher =
     std::function<std::optional<std::span<const std::byte>>(std::string_view absolute_key)>;
 
 struct ConfigLoader {
+    // ── Faces that promise a config ──────────────────────────────────────────
+    //
+    // Each throws `Error` if the document does not load, carrying every
+    // problem the collector found rather than only the first. The returned
+    // `diags` is warnings.
+
     /// Load a config file and resolve its include tree against the file's own
     /// directory.
     [[nodiscard]] static ConfigResult loadFromFile(const std::filesystem::path &path);
@@ -50,6 +61,35 @@ struct ConfigLoader {
                                                      std::string_view sourceName = "<string>",
                                                      const std::filesystem::path &baseDir = {});
 
+    /// Parse `root_bytes` as TOML, recursively resolve `include = "..."`
+    /// directives by calling `fetcher` for each computed include key, merge
+    /// everything, and run the config-AST parser. Cycle detection is by
+    /// string-key equality in a visited set.
+    [[nodiscard]] static ConfigResult parseAndMerge(std::span<const std::byte> root_bytes,
+                                                    std::string_view root_key,
+                                                    IncludeFetcher fetcher);
+
+    // ── Faces that promise a report ──────────────────────────────────────────
+    //
+    // The loader collects rather than stops, because naming every problem in a
+    // document is the whole job — so these hand the collection back, errors and
+    // all, and never throw for anything the document *says*. They still throw
+    // when there is no document to report on: a file that will not open.
+    //
+    // This is what `nodehammer validate-config` and `Config::check` are built
+    // from, and why the doctrine's "no result type represents failure" does not
+    // apply to them: the report *is* the result.
+
+    [[nodiscard]] static ConfigResult collectFromFile(const std::filesystem::path &path);
+
+    [[nodiscard]] static ConfigResult collectFromString(std::string_view content,
+                                                        std::string_view sourceName = "<string>",
+                                                        const std::filesystem::path &baseDir = {});
+
+    [[nodiscard]] static ConfigResult collectAndMerge(std::span<const std::byte> root_bytes,
+                                                      std::string_view root_key,
+                                                      IncludeFetcher fetcher);
+
     /// Read only the top-level `include = [...]` array of a TOML buffer —
     /// does NOT recurse. Used by the BuildSession's include-graph walk
     /// to discover the next round of keys to resolve. Returns the raw,
@@ -66,17 +106,6 @@ struct ConfigLoader {
     /// (forward-slash) and lexically normalised.
     [[nodiscard]] static std::string resolveIncludeKey(std::string_view parent_key,
                                                        std::string_view rel);
-
-    /// Parse `root_bytes` as TOML, recursively resolve `include = "..."`
-    /// directives by calling `fetcher` for each computed include key,
-    /// merge everything, and run the config-AST parser. Cycle detection
-    /// is by string-key equality in a visited set. Diagnostics report
-    /// missing/unresolvable includes; the caller (BuildSession) is
-    /// responsible for ensuring the fetcher can satisfy every reachable
-    /// key before invocation.
-    [[nodiscard]] static ConfigResult parseAndMerge(std::span<const std::byte> root_bytes,
-                                                    std::string_view root_key,
-                                                    IncludeFetcher fetcher);
 };
 
 } // namespace nodehammer::config

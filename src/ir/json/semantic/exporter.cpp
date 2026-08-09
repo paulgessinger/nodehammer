@@ -16,22 +16,19 @@ std::vector<std::string> SemanticJsonExporter::supportedExtensions() const {
     return {"json", "json.zst"};
 }
 
-SemanticExportResult
-SemanticJsonExporter::write(const semantic::Scene &scene, const std::filesystem::path &path,
-                            [[maybe_unused]] const SemanticExportConfig &config) const {
-    SemanticExportResult result;
-
+void SemanticJsonExporter::write(const semantic::Scene &scene, const std::filesystem::path &path,
+                                 [[maybe_unused]] const SemanticExportConfig &config) const {
     try {
         nlohmann::json j = scene;
         const std::string jsonStr = j.dump(-1);
         detail::zstd_io::writeJsonToFile(path, jsonStr);
+    } catch (const Error &) {
+        throw;
     } catch (const std::exception &ex) {
-        result.diags.error(codes::kErrExportWriteFailed,
-                           std::format("failed to write JSON '{}': {}", path.string(), ex.what()),
-                           path.string());
+        throw Error{codes::kFatalExportWriteFailed,
+                    std::format("failed to write JSON '{}': {}", path.string(), ex.what()),
+                    path.string()};
     }
-
-    return result;
 }
 
 } // namespace nodehammer::ir
