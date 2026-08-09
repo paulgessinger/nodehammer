@@ -18,6 +18,14 @@
 #include <utility>
 #include <vector>
 
+// The EM_JS bodies below go through Closure in the Release link, which renames
+// every unquoted property. Anything reached off `Module` is therefore written
+// quoted, without exception -- exports, runtime methods, host-set props and our
+// own `__nh*` scratch alike -- because the runtime publishes them under their
+// literal names and Closure preserves only the quoted side. Bare `HEAPU8` /
+// `_malloc` (the module-scope bindings) are fine: Closure renames those
+// consistently. scripts/check_em_js_closure.py enforces this.
+
 // clang-format off
 EM_JS(void, nh_viewer_commit_url_state, (const char *state_query, const char *managed_keys), {
     var url = new URL(window.location.href);
@@ -97,8 +105,8 @@ EM_JS(void, nh_viewer_download_bytes,
 // clang-format off
 EM_JS(void, nh_viewer_idb_open_helper, (), {
     // Lazily define a shared open() helper the get/put/delete calls reuse.
-    if (Module.__nhIdbOpen) { return; }
-    Module.__nhIdbOpen = function() {
+    if (Module['__nhIdbOpen']) { return; }
+    Module['__nhIdbOpen'] = function() {
         return new Promise(function(resolve, reject) {
             var req = indexedDB.open('nodehammer', 1);
             req.onupgradeneeded = function() {
@@ -116,7 +124,7 @@ EM_JS(void, nh_viewer_idb_open_helper, (), {
 EM_JS(void, nh_viewer_idb_get, (const char *key), {
     var k = UTF8ToString(key);
     nh_viewer_idb_open_helper();
-    Module.__nhIdbOpen().then(function(db) {
+    Module['__nhIdbOpen']().then(function(db) {
         var tx = db.transaction('blobs', 'readonly');
         var req = tx.objectStore('blobs').get(k);
         req.onsuccess = function() {
@@ -127,7 +135,7 @@ EM_JS(void, nh_viewer_idb_get, (const char *key), {
             }
             var bytes = new Uint8Array(val);
             var ptr = Module['_malloc'](bytes.length);
-            Module.HEAPU8.set(bytes, ptr);
+            Module['HEAPU8'].set(bytes, ptr);
             Module['_nh_viewer_project_blob_loaded'](ptr, bytes.length);
             Module['_free'](ptr);
         };
@@ -143,7 +151,7 @@ EM_JS(void, nh_viewer_idb_put, (const char *key, const uint8_t *data, int size),
     // Copy out of the wasm heap now (it can move before the async write runs).
     var copy = new Uint8Array(HEAPU8.subarray(data, data + size));
     nh_viewer_idb_open_helper();
-    Module.__nhIdbOpen().then(function(db) {
+    Module['__nhIdbOpen']().then(function(db) {
         var tx = db.transaction('blobs', 'readwrite');
         tx.objectStore('blobs').put(copy, k);
     }).catch(function(e) { console.warn('nodehammer: IDB put failed', e); });
@@ -152,7 +160,7 @@ EM_JS(void, nh_viewer_idb_put, (const char *key, const uint8_t *data, int size),
 EM_JS(void, nh_viewer_idb_delete, (const char *key), {
     var k = UTF8ToString(key);
     nh_viewer_idb_open_helper();
-    Module.__nhIdbOpen().then(function(db) {
+    Module['__nhIdbOpen']().then(function(db) {
         var tx = db.transaction('blobs', 'readwrite');
         tx.objectStore('blobs').delete(k);
     }).catch(function(e) { console.warn('nodehammer: IDB delete failed', e); });
@@ -186,11 +194,11 @@ EM_JS(void, nh_viewer_publish_fetch_runtime, (), {
             if (!e) { continue; } // a missing backend variant is tolerated
             var bytes = new Uint8Array(e.buf);
             var data_ptr = Module['_malloc'](bytes.length);
-            Module.HEAPU8.set(bytes, data_ptr);
+            Module['HEAPU8'].set(bytes, data_ptr);
             var name_utf8 = enc.encode(e.name);
             var name_ptr = Module['_malloc'](name_utf8.length + 1);
-            Module.HEAPU8.set(name_utf8, name_ptr);
-            Module.HEAPU8[name_ptr + name_utf8.length] = 0;
+            Module['HEAPU8'].set(name_utf8, name_ptr);
+            Module['HEAPU8'][name_ptr + name_utf8.length] = 0;
             Module['_nh_viewer_publish_add_file'](name_ptr, data_ptr, bytes.length);
             Module['_free'](name_ptr);
             Module['_free'](data_ptr);
@@ -202,12 +210,12 @@ EM_JS(void, nh_viewer_publish_fetch_runtime, (), {
 
 // clang-format off
 EM_JS(void, nh_viewer_install_window_observers, (uintptr_t handle), {
-    if (Module.__nhWindowObserversInstalled) {
+    if (Module['__nhWindowObserversInstalled']) {
         return;
     }
-    Module.__nhWindowObserversInstalled = true;
+    Module['__nhWindowObserversInstalled'] = true;
 
-    var canvas = Module.canvas || document.getElementById('canvas');
+    var canvas = Module['canvas'] || document.getElementById('canvas');
     if (!canvas) {
         return;
     }
@@ -387,12 +395,12 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
                 var bytes = new Uint8Array(buffers[i]);
                 var size = bytes.length;
                 var data_ptr = Module['_malloc'](size);
-                Module.HEAPU8.set(bytes, data_ptr);
+                Module['HEAPU8'].set(bytes, data_ptr);
 
                 var name_utf8 = enc.encode(files[i].name);
                 var name_ptr = Module['_malloc'](name_utf8.length + 1);
-                Module.HEAPU8.set(name_utf8, name_ptr);
-                Module.HEAPU8[name_ptr + name_utf8.length] = 0;
+                Module['HEAPU8'].set(name_utf8, name_ptr);
+                Module['HEAPU8'][name_ptr + name_utf8.length] = 0;
 
                 Module['_nh_viewer_add_upload'](handle, name_ptr, data_ptr, size);
 
@@ -426,7 +434,7 @@ EM_JS(void, nh_viewer_open_archive_picker, (), {
             var buffer = await files[0].arrayBuffer();
             var bytes = new Uint8Array(buffer);
             var data_ptr = Module['_malloc'](bytes.length);
-            Module.HEAPU8.set(bytes, data_ptr);
+            Module['HEAPU8'].set(bytes, data_ptr);
             Module['_nh_viewer_open_archive'](data_ptr, bytes.length);
             Module['_free'](data_ptr);
         });
