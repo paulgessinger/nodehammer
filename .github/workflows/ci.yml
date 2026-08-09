@@ -205,6 +205,37 @@ jobs:
           path: ~/emsdk-stable/upstream/emscripten/cache
           key: emscripten-cache-5.0.6-${{ hashFiles('CMakeLists.txt', 'cmake/**/*.cmake', 'profiles/emscripten', 'conanfile.py') }}-${{ github.run_id }}
 
+      # Closure runs only in this configuration, so this is the only place a
+      # renamed-away or never-exported `Module['x']` can be seen. The failure it
+      # guards against is silent: the property is simply undefined, and the page
+      # dies at the moment that handler first runs, in the browser, in
+      # production. Text-only -- no browser, no node.
+      - name: Check wasm Module linkage
+        if: matrix.kind == 'wasm'
+        shell: bash
+        run: |
+          scripts/check_wasm_module_linkage.py \
+            build/emscripten/Release/nodehammer-wgpu.js \
+            build/emscripten/Release/nodehammer-gles3.js
+
+      # The other half of the boundary: drives nh_compute_build in node against
+      # the closure'd compute module, i.e. the heap staging, ccall marshalling
+      # and progress postMessage protocol the browser worker uses, without a
+      # browser. `just wasm-compute-smoke` runs the same script locally but
+      # defaults to RelWithDebInfo, where Closure never runs -- only this pass
+      # can see a minification break in the worker protocol.
+      #
+      # ODD rather than a synthetic scene: it is already the CI fixture (see
+      # ci/bench.sh), it needs no native build to mint, and at 325k render nodes
+      # it actually produces progress messages, which a trivial scene does not.
+      - name: Compute module smoke (Release)
+        if: matrix.kind == 'wasm'
+        shell: bash
+        run: |
+          zstd -dc odd.nhb.zst > smoke.nhb
+          node scripts/wasm_compute_smoke.js \
+            build/emscripten/Release/nodehammer-compute.js smoke.nhb
+
       - name: Test
         shell: bash
         run: ci/build.sh test ${{ matrix.kind }}
@@ -292,6 +323,8 @@ jobs:
           tar xzf wasm-artifact/nodehammer-wasm32.tar.gz -C wasm-runtime
           ls -la wasm-runtime/bin
 
+      # The native build is only here to mint the .nhb fixture for the smoke
+      # below; this job otherwise deals purely in the wasm artifact.
       # Landing page + one self-contained directory per web posture:
       # app/ (no sidecar -> application mode) and odd/ + odd-simple/
       # (sidecar -> locked .nhproj publications).
