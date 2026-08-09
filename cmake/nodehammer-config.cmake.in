@@ -25,4 +25,74 @@
 
 include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
 
+# ── MSVC: the consumer's C runtime has to match the library's ─────────────────
+# This API passes owning std:: types across the boundary — std::string inside
+# Diagnostic, std::vector out of toNhb() — and throws an exception across it. On
+# MSVC that is defined only while both sides agree on the standard library's
+# layout and on which heap frees what, and they agree across neither the
+# debug/release split (_ITERATOR_DEBUG_LEVEL is 2 under a debug CRT and 0
+# otherwise, adding a proxy pointer to every container, so sizeof(std::string) is
+# 40 against 32) nor the static/dynamic one (/MT and /MD each carry their own
+# heap).
+#
+# The failure that produces is silent and late: everything compiles, everything
+# links, and the first call returns an empty vector because the caller read a
+# 32-byte object as 40, then dies freeing it. That is what CI's consumer hit —
+# a Debug build picking up an env-set CMAKE_BUILD_TYPE against the Release
+# library.
+#
+# Deliberately conservative about when it fires, on *both* sides. Neither
+# runtime can always be resolved here: `CMAKE_MSVC_RUNTIME_LIBRARY` is normally
+# a generator expression whose shape varies by who set it (CMake writes
+# "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL", Conan writes
+# "$<$<CONFIG:Release>:MultiThreadedDLL>"), a multi-config consumer has not
+# chosen a configuration at find_package time, and `$<TARGET_PROPERTY:>` does
+# not recursively evaluate a genex stored in a property. So each side is
+# classified only when it is a plain string, and the check runs only when both
+# are.
+#
+# Undecidable means silent, not fatal. Two earlier versions of this guard tried
+# to parse the expressions and rejected correct builds instead — a false
+# positive here blocks a consumer outright, which is worse than the failure the
+# check exists to make legible.
+set(_nh_runtime_file "${CMAKE_CURRENT_LIST_DIR}/nodehammer-msvc-runtime.txt")
+if(MSVC AND CMAKE_BUILD_TYPE AND EXISTS "${_nh_runtime_file}")
+    file(READ "${_nh_runtime_file}" _nh_lib_runtime)
+    string(STRIP "${_nh_lib_runtime}" _nh_lib_runtime)
+
+    # CMake documents configuration handling as case-insensitive, so normalise
+    # before classifying: -DCMAKE_BUILD_TYPE=debug is a debug build.
+    string(TOLOWER "${CMAKE_BUILD_TYPE}" _nh_consumer_cfg)
+    if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+        # CMake's default when the variable is unset.
+        if(_nh_consumer_cfg STREQUAL "debug")
+            set(_nh_consumer_runtime "MultiThreadedDebugDLL")
+        else()
+            set(_nh_consumer_runtime "MultiThreadedDLL")
+        endif()
+    elseif(NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "\\$<")
+        set(_nh_consumer_runtime "${CMAKE_MSVC_RUNTIME_LIBRARY}")
+    else()
+        set(_nh_consumer_runtime "")   # a genex; not decidable here
+    endif()
+
+    if(_nh_lib_runtime MATCHES "\\$<")
+        set(_nh_lib_runtime "")   # a genex; not decidable here either
+    endif()
+
+    if(_nh_lib_runtime AND _nh_consumer_runtime
+       AND NOT _nh_consumer_runtime STREQUAL _nh_lib_runtime)
+        message(FATAL_ERROR
+            "nodehammer was built against the ${_nh_lib_runtime} MSVC runtime, but this "
+            "project resolves to ${_nh_consumer_runtime} (CMAKE_BUILD_TYPE="
+            "${CMAKE_BUILD_TYPE}). Mixing MSVC runtimes is undefined whenever std:: types "
+            "or exceptions cross a DLL boundary, which nodehammer's API does. Build "
+            "against a matching configuration.")
+    endif()
+    unset(_nh_consumer_cfg)
+    unset(_nh_consumer_runtime)
+    unset(_nh_lib_runtime)
+endif()
+unset(_nh_runtime_file)
+
 check_required_components(nodehammer)

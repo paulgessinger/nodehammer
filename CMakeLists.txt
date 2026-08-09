@@ -94,6 +94,23 @@ option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at bu
 option(NODEHAMMER_PIC_CHECK     "Link a probe shared module against the static library to prove every object is position-independent (consumed in cmake/PicProbe.cmake)" OFF)
 option(NODEHAMMER_BUILD_SHARED  "Also build and install the shared library + public headers + CMake package config" OFF)
 
+# DD4hep's importer *is* a TGeo importer with extra passes: it calls
+# `traverseTGeoManager`, and the importer registry registers `TGeoImporter`
+# whenever NH_WITH_TGEO is defined — which enabling DD4hep already does, since
+# that define is on the union of the two options. But the TU defining both of
+# those symbols was gated on NODEHAMMER_WITH_TGEO alone, so a DD4hep-only build
+# compiled two call sites for code nobody compiled and failed to link on both.
+#
+# Forcing the option on is the fix rather than widening that one source gate: it
+# keeps the define, the registry entry, the `.root` importer and the traversal
+# moving together, so there is one answer to "does this build have TGeo" instead
+# of two that can drift. Latent until now only because no configuration builds
+# DD4hep without TGeo — CI's LCG job sets both.
+if(NODEHAMMER_WITH_DD4HEP AND NOT NODEHAMMER_WITH_TGEO)
+    message(STATUS "nodehammer: NODEHAMMER_WITH_DD4HEP implies NODEHAMMER_WITH_TGEO; enabling it")
+    set(NODEHAMMER_WITH_TGEO ON CACHE BOOL "Enable TGeo/ROOT importer" FORCE)
+endif()
+
 include(cmake/Dependencies.cmake)
 include(cmake/CompilerOptions.cmake)
 
@@ -193,6 +210,14 @@ set(NH_CORE_SOURCES
     src/scene_build.cpp
     src/export_resolve.cpp
     src/version.cpp
+    # The public API bridge: the only translation units that see both a public
+    # handle and its internals (src/api/handles.hpp is where the seam lives).
+    # Core, not app — these *are* what the installed library publishes.
+    src/api/diagnostics.cpp
+    src/api/semantic_scene.cpp
+    src/api/config.cpp
+    src/api/render_scene.cpp
+    src/api/build.cpp
     # The in-memory bag (key→bytes store) behind ProjectFs. Under src/viewer/ for
     # organisational reasons, but no sokol/GUI deps and part of the project
     # substrate rather than the app — see NH_APP_SOURCES for where that line is.
@@ -423,7 +448,7 @@ endfunction()
 # A shared build compiles the core twice, once per variant. On Windows that is
 # unavoidable — __declspec(dllexport) is codegen-affecting, so a DLL's objects
 # are not valid inside a static library. Elsewhere NH_API only ever *raises*
-# visibility (include/nodehammer/api.hpp), so one object serves both and an
+# visibility (include/nodehammer/visibility.hpp), so one object serves both and an
 # OBJECT library compiles the core once.
 #
 # The trade: shared objects cannot carry NH_STATIC, so the archive's *public*
@@ -477,7 +502,7 @@ target_compile_definitions(nodehammer_lib PUBLIC ${NH_CORE_DEFINES} ${NH_APP_DEF
 # installed, so this never reaches a package config.
 target_compile_features(nodehammer_lib INTERFACE cxx_std_23)
 
-# NH_STATIC collapses NH_API to nothing (include/nodehammer/api.hpp). PUBLIC so
+# NH_STATIC collapses NH_API to nothing (include/nodehammer/visibility.hpp). PUBLIC so
 # every in-tree consumer — CLI, viewer, tests — inherits it and no target has to
 # remember; without it they would see the dllimport spelling on Windows and fail
 # to link against the archive.
@@ -701,6 +726,33 @@ else()
     nh_apply_emscripten_exe_options(nodehammer)
 endif()
 
+# ── gcc 15: a false positive on copying a vector<SelectionRule> ───────────────
+# Copying a `SelectionRule` copies a `PredicateExpr`, which is a `std::variant`
+# holding `shared_ptr`s for the compound predicates. At -O3, gcc 15 inlines the
+# variant's copy constructor together with the destructor that only ever runs if
+# that construction *throws*, then reports the control-block pointer on that
+# unreachable path as maybe-uninitialized. NODEHAMMER_WERROR makes it fatal, and
+# `LCG 109` is the only configuration that compiles with this compiler.
+#
+# Declared as a list rather than as a `#pragma` in the offending function,
+# because which function is "offending" is an inlining decision and moves: the
+# first version of this suppression sat in src/api/build.cpp, and deleting an
+# unrelated dead `catch` in that file moved the report to scene_build.cpp. These
+# are the translation units that construct a `SelectionEngine`, which is where
+# the copy happens; if a sixth appears, it goes here.
+#
+# Scoped per source so a genuine maybe-uninitialized anywhere else still fails.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    set_source_files_properties(
+        src/api/build.cpp
+        src/scene_build.cpp
+        src/selection/selector.cpp
+        src/cli/cmd_convert.cpp
+        src/cli/cmd_dump_semantic.cpp
+        PROPERTIES COMPILE_OPTIONS "-Wno-maybe-uninitialized"
+    )
+endif()
+
 # ── Tests ──────────────────────────────────────────────────────────────────────
 if(NODEHAMMER_BUILD_TESTS)
     enable_testing()
@@ -795,6 +847,31 @@ if(NODEHAMMER_BUILD_SHARED)
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
         COMPONENT Development
     )
+
+    # Baked into the package config so a consumer's mismatched C runtime fails at
+    # configure time rather than as a segmentation fault on the first call that
+    # returns a container (see cmake/nodehammer-config.cmake.in).
+    #
+    # Evaluated by CMake rather than parsed by us. `CMAKE_MSVC_RUNTIME_LIBRARY`
+    # is normally a generator expression, and its shape varies by who set it —
+    # CMake's own default is "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" while
+    # Conan writes "$<$<CONFIG:Release>:MultiThreadedDLL>". A hand-rolled
+    # substitution for one of those spellings reported the other as a mismatch
+    # and blocked a legitimate build, which is worse than the failure it exists
+    # to catch. `file(GENERATE)` resolves whatever is there, exactly.
+    #
+    # The full runtime name, not a debug flag: /MT and /MD are different heaps
+    # even when neither is a debug runtime, so a static-CRT library and a
+    # dynamic-CRT consumer must not pass.
+    if(MSVC)
+        set(_nh_runtime_stamp "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-msvc-runtime.txt")
+        file(GENERATE OUTPUT "${_nh_runtime_stamp}"
+             CONTENT "$<TARGET_PROPERTY:nodehammer_shared,MSVC_RUNTIME_LIBRARY>")
+        install(FILES "${_nh_runtime_stamp}"
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
+            COMPONENT Development
+        )
+    endif()
 
     include(CMakePackageConfigHelpers)
     configure_package_config_file(

@@ -30,7 +30,7 @@ TEST_CASE("ConfigLoader: invalid TOML syntax -> Error diagnostic with source pos
     auto result = nodehammer::config::ConfigLoader::loadFromString(bad, "test_input");
     REQUIRE(result.diags.hasErrors());
     const auto &d = result.diags.items().front();
-    REQUIRE(d.severity == nodehammer::diagnostics::DiagnosticSeverity::Error);
+    REQUIRE(d.severity == nodehammer::diagnostics::Severity::Error);
     REQUIRE(d.context.find("test_input") != std::string::npos);
 }
 
@@ -280,7 +280,7 @@ max_segments_circle = 32
     REQUIRE_FALSE(result.diags.hasErrors()); // still succeeds
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::diagnostics::Severity::Warning &&
             d.code == nodehammer::codes::kWarnConfigUnknownKey &&
             d.message.find("tessellation_rulesx") != std::string::npos) {
             found = true;
@@ -299,7 +299,7 @@ roughness = 0.2
     REQUIRE_FALSE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::diagnostics::Severity::Warning &&
             d.message.find("metallick") != std::string::npos) {
             found = true;
         }
@@ -319,7 +319,7 @@ fallback = "skip"
     REQUIRE_FALSE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::diagnostics::Severity::Warning &&
             d.message.find("xmax_segments_circle") != std::string::npos) {
             found = true;
         }
@@ -339,7 +339,7 @@ type = "is_leaf"
     REQUIRE_FALSE(result.diags.hasErrors());
     bool found = false;
     for (const auto &d : result.diags.items()) {
-        if (d.severity == nodehammer::diagnostics::DiagnosticSeverity::Warning &&
+        if (d.severity == nodehammer::diagnostics::Severity::Warning &&
             d.message.find("scop") != std::string::npos) {
             found = true;
         }

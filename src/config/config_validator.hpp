@@ -8,7 +8,7 @@ namespace nodehammer::config {
 struct ConfigValidator {
     /// Validates cross-references and constraints within an already-parsed NHConfig.
     /// Returns diagnostics found. Empty list = valid.
-    [[nodiscard]] static diagnostics::DiagnosticList validate(const NHConfig &config);
+    [[nodiscard]] static diagnostics::List validate(const NHConfig &config);
 };
 
 } // namespace nodehammer::config

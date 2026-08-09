@@ -60,7 +60,7 @@ function(nh_set_compiler_options target)
     endif()
 endfunction()
 
-# Export nothing unless it says NH_API (include/nodehammer/api.hpp).
+# Export nothing unless it says NH_API (include/nodehammer/visibility.hpp).
 #
 # Applied to *both* core variants. For the shared library that is the point. The
 # static one has no export table, and the reason there is that it makes the

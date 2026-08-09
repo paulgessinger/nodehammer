@@ -5,6 +5,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -90,7 +91,7 @@ struct ExportConfig {
 // ── ExportResult ──────────────────────────────────────────────────────────────
 
 struct ExportResult {
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 };
 
 // ── IRenderExporter ───────────────────────────────────────────────────────────
@@ -128,6 +129,12 @@ class RenderExporterRegistry {
     /// formatHint takes precedence when non-empty; otherwise the path extension is used.
     [[nodiscard]] const IRenderExporter *resolve(const std::filesystem::path &path,
                                                  std::string_view formatHint = {}) const noexcept;
+
+    /// All registered exporters, in registration order. The sibling registries
+    /// (`ImporterRegistry`, `SemanticExporterRegistry`) have always had this;
+    /// its absence here was an oversight, and `RenderScene::formats()` is the
+    /// first caller that has to enumerate rather than look up.
+    [[nodiscard]] std::span<const std::unique_ptr<IRenderExporter>> exporters() const noexcept;
 
     /// Build a registry pre-populated with GltfExporter and ObjExporter.
     [[nodiscard]] static RenderExporterRegistry makeDefault();

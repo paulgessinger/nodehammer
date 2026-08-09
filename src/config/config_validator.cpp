@@ -6,8 +6,8 @@
 
 namespace nodehammer::config {
 
-diagnostics::DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
-    diagnostics::DiagnosticList diags;
+diagnostics::List ConfigValidator::validate(const NHConfig &cfg) {
+    diagnostics::List diags;
 
     // Build set of defined material names for reference checking.
     std::unordered_set<std::string> definedMaterials;

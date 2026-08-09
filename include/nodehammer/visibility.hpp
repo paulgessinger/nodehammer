@@ -1,6 +1,11 @@
 #pragma once
 
-// Visibility decoration for the public API.
+// Visibility decoration for the public API — the two macros that decide what
+// leaves the shared library, and nothing else.
+//
+// Named for what it holds rather than for the API it decorates: a header called
+// `api.hpp` reads like the place the API *is*, which is semantic_scene.hpp,
+// render_scene.hpp, config.hpp, diagnostics.hpp and build.hpp between them.
 //
 // The add-on to the public/internal split, not the split itself: what keeps
 // internals unreachable is physical, since `include/nodehammer/` holds only
@@ -35,4 +40,24 @@
 #endif
 #else
 #define NH_API __attribute__((visibility("default")))
+#endif
+
+// Decoration for a *type* whose identity has to cross the boundary — today only
+// the exception, since `catch` matches on the type rather than on a symbol.
+//
+// It differs from NH_API because the two platforms need opposite things:
+//
+//   ELF / Mach-O   the class must carry default visibility so its typeinfo and
+//                  vtable are exported. Under -fvisibility=hidden each shared
+//                  object would otherwise emit its own copy, and a `catch` in
+//                  the consumer would not match a `throw` from the library.
+//   Windows        nothing. MSVC matches a thrown type by its mangled name
+//                  recorded in the throw info, so no export is needed — and
+//                  applying __declspec(dllexport) to a class derived from
+//                  std::runtime_error raises C4275, which this project treats
+//                  as an error. Members still carry NH_API individually.
+#if defined(NH_STATIC) || defined(_WIN32)
+#define NH_API_TYPE
+#else
+#define NH_API_TYPE __attribute__((visibility("default")))
 #endif

@@ -14,7 +14,7 @@ namespace nodehammer::ir {
 struct SemanticExportConfig {};
 
 struct SemanticExportResult {
-    diagnostics::DiagnosticList diags;
+    diagnostics::List diags;
 };
 
 /// Pure interface for semantic scene exporters (JSON/NHB/...).

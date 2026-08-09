@@ -58,6 +58,11 @@ const IRenderExporter *RenderExporterRegistry::resolve(const std::filesystem::pa
     return nullptr;
 }
 
+std::span<const std::unique_ptr<IRenderExporter>>
+RenderExporterRegistry::exporters() const noexcept {
+    return exporters_;
+}
+
 RenderExporterRegistry RenderExporterRegistry::makeDefault() {
     RenderExporterRegistry reg;
     reg.registerExporter(std::make_unique<GltfExporter>());

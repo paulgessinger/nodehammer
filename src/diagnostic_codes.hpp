@@ -63,4 +63,13 @@ inline constexpr std::string_view kErrExportWriteFailed = "NH0600";
 // ── Compute worker (web) ────────────────────────────────────────────────────────
 inline constexpr std::string_view kErrComputeWorker = "NH0700";
 
+// ── Public API boundary ───────────────────────────────────────────────────────
+// Raised by src/api/ only, for the two failures that exist because there is a
+// boundary: a verb handed a handle that refers to nothing, and a format whose
+// backend this build does not have. The latter is a diagnostic rather than a
+// link error precisely for the entry points that dispatch on a string, where
+// the format is not known until run time (#41 §5).
+inline constexpr std::string_view kErrApiInvalidHandle = "NH0800";
+inline constexpr std::string_view kErrApiBackendMissing = "NH0801";
+
 } // namespace nodehammer::codes

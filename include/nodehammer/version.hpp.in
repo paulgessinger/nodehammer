@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nodehammer/api.hpp>
+#include <nodehammer/visibility.hpp>
 
 #include <string_view>
 
@@ -15,8 +15,13 @@ inline constexpr int VERSION_PATCH = @NODEHAMMER_VERSION_PATCH@;
 // headers were *compiled against*. For a shared library those can differ, and
 // only the out-of-line form reports the former — which also makes this the one
 // entity proving a consumer is really talking to libnodehammer rather than just
-// reading its headers. Final home is a step-6 question (the API sketch files it
-// under diagnostics.hpp); here for now because this is the only public header.
+// reading its headers.
+//
+// Step 6 answered the "final home" question by leaving it here. The API sketch
+// filed it under diagnostics.hpp, but that was a listing artefact: `VERSION` and
+// `version()` are the two halves of one question — compiled-against versus
+// linked — and splitting them across headers would mean a consumer includes
+// diagnostics.hpp to compare against a constant that lives somewhere else.
 NH_API std::string_view version() noexcept;
 
 } // namespace nodehammer
