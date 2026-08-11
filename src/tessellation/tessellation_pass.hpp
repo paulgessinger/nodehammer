@@ -9,7 +9,7 @@ namespace nodehammer::tessellation {
 
 struct TessellationPassResult {
     ir::render::Scene scene;
-    diagnostics::List diags;
+    DiagnosticList diags;
 };
 
 /// Lowers a semantic::Scene to a render::Scene.

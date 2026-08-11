@@ -36,7 +36,7 @@ TEST_CASE("boolean tessellator: full hollow pgon is manifold",
     auto mesh = tess.tessellate(ir::semantic::ShapeVariant{pgon}, kDefault);
     REQUIRE_FALSE(mesh.vertices.empty());
 
-    diagnostics::List diags;
+    DiagnosticList diags;
     auto m = meshToManifold(mesh, diags, "pgon");
     REQUIRE(m.has_value());
     CHECK(m->Status() == manifold::Manifold::Error::NoError);
@@ -56,7 +56,7 @@ TEST_CASE("boolean tessellator: large full hollow pgon is manifold",
     pgon.sections = {{-345.0, 160.0, 343.6}, {345.0, 160.0, 343.6}};
 
     auto mesh = tess.tessellate(ir::semantic::ShapeVariant{pgon}, kDefault);
-    diagnostics::List diags;
+    DiagnosticList diags;
     auto m = meshToManifold(mesh, diags, "pgon_large");
     REQUIRE(m.has_value());
     CHECK(m->Status() == manifold::Manifold::Error::NoError);

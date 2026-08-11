@@ -19,8 +19,7 @@ namespace {
 
 [[nodiscard]] bool dedupApplies(const config::NHConfig &cfg) { return cfg.deduplicateShapes; }
 
-void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg,
-                  diagnostics::List &diags) {
+void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg, DiagnosticList &diags) {
     const selection::SelectionEngine engine{cfg.selection, cfg.hoistOrphans};
     diags.append(engine.prune(scene));
 }
@@ -31,7 +30,7 @@ void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg,
 /// discarded them, so a caller had no way to tell "dedup ran" from "dedup did
 /// something". They are `Info` — the result is exactly what was asked for, and
 /// this is worth recording (docs/error-model.md).
-void runDedup(ir::semantic::Scene &scene, diagnostics::List &diags) {
+void runDedup(ir::semantic::Scene &scene, DiagnosticList &diags) {
     const auto materials = scene.deduplicateMaterials();
     const auto shapes = scene.deduplicateShapes();
     const auto logVols = scene.deduplicateLogVols();
@@ -53,13 +52,12 @@ SemanticResult applySelection(const SemanticScene &scene, const SceneConfig &con
     }
 
     ir::semantic::Scene working = input;
-    diagnostics::List diags;
+    DiagnosticList diags;
     runSelection(working, cfg, diags);
     // The scene comes back even when the diagnostics carry errors — a
     // root-dropped rule leaves `prune` a no-op and says so (NH0401), and
     // handing back nothing would hide the scene the caller still has.
-    return SemanticResult{api::asHandle(std::move(working)),
-                          diagnostics::asHandle(std::move(diags))};
+    return SemanticResult{api::asHandle(std::move(working)), std::move(diags)};
 }
 
 SemanticResult deduplicate(const SemanticScene &scene, const SceneConfig &config) {
@@ -70,10 +68,9 @@ SemanticResult deduplicate(const SemanticScene &scene, const SceneConfig &config
     }
 
     ir::semantic::Scene working = input;
-    diagnostics::List diags;
+    DiagnosticList diags;
     runDedup(working, diags);
-    return SemanticResult{api::asHandle(std::move(working)),
-                          diagnostics::asHandle(std::move(diags))};
+    return SemanticResult{api::asHandle(std::move(working)), std::move(diags)};
 }
 
 RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
@@ -85,8 +82,7 @@ RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
     // unknown shape and leaves that one node without a mesh binding, and the
     // rest of the scene is still a scene. Returning it is what lets a caller
     // decide whether to export anyway, exactly as the internal pass allows.
-    return RenderResult{api::asHandle(std::move(result.scene)),
-                        diagnostics::asHandle(std::move(result.diags))};
+    return RenderResult{api::asHandle(std::move(result.scene)), std::move(result.diags)};
 }
 
 RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
@@ -97,7 +93,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     // through the public verbs: same order, same conditions, one copy of the
     // scene instead of three.
     ir::semantic::Scene working = input;
-    diagnostics::List diags;
+    DiagnosticList diags;
 
     if (selectionApplies(cfg)) {
         runSelection(working, cfg, diags);
@@ -110,8 +106,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     auto result = pass.lower(working);
     diags.append(result.diags);
     // Tessellation errors come back *with* the scene — see `tessellate`.
-    return RenderResult{api::asHandle(std::move(result.scene)),
-                        diagnostics::asHandle(std::move(diags))};
+    return RenderResult{api::asHandle(std::move(result.scene)), std::move(diags)};
 }
 
 } // namespace nodehammer

@@ -77,12 +77,11 @@ void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidate
 struct Strictness {
     bool warningsAreFatal = false;
 
-    void operator()(const nodehammer::diagnostics::List &diags, std::string_view stage) const {
+    void operator()(const nodehammer::DiagnosticList &diags, std::string_view stage) const {
         nodehammer::diagnostics::throwIfErrors(diags, stage);
         if (warningsAreFatal && !diags.empty()) {
             throw nodehammer::Error{nodehammer::codes::kErrConfigParse,
-                                    "warnings are errors under --strict", stage,
-                                    nodehammer::diagnostics::asHandle(diags)};
+                                    "warnings are errors under --strict", stage, diags};
         }
     }
 };

@@ -21,8 +21,8 @@ constexpr int kMaxRecursionDepth = 32;
 
 // ── Mesh conversion helpers (public) ─────────────────────────────────────────
 
-std::optional<manifold::Manifold>
-meshToManifold(const TessellationOutput &mesh, diagnostics::List &diags, std::string_view context) {
+std::optional<manifold::Manifold> meshToManifold(const TessellationOutput &mesh,
+                                                 DiagnosticList &diags, std::string_view context) {
     if (mesh.vertices.empty() || mesh.indices.empty()) {
         return std::nullopt;
     }
@@ -273,7 +273,7 @@ std::optional<manifold::Manifold> resolveAndTessellate(ir::semantic::ShapeId sha
                                                        const ir::semantic::Scene &scene,
                                                        const ITessellator &tessellator,
                                                        const TessellationParams &params,
-                                                       diagnostics::List &diags, int depth) {
+                                                       DiagnosticList &diags, int depth) {
     if (depth > kMaxRecursionDepth) {
         diags.warn(codes::kWarnTessBooleanManifoldFail,
                    std::format("boolean recursion depth exceeded (max {})", kMaxRecursionDepth));

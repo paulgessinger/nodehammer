@@ -24,8 +24,7 @@ namespace {
 /// what arrives here is a scene and what was observed about it. The wrapper is
 /// two conversions.
 [[nodiscard]] SemanticResult adopt(ir::ImportResult result) {
-    return SemanticResult{api::asHandle(std::move(result.scene)),
-                          diagnostics::asHandle(std::move(result.diags))};
+    return SemanticResult{api::asHandle(std::move(result.scene)), std::move(result.diags)};
 }
 
 void appendUnique(std::vector<std::string> &out, std::string_view name) {

@@ -10,7 +10,7 @@ namespace nodehammer::tessellation {
 /// Convert a TessellationOutput mesh to a Manifold, welding duplicate vertices.
 /// Returns nullopt (with diagnostics) if the mesh is not manifold-compatible.
 [[nodiscard]] std::optional<manifold::Manifold>
-meshToManifold(const TessellationOutput &mesh, diagnostics::List &diags, std::string_view context);
+meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::string_view context);
 
 /// Convex hull of a point cloud, as a flat-shaded watertight mesh. Used to
 /// build a gap-free LOD proxy for a merged sampling stack (the hull spans the

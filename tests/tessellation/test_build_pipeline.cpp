@@ -227,7 +227,7 @@ TEST_CASE("BuildPipeline: a fatal prep failure arrives as a value", "[build_pipe
     REQUIRE(r.failure->code() == nodehammer::codes::kErrUndefinedMaterialRef);
     // The two channels stay apart: what could not be done is in `failure`, and
     // the diagnostics are what was observed on the way there.
-    REQUIRE(r.failure->observed().hasErrors());
+    REQUIRE(nodehammer::hasErrors(r.failure->observed()));
 }
 
 TEST_CASE("BuildPipeline: degenerate and absent wedge skip Cutting", "[build_pipeline]") {

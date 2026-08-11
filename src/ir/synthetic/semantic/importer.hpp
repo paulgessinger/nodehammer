@@ -26,7 +26,7 @@ class SyntheticSceneBuilder {
 
     /// Scene with one node whose shape is UnknownShape.
     /// Sets DegradationBit::UnknownShape on the node's provenance and emits
-    /// a NH0102 warning into the returned diagnostics::List.
+    /// a NH0102 warning into the returned DiagnosticList.
     [[nodiscard]] static ImportResult buildWithDiagnostics();
 };
 

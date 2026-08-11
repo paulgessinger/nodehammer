@@ -23,7 +23,7 @@ namespace nodehammer::config {
 /// (docs/error-model.md).
 struct ConfigResult {
     NHConfig config;
-    diagnostics::List diags;
+    DiagnosticList diags;
 };
 
 /// Synchronous byte fetcher used by `parseAndMerge` to look up the bytes

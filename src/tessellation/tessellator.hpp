@@ -15,7 +15,7 @@ struct TessellationParams {
 struct TessellationOutput {
     std::vector<ir::render::Vertex> vertices;
     std::vector<uint32_t> indices;
-    diagnostics::List diags;
+    DiagnosticList diags;
     /// Whether the producing operation completed. False marks a genuine failure
     /// (e.g. a boolean whose operands could not be built). Note that `succeeded`
     /// with empty `vertices` is a *valid* result: a boolean can legitimately

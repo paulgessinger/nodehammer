@@ -18,7 +18,7 @@
 
 namespace {
 
-void printDiags(const nodehammer::diagnostics::List &diags) {
+void printDiags(const nodehammer::DiagnosticList &diags) {
     for (const auto &d : diags.items()) {
         const char *sev = d.severity >= nodehammer::diagnostics::Severity::Error     ? "error"
                           : d.severity == nodehammer::diagnostics::Severity::Warning ? "warning"

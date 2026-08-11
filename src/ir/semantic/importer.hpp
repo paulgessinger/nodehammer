@@ -17,7 +17,7 @@ namespace nodehammer::ir {
 /// (docs/error-model.md).
 struct ImportResult {
     semantic::Scene scene;
-    diagnostics::List diags;
+    DiagnosticList diags;
 };
 
 /// Pure interface for all geometry importers.

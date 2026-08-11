@@ -29,7 +29,7 @@ struct SceneBuildResult {
     /// `shared_ptr<const render::Scene>`. Keeping the producer's handle mutable
     /// was the one gap in that chain.
     std::shared_ptr<const ir::render::Scene> scene;
-    diagnostics::List diags;
+    DiagnosticList diags;
 
     /// Set when the build could not produce a scene. Holds what would have been
     /// thrown, including everything observed before it.
@@ -42,7 +42,7 @@ struct SceneBuildResult {
 struct ScenePrepResult {
     config::NHConfig config;
     ir::semantic::Scene scene;
-    diagnostics::List diags;
+    DiagnosticList diags;
 };
 
 /// Synchronous drive-to-completion shim for headless callers

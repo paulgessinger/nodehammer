@@ -76,18 +76,17 @@ namespace {
 /// diagnostics land in the same list as the load's, which is what makes `build`
 /// free of a validation step of its own (#41 §8).
 [[nodiscard]] ConfigResult demand(config::ConfigResult collected, const std::string &context) {
-    diagnostics::List diags = std::move(collected.diags);
+    DiagnosticList diags = std::move(collected.diags);
     diags.append(config::ConfigValidator::validate(collected.config));
     diagnostics::throwIfErrors(diags, context);
-    return ConfigResult{api::asHandle(std::move(collected.config)),
-                        diagnostics::asHandle(std::move(diags))};
+    return ConfigResult{api::asHandle(std::move(collected.config)), std::move(diags)};
 }
 
 /// The same work, under the other promise: hand back everything observed.
 [[nodiscard]] DiagnosticList report(config::ConfigResult collected) {
-    diagnostics::List diags = std::move(collected.diags);
+    DiagnosticList diags = std::move(collected.diags);
     diags.append(config::ConfigValidator::validate(collected.config));
-    return diagnostics::asHandle(std::move(diags));
+    return diags;
 }
 
 /// Cut a slice from a document. The pointer aliases the handle's state, so a
