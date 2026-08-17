@@ -156,6 +156,10 @@ wasm-release: wasm-deps-release wasm-configure-release wasm-build-release
 #
 # `scene` names any fixtures/configs/<scene>.toml; its full include chain is
 # packed into the archive automatically. Pass `none` for application mode.
+# `scene` can also be a path to an already-built .nhproj (any provenance --
+# e.g. a Lua-config archive made natively via File > Create archive from
+# scene > Save As, since make_nhproj.py only packs TOML scenes); it is staged
+# as-is instead of packed from fixtures/configs.
 #
 # Usage:
 #   just wasm-serve                                    # ODD scene, viewer mode (default)
@@ -163,6 +167,7 @@ wasm-release: wasm-deps-release wasm-configure-release wasm-build-release
 #   just wasm-serve odd_drop_coincident_faces           # ODD with calorimeter/long-strip interior faces dropped
 #   just wasm-serve none                                # no sidecar; application mode
 #   just wasm-serve odd 9000                            # ODD scene on a custom port
+#   just wasm-serve /tmp/my-lua-scene.nhproj            # pre-built archive, viewer mode
 wasm-serve scene='odd' port='8000':
     #!/usr/bin/env bash
     set -euo pipefail
