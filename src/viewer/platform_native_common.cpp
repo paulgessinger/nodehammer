@@ -73,7 +73,7 @@ void NativePickerState::runFilePickerModal(App &app) {
     NFD::Guard nfd;
     NFD::UniquePathSet picked;
     nfdu8filteritem_t filters[] = {
-        {"Nodehammer scene", "toml,nhb,zst,gltf,glb,gdml,root,fb,json,xml"},
+        {"Nodehammer scene", "toml,lua,nhb,zst,gltf,glb,gdml,root,fb,json,xml"},
     };
     if (NFD::OpenDialogMultiple(picked, filters, 1) != NFD_OKAY) {
         return;

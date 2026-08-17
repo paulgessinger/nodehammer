@@ -35,6 +35,11 @@ std::string lowerExtension(const std::filesystem::path &path) {
     return ext;
 }
 
+bool isConfigKey(std::string_view key) {
+    const auto ext = lowerExtension(std::filesystem::path{key});
+    return ext == ".toml" || ext == ".lua";
+}
+
 bool isFlatBufferGeometry(std::string_view key) {
     auto path = std::filesystem::path{key};
     const auto ext = lowerExtension(path);
@@ -174,7 +179,7 @@ void renderProjectPanel(bool *open, const ViewerUiContext &ctx, const UiActions 
             }
 
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                if (lowerExtension(std::filesystem::path{node.key}) == ".toml") {
+                if (isConfigKey(node.key)) {
                     if (actions.select_config_key) {
                         actions.select_config_key(node.key);
                     }
