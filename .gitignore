@@ -11,6 +11,9 @@
 *.nhb.zst
 !/odd.nhb.zst
 
+# Project archives packed by the viewer / make_nhproj.py — always generated.
+*.nhproj
+
 # config-flatten output written to the repo root (generated from fixtures/).
 /*_flat.toml
 CMakeUserPresets.json
