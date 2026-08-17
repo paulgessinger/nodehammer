@@ -22,4 +22,10 @@ struct ProjectManifest {
 /// extension-based recognition.
 std::optional<ProjectManifest> parseProjectManifest(std::span<const std::byte> toml_bytes);
 
+/// Serialize a `[project]` manifest to the TOML text that belongs at an archive's
+/// root as `nodehammer.toml` — the inverse of `parseProjectManifest`. An archive
+/// written with this opens with its roots already set instead of coming up blank
+/// and waiting for the user to pick them out of the tree.
+std::string serializeProjectManifest(const ProjectManifest &manifest);
+
 } // namespace nodehammer::viewer

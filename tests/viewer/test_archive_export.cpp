@@ -3,6 +3,7 @@
 #include <detail/file_io.hpp>
 #include <viewer/archive_project_fs.hpp>
 #include <viewer/filesystem_project_fs.hpp>
+#include <viewer/project_manifest.hpp>
 #include <viewer/zip_working_set.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -19,6 +20,7 @@
 using nodehammer::viewer::ArchiveProjectFs;
 using nodehammer::viewer::buildArchiveWorkingSet;
 using nodehammer::viewer::FilesystemProjectFs;
+using nodehammer::viewer::parseProjectManifest;
 using nodehammer::viewer::ZipWorkingSet;
 
 namespace {
@@ -191,4 +193,50 @@ include(part .. ".lua")
     REQUIRE(out.contains("lib/palette.lua")); // reached by use() one level deeper
     REQUIRE(out.contains("scene.nhb.zst"));
     REQUIRE_FALSE(out.contains("unrelated.lua"));
+}
+
+// Packing every byte is only half of it: something has to name the entry points,
+// or the archive opens blank. This is the failure the content assertions above
+// cannot see — they pass on an archive that is complete and still unbuildable.
+TEST_CASE("buildArchiveWorkingSet stamps the roots into a manifest",
+          "[viewer][archive_export]") {
+    TempDir dir{"manifest"};
+    dir.write("scene.lua", "material(\"m\", {})\n");
+    dir.write("scene.nhb.zst", "GEOMETRY-BLOB");
+
+    FilesystemProjectFs fs{dir.root};
+    auto ws = buildArchiveWorkingSet(fs, "scene.lua", "scene.nhb.zst");
+    auto out = ZipWorkingSet::openFromBytes(ws.serialize());
+
+    const auto manifest = out.read("nodehammer.toml");
+    REQUIRE(manifest.has_value());
+
+    // Round-trips through the parser the viewer actually opens archives with.
+    const auto parsed = parseProjectManifest(manifest->span());
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->config_key == "scene.lua");
+    REQUIRE(parsed->geometry_key == "scene.nhb.zst");
+}
+
+// A complete backend copies whatever it is holding, manifest included. The
+// export still has to describe the roots being exported now, not the ones some
+// earlier export happened to record.
+TEST_CASE("buildArchiveWorkingSet refreshes a stale manifest on a complete backend",
+          "[viewer][archive_export]") {
+    auto seed = ZipWorkingSet::create();
+    seed.writeEntry("nodehammer.toml",
+                    asBytes("[project]\nconfig = 'old.toml'\ngeometry = 'old.nhb.zst'\n"));
+    seed.writeEntry("scene.toml", asBytes("root = 1\n"));
+    seed.writeEntry("scene.nhb.zst", asBytes("GEOMETRY-BLOB"));
+
+    ArchiveProjectFs fs{std::move(seed)};
+    REQUIRE(fs.listingIsComplete());
+
+    auto ws = buildArchiveWorkingSet(fs, "scene.toml", "scene.nhb.zst");
+    auto out = ZipWorkingSet::openFromBytes(ws.serialize());
+
+    const auto parsed = parseProjectManifest(out.read("nodehammer.toml")->span());
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->config_key == "scene.toml");
+    REQUIRE(parsed->geometry_key == "scene.nhb.zst");
 }

@@ -3,6 +3,7 @@
 #include <config/config_loader.hpp>
 #include <lua/lua_config.hpp>
 #include <viewer/project_fs.hpp>
+#include <viewer/project_manifest.hpp>
 
 #include <algorithm>
 #include <deque>
@@ -166,6 +167,21 @@ ZipWorkingSet buildArchiveWorkingSet(const ProjectFs &fs, std::string_view confi
         collectListing(fs, ws, skipped);
     } else {
         collectClosure(fs, ws, config_key, geometry_key, skipped);
+    }
+
+    // Stamp the roots into the archive so it is self-describing, the way
+    // `scripts/make_nhproj.py` already does. Without this every byte is present
+    // but nothing names the entry points, so the archive opens blank and waits
+    // for someone to pick a config out of the tree — it knows what it contains,
+    // just not what to build.
+    //
+    // Written last so that on a complete backend it supersedes any manifest the
+    // listing walk copied in: the roots being exported are the current ones.
+    if (!config_key.empty() && !geometry_key.empty()) {
+        const auto toml = serializeProjectManifest(
+            ProjectManifest{std::string{config_key}, std::string{geometry_key}});
+        const auto *bytes = reinterpret_cast<const std::byte *>(toml.data());
+        ws.writeEntry("nodehammer.toml", std::vector<std::byte>(bytes, bytes + toml.size()));
     }
     return ws;
 }
