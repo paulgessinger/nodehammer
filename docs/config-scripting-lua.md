@@ -523,6 +523,24 @@ defaults { tessellation = { max_segments_circle = 10, fallback = "skip" },
            extras       = { visible = true, opacity = 1.0 } }
 ```
 
+This sketch now ships as a real fixture: `fixtures/configs/lua/odd.lua`, with its
+fragments under `fixtures/configs/lua/odd/`. It is a *faithful* port —
+`config-lua -c fixtures/configs/lua/odd.lua` and `config-flatten -c
+fixtures/configs/odd.toml` emit byte-identical TOML, which is what keeps the two
+front ends honest on a real config rather than only on `parity.lua`.
+
+The `include("odd/base.lua")` line above is load-bearing and worth calling out,
+because dropping it fails quietly rather than loudly: the baseline is what makes
+selection subtractive (drop everything, then keep back what each subsystem
+owns). Without it every node survives unless something explicitly drops it, so
+the config still evaluates, still validates, and still renders — just far more
+geometry than the detector.
+
+A separate `fixtures/configs/lua/kitchen_sink.lua` tours the scripting surface
+instead. It names ODD geometry but is not a port of anything: it collapses the
+fifteen materials onto three and omits the baseline, so its output differs from
+`odd.toml` by design.
+
 ---
 
 ## 9. Sandboxing
