@@ -12,6 +12,14 @@
 // Deliberately C++20 and <iostream>: the installed headers must not require the
 // C++23 the library itself is built with, and this file must not either — so no
 // `std::print`, and no `std::format`.
+//
+// tests/public/ asks the neighbouring question — is every exported entry point
+// reachable, and does what it returns survive the boundary — against the
+// in-tree shared library, with Catch2 to say which case failed. What stays here
+// is everything that needs an *install*: the package config resolving with no
+// hints, the headers being the only ones installed, the language floor. Both
+// call the same API, and the overlap is the point: a failure in one narrows
+// down to packaging or to the API depending on whether the other went with it.
 
 #include <nodehammer/build.hpp>
 #include <nodehammer/config.hpp>
