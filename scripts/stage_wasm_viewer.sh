@@ -3,9 +3,11 @@ set -euo pipefail
 shopt -s nullglob
 
 usage() {
-    echo "usage: $0 <link|copy> <scene|none> <target-dir> [src-dir]" >&2
+    echo "usage: $0 <link|copy> <scene|archive.nhproj|none> <target-dir> [src-dir]" >&2
     echo "  scene names any fixtures/configs/<scene>.toml (e.g. odd, odd_simple)," >&2
     echo "  packed into a .nhproj + nh_manifest.json sidecar -> viewer mode." >&2
+    echo "  a path ending in .nhproj is staged as-is (however it was built --" >&2
+    echo "  e.g. native File > Create archive from scene > Save As) -> viewer mode." >&2
     echo "  'none' omits the sidecar -> the viewer comes up as the application." >&2
 }
 
@@ -37,6 +39,27 @@ out="$target"
 case "$out" in
     /*) ;;
     *) out="$root/$out" ;;
+esac
+
+# A scene ending in .nhproj is an already-built archive (any provenance --
+# make_nhproj.py, native Save As, a web-published download) staged as-is
+# instead of one we pack ourselves. Resolved up front so the stale-sidecar
+# cleanup below can avoid deleting it out from under itself when the caller
+# points at a file already inside $out (e.g. re-running against last run's
+# output).
+archive_src=""
+case "$scene" in
+    *.nhproj)
+        archive_src="$scene"
+        case "$archive_src" in
+            /*) ;;
+            *) archive_src="$root/$archive_src" ;;
+        esac
+        if [ ! -f "$archive_src" ]; then
+            echo "no such archive: $scene" >&2
+            exit 1
+        fi
+        ;;
 esac
 
 if [ ! -f "$src/nodehammer-gles3.js" ] && [ ! -f "$src/nodehammer-wgpu.js" ]; then
@@ -76,7 +99,12 @@ done
 # if a scene was requested. Also drop the loose scene files earlier recipes
 # staged (pre-archive sidecar schema) and legacy synthetic-name symlinks.
 rm -f "$out/nh_manifest.json"
-rm -f "$out"/project.*.nhproj
+for stale_archive in "$out"/project.*.nhproj; do
+    if [ -n "$archive_src" ] && [ "$stale_archive" -ef "$archive_src" ]; then
+        continue
+    fi
+    rm -f "$stale_archive"
+done
 rm -f "$out/scene.nhb.zst" "$out/scene.toml" "$out/odd.nhb.zst"
 rm -rf "$out/odd"
 # Entry configs were staged at the root under their fixture name; only remove a
@@ -90,6 +118,19 @@ done
 case "$scene" in
     none|'')
         scene_mode="application mode (no sidecar)"
+        ;;
+    *.nhproj)
+        archive="$(basename "$archive_src")"
+        stage_file "$archive_src" "$out/$archive"
+
+        printf '%s\n' \
+            '{' \
+            "  \"archive\": \"$archive\"," \
+            '  "lock": true,' \
+            "  \"title\": \"nodehammer — $archive\"" \
+            '}' \
+            > "$out/nh_manifest.json"
+        scene_mode="viewer mode (archive $scene -> $archive)"
         ;;
     *)
         if [ ! -f "$root/fixtures/configs/$scene.toml" ]; then

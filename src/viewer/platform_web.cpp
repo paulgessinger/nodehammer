@@ -379,7 +379,7 @@ EM_JS(void, nh_viewer_open_file_picker, (), {
     var input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
-    input.accept = '.nhproj,.toml,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
+    input.accept = '.nhproj,.toml,.lua,.nhb,.zst,.gltf,.glb,.gdml,.root,.fb,.json,.xml';
     input.style.display = 'none';
     input.addEventListener(
         'change', async function(ev) {
