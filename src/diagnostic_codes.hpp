@@ -103,12 +103,16 @@ inline constexpr std::string_view kFatalExportWriteFailed = "NH0600";
 inline constexpr std::string_view kFatalComputeWorker = "NH0700";
 
 // ── Public API boundary ───────────────────────────────────────────────────────
-// Raised by src/api/ only, for the two failures that exist because there is a
-// boundary: a verb handed a handle that refers to nothing, and a format whose
-// backend this build does not have. The latter is a run-time failure rather than
-// a link error precisely for the entry points that dispatch on a string, where
-// the format is not known until run time (#41 §5).
+// Raised by src/api/ only, for the failure that exists because there is a
+// boundary: a verb handed a handle that refers to nothing.
+//
+// NH0801 ("this build has no such backend") used to sit here too, raised by
+// `Config::read` on a `.lua` path in a build without the interpreter. There is
+// no such build any more, and no other site ever raised it: a format whose
+// backend is absent is simply not in its registry, so the string-dispatched
+// entry points already answer with their own unknown-format code (#41 §5). It
+// is left unassigned rather than reused, since a code that meant something else
+// once is worse than a gap.
 inline constexpr std::string_view kFatalApiInvalidHandle = "NH0800";
-inline constexpr std::string_view kFatalApiBackendMissing = "NH0801";
 
 } // namespace nodehammer::codes

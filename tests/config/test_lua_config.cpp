@@ -5,13 +5,19 @@
 #include <config/config_writer.hpp>
 #include <lua/lua_config.hpp>
 
+#include <algorithm>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <variant>
+#include <vector>
 
 using namespace nodehammer;
 using namespace nodehammer::diagnostics;
@@ -24,7 +30,16 @@ const std::filesystem::path kLuaFixtures =
     std::filesystem::path{NODEHAMMER_FIXTURES_DIR} / "configs" / "lua";
 
 // Evaluate an inline script with the lua-fixtures dir as the include/use root.
-ConfigResult eval(const std::string &src) { return evalLuaConfig(src, "<test>", kLuaFixtures); }
+//
+// The root key is a name *inside* that directory rather than the directory
+// itself: `resolveIncludeKey` takes the parent of the key it is given, so a key
+// of `<fixtures>/<test>` is what makes `include("materials.lua")` land beside
+// the fixtures. This mirrors `ConfigLoader::collectFromString`, which joins its
+// baseDir onto the source name for exactly the same reason.
+ConfigResult eval(const std::string &src) {
+    return evalLuaConfig(src, (kLuaFixtures / "<test>").generic_string(),
+                         ConfigLoader::filesystemFetcher());
+}
 
 std::optional<std::string> readFile(const std::filesystem::path &p) {
     std::ifstream in(p, std::ios::binary);
@@ -212,7 +227,8 @@ TEST_CASE("config front-ends agree: Lua and TOML produce an identical NHConfig",
     REQUIRE(luaSrc.has_value());
     REQUIRE(tomlSrc.has_value());
 
-    auto lua = evalLuaConfig(*luaSrc, "parity.lua", kLuaFixtures);
+    auto lua = evalLuaConfig(*luaSrc, (kLuaFixtures / "parity.lua").generic_string(),
+                             ConfigLoader::filesystemFetcher());
     auto toml = ConfigLoader::loadFromString(*tomlSrc, "parity.toml");
     REQUIRE_FALSE(lua.diags.hasErrors());
     REQUIRE_FALSE(toml.diags.hasErrors());
@@ -301,4 +317,108 @@ TEST_CASE("evalLuaConfig: unknown export key stays a warning", "[config][lua]") 
     auto r = eval(R"LUA(export("obj", { frobnicate = 1 }))LUA");
     REQUIRE_FALSE(r.diags.hasErrors());
     REQUIRE(hasUnknownKeyWarning(r.diags));
+}
+
+// ── The seam the fetcher exists for ──────────────────────────────────────────
+//
+// Everything above resolves includes off the real filesystem, because that is
+// what a CLI has. A project archive is the case that has no filesystem at all:
+// the bytes live in a ZIP working set and reach the loader through a fetcher
+// over keys. These cases evaluate a script whose includes exist *only* in a map,
+// which is the same shape `BuildSession` serves and the reason `evalLuaConfig`
+// takes a fetcher rather than a directory.
+namespace {
+
+/// A fetcher over an in-memory key→bytes map, like a project's working set.
+struct MemoryFiles {
+    std::unordered_map<std::string, std::vector<std::byte>> files;
+    std::vector<std::string> requested; // in call order, for the include closure
+
+    void put(std::string key, std::string_view content) {
+        const auto *p = reinterpret_cast<const std::byte *>(content.data());
+        files.emplace(std::move(key), std::vector<std::byte>{p, p + content.size()});
+    }
+
+    IncludeFetcher fetcher() {
+        return [this](std::string_view key) -> std::optional<std::span<const std::byte>> {
+            requested.emplace_back(key);
+            const auto it = files.find(std::string{key});
+            if (it == files.end()) {
+                return std::nullopt;
+            }
+            return std::span<const std::byte>{it->second};
+        };
+    }
+};
+
+} // namespace
+
+TEST_CASE("evalLuaConfig: includes resolve through a fetcher with no filesystem", "[config][lua]") {
+    MemoryFiles project;
+    project.put("proj/materials.lua", R"LUA(
+material("silicon", { metallic = 1.0 })
+)LUA");
+    project.put("proj/lib/palette.lua", R"LUA(
+return { kapton = "#806040" }
+)LUA");
+    project.put("proj/rules.lua", R"LUA(
+local P = use("lib/palette.lua")
+material("kapton", { base_color = P.kapton })
+for i = 1, 3 do
+  rule { match = ('path ~= "**/Layer%d*"'):format(i), material = "silicon" }
+end
+)LUA");
+
+    const std::string root = R"LUA(
+config { deduplicate_shapes = true }
+include("materials.lua")
+include("rules.lua")
+)LUA";
+
+    const auto r = evalLuaConfig(root, "proj/config.lua", project.fetcher());
+    REQUIRE_FALSE(r.diags.hasErrors());
+    REQUIRE(r.config.deduplicateShapes);
+    REQUIRE(r.config.materials.size() == 2);
+    REQUIRE(r.config.rules.size() == 3);
+
+    // `use()` inside an included fragment resolves against *that* fragment's
+    // key, not the root's — which is the whole reason the key stack exists.
+    REQUIRE(std::ranges::find(project.requested, "proj/lib/palette.lua") !=
+            project.requested.end());
+}
+
+TEST_CASE("evalLuaConfig: the keys a script asks for are its include closure", "[config][lua]") {
+    // What a project archive needs to know in order to pack itself: a Lua
+    // config's include set cannot be read off the source the way TOML's
+    // `include = [...]` can, because it is computed. Recording what the fetcher
+    // was asked for is the answer, and it is exact.
+    MemoryFiles project;
+    project.put("proj/a.lua", "include(\"b.lua\")\n");
+    project.put("proj/b.lua", "material(\"m\", {})\n");
+
+    const auto r = evalLuaConfig("include(\"a.lua\")\n", "proj/root.lua", project.fetcher());
+    REQUIRE_FALSE(r.diags.hasErrors());
+    REQUIRE(project.requested == std::vector<std::string>{"proj/a.lua", "proj/b.lua"});
+}
+
+TEST_CASE("evalLuaConfig: a missing key in a project is reported, not fatal to the process",
+          "[config][lua]") {
+    MemoryFiles project; // deliberately empty
+    const auto r = evalLuaConfig("include(\"gone.lua\")\n", "proj/root.lua", project.fetcher());
+    REQUIRE(r.diags.hasErrors());
+    REQUIRE(project.requested == std::vector<std::string>{"proj/gone.lua"});
+}
+
+TEST_CASE("evalLuaConfig: the root guard does not depend on the fetcher", "[config][lua]") {
+    // A fetcher that would happily serve anything still does not get asked:
+    // the escape is refused in key space, so an untrusted script's reach is the
+    // same whether it is running against a ZIP or against a disk.
+    MemoryFiles project;
+    project.put("secrets.lua", "material(\"leaked\", {})\n");
+
+    const auto r =
+        evalLuaConfig("include(\"../secrets.lua\")\n", "proj/root.lua", project.fetcher());
+    REQUIRE(r.diags.hasErrors());
+    REQUIRE(r.config.materials.empty());
+    REQUIRE(project.requested.empty()); // never even asked
 }

@@ -5,9 +5,7 @@
 #include <detail/file_io.hpp>
 #include <diagnostic_codes.hpp>
 
-#if NH_WITH_LUA
 #include <lua/lua_config.hpp>
-#endif
 
 #include <algorithm>
 #include <array>
@@ -33,14 +31,16 @@ namespace {
 /// Both front ends collect rather than stop, so this reports a broken document
 /// instead of throwing about one — which is what lets `read` and `check` be the
 /// same work under two different promises. It still throws when there is no
-/// document to collect: a file that will not open, or `.lua` in a build with no
-/// Lua.
+/// document to collect: a file that will not open.
+///
+/// Both front ends are always present — the interpreter ships in every build,
+/// wasm included — so this dispatches on the extension alone and has no
+/// "backend missing" arm to fall down.
 [[nodiscard]] config::ConfigResult collect(const std::filesystem::path &path) {
     if (!hasLuaExtension(path)) {
         return config::ConfigLoader::collectFromFile(path);
     }
 
-#if NH_WITH_LUA
     // Canonicalise first, then take the parent: that is what roots `include()`
     // and `use()`, and it is derived from the caller's own path rather than
     // invented. A bare `cfg.lua` therefore roots at the directory the file was
@@ -56,16 +56,17 @@ namespace {
         api::rethrowAsError(e, codes::kFatalImportFileNotFound, path.string());
     }
     try {
-        return lua::evalLuaConfig(source, canonical.string(), canonical.parent_path());
+        // The canonical path *is* the root key, so `include()` resolves against
+        // the directory the script was found in — the same rule `loadFromFile`
+        // applies to a TOML root, and for the same reason: it is derived from
+        // the caller's own path rather than invented here.
+        return lua::evalLuaConfig(source, canonical.generic_string(),
+                                  config::ConfigLoader::filesystemFetcher());
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
         api::rethrowAsError(e, codes::kErrConfigParse, path.string());
     }
-#else
-    throw Error{codes::kFatalApiBackendMissing,
-                "this build has no Lua config front end; see formats()", path.string()};
-#endif
 }
 
 /// Validate, and demand the whole thing be sound.
@@ -121,12 +122,13 @@ DiagnosticList Config::checkString(std::string_view toml, const std::filesystem:
 }
 
 std::span<const std::string_view> Config::formats() {
-    static constexpr std::string_view kToml{"toml"};
-#if NH_WITH_LUA
-    static constexpr std::array<std::string_view, 2> kFormats{kToml, std::string_view{"lua"}};
-#else
-    static constexpr std::array<std::string_view, 1> kFormats{kToml};
-#endif
+    // Constant across every build this project produces. `SemanticScene::formats`
+    // genuinely varies — ROOT and DD4hep are absent from most configurations —
+    // but both config front ends are compiled in unconditionally, so the honest
+    // answer here never changes. It stays a runtime query because it is the same
+    // question asked of every type (#41 §5), not because the answer is in doubt.
+    static constexpr std::array<std::string_view, 2> kFormats{std::string_view{"toml"},
+                                                              std::string_view{"lua"}};
     return kFormats;
 }
 

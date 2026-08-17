@@ -1,11 +1,13 @@
 #include <viewer/build_session.hpp>
 
 #include <ir/fb/semantic/importer.hpp>
+#include <lua/lua_config.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <set>
 #include <span>
 #include <string>
@@ -35,6 +37,11 @@ bool endsWithCi(std::string_view s, std::string_view suffix) {
 }
 
 bool isTomlKey(std::string_view key) { return endsWithCi(key, ".toml"); }
+
+// A Lua config's include set is *computed*, so there is no `include = [...]` to
+// peek at and no static walk that could find its fragments. It is discovered by
+// running the script instead — see the fetcher below.
+bool isLuaKey(std::string_view key) { return endsWithCi(key, ".lua"); }
 
 /// FNV-1a 64-bit over an arbitrary byte range.
 void fnv1a(std::uint64_t &h, std::span<const std::byte> bytes) {
@@ -259,10 +266,62 @@ void BuildSession::poll(ProjectFs *project) {
     // being over is `enter_error` — so the exception is caught here rather than
     // left to unwind past the UI. `what()` is the loader's whole complaint,
     // which is what the hand-rolled first-error hunt used to reconstruct.
+    // A Lua config resolves its own includes as it runs, straight out of the
+    // project. It cannot use `bytes_by_key`: the walk above only enqueued the
+    // two root keys, because `peekIncludesFromBytes` has nothing to read in a
+    // script whose includes are decided at run time.
+    //
+    // Resolving inside the evaluation is safe because no backend is
+    // asynchronous — every `ProjectFs` answers Ready or Missing, never Pending,
+    // now that projects are ZIP working sets rather than on-demand URL fetches.
+    // A key that is missing is collected rather than thrown on, so the session
+    // can name every missing fragment at once and re-run when the user supplies
+    // them; the sandbox opens no `io`, `os` or `package`, so re-running a script
+    // is the same script.
+    std::unordered_map<std::string, ByteBuffer> lua_bytes; // pins spans for the eval
+    std::vector<std::string> lua_missing;
+    auto lua_fetcher = [&](std::string_view k) -> std::optional<std::span<const std::byte>> {
+        const std::string key{k};
+        if (const auto it = lua_bytes.find(key); it != lua_bytes.end()) {
+            return it->second.span();
+        }
+        auto r = project->resolve(key);
+        if (r.status != ResolveStatus::Ready) {
+            lua_missing.push_back(r.missing_key.empty() ? key : r.missing_key);
+            return std::nullopt;
+        }
+        auto [ins, _] = lua_bytes.emplace(key, std::move(r.file.bytes));
+        return ins->second.span();
+    };
+
     config::ConfigResult cfg;
     try {
-        cfg =
-            config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key, fetcher);
+        if (isLuaKey(impl_->config_key)) {
+            const auto sp = cfg_it->second.span();
+            cfg = lua::evalLuaConfig(
+                std::string_view{reinterpret_cast<const char *>(sp.data()), sp.size()},
+                impl_->config_key, lua_fetcher);
+            if (!lua_missing.empty()) {
+                // Not an error: the script named files the project does not have
+                // yet, which is the same situation the walk reports for TOML.
+                impl_->missing = std::move(lua_missing);
+                impl_->phase = BuildPhase::WaitingForUser;
+                return;
+            }
+            diagnostics::throwIfErrors(cfg.diags, impl_->config_key);
+            // The fragments are build inputs like any other, so they belong in
+            // the map `input_hash` is taken over. Without this a script's
+            // fragments would be invisible to the hash — the root config and the
+            // geometry are all the walk enqueued — and editing `materials.lua`
+            // would produce a hash identical to the previous build's, which the
+            // controller reads as "same content" and answers by keeping the
+            // scene it already has.
+            impl_->bytes_by_key.insert(std::make_move_iterator(lua_bytes.begin()),
+                                       std::make_move_iterator(lua_bytes.end()));
+        } else {
+            cfg = config::ConfigLoader::parseAndMerge(cfg_it->second.span(), impl_->config_key,
+                                                      fetcher);
+        }
     } catch (const Error &e) {
         for (const auto &d : e.observed()) {
             if (d.severity < diagnostics::Severity::Error) {

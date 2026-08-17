@@ -1,10 +1,16 @@
 # Scripted configuration (Lua) — design exploration
 
 **Status:** Option A implemented — the `config-lua` CLI command (backed by
-`src/lua/lua_config.cpp`, a native-only source compiled into `nodehammer_lib`)
-evaluates a Lua script into an `NHConfig` and emits flattened TOML. Option B (embedding the engine so scripts run inside
-the app/browser) remains future work. This document captures the design space so
-the remaining trade-offs stay mapped.
+`src/lua/lua_config.cpp`, compiled into `nodehammer_lib`) evaluates a Lua script
+into an `NHConfig` and emits flattened TOML, and `Config::read` dispatches `.lua`
+by extension.
+
+**Option B is implemented.** The engine ships in every build, wasm included;
+`include()`/`use()` resolve through the config `IncludeFetcher` rather than the
+filesystem, so a `.lua` works inside a `.nhproj` where there is no filesystem;
+and `BuildSession` and `archive_export` both handle one. See §4.1 for what it
+cost and §10.6 for how a computed include set is discovered. This document
+captures the design space so the remaining trade-offs stay mapped.
 
 The existing TOML config is described operationally in
 [predicate-expressions.md](predicate-expressions.md); the parser lives in
@@ -112,6 +118,43 @@ to B without users rewriting anything.
 win at near-zero risk and no wasm bloat), keep the door open to B. The one
 decision that forces the choice: *must config scripts execute inside the
 app/browser?* → B. *Is a build-time generation step acceptable?* → A.
+
+### 4.1 What shipping the engine everywhere actually cost
+
+The "no engine in wasm" half of A turned out to be a build accident rather than a
+constraint, and it has been removed: `src/lua/lua_config.cpp` and the interpreter
+are unconditional in `nodehammer_lib` on every platform.
+
+- **The one real obstacle was exception handling, not size.** Lua raises errors
+  with `setjmp`/`longjmp`, which Emscripten implements as JS-based SjLj —
+  mutually exclusive with the native wasm exceptions this project uses
+  everywhere. Building the interpreter as C++ (`lua/*:compile_as_cpp=True`, set
+  for Emscripten in `conanfile.py`) makes `LUAI_THROW` a real `throw`, and the
+  problem disappears rather than being worked around.
+- **Binary size, measured rather than guessed.** Release wasm (`-Oz` + LTO +
+  closure), before and after the viewer gained the Lua load path:
+
+  | `nodehammer-gles3.wasm` | raw | gzip | brotli -q11 |
+  |---|---|---|---|
+  | without | 2,946,548 | 1,236,350 | 963,616 |
+  | with | 3,223,007 | 1,343,793 | 1,044,922 |
+  | **delta** | **+276 KB** (+9.4%) | **+107 KB** (+8.7%) | **+81 KB** (+8.4%) |
+
+  So ~81 KB over the wire, for the interpreter *and* the whole DSL binding
+  layer — the low end of the 200–300 KB this doc originally guessed.
+  `nodehammer-compute.wasm` is byte-identical: it does not link `BuildSession`,
+  so it still calls nothing that reaches the interpreter and dead-strip keeps
+  paying it nothing. That is the shape of the cost in general — it lands on the
+  call site that wants it, not on every binary.
+- **What the gate did cost** was a public API that varied by platform:
+  `Config::formats()` answered `["toml"]` in a browser and `["toml", "lua"]` on a
+  desktop, for the same source tree. It is now constant.
+
+`tests/wasm_lua_smoke.cpp` is the standing check: the same library linked
+*without* `-sNODERAWFS`, so the only filesystem is MEMFS as in a real tab,
+driving `Config::read` on scripts it stages itself. `nodehammer_tests` cannot
+answer that question, because it links NODERAWFS and therefore reads the host's
+files.
 
 ---
 
@@ -485,18 +528,25 @@ defaults { tessellation = { max_segments_circle = 10, fallback = "skip" },
 ## 9. Sandboxing
 
 Required either way; mandatory for B in the shared viewer, where a `.lua` may be
-untrusted:
+untrusted. All three are in place:
 
-- Open only `base` / `string` / `table` / `math`. No `io`, `os`, `package`, or
+- ✅ Open only `base` / `string` / `table` / `math`. No `io`, `os`, `package`, or
   raw `require`; `include` / `use` are the vetted I/O primitives, routed through
-  the fetcher.
-- Fresh environment per run *is* the sandbox — you enumerate exactly which
-  globals exist and nothing leaks between loads.
-- Add a `lua_sethook` instruction-count guard so a runaway `while true do` in an
-  untrusted script can't wedge the build thread.
+  the fetcher. Because they are the *only* way out, what a script can reach is
+  whatever its fetcher serves — and the root guard refuses an escaping key before
+  the fetcher is asked, so a filesystem fetcher grants no more reach than a ZIP
+  one.
+- ✅ Fresh environment per run *is* the sandbox — you enumerate exactly which
+  globals exist and nothing leaks between loads. This is also what makes
+  re-running a script after a missing fragment arrives sound rather than merely
+  convenient (§10.6).
+- ✅ A `lua_sethook` instruction-count guard, so a runaway `while true do` in an
+  untrusted script cannot wedge the build thread.
 
 This is the one genuinely new attack surface versus toml++, which cannot execute
-anything.
+anything. What is *not* claimed: the budget bounds instructions, not wall time or
+memory, so a script can still allocate hard or run for a while under the budget.
+That is a denial of the tab it is running in, not an escape from it.
 
 ---
 
@@ -518,4 +568,30 @@ anything.
    helpers, `include`/`use`, a sandbox, and a `.lua`-detection dispatch in
    `ConfigLoader`. Option B is the same plus shipping the engine in every target
    (incl. wasm build/CMake/Conan wiring) and the sandbox hardening that in-browser
-   execution demands.
+   execution demands. ~~The engine half is the one that sounded expensive.~~
+   Done, and it was the cheap half — see §4.1. What is left is item 6.
+6. **A computed include set cannot be read; it has to be run.** ~~`include()` /
+   `use()` do not go through a fetcher.~~ Done. `evalLuaConfig` now takes a root
+   key and an `IncludeFetcher`, the same pair `parseAndMerge` takes, and
+   `include()`/`use()` compute their keys with the same
+   `ConfigLoader::resolveIncludeKey`. The root guard moved into key space with
+   them and is checked *before* the fetcher is called, so an untrusted script's
+   reach does not depend on whether its fetcher is a ZIP that could not serve
+   `../secrets` or a disk that could.
+
+   The consequence worth recording is the one that has no TOML analogue. Both
+   `BuildSession` and `archive_export` discover a config's includes by reading
+   `include = [...]` off the source — and there is nothing to read in
+   `include(part .. ".lua")`. So the closure is discovered by **running the
+   script against a fetcher backed by the project: the keys it asks for are the
+   closure**, exactly. In the exporter the fetcher is also the packer, so
+   serving a fragment and archiving it are one act and the archive cannot
+   disagree with the script.
+
+   That works because resolution is synchronous. `ResolveStatus::Pending` is
+   still declared, but no backend has produced it since projects became ZIP
+   working sets rather than on-demand URL fetches — which is what the
+   walk-then-parse ordering existed to accommodate. Missing fragments are
+   collected rather than thrown on, so the session reports all of them at once
+   and re-runs the script once they arrive; re-running is sound precisely
+   because §9's sandbox opens no `io`, `os` or `package`.
