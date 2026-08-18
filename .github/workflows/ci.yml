@@ -321,12 +321,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # One canary on a pull request, every platform on main and on tags. Each
-        # wheel is a cold Conan graph compiled from source inside the manylinux
-        # container -- cppstd=23 puts every package outside ConanCenter's
-        # prebuilts -- so paying for three of them on every PR would dominate the
-        # run for a packaging path that rarely changes.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"}]' || '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"},{"os":"ubuntu-24.04-arm","identifier":"cp312-manylinux_aarch64"},{"os":"macos-26","identifier":"cp312-macosx_arm64"}]') }}
+        # A pull request builds one canary; main and tags build all three. Each
+        # wheel is a cold Conan graph compiled from source inside the container --
+        # cppstd=23 puts every package outside ConanCenter's prebuilts -- so three
+        # per PR would dominate the run for a path that rarely changes.
+        #
+        # This has to be one expression rather than a static list of three with
+        # the extra two skipped: the `matrix` context is not available in a
+        # job-level `if`, so the only available skip is per-step, which still
+        # starts three runners and reports two green checks that built nothing.
+        include: >-
+          ${{ fromJSON(github.event_name == 'pull_request'
+          && '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"}]'
+          || '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"},
+          {"os":"ubuntu-24.04-arm","identifier":"cp312-manylinux_aarch64"},
+          {"os":"macos-26","identifier":"cp312-macosx_arm64"}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
