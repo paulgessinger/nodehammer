@@ -65,6 +65,7 @@ __all__ = [
     "SemanticScene",
     "apply_selection",
     "build",
+    "check_config",
     "deduplicate",
     "load_config",
     "tessellate",
@@ -93,61 +94,82 @@ def load_config(
     """Build a :class:`Config` from a dict, a file, or TOML text.
 
     What ``src`` means is decided by its **type**, never by looking at the
-    filesystem:
+    filesystem — see :func:`check_config` for the rule and the reasoning.
 
-    - :class:`~pathlib.Path` — a config file to read (``.toml`` or ``.lua``).
-    - :class:`str` — TOML *text*, not a filename.
-    - :class:`~collections.abc.Mapping` — serialized to TOML and parsed, so it
-      goes through the same validator as a file and produces the same diagnostic
-      codes. Nothing here reimplements config semantics.
+    Raises :class:`Error` if the document does not load. Use :func:`check_config`
+    to get every problem as a report instead.
+    """
+    kind, value = _resolve_source(src, overrides)
+    if kind == "path":
+        return Config.read(value).config
+    try:
+        return Config.parse(value, base_dir).config
+    except Error as exc:
+        # A heuristic in the *error* path only: it never changes what a
+        # successful call does, it just answers the question the confusing
+        # message provokes. "expected '=' after key" is unhelpful when what
+        # actually happened is that someone passed a filename as text.
+        if isinstance(src, str) and _looks_like_a_filename(src):
+            raise Error(
+                exc.code,
+                f"{exc} -- `src` is a str, which is read as TOML text; "
+                f"pass Path({src!r}) to read it as a file",
+            ) from exc
+        raise
+
+
+def check_config(
+    src: Mapping[str, Any] | Path | str,
+    *,
+    base_dir: str | None = None,
+    **overrides: Any,
+) -> DiagnosticList:
+    """Report every problem in a config, rather than raising on the first.
+
+    The reporting half of :func:`load_config`, and the same dispatch: a
+    :class:`~pathlib.Path` is a file, a :class:`str` is TOML *text*, and a
+    :class:`~collections.abc.Mapping` is serialized to TOML and parsed, so a
+    dict-built config produces the same diagnostic codes as a file the CLI reads.
 
     Deciding by type rather than by whether a file happens to exist is
     deliberate. Existence-based dispatch would make the meaning of an argument
     depend on the state of the filesystem, and a mistyped path would silently
-    become a document to parse rather than a missing file to report. Pass a
-    ``Path`` and a typo is a clean error.
+    become a document to parse rather than a missing file to report.
 
     ``base_dir`` roots any ``include``. ``None`` means *this content has no
     location* — not the working directory. That is the library's rule (a config
     must not be able to pull in a file from wherever the process happened to
-    start), and choosing what "here" means belongs to the application, so if you
-    want the working directory, pass it.
-
-    Raises :class:`Error` if the document does not load.
+    start), and choosing what "here" means belongs to the application.
     """
-    if isinstance(src, Path):
-        if overrides:
-            raise TypeError("overrides are only supported when src is a mapping")
-        return Config.read(src).config
+    kind, value = _resolve_source(src, overrides)
+    if kind == "path":
+        return Config.check(value)
+    return Config.check_string(value, base_dir)
 
-    if isinstance(src, str):
+
+def _resolve_source(
+    src: Mapping[str, Any] | Path | str, overrides: Mapping[str, Any]
+) -> tuple[str, Any]:
+    """Normalize the three accepted shapes to either a path or TOML text.
+
+    Shared by load_config and check_config so the dispatch rule is stated once.
+    The two differ only in which promise they make of the result, which is the
+    same split the C++ API draws between `read`/`parse` and `check`.
+    """
+    if isinstance(src, (Path, str)):
         if overrides:
             raise TypeError("overrides are only supported when src is a mapping")
-        try:
-            return Config.parse(src, base_dir).config
-        except Error as exc:
-            # A heuristic in the *error* path only: it never changes what a
-            # successful call does, it just answers the question the confusing
-            # message provokes. "expected '=' after key" is unhelpful when what
-            # actually happened is that someone passed a filename as text.
-            if _looks_like_a_filename(src):
-                raise Error(
-                    exc.code,
-                    f"{exc} -- `src` is a str, which load_config reads as TOML text; "
-                    f"pass Path({src!r}) to read it as a file",
-                ) from exc
-            raise
+        return ("path", src) if isinstance(src, Path) else ("text", src)
 
     try:
         import tomli_w
     except ModuleNotFoundError as exc:  # pragma: no cover - depends on env
         raise ModuleNotFoundError(
-            "load_config() with a dict needs tomli-w; install nodehammer[dict] "
-            "or pass TOML text instead."
+            "a dict config needs tomli-w; install nodehammer[dict] or pass TOML "
+            "text instead."
         ) from exc
 
-    merged = tomli_w.dumps(_deep_merge(dict(src), overrides))
-    return Config.parse(merged, base_dir).config
+    return ("text", tomli_w.dumps(_deep_merge(dict(src), overrides)))
 
 
 def _looks_like_a_filename(src: str) -> bool:

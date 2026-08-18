@@ -208,3 +208,23 @@ def test_work_and_io_stay_methods():
     assert isinstance(scene.to_nhb(), bytes)
     assert isinstance(nh.SemanticScene.formats(), list)
     assert isinstance(nh.Config.parse("").diags.items(), list)
+
+
+def test_check_config_is_the_reporting_half_of_load_config(tmp_path):
+    # Same dispatch, different promise: load_config raises, check_config reports.
+    path = tmp_path / "broken.toml"
+    path.write_text("this is not = = toml\n")
+
+    assert nh.check_config(path).has_errors  # Path -> a file
+    assert nh.check_config("this is not = = toml\n").has_errors  # str -> text
+    assert not nh.check_config("deduplicate_shapes = true\n").has_errors
+
+    with pytest.raises(nh.Error):
+        nh.load_config(path)
+
+
+def test_check_config_accepts_a_dict():
+    pytest.importorskip("tomli_w")
+
+    assert not nh.check_config({"deduplicate_shapes": True}).has_errors
+    assert nh.check_config({"rules": [{"tessellation": {"max_segments_circle": -1}}]}).has_errors

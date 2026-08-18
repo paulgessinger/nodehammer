@@ -157,3 +157,23 @@ install(FILES "${NH_PYTHON_BUILD_PKG}/_nodehammer.pyi"
     DESTINATION "${NH_PYTHON_PKG_DIR}"
     COMPONENT Python
 )
+
+# The pytest mirror of tests/public/, registered as an ordinary ctest test.
+#
+# Registered here rather than in tests/CMakeLists.txt because Python_EXECUTABLE
+# is found in this directory, and because the suite belongs with the module it
+# exercises. The payoff is that it needs no CI wiring of its own: it joins the
+# `ctest --preset` invocation every native job already runs, and shows up in the
+# same count as the C++ tests.
+#
+# Deliberately not guarded on pytest being importable. A configuration that
+# turned this on and then skipped the tests because a dependency was missing
+# would be indistinguishable from one where they passed -- and the whole reason
+# this exists is that the bindings were previously compiled and tested nowhere
+# but a developer's laptop.
+if(NODEHAMMER_BUILD_TESTS)
+    add_test(NAME python_bindings
+             COMMAND "${Python_EXECUTABLE}" -m pytest "${CMAKE_SOURCE_DIR}/tests/python" -q)
+    set_tests_properties(python_bindings PROPERTIES
+        ENVIRONMENT "PYTHONPATH=${CMAKE_BINARY_DIR}/python")
+endif()
