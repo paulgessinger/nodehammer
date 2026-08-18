@@ -60,6 +60,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # cmake/Version.cmake derives the version from `git describe`, and the
+          # default shallow clone carries no tags -- so every artifact this job
+          # has ever produced reports 0.0.0. That was invisible until the wheels
+          # started reporting the truth: without this, a single tagged release
+          # would ship a tarball claiming 0.0.0 next to a wheel claiming 0.1.4.
+          fetch-depth: 0
 
       - name: Remove untrusted aws/tap (macOS)
         if: runner.os == 'macOS'
