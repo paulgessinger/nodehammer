@@ -236,6 +236,36 @@ TEST_CASE("config front-ends agree: Lua and TOML produce an identical NHConfig",
     REQUIRE(configToToml(lua.config) == configToToml(toml.config));
 }
 
+// The same guarantee, on a real config rather than a synthetic one. parity.lua
+// exercises every field once; this pins the two ODD fixtures to each other —
+// fixtures/configs/odd.toml with its odd/*.toml fragments, and
+// fixtures/configs/lua/odd.lua with its odd/*.lua ones.
+//
+// The failure this catches is not a mis-mapped key but a fragment drifting: an
+// include dropped in translation, a rule that did not survive the port. Nothing
+// about that is loud — both sides still parse, still validate, still render —
+// so without this the first symptom is a visibly different detector.
+TEST_CASE("config front-ends agree on the ODD config", "[config][lua]") {
+    const auto luaSrc = readFile(kLuaFixtures / "odd.lua");
+    REQUIRE(luaSrc.has_value());
+
+    auto lua = evalLuaConfig(*luaSrc, (kLuaFixtures / "odd.lua").generic_string(),
+                             ConfigLoader::filesystemFetcher());
+    auto toml = ConfigLoader::loadFromFile(kLuaFixtures.parent_path() / "odd.toml");
+    REQUIRE_FALSE(lua.diags.hasErrors());
+    REQUIRE_FALSE(toml.diags.hasErrors());
+
+    REQUIRE(configToToml(lua.config) == configToToml(toml.config));
+
+    // Selection is subtractive: base.lua/base.toml drop everything first and each
+    // subsystem keeps back what it owns. That baseline is the one thing the
+    // comparison above cannot catch by itself — it would have to vanish from
+    // both fixtures at once — and losing it is silent, since the config still
+    // loads and still renders, just far more geometry than the detector has.
+    REQUIRE_FALSE(lua.config.selection.empty());
+    REQUIRE(lua.config.selection.front().action == SelectionAction::DropIf);
+}
+
 TEST_CASE("evalLuaConfig: include()/use() cannot escape the config root", "[config][lua]") {
     // A `..` that climbs above baseDir is rejected before any file read.
     REQUIRE(eval(R"LUA(include("../escape.lua"))LUA").diags.hasErrors());
