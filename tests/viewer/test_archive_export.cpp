@@ -198,8 +198,7 @@ include(part .. ".lua")
 // Packing every byte is only half of it: something has to name the entry points,
 // or the archive opens blank. This is the failure the content assertions above
 // cannot see — they pass on an archive that is complete and still unbuildable.
-TEST_CASE("buildArchiveWorkingSet stamps the roots into a manifest",
-          "[viewer][archive_export]") {
+TEST_CASE("buildArchiveWorkingSet stamps the roots into a manifest", "[viewer][archive_export]") {
     TempDir dir{"manifest"};
     dir.write("scene.lua", "material(\"m\", {})\n");
     dir.write("scene.nhb.zst", "GEOMETRY-BLOB");
