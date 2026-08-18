@@ -321,21 +321,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # A pull request builds one canary; main and tags build all three. Each
-        # wheel is a cold Conan graph compiled from source inside the container --
-        # cppstd=23 puts every package outside ConanCenter's prebuilts -- so three
-        # per PR would dominate the run for a path that rarely changes.
-        #
-        # This has to be one expression rather than a static list of three with
-        # the extra two skipped: the `matrix` context is not available in a
-        # job-level `if`, so the only available skip is per-step, which still
-        # starts three runners and reports two green checks that built nothing.
-        include: >-
-          ${{ fromJSON(github.event_name == 'pull_request'
-          && '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"}]'
-          || '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"},
-          {"os":"ubuntu-24.04-arm","identifier":"cp312-manylinux_aarch64"},
-          {"os":"macos-26","identifier":"cp312-macosx_arm64"}]') }}
+        include:
+          - os: ubuntu-24.04
+            identifier: cp312-manylinux_x86_64
+          - os: ubuntu-24.04-arm
+            identifier: cp312-manylinux_aarch64
+          - os: macos-26
+            identifier: cp312-macosx_arm64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -361,10 +353,37 @@ jobs:
           echo "value=$v" >> "$GITHUB_OUTPUT"
           echo "building $v"
 
+      - name: Point Conan at a cacheable directory
+        if: runner.os == 'Linux'
+        shell: bash
+        # On Linux the dependencies are built *inside* the container, so a cache
+        # has to live on the other side of the /host mount cibuildwheel provides
+        # or it dies with the container. macOS needs nothing: before-all runs on
+        # the host, so Conan already writes to the home directory cached below.
+        run: echo "CONAN_HOME=/host${HOME}/.conan2" >> "$GITHUB_ENV"
+
+      # Keyed on conanfile.py alone, with no run id — unlike the caches in the
+      # build job. Those grow run to run and want a fresh entry each time; this
+      # one is a fixed dependency set that only changes when the recipe does, so
+      # a content key writes once and is reused until the recipe moves. That also
+      # keeps three more ~250 MB blobs from churning against the repository's
+      # cache quota, which one open PR has exhausted before (#51).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.conan2/p
+          key: conan-wheel-${{ matrix.identifier }}-${{ hashFiles('conanfile.py') }}
+
       - uses: pypa/cibuildwheel@1828c10ab37f080699c7b81cea34097c684a7074 # v4.2.0
         env:
           CIBW_ONLY: ${{ matrix.identifier }}
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.value }}
+
+      # The container builds as root, so everything it wrote through the /host
+      # mount is owned by root on the runner and actions/cache cannot read it to
+      # save. Same workaround the LCG job already carries for the same reason.
+      - name: Fix Conan cache ownership
+        if: always() && runner.os == 'Linux'
+        run: sudo chown -R "$USER" "$HOME/.conan2" || true
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -140,7 +140,10 @@ before-all = [
 # setuptools_scm cannot derive a version there and the build dies before it
 # reaches CMake. The host knows the version, so it computes it and passes it in;
 # `just wheel-linux` and the CI job both set it the same way.
-environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION"]
+# CONAN_HOME rides along so CI can point it at a directory under cibuildwheel's
+# /host mount, which is the only way a cache survives the container. Unset
+# locally, where the container's own default is fine.
+environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION", "CONAN_HOME"]
 
 [tool.cibuildwheel.linux.environment]
 CMAKE_TOOLCHAIN_FILE = "/tmp/conan/build/Release/generators/conan_toolchain.cmake"
