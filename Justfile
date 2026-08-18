@@ -276,3 +276,73 @@ wasm-compute-smoke build='RelWithDebInfo':
     trap 'rm -f "$fixture"' EXIT
     zstd -dcf "$root/odd.nhb.zst" > "$fixture"
     node "$root/scripts/wasm_compute_smoke.js" "$module" "$fixture"
+
+# ── Python wheel ──────────────────────────────────────────────────────────────
+# One deployment target, reaching both halves of the build.
+#
+# 13.3 is not a preference, it is the floor this code compiles to: Apple's libc++
+# gates floating-point std::to_chars behind macOS 13.3, and <format> uses it, so
+# anything lower fails to compile with "'to_chars' is unavailable". The arm64
+# minimum of 11.0 is therefore unreachable while the tree uses std::format.
+#
+# It has to reach Conan as well as CMake. Set it only in the environment and the
+# dependencies still get built at the host's default, so the linker warns
+# ("object file was built for newer 'macOS' version") and the wheel claims a
+# floor its own payload does not honour -- which delocate checks and rejects, and
+# which would otherwise crash on a machine old enough to care.
+macos_deployment_target := "13.3"
+
+# Resolve dependencies for a wheel build (Release, no viewer, pinned floor)
+wheel-deps: recipes
+    conan install . \
+        -s build_type=Release \
+        -s:a compiler.cppstd=23 \
+        {{ if os() == "macos" { "-s os.version=" + macos_deployment_target } else { "" } }} \
+        -c tools.cmake.cmaketoolchain:generator=Ninja \
+        --build=missing
+
+# Conan runs first (see wheel-deps): its toolchain carries cppstd, libcxx and the
+# deployment target, none of which a CMake dependency provider can deliver -- so
+# the path is passed in rather than discovered.
+
+# Build the Python wheel (run `just wheel-deps` first)
+wheel *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    tc="$root/build/Release/generators/conan_toolchain.cmake"
+    if [ ! -f "$tc" ]; then
+        echo "run 'just wheel-deps' first ($tc is missing)" >&2
+        exit 1
+    fi
+    export CMAKE_TOOLCHAIN_FILE="$tc"
+    if [ "$(uname)" = "Darwin" ]; then
+        export MACOSX_DEPLOYMENT_TARGET="{{macos_deployment_target}}"
+    fi
+    uv build --wheel --out-dir "$root/dist" {{args}}
+    # nanobind_add_module(STABLE_ABI) degrades *silently* to a version-specific
+    # module when find_package(Python) did not turn up Development.SABIModule, and
+    # the only visible difference is the filename. Catch that here rather than
+    # discovering it as a CI matrix that grew from one wheel per platform to one
+    # per interpreter.
+    for whl in "$root"/dist/*.whl; do
+        case "$whl" in
+            *-abi3-*) ;;
+            *) echo "not an abi3 wheel: $(basename "$whl") -- STABLE_ABI did not engage" >&2
+               exit 1 ;;
+        esac
+    done
+
+# The Python counterpart of ci/shared_consumer: the build tree resolves
+# libnodehammer through CMake's own rpath, so only an installed wheel proves the
+# relative rpath and the bundled library are right.
+
+# Install the built wheel into a throwaway venv and run the suite against it
+wheel-test: wheel
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    venv=$(mktemp -d)/venv
+    uv venv --python 3.12 "$venv"
+    VIRTUAL_ENV="$venv" uv pip install --quiet pytest tomli-w "$root"/dist/nodehammer-*.whl
+    cd "$root" && "$venv/bin/python" -m pytest tests/python -q

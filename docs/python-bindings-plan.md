@@ -247,11 +247,20 @@ non-limited-API usage would creep in.
   does the `conan install`; `CONAN_HOME` points into cibuildwheel's `/host` mount
   so the existing `actions/cache` Conan blobs are reused. The Conan cache is not
   concurrency-safe — one per job.
-- **macOS**: `MACOSX_DEPLOYMENT_TARGET` must be identical across Conan
-  dependencies, `libnodehammer`, and the wheel tag. Since delocate 0.11 the
-  repair step *verifies* this and fails on a mismatch. Note the split:
-  scikit-build-core reads the environment variable to compute the wheel tag,
-  while the compile uses `CMAKE_OSX_DEPLOYMENT_TARGET` from the Conan toolchain.
+- **macOS deployment target is 13.3, and that is measured rather than chosen.**
+  Apple's libc++ gates floating-point `std::to_chars` behind macOS 13.3 and
+  `<format>` uses it, so a lower target fails to compile outright
+  (`'to_chars' is unavailable: introduced in macOS 13.3`). The arm64 minimum of
+  11.0 is unreachable while the tree uses `std::format`.
+
+  It must reach **Conan as well as CMake**. Setting it only in the environment
+  leaves the dependencies built at the host default, so the linker warns
+  (`object file was built for newer 'macOS' version`) and the wheel advertises a
+  floor its own payload does not honour — which delocate verifies and rejects
+  since 0.11. The `Justfile` therefore holds it in one variable and passes it to
+  `conan install` as `-s os.version=` and to the build as
+  `MACOSX_DEPLOYMENT_TARGET`. Pinning it changes the Conan `package_id`, so the
+  first build after a change recompiles the graph.
 - **Cadence**: one canary identifier on PR (`--only cp312-manylinux_x86_64`), the
   full three-wheel matrix on `v*` tags. The `release` job
   (`.github/workflows/ci.yml:389-401`) downloads all artifacts and uploads

@@ -1,0 +1,111 @@
+[build-system]
+requires = ["scikit-build-core>=1.0,<2", "nanobind>=2.5", "setuptools_scm>=8"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nodehammer"
+description = "Detector geometry tessellation and export"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Paul Gessinger" }]
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.optional-dependencies]
+# load_config(dict) serializes to TOML and hands it to Config.parse, so the
+# validator sees exactly what a file would produce. tomli-w is the only thing
+# that needs, and the rest of the package needs nothing at runtime.
+dict = ["tomli-w>=1.0"]
+
+[project.urls]
+Homepage = "https://github.com/paulgessinger/nodehammer"
+
+# ── scikit-build-core ────────────────────────────────────────────────────────
+[tool.scikit-build]
+minimum-version = "1.0"
+
+# The root project requires 3.25, so say so here: scikit-build-core will fetch a
+# suitable cmake rather than letting a stale system one fail further in.
+cmake.version = ">=3.25"
+ninja.version = ">=1.11"
+
+# Under /build, which .gitignore already covers. Keeping it stable (rather than
+# the default temp dir) makes rebuilds incremental, and {wheel_tag} keeps it
+# clear of `just configure`'s build/RelWithDebInfo.
+build-dir = "build/wheel/{wheel_tag}"
+
+# abi3 from 3.12 up. This must agree with nanobind_add_module(STABLE_ABI) and
+# with the floor in src/python/CMakeLists.txt's find_package(Python 3.12) —
+# three statements of one decision, which is why tests/python asserts the
+# resulting filename rather than trusting that they stayed in step.
+wheel.py-api = "cp312"
+
+# The pure-Python half, copied from the source tree. The binary half arrives
+# from the CMake install below and merges into the same directory.
+wheel.packages = ["python/nodehammer"]
+
+# The wheel is the extension plus libnodehammer, and nothing else. Every install
+# rule in CMakeLists.txt carries a component, so naming one is a positive
+# statement of the payload rather than a list of exclusions: no CLI executable,
+# no headers, no nodehammer-config.cmake, no third-party licence staging.
+install.components = ["Python"]
+
+# Likewise on the build side. The default builds everything, which for a wheel
+# means compiling the CLI, the static archive and the Catch2 binary for nothing.
+# nodehammer_shared still gets built — it is what the extension links.
+#
+# The umbrella target rather than nodehammer_python itself: the wheel needs the
+# generated .pyi as well, and naming the extension alone silently skipped the
+# stub target while the install rule still expected its output. Depending on the
+# umbrella keeps "what a complete package contains" in one place in CMake instead
+# of duplicated here, so adding a staged artifact later does not need this line
+# edited to match.
+build.targets = ["nodehammer_python_package"]
+
+[tool.scikit-build.cmake.define]
+NODEHAMMER_BUILD_PYTHON = "ON"
+NODEHAMMER_BUILD_TESTS = "OFF"
+NODEHAMMER_WITH_VIEWER = "OFF"
+NODEHAMMER_WERROR = "OFF"
+# CMAKE_TOOLCHAIN_FILE is deliberately absent: Conan writes it to an absolute,
+# machine-specific path, so it arrives through the CMAKE_TOOLCHAIN_FILE
+# environment variable that `just wheel` exports. See docs/python-bindings-plan.md
+# for why Conan runs as an explicit pre-step rather than through cmake-conan's
+# dependency provider.
+
+# ── version ──────────────────────────────────────────────────────────────────
+# cmake/Version.cmake derives from `git describe`, which yields
+# "0.1.3-398-g920e6c5" — not PEP 440, and 0.0.0 in a tagless clone. So the wheel
+# version comes from setuptools_scm and is pushed *down* into CMake, which
+# prefers SKBUILD_PROJECT_VERSION when it is set. One source of truth per build,
+# and the test suite asserts the two agree.
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.setuptools_scm"
+
+[tool.setuptools_scm]
+# no-guess-dev rather than the default guess-next-dev: the default bumps the
+# patch component (0.1.3 plus 398 commits becomes "0.1.4.dev398"), so the base
+# would name a tag that does not exist and disagree with PROJECT_VERSION on every
+# commit that is not exactly on one. This keeps the base at the tag actually
+# found: "0.1.3.post1.dev398+g920e6c5". On a tag both schemes give plain "0.1.3".
+version_scheme = "no-guess-dev"
+
+[tool.scikit-build.sdist]
+exclude = [
+    "/.github",
+    "/analysis",
+    "/branding",
+    "/build",
+    "/docs",
+    "/web",
+    "*.nhb",
+    "*.nhb.zst",
+    "*.nhproj",
+]
