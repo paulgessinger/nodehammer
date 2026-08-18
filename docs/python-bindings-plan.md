@@ -74,8 +74,9 @@ into the library. `REUSE.toml`'s `path = "**"` covers all of it with no edit.
 |---|---|
 | `SemanticScene::read(path, {format})` / `read(span<byte>)` | `SemanticScene.read(path_or_bytes, format="")` |
 | `SemanticScene::toNhb()` / `RenderScene::toNhr()` | `.to_nhb()` / `.to_nhr()` → `bytes` |
-| `nodeCount` / `logVolCount` / `shapeCount` / `materialCount` / `meshCount` / `triangleCount` | `node_count` / `log_vol_count` / … |
-| `DiagnosticList::hasErrors()` | `.has_errors()` |
+| `nodeCount` / `logVolCount` / `shapeCount` / `materialCount` / `meshCount` / `triangleCount` | `node_count` / `log_vol_count` / … (properties) |
+| `DiagnosticList::hasErrors()` | `.has_errors` (property) |
+| `valid()`, `Config::scene()` / `output()` | `.valid`, `.scene`, `.output` (properties) |
 | `Diagnostic::Severity` | `Diagnostic.Severity` |
 | `applySelection` / `deduplicate` / `tessellate` / `build` | `apply_selection` / `deduplicate` / `tessellate` / `build` |
 | `Config::read` / `parse` / `check` / `checkString` | `Config.read` / `.parse` / `.check` / `.check_string` |
@@ -95,6 +96,13 @@ into the library. `REUSE.toml`'s `path = "**"` covers all of it with no edit.
   `std::string format`): a `format=""` keyword instead of binding the structs. A
   deliberate, documented delta — the C++ shape exists to carry a defaulted
   trailing parameter, which Python does not need.
+- **Zero-argument accessors are properties**, for the same reason: mirroring the
+  API means its names and semantics, not its punctuation, and Python spells a
+  cheap side-effect-free read as an attribute. The line is *cost*, not arity —
+  anything that serializes (`to_nhb`), does I/O (`read`, `write`) or materializes
+  a container (`formats`, `items`) stays a method, so a property never hides work.
+  Published through a `nanobind_add_stub`-generated `.pyi`, without which the
+  `py.typed` marker would claim annotations the package does not ship.
 - **`SemanticScene::read(TGeoManager&)`**: **not bound.** No ROOT in the wheel,
   and it is the one entry point whose definition is build-conditional
   (`src/api/semantic_scene.cpp:71-81`), so referencing it would be an undefined

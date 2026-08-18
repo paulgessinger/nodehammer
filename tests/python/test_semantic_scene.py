@@ -17,20 +17,20 @@ import nodehammer as nh
 def test_read_imports_through_the_synthetic_backend():
     result = nh.SemanticScene.read("", format="synthetic")
 
-    assert result.scene.valid()
-    assert not result.diags.has_errors()
+    assert result.scene.valid
+    assert not result.diags.has_errors
 
-    assert result.scene.node_count() == 1
-    assert result.scene.log_vol_count() == 1
-    assert result.scene.shape_count() == 1
-    assert result.scene.material_count() == 1
+    assert result.scene.node_count == 1
+    assert result.scene.log_vol_count == 1
+    assert result.scene.shape_count == 1
+    assert result.scene.material_count == 1
 
 
 def test_result_unpacks_like_the_cpp_structured_binding():
     scene, diags = nh.SemanticScene.read("", format="synthetic")
 
-    assert scene.valid()
-    assert not diags.has_errors()
+    assert scene.valid
+    assert not diags.has_errors
 
 
 def test_formats_reports_what_this_build_can_read_and_write():
@@ -69,9 +69,9 @@ def test_round_trips_through_nhb_bytes():
 
     restored = nh.SemanticScene.read(payload).scene
 
-    assert restored.valid()
-    assert restored.node_count() == original.node_count()
-    assert restored.shape_count() == original.shape_count()
+    assert restored.valid
+    assert restored.node_count == original.node_count
+    assert restored.shape_count == original.shape_count
 
 
 def test_round_trips_through_a_file(tmp_path):
@@ -82,7 +82,7 @@ def test_round_trips_through_a_file(tmp_path):
     assert path.exists()
 
     restored = nh.SemanticScene.read(path).scene
-    assert restored.node_count() == original.node_count()
+    assert restored.node_count == original.node_count
 
 
 def test_read_accepts_os_pathlike_and_str(tmp_path):
@@ -90,8 +90,8 @@ def test_read_accepts_os_pathlike_and_str(tmp_path):
     path = tmp_path / "scene.nhb"
     scene.write(path)
 
-    assert nh.SemanticScene.read(path).scene.valid()  # pathlib.Path
-    assert nh.SemanticScene.read(str(path)).scene.valid()  # str
+    assert nh.SemanticScene.read(path).scene.valid  # pathlib.Path
+    assert nh.SemanticScene.read(str(path)).scene.valid  # str
 
 
 def test_write_rejects_a_format_this_build_does_not_have(tmp_path):
@@ -104,7 +104,7 @@ def test_write_rejects_a_format_this_build_does_not_have(tmp_path):
 def test_an_empty_scene_answers_and_raises_where_it_would_dereference():
     empty = nh.SemanticScene()
 
-    assert not empty.valid()
+    assert not empty.valid
 
     # NH0800: the call cannot deliver what its signature promises, so it is
     # fatal rather than a diagnostic.
@@ -124,5 +124,5 @@ def test_a_scene_outlives_the_result_that_produced_it():
 
     gc.collect()
 
-    assert scene.valid()
-    assert scene.node_count() == 1
+    assert scene.valid
+    assert scene.node_count == 1

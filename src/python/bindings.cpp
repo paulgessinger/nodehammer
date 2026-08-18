@@ -109,6 +109,16 @@ void translateError(const std::exception_ptr &p, void * /*payload*/) {
 NB_MODULE(_nodehammer, m) {
     m.doc() = "Detector geometry tessellation and export — the nodehammer public API.";
 
+    // Zero-argument accessors are bound as properties, not methods. Mirroring the
+    // C++ API means keeping its names and its semantics, not transliterating its
+    // punctuation: Python's way of spelling a cheap side-effect-free read *is* an
+    // attribute, so `scene.valid` is the faithful spelling of `scene.valid()`,
+    // the same way `format=` is the faithful spelling of ReadOptions{format}.
+    //
+    // The line is cost, not arity. Anything that serializes (to_nhb), does I/O
+    // (read, write) or materializes a container (formats, items) stays a method,
+    // so a property never hides work a caller would want to see.
+
     // ── diagnostics ─────────────────────────────────────────────────────────
     nb::class_<nh::Diagnostic> diagnostic(m, "Diagnostic");
 
@@ -146,7 +156,7 @@ NB_MODULE(_nodehammer, m) {
         // Answers "is the result partial?", never "did it work" — see
         // docs/error-model.md. A caller that ignores the whole list still holds
         // something valid.
-        .def("has_errors", &nh::DiagnosticList::hasErrors)
+        .def_prop_ro("has_errors", &nh::DiagnosticList::hasErrors)
         .def("items", &nh::DiagnosticList::items)
         .def("__len__", &nh::DiagnosticList::size)
         .def("__bool__", [](const nh::DiagnosticList &l) { return !l.empty(); })
@@ -168,11 +178,11 @@ NB_MODULE(_nodehammer, m) {
     // back into a verb.
     nb::class_<nh::SceneConfig>(m, "SceneConfig")
         .def(nb::init<>())
-        .def("valid", &nh::SceneConfig::valid);
+        .def_prop_ro("valid", &nh::SceneConfig::valid);
 
     nb::class_<nh::OutputConfig>(m, "OutputConfig")
         .def(nb::init<>())
-        .def("valid", &nh::OutputConfig::valid);
+        .def_prop_ro("valid", &nh::OutputConfig::valid);
 
     nb::class_<nh::Config> config(m, "Config");
     config.def(nb::init<>())
@@ -215,9 +225,9 @@ NB_MODULE(_nodehammer, m) {
             },
             "toml"_a, "base_dir"_a = nb::none())
         .def_static("formats", [] { return toStringList(nh::Config::formats()); })
-        .def("scene", &nh::Config::scene)
-        .def("output", &nh::Config::output)
-        .def("valid", &nh::Config::valid);
+        .def_prop_ro("scene", &nh::Config::scene)
+        .def_prop_ro("output", &nh::Config::output)
+        .def_prop_ro("valid", &nh::Config::valid);
 
     nb::class_<nh::ConfigResult>(m, "ConfigResult")
         .def_ro("config", &nh::ConfigResult::config)
@@ -274,11 +284,11 @@ NB_MODULE(_nodehammer, m) {
                  return toPyBytes(data);
              })
         // Reports whether there is something to look at — never success.
-        .def("valid", &nh::SemanticScene::valid)
-        .def("node_count", &nh::SemanticScene::nodeCount)
-        .def("log_vol_count", &nh::SemanticScene::logVolCount)
-        .def("shape_count", &nh::SemanticScene::shapeCount)
-        .def("material_count", &nh::SemanticScene::materialCount);
+        .def_prop_ro("valid", &nh::SemanticScene::valid)
+        .def_prop_ro("node_count", &nh::SemanticScene::nodeCount)
+        .def_prop_ro("log_vol_count", &nh::SemanticScene::logVolCount)
+        .def_prop_ro("shape_count", &nh::SemanticScene::shapeCount)
+        .def_prop_ro("material_count", &nh::SemanticScene::materialCount);
 
     // read(TGeoManager&) is deliberately absent: it is the one entry point whose
     // *definition* is build-conditional, so binding it would make this module
@@ -329,11 +339,13 @@ NB_MODULE(_nodehammer, m) {
                  }
                  return toPyBytes(data);
              })
-        .def("valid", &nh::RenderScene::valid)
-        .def("node_count", &nh::RenderScene::nodeCount)
-        .def("mesh_count", &nh::RenderScene::meshCount)
-        .def("material_count", &nh::RenderScene::materialCount)
-        .def("triangle_count", &nh::RenderScene::triangleCount);
+        .def_prop_ro("valid", &nh::RenderScene::valid)
+        .def_prop_ro("node_count", &nh::RenderScene::nodeCount)
+        .def_prop_ro("mesh_count", &nh::RenderScene::meshCount)
+        .def_prop_ro("material_count", &nh::RenderScene::materialCount)
+        .def_prop_ro("triangle_count", &nh::RenderScene::triangleCount,
+                     "Total triangles across every mesh. The one count that is not a\n"
+                     "container size — it sums over mesh assets, so it is O(meshes).");
 
     nb::class_<nh::RenderResult>(m, "RenderResult")
         .def_ro("scene", &nh::RenderResult::scene)
@@ -342,9 +354,14 @@ NB_MODULE(_nodehammer, m) {
              [](const nh::RenderResult &r) { return nb::iter(nb::make_tuple(r.scene, r.diags)); });
 
     // ── pipeline verbs ──────────────────────────────────────────────────────
-    // All four release the GIL: `build` is minutes on a real detector, and a
-    // Python caller that cannot run a progress thread meanwhile has a binding
-    // that is worse than a subprocess.
+    // All four release the GIL. Measured on ODD (325k nodes, 211k triangles):
+    // read 227 ms, build 280 ms, write 631 ms — so `write` is the long pole, not
+    // `build`, and none of them is anywhere near the "minutes" an earlier version
+    // of this comment claimed. Hundreds of milliseconds is still far too long to
+    // hold the interpreter in a notebook or any threaded application, and the
+    // boolean/manifold paths are unbounded on hostile geometry in a way a fixed
+    // number does not capture. Holding the GIL is what would make this binding
+    // worse than a subprocess.
     m.def(
         "apply_selection",
         [](const nh::SemanticScene &scene, const nh::SceneConfig &config) {

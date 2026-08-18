@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
+from pathlib import Path
 from typing import Any, Mapping
 
 from . import _nodehammer
@@ -84,38 +85,74 @@ __cxx_version__ = version()
 
 
 def load_config(
-    src: Mapping[str, Any] | str,
+    src: Mapping[str, Any] | Path | str,
     *,
     base_dir: str | None = None,
     **overrides: Any,
 ) -> Config:
-    """Build a :class:`Config` from a dict, TOML text, or either plus overrides.
+    """Build a :class:`Config` from a dict, a file, or TOML text.
 
-    A dict is serialized to TOML and handed to :meth:`Config.parse`, so it goes
-    through exactly the same validator as a file the CLI reads and produces the
-    same diagnostic codes. Nothing here reimplements config semantics.
+    What ``src`` means is decided by its **type**, never by looking at the
+    filesystem:
+
+    - :class:`~pathlib.Path` — a config file to read (``.toml`` or ``.lua``).
+    - :class:`str` — TOML *text*, not a filename.
+    - :class:`~collections.abc.Mapping` — serialized to TOML and parsed, so it
+      goes through the same validator as a file and produces the same diagnostic
+      codes. Nothing here reimplements config semantics.
+
+    Deciding by type rather than by whether a file happens to exist is
+    deliberate. Existence-based dispatch would make the meaning of an argument
+    depend on the state of the filesystem, and a mistyped path would silently
+    become a document to parse rather than a missing file to report. Pass a
+    ``Path`` and a typo is a clean error.
 
     ``base_dir`` roots any ``include``. ``None`` means *this content has no
     location* — not the working directory. That is the library's rule (a config
     must not be able to pull in a file from wherever the process happened to
-    start), and the choice of what "here" means belongs to the application, so
-    if you want the working directory, pass it.
+    start), and choosing what "here" means belongs to the application, so if you
+    want the working directory, pass it.
 
     Raises :class:`Error` if the document does not load.
     """
-    if not isinstance(src, str):
-        try:
-            import tomli_w
-        except ModuleNotFoundError as exc:  # pragma: no cover - depends on env
-            raise ModuleNotFoundError(
-                "load_config() with a dict needs tomli-w; install nodehammer[dict] "
-                "or pass TOML text instead."
-            ) from exc
-        src = tomli_w.dumps(_deep_merge(dict(src), overrides))
-    elif overrides:
-        raise TypeError("overrides are only supported when src is a mapping")
+    if isinstance(src, Path):
+        if overrides:
+            raise TypeError("overrides are only supported when src is a mapping")
+        return Config.read(src).config
 
-    return Config.parse(src, base_dir).config
+    if isinstance(src, str):
+        if overrides:
+            raise TypeError("overrides are only supported when src is a mapping")
+        try:
+            return Config.parse(src, base_dir).config
+        except Error as exc:
+            # A heuristic in the *error* path only: it never changes what a
+            # successful call does, it just answers the question the confusing
+            # message provokes. "expected '=' after key" is unhelpful when what
+            # actually happened is that someone passed a filename as text.
+            if _looks_like_a_filename(src):
+                raise Error(
+                    exc.code,
+                    f"{exc} -- `src` is a str, which load_config reads as TOML text; "
+                    f"pass Path({src!r}) to read it as a file",
+                ) from exc
+            raise
+
+    try:
+        import tomli_w
+    except ModuleNotFoundError as exc:  # pragma: no cover - depends on env
+        raise ModuleNotFoundError(
+            "load_config() with a dict needs tomli-w; install nodehammer[dict] "
+            "or pass TOML text instead."
+        ) from exc
+
+    merged = tomli_w.dumps(_deep_merge(dict(src), overrides))
+    return Config.parse(merged, base_dir).config
+
+
+def _looks_like_a_filename(src: str) -> bool:
+    """A one-line string ending in a config extension, i.e. almost certainly a path."""
+    return "\n" not in src and src.strip().endswith((".toml", ".lua"))
 
 
 def _deep_merge(base: dict[str, Any], overlay: Mapping[str, Any]) -> dict[str, Any]:

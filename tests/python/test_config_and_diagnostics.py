@@ -17,24 +17,24 @@ import nodehammer as nh
 def test_parse_accepts_toml_text():
     result = nh.Config.parse("deduplicate_shapes = true\n")
 
-    assert result.config.valid()
-    assert not result.diags.has_errors()
-    assert result.config.scene().valid()
-    assert result.config.output().valid()
+    assert result.config.valid
+    assert not result.diags.has_errors
+    assert result.config.scene.valid
+    assert result.config.output.valid
 
 
 def test_config_result_unpacks():
     config, diags = nh.Config.parse("deduplicate_shapes = true\n")
 
-    assert config.valid()
-    assert not diags.has_errors()
+    assert config.valid
+    assert not diags.has_errors
 
 
 def test_read_loads_a_file(tmp_path):
     path = tmp_path / "cfg.toml"
     path.write_text("deduplicate_shapes = true\n")
 
-    assert nh.Config.read(path).config.valid()
+    assert nh.Config.read(path).config.valid
 
 
 def test_formats_is_constant_and_includes_lua():
@@ -55,7 +55,7 @@ def test_check_reports_rather_than_raising():
     # and raises; `check_string` promises a report and returns one.
     diags = nh.Config.check_string("this is not = = toml\n")
 
-    assert diags.has_errors()
+    assert diags.has_errors
     assert len(diags) > 0
 
 
@@ -68,7 +68,7 @@ def test_an_unset_base_dir_means_no_location(tmp_path, monkeypatch):
 
     diags = nh.Config.check_string('include = "included.toml"\n')
 
-    assert diags.has_errors()
+    assert diags.has_errors
     assert any("not found" in d.message for d in diags)
 
 
@@ -77,7 +77,7 @@ def test_a_base_dir_resolves_includes(tmp_path):
 
     diags = nh.Config.check_string('include = "included.toml"\n', base_dir=str(tmp_path))
 
-    assert not diags.has_errors()
+    assert not diags.has_errors
 
 
 # ── diagnostics and the error model ─────────────────────────────────────────
@@ -125,7 +125,7 @@ def test_error_is_a_runtime_error():
 
 
 def test_load_config_accepts_toml_text():
-    assert nh.load_config("deduplicate_shapes = true\n").valid()
+    assert nh.load_config("deduplicate_shapes = true\n").valid
 
 
 def test_load_config_accepts_a_dict():
@@ -133,8 +133,8 @@ def test_load_config_accepts_a_dict():
 
     config = nh.load_config({"deduplicate_shapes": True})
 
-    assert config.valid()
-    assert config.scene().valid()
+    assert config.valid
+    assert config.scene.valid
 
 
 def test_load_config_applies_overrides():
@@ -145,7 +145,7 @@ def test_load_config_applies_overrides():
         export={"gltf": {"unit_scale": 0.01}},
     )
 
-    assert config.valid()
+    assert config.valid
 
 
 def test_load_config_routes_through_the_same_validator():
@@ -159,3 +159,52 @@ def test_load_config_routes_through_the_same_validator():
         nh.load_config({"rules": [{"tessellation": {"max_segments_circle": -1}}]})
 
     assert excinfo.value.code == "NH0003"
+
+
+def test_load_config_reads_a_path_and_parses_a_str(tmp_path):
+    # What `src` means is decided by its type, never by whether a file happens
+    # to exist: a Path is a file, a str is TOML text.
+    path = tmp_path / "cfg.toml"
+    path.write_text("deduplicate_shapes = true\n")
+
+    assert nh.load_config(path).valid  # Path -> read the file
+    assert nh.load_config("deduplicate_shapes = true\n").valid  # str -> TOML text
+
+
+def test_a_filename_passed_as_a_str_says_so(tmp_path):
+    # The heuristic lives in the error path only, so it cannot change what a
+    # successful call does — it just answers the question that "expected '='
+    # after key" provokes when someone passed a filename as text.
+    path = tmp_path / "cfg.toml"
+    path.write_text("deduplicate_shapes = true\n")
+
+    with pytest.raises(nh.Error) as excinfo:
+        nh.load_config(str(path))
+
+    assert "pass Path(" in str(excinfo.value)
+
+
+def test_overrides_are_rejected_for_non_mappings(tmp_path):
+    with pytest.raises(TypeError):
+        nh.load_config("deduplicate_shapes = true\n", hoist_orphans=True)
+
+
+def test_the_cheap_accessors_are_properties_not_methods():
+    # Mirroring the C++ API means its names and semantics, not its punctuation.
+    # Calling one is a clear TypeError rather than something that silently works.
+    scene = nh.SemanticScene.read("", format="synthetic").scene
+
+    assert scene.valid is True
+    assert isinstance(scene.node_count, int)
+    with pytest.raises(TypeError):
+        scene.valid()
+
+
+def test_work_and_io_stay_methods():
+    # The line is cost, not arity: anything that serializes, does I/O or builds
+    # a container is still a call, so a property never hides work.
+    scene = nh.SemanticScene.read("", format="synthetic").scene
+
+    assert isinstance(scene.to_nhb(), bytes)
+    assert isinstance(nh.SemanticScene.formats(), list)
+    assert isinstance(nh.Config.parse("").diags.items(), list)
