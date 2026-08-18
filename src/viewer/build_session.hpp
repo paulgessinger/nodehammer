@@ -22,7 +22,7 @@ namespace nodehammer::viewer {
 /// generation bump, or an explicit `invalidate()` call from the App).
 enum class BuildPhase {
     Idle,           ///< no root keys set yet (or session was invalidated and root keys cleared)
-    Walking,        ///< resolving the include graph; some keys may be Pending
+    Stale,          ///< derived state no longer matches the project; the next refresh re-derives
     WaitingForUser, ///< at least one key is Missing — surface in UI; session holds
     ResolvedReady,  ///< all bytes resolved and parsed; consume via `takeInputs()`
     Consumed,       ///< inputs handed to the App; await invalidation
@@ -45,20 +45,25 @@ struct BuildSessionInputs {
     std::uint64_t input_hash{0};
 };
 
-/// Drives the include-graph walk against a `ProjectFs`. On each
-/// `poll()`, if the project hasn't bumped its `generation()` since the
-/// last poll the session is a no-op; otherwise it walks: resolves the
-/// root config key, peeks its includes, resolves each (recursively),
-/// then resolves the input key. Once every reachable key is `Ready`,
-/// the session parses the config (via `ConfigLoader::parseAndMerge`)
-/// and imports the geometry (via `FlatBufferImporter::importFromBytes`),
-/// and transitions to `ResolvedReady`.
+/// Derives a build's inputs from a `ProjectFs`. On each `refresh()`, if
+/// the project hasn't bumped its `generation()` since the last one the
+/// session is a no-op; otherwise it re-derives in one
+/// pass: resolve the two root keys, parse the config — its includes
+/// resolved through a fetcher that reads the project directly — and
+/// import the geometry, then transition to `ResolvedReady`.
 ///
-/// Backend agnosticism: the session calls `project->resolve(key)` and
-/// honours all four `ResolveStatus` outcomes. `Pending` keeps the
-/// session in `Walking`; the next poll re-tries. This is what lets the
-/// URL backend's lazy fetches work without the session owning any
-/// fetch logic itself.
+/// There is no separate resolution phase. There used to be, because a
+/// URL backend resolved keys asynchronously and a walk had to be
+/// resumable across frames; every backend is synchronous now, so
+/// discovering an include and reading it are the same act. That is also
+/// the only arrangement a Lua config admits: its include set is computed
+/// rather than declared, so there is nothing to walk ahead of running it.
+///
+/// What the fetcher could not supply is what distinguishes
+/// `WaitingForUser` from `Error`, and it is asked rather than inferred
+/// from diagnostics: `ProjectFs` already separates "the project does not
+/// have this" from "the backend broke", and only the first is something
+/// the user can fix by adding a file.
 class BuildSession : public LogSinkHolder {
   public:
     BuildSession();
@@ -68,23 +73,29 @@ class BuildSession : public LogSinkHolder {
     BuildSession &operator=(const BuildSession &) = delete;
 
     /// Set or replace the root keys. Resets phase to `Idle` if either
-    /// key is empty, or `Walking` if both are set. Existing in-flight
+    /// key is empty, or `Stale` if both are set. Existing in-flight
     /// state is discarded — if a previous build was already
     /// `ResolvedReady`/`Consumed` and the new keys differ, the previous
     /// inputs are dropped.
     void setRootKeys(std::string config_key, std::string geometry_key);
 
-    /// Force a re-walk on the next poll, regardless of project
-    /// generation. Used after a project swap (close project, URL → bag
-    /// graduation) so cached state from the prior project is dropped.
+    /// Force a re-derive on the next refresh, regardless of project
+    /// generation. Used after a project swap (close project, archive
+    /// restore) so cached state from the prior project is dropped.
     void invalidate();
 
-    /// Drive the state machine. Reads the project via the provided
-    /// `project` pointer. Cheap to call every frame: when the project's
-    /// generation hasn't moved and the session is settled, this is a
-    /// no-op. The pointer is read live (matches the decoration
-    /// discipline rule that consumers don't cache `ProjectFs*`).
-    void poll(ProjectFs *project);
+    /// Bring the derived state in line with the project, re-deriving it
+    /// from scratch if the project has moved since last time. Cheap to
+    /// call every frame: when the generation hasn't moved and the session
+    /// is settled, this returns immediately.
+    ///
+    /// Not called `poll`, because it polls nothing of its own — the work
+    /// it does is finished by the time it returns. `ProjectFs::poll()` is
+    /// the real poll in this pair: that one drains change notifications a
+    /// watcher raised on a background thread. The project is taken by
+    /// reference and read live, never cached (the decoration discipline
+    /// rule).
+    void refresh(ProjectFs &project);
 
     BuildPhase phase() const;
 

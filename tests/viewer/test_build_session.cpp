@@ -64,7 +64,7 @@ std::vector<std::byte> stringBytes(std::string_view s) {
     return out;
 }
 
-void pollUntilSettled(BuildSession &session, viewer::ProjectFs &project) {
+void refreshUntilSettled(BuildSession &session, viewer::ProjectFs &project) {
     for (int i = 0; i < kPollBudget; ++i) {
         const auto p = session.phase();
         if (p == BuildPhase::ResolvedReady || p == BuildPhase::WaitingForUser ||
@@ -75,7 +75,7 @@ void pollUntilSettled(BuildSession &session, viewer::ProjectFs &project) {
                 return;
             }
         }
-        session.poll(&project);
+        session.refresh(project);
     }
 }
 
@@ -91,7 +91,7 @@ TEST_CASE("BuildSession resolves a flat config + geometry from a bag", "[viewer]
     session.setRootKeys("scene.toml", "scene.nhb.zst");
 
     for (int i = 0; i < kPollBudget; ++i) {
-        session.poll(bag.get());
+        session.refresh(*bag);
         if (session.phase() == BuildPhase::ResolvedReady || session.phase() == BuildPhase::Error ||
             session.phase() == BuildPhase::WaitingForUser) {
             break;
@@ -114,7 +114,7 @@ TEST_CASE("BuildSession input_hash is content-addressed and backend-independent"
         BuildSession session;
         session.setRootKeys("scene.toml", "scene.nhb.zst");
         for (int i = 0; i < kPollBudget; ++i) {
-            session.poll(&project);
+            session.refresh(project);
             if (session.phase() == BuildPhase::ResolvedReady) {
                 break;
             }
@@ -152,7 +152,7 @@ TEST_CASE("BuildSession surfaces missing geometry as WaitingForUser", "[viewer][
     BuildSession session;
     session.setRootKeys("scene.toml", "scene.nhb.zst");
 
-    pollUntilSettled(session, *bag);
+    refreshUntilSettled(session, *bag);
 
     REQUIRE(session.phase() == BuildPhase::WaitingForUser);
     bool found = false;
@@ -178,7 +178,7 @@ TEST_CASE("BuildSession resolves subdir include via bag basename fallback",
     session.setRootKeys("scene.toml", "scene.nhb.zst");
 
     for (int i = 0; i < kPollBudget; ++i) {
-        session.poll(bag.get());
+        session.refresh(*bag);
         if (session.phase() == BuildPhase::ResolvedReady || session.phase() == BuildPhase::Error ||
             session.phase() == BuildPhase::WaitingForUser) {
             break;
@@ -199,7 +199,7 @@ TEST_CASE("BuildSession enters Error on malformed FlatBuffer geometry", "[viewer
     session.setRootKeys("scene.toml", "scene.nhb.zst");
 
     for (int i = 0; i < kPollBudget; ++i) {
-        session.poll(bag.get());
+        session.refresh(*bag);
         if (session.phase() == BuildPhase::Error || session.phase() == BuildPhase::ResolvedReady) {
             break;
         }
@@ -234,7 +234,7 @@ end
 
     BuildSession session;
     session.setRootKeys("scene.lua", "scene.nhb.zst");
-    pollUntilSettled(session, *bag);
+    refreshUntilSettled(session, *bag);
 
     REQUIRE(session.phase() == BuildPhase::ResolvedReady);
     auto inputs = session.takeInputs();
@@ -254,7 +254,7 @@ TEST_CASE("BuildSession reports a Lua fragment the project does not have",
 
     BuildSession session;
     session.setRootKeys("scene.lua", "scene.nhb.zst");
-    pollUntilSettled(session, *bag);
+    refreshUntilSettled(session, *bag);
 
     // Waiting, not Error: the user can still drop the fragment in, exactly as
     // for a missing TOML include.
@@ -264,11 +264,11 @@ TEST_CASE("BuildSession reports a Lua fragment the project does not have",
 
     // Supplying it lets the same session finish, which is what makes re-running
     // the script the right recovery rather than a restart. Polled explicitly:
-    // `pollUntilSettled` treats WaitingForUser as settled and would never ask
+    // `refreshUntilSettled` treats WaitingForUser as settled and would never ask
     // the session again, which is exactly what the App's frame loop does not do.
     bag->addBytes("absent.lua", stringBytes("material(\"m\", {})\n"));
     for (int i = 0; i < kPollBudget && session.phase() != BuildPhase::ResolvedReady; ++i) {
-        session.poll(bag.get());
+        session.refresh(*bag);
     }
     REQUIRE(session.phase() == BuildPhase::ResolvedReady);
     auto inputs = session.takeInputs();
@@ -291,7 +291,7 @@ TEST_CASE("BuildSession input_hash covers a Lua config's fragments", "[viewer][b
 
         BuildSession session;
         session.setRootKeys("scene.lua", "scene.nhb.zst");
-        pollUntilSettled(session, *bag);
+        refreshUntilSettled(session, *bag);
         REQUIRE(session.phase() == BuildPhase::ResolvedReady);
         auto inputs = session.takeInputs();
         REQUIRE(inputs);
@@ -305,4 +305,142 @@ TEST_CASE("BuildSession input_hash covers a Lua config's fragments", "[viewer][b
     // ...and unchanged content still hashes the same, or every poll would look
     // like an edit.
     REQUIRE(hashFor("material(\"silicon\", { metallic = 1.0 })\n") == a);
+}
+
+// ── Characterization: what the walk resolves, and what it reports missing ────
+//
+// These pin behaviour that is about to be re-implemented (the two-phase walk
+// collapses into a single fetcher-driven pass), so they are written against the
+// *current* code and must survive the change untouched. Neither describes the
+// refactor; both describe what a user would notice if it went wrong.
+
+TEST_CASE("BuildSession input_hash covers exactly the TOML include closure",
+          "[viewer][build_session]") {
+    // `input_hash` decides whether BuildController rebuilds or keeps the live
+    // scene, so its *key set* is the thing to pin — too few and an edit is
+    // silently ignored, too many and every unrelated file churns the scene.
+    //
+    // Pinned by comparison rather than by a golden literal: the geometry blob is
+    // zstd-compressed, so a literal would also be asserting the compressor's
+    // output and would break on a dependency bump for a reason that has nothing
+    // to do with this property.
+    auto geom = minimalNhbZstBytes();
+
+    struct Project {
+        std::string deep;  // contents of the transitively-included file
+        bool extra{false}; // an unreferenced sibling in the same bag
+    };
+
+    const auto hashFor = [&](const Project &p) {
+        auto bag = std::make_unique<BagProjectFs>();
+        bag->addBytes("scene.toml", stringBytes("include = [\"mid.toml\"]\n"));
+        bag->addBytes("mid.toml", stringBytes("include = [\"deep.toml\"]\n"));
+        bag->addBytes("deep.toml", stringBytes(p.deep));
+        if (p.extra) {
+            bag->addBytes("unreferenced.toml", stringBytes("hoist_orphans = true\n"));
+        }
+        bag->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+
+        BuildSession session;
+        session.setRootKeys("scene.toml", "scene.nhb.zst");
+        refreshUntilSettled(session, *bag);
+        REQUIRE(session.phase() == BuildPhase::ResolvedReady);
+        auto inputs = session.takeInputs();
+        REQUIRE(inputs);
+        return inputs->input_hash;
+    };
+
+    const auto base = hashFor({.deep = "deduplicate_shapes = true\n"});
+
+    // Stable: identical content must hash identically, or every poll looks like
+    // an edit and nothing is ever cached.
+    REQUIRE(hashFor({.deep = "deduplicate_shapes = true\n"}) == base);
+
+    // Sensitive two levels down. This is the dangerous direction: if a
+    // transitively-included file falls out of the hash, editing it leaves the
+    // viewer showing the old scene with no indication anything was ignored.
+    REQUIRE(hashFor({.deep = "deduplicate_shapes = false\n"}) != base);
+
+    // ...and no wider than the closure. A file sitting in the project that the
+    // config never includes must not enter the hash, or unrelated drops would
+    // invalidate a perfectly good scene.
+    REQUIRE(hashFor({.deep = "deduplicate_shapes = true\n", .extra = true}) == base);
+}
+
+TEST_CASE("BuildSession names every missing TOML include in one pass", "[viewer][build_session]") {
+    // The UI prints `missing()` as a to-do list, so reporting them one at a time
+    // would turn one round trip into three. Both siblings are missing and both
+    // have to be named; the walk keeps going past the first.
+    auto bag = std::make_unique<BagProjectFs>();
+    bag->addBytes("scene.toml", stringBytes("include = [\"a.toml\", \"b.toml\"]\n"));
+    auto geom = minimalNhbZstBytes();
+    bag->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+
+    BuildSession session;
+    session.setRootKeys("scene.toml", "scene.nhb.zst");
+    refreshUntilSettled(session, *bag);
+
+    REQUIRE(session.phase() == BuildPhase::WaitingForUser);
+    const auto missing = session.missing();
+    REQUIRE(std::ranges::find(missing, "a.toml") != missing.end());
+    REQUIRE(std::ranges::find(missing, "b.toml") != missing.end());
+
+    // Not an error, and recoverable in place: supplying both lets the same
+    // session finish rather than requiring a restart.
+    bag->addBytes("a.toml", stringBytes("hoist_orphans = true\n"));
+    bag->addBytes("b.toml", stringBytes("deduplicate_shapes = false\n"));
+    for (int i = 0; i < kPollBudget && session.phase() != BuildPhase::ResolvedReady; ++i) {
+        session.refresh(*bag);
+    }
+    REQUIRE(session.phase() == BuildPhase::ResolvedReady);
+}
+
+TEST_CASE("BuildSession reports a missing root geometry, not just a missing config",
+          "[viewer][build_session]") {
+    // The two roots are resolved by the same walk as the includes today. When
+    // that walk goes away they still have to be resolved by *something*, and a
+    // missing geometry has to stay a WaitingForUser rather than becoming a parse
+    // error or an internal one.
+    auto bag = std::make_unique<BagProjectFs>();
+    bag->addBytes("scene.toml", stringBytes("deduplicate_shapes = true\n"));
+    // no scene.nhb.zst
+
+    BuildSession session;
+    session.setRootKeys("scene.toml", "scene.nhb.zst");
+    refreshUntilSettled(session, *bag);
+
+    REQUIRE(session.phase() == BuildPhase::WaitingForUser);
+    const auto missing = session.missing();
+    REQUIRE(std::ranges::find(missing, "scene.nhb.zst") != missing.end());
+}
+
+TEST_CASE("BuildSession names a missing geometry and a missing include together",
+          "[viewer][build_session]") {
+    // The two halves of the to-do list come from different places — the roots
+    // are resolved up front, the includes only once the config has been read —
+    // and a user with an incomplete project has both. Naming the geometry
+    // alone, taking the file, and only then admitting to the include is one
+    // round trip per layer, for a project that was always one drop short.
+    auto bag = std::make_unique<BagProjectFs>();
+    bag->addBytes("scene.toml", stringBytes("include = [\"a.toml\"]\n"));
+    // no scene.nhb.zst, no a.toml
+
+    BuildSession session;
+    session.setRootKeys("scene.toml", "scene.nhb.zst");
+    refreshUntilSettled(session, *bag);
+
+    REQUIRE(session.phase() == BuildPhase::WaitingForUser);
+    const auto missing = session.missing();
+    REQUIRE(std::ranges::find(missing, "scene.nhb.zst") != missing.end());
+    REQUIRE(std::ranges::find(missing, "a.toml") != missing.end());
+
+    // And supplying both at once finishes it, rather than the second one
+    // uncovering a third thing to ask for.
+    bag->addBytes("a.toml", stringBytes("hoist_orphans = true\n"));
+    auto geom = minimalNhbZstBytes();
+    bag->addBytes("scene.nhb.zst", std::span<const std::byte>{geom});
+    for (int i = 0; i < kPollBudget && session.phase() != BuildPhase::ResolvedReady; ++i) {
+        session.refresh(*bag);
+    }
+    REQUIRE(session.phase() == BuildPhase::ResolvedReady);
 }

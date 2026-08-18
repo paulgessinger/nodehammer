@@ -445,7 +445,7 @@ struct App::Impl {
         const auto session_phase = build_controller_.session().phase();
         return !ibl_baker_.installed() || build_controller_.inProgress() ||
                (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
-               build_controller_.pendingCutRebuild() || session_phase == BuildPhase::Walking ||
+               build_controller_.pendingCutRebuild() || session_phase == BuildPhase::Stale ||
                session_phase == BuildPhase::ResolvedReady;
     }
 

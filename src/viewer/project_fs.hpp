@@ -25,9 +25,19 @@ struct ProjectProgress {
     bool failed{false};
 };
 
+// No asynchronous outcome, deliberately. Every backend owns a complete working
+// set by the time it exists: the web viewer fetches a whole `.nhproj` and only
+// *then* constructs an ArchiveProjectFs over it, and the IndexedDB restore does
+// the same. Loading is modelled as a different project, never as a project that
+// is still loading — which is what lets resolution be a plain function call.
+//
+// There used to be a `Pending` here, for a URL backend that fetched entries on
+// demand. It went away with the move to ZIP working sets, and the machinery that
+// resumed a half-finished walk across frames went with it. Bringing per-entry
+// lazy loading back would need this again — and would deserve a design aimed at
+// that, rather than a fossil kept warm in case.
 enum class ResolveStatus {
     Ready,   // bytes available; OpenedFile populated
-    Pending, // backend is fetching; ask again on a later poll
     Missing, // backend cannot supply this key without user action
     Error,   // backend hit a hard failure for this key
 };
@@ -196,12 +206,10 @@ class ProjectFs : public LogSinkHolder {
     /// generation() on a real move.
     virtual void moveKey(std::string_view /*from_key*/, std::string_view /*to_key*/) {}
 
-    /// Look up the bytes for a logical key. Backends that have everything
-    /// in memory (the bag, an archive) return Ready or Missing
-    /// synchronously; backends that fetch lazily (the URL backend) return
-    /// Pending while the bytes are in flight and Ready once they land.
-    /// The returned `ByteBuffer` holds its bytes by refcount; consumers
-    /// may keep it across backend mutations.
+    /// Look up the bytes for a logical key, synchronously. Every backend has
+    /// its working set in memory, so this answers Ready, Missing or Error and
+    /// never asks to be called again. The returned `ByteBuffer` holds its bytes
+    /// by refcount; consumers may keep it across backend mutations.
     virtual ResolveResult resolve(std::string_view key) const {
         return ResolveResult{ResolveStatus::Missing, {}, std::string{key}, {}};
     }
