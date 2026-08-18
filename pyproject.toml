@@ -27,6 +27,14 @@ dict = ["tomli-w>=1.0"]
 [project.urls]
 Homepage = "https://github.com/paulgessinger/nodehammer"
 
+# The environment the bindings are built against and tested in, named once so
+# `just python-deps` and CI's own venv cannot drift apart -- they now install
+# this group rather than each repeating the list. nanobind's floor matches
+# build-system.requires above: the same nanobind compiles the extension either
+# way. Not project dependencies; the wheel needs none of this at runtime.
+[dependency-groups]
+dev = ["nanobind>=2.5", "pytest", "tomli-w"]
+
 # ── scikit-build-core ────────────────────────────────────────────────────────
 [tool.scikit-build]
 minimum-version = "1.0"
@@ -149,10 +157,14 @@ environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION", "CONAN_HOME"]
 CMAKE_TOOLCHAIN_FILE = "/tmp/conan/build/Release/generators/conan_toolchain.cmake"
 
 [tool.cibuildwheel.macos]
+# Through uv, not the host interpreter. Unlike Linux, macOS before-all runs on
+# the *host*, whose python3 is Homebrew's and marked externally managed, so
+# `pip install conan` is refused outright (PEP 668). uvx gives Conan an
+# environment of its own; uv is on PATH here for the same reason the wheel job's
+# version step can call it, and `just` already builds wheels through it.
 before-all = [
-    "python3 -m pip install --upgrade conan",
-    "conan profile detect --force",
-    "conan install {project} -of /tmp/nh-conan -s build_type=Release -s:a compiler.cppstd=23 -s os.version=13.3 --build=missing",
+    "uvx conan profile detect --force",
+    "uvx conan install {project} -of /tmp/nh-conan -s build_type=Release -s:a compiler.cppstd=23 -s os.version=13.3 --build=missing",
 ]
 
 [tool.cibuildwheel.macos.environment]

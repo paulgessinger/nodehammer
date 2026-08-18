@@ -170,7 +170,7 @@ jobs:
         shell: bash
         run: |
           uv venv --python 3.12 .venv-ci
-          uv pip install --python .venv-ci nanobind pytest tomli-w
+          uv pip install --python .venv-ci --group dev
           echo "NH_PYTHON=$PWD/.venv-ci/bin/python" >> "$GITHUB_ENV"
 
       - name: Detect Conan profile

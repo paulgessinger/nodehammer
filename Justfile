@@ -47,7 +47,7 @@ lint:
 # Create the virtualenv the bindings are built against and tested with
 python-deps:
     uv venv --python 3.12 .venv
-    uv pip install --python .venv nanobind pytest tomli-w
+    uv pip install --python .venv --group dev
 
 # Configure, build and test the Python bindings (run `just python-deps` first)
 python: python-configure python-build python-test
@@ -290,7 +290,10 @@ wasm-compute-smoke build='RelWithDebInfo':
 # ("object file was built for newer 'macOS' version") and the wheel claims a
 # floor its own payload does not honour -- which delocate checks and rejects, and
 # which would otherwise crash on a machine old enough to care.
-macos_deployment_target := `python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['tool']['cibuildwheel']['macos']['environment']['MACOSX_DEPLOYMENT_TARGET'])"`
+# Read with sed rather than a TOML parser because `just` evaluates backtick
+# assignments eagerly: this runs on every `just` invocation, on every platform,
+# including the ones that never look at the value.
+macos_deployment_target := `sed -n 's/^MACOSX_DEPLOYMENT_TARGET = "\(.*\)"/\1/p' pyproject.toml`
 
 # Resolve dependencies for a wheel build (Release, no viewer, pinned floor)
 wheel-deps: recipes
@@ -360,6 +363,6 @@ wheel-linux *args:
     # wheel carries is the version CI would upload.
     export SETUPTOOLS_SCM_PRETEND_VERSION=$(
         SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
-        "$root/.venv/bin/python" -m setuptools_scm 2>/dev/null | tail -1)
+        uv run --no-project --with setuptools-scm python -m setuptools_scm | tail -1)
     echo "version: $SETUPTOOLS_SCM_PRETEND_VERSION"
-    "$root/.venv/bin/cibuildwheel" --platform linux --output-dir "$root/dist" {{args}}
+    uvx cibuildwheel --platform linux --output-dir "$root/dist" {{args}}
