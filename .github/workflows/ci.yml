@@ -364,7 +364,15 @@ jobs:
     # commit.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-slim
-    environment: testpypi
+    # The environment is not decoration: TestPyPI's trusted publisher records it
+    # and rejects an OIDC token whose `environment` claim does not match, so it is
+    # what narrows "anything in this repo running ci.yml" down to "this job". The
+    # matching deployment-branch rule on the GitHub side (main only) is what stops
+    # a branch from entering the environment in the first place, which is why the
+    # `if:` above is defence in depth rather than the only guard.
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/nodehammer
     permissions:
       # Trusted publishing: the job proves its identity to TestPyPI with a
       # short-lived OIDC token, so there is no API token in the repository to
