@@ -64,6 +64,20 @@ target_compile_features(nodehammer_python PRIVATE cxx_std_23)
 nh_set_compiler_options(nodehammer_python)
 nh_set_visibility(nodehammer_python)
 
+# GCC's -Wshadow flags a lambda parameter that shadows an enclosing local even
+# when nothing captures it; clang does not, unless asked. This file is almost
+# entirely lambdas closing over a scope full of locals, so that divergence means
+# a clean build here and a -Werror failure on the Linux legs -- which is exactly
+# how it was found. Asking clang for the same check keeps the two honest.
+#
+# Scoped to this target rather than the whole tree: src/selection/predicate.cpp
+# trips clang's version in three places that GCC does not object to, so the flags
+# are near-equivalents rather than equivalents, and widening it is a separate
+# question from keeping the bindings buildable everywhere.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(nodehammer_python PRIVATE -Wshadow-uncaptured-local)
+endif()
+
 # nh_set_compiler_options turns on -Wall -Wextra -Wpedantic -Wconversion and
 # friends, which NODEHAMMER_WERROR then makes fatal. nanobind does not mark its
 # own interface includes SYSTEM, so those warnings fire inside its headers —

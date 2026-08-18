@@ -262,8 +262,12 @@ NB_MODULE(_nodehammer, m) {
         .def(nb::init<>())
         .def_prop_ro("valid", &nh::OutputConfig::valid);
 
-    nb::class_<nh::Config> config(m, "Config");
-    config.def(nb::init<>())
+    // Named for the binding rather than the type: the pipeline verbs below take a
+    // parameter called `config`, and GCC's -Wshadow flags a lambda parameter that
+    // shadows an enclosing local even when nothing captures it. Clang does not,
+    // unless asked with -Wshadow-uncaptured-local, so this only failed in CI.
+    nb::class_<nh::Config> configClass(m, "Config");
+    configClass.def(nb::init<>())
         .def_static(
             "read",
             [](nb::handle src, const std::optional<std::filesystem::path> &baseDir) {
