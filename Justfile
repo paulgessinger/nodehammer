@@ -39,6 +39,38 @@ test:
 lint:
     prek run --all-files
 
+# ── Python bindings ───────────────────────────────────────────────────────────
+# Opt-in rather than folded into `just configure`: enabling the extension needs
+# an interpreter with nanobind, and a plain `just configure` must not start
+# failing for anyone who has not asked for the bindings.
+
+# Create the virtualenv the bindings are built against and tested with
+python-deps:
+    uv venv --python 3.12 .venv
+    uv pip install --python .venv nanobind pytest tomli-w
+
+# Configure, build and test the Python bindings (run `just python-deps` first)
+python: python-configure python-build python-test
+
+python-configure:
+    cmake --preset conan-relwithdebinfo -GNinja {{ccache_launcher_arg}} \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+        -DNODEHAMMER_BUILD_TESTS=ON \
+        -DNODEHAMMER_BUILD_PYTHON=ON \
+        -DPython_EXECUTABLE={{justfile_directory()}}/.venv/bin/python
+
+python-build:
+    cmake --build --preset conan-relwithdebinfo --target nodehammer_python_package
+
+# The same test CI runs, as ctest test #511
+python-test:
+    ctest --preset conan-relwithdebinfo -R python_bindings --output-on-failure
+
+# The same suite directly, when you want per-case output rather than one verdict
+pytest *args:
+    PYTHONPATH={{justfile_directory()}}/build/RelWithDebInfo/python \
+        {{justfile_directory()}}/.venv/bin/python -m pytest tests/python {{args}}
+
 configure-full:
     #!/bin/bash
     . /Users/pagessin/spack/share/spack/setup-env.sh
