@@ -60,7 +60,14 @@ install.components = ["Python"]
 # Likewise on the build side. The default builds everything, which for a wheel
 # means compiling the CLI, the static archive and the Catch2 binary for nothing.
 # nodehammer_shared still gets built — it is what the extension links.
-build.targets = ["nodehammer_python"]
+#
+# The umbrella target rather than nodehammer_python itself: the wheel needs the
+# generated .pyi as well, and naming the extension alone silently skipped the
+# stub target while the install rule still expected its output. Depending on the
+# umbrella keeps "what a complete package contains" in one place in CMake instead
+# of duplicated here, so adding a staged artifact later does not need this line
+# edited to match.
+build.targets = ["nodehammer_python_package"]
 
 [tool.scikit-build.cmake.define]
 NODEHAMMER_BUILD_PYTHON = "ON"
