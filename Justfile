@@ -290,7 +290,7 @@ wasm-compute-smoke build='RelWithDebInfo':
 # ("object file was built for newer 'macOS' version") and the wheel claims a
 # floor its own payload does not honour -- which delocate checks and rejects, and
 # which would otherwise crash on a machine old enough to care.
-macos_deployment_target := "13.3"
+macos_deployment_target := `python3 -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['tool']['cibuildwheel']['macos']['environment']['MACOSX_DEPLOYMENT_TARGET'])"`
 
 # Resolve dependencies for a wheel build (Release, no viewer, pinned floor)
 wheel-deps: recipes
@@ -346,3 +346,20 @@ wheel-test: wheel
     uv venv --python 3.12 "$venv"
     VIRTUAL_ENV="$venv" uv pip install --quiet pytest tomli-w "$root"/dist/nodehammer-*.whl
     cd "$root" && "$venv/bin/python" -m pytest tests/python -q
+
+# Build the Linux wheels the way CI does, in a manylinux container. Needs Docker.
+# The same cibuildwheel configuration CI uses, so a failure here is a failure
+# there -- including `auditwheel repair`, which is the check that decides whether
+# the library's libstdc++ references fit the manylinux policy.
+wheel-linux *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    # The container has no .git, so setuptools_scm has to be told the answer from
+    # out here. Same override the publish job uses, so the version a local Linux
+    # wheel carries is the version CI would upload.
+    export SETUPTOOLS_SCM_PRETEND_VERSION=$(
+        SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
+        "$root/.venv/bin/python" -m setuptools_scm 2>/dev/null | tail -1)
+    echo "version: $SETUPTOOLS_SCM_PRETEND_VERSION"
+    "$root/.venv/bin/cibuildwheel" --platform linux --output-dir "$root/dist" {{args}}

@@ -308,6 +308,80 @@ jobs:
           path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+  wheels:
+    name: wheel ${{ matrix.identifier }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # One canary on a pull request, every platform on main and on tags. Each
+        # wheel is a cold Conan graph compiled from source inside the manylinux
+        # container -- cppstd=23 puts every package outside ConanCenter's
+        # prebuilts -- so paying for three of them on every PR would dominate the
+        # run for a packaging path that rarely changes.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"}]' || '[{"os":"ubuntu-24.04","identifier":"cp312-manylinux_x86_64"},{"os":"ubuntu-24.04-arm","identifier":"cp312-manylinux_aarch64"},{"os":"macos-26","identifier":"cp312-macosx_arm64"}]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # setuptools_scm reads tags. The default shallow, tagless clone is why
+          # every other job in this workflow builds a library reporting 0.0.0;
+          # a wheel must not inherit that.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: false
+
+      - name: Derive the version outside the container
+        id: version
+        shell: bash
+        # cibuildwheel copies the project into the container without .git, so
+        # setuptools_scm cannot work it out in there. The local scheme is dropped
+        # because PyPI rejects local version identifiers on upload, and a wheel
+        # that cannot be uploaded is not worth building here.
+        run: |
+          v=$(SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
+              uv run --no-project --with setuptools-scm python -m setuptools_scm | tail -1)
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+          echo "building $v"
+
+      - uses: pypa/cibuildwheel@1828c10ab37f080699c7b81cea34097c684a7074 # v4.2.0
+        env:
+          CIBW_ONLY: ${{ matrix.identifier }}
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.value }}
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel-${{ matrix.identifier }}
+          path: wheelhouse/*.whl
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: wheels
+    # Main only. Every commit gets a distinct dev version from the commit count,
+    # so uploads do not collide, and skip-existing covers a re-run of the same
+    # commit.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-slim
+    environment: testpypi
+    permissions:
+      # Trusted publishing: the job proves its identity to TestPyPI with a
+      # short-lived OIDC token, so there is no API token in the repository to
+      # leak or rotate.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
   bench-summary:
     name: Benchmark summary
     needs: build
@@ -409,7 +483,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: build
+    needs: [build, wheels]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
