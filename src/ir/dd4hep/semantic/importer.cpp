@@ -15,7 +15,6 @@
 #include <RtypesCore.h> // gErrorIgnoreLevel
 
 #include <format>
-#include <print>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -131,11 +130,16 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
         }
     }
 
-    std::println(stderr, "DD4hep import stats:");
-    std::println(stderr, "  TGeo nodes (semantic nodes): {}", tr.result.scene.nodes.size());
-    std::println(stderr, "  Semantic logvols:             {}", tr.result.scene.logVols.size());
-    std::println(stderr, "  Semantic shapes:              {}", tr.result.scene.shapes.size());
-    std::println(stderr, "  Semantic materials:           {}", tr.result.scene.materials.size());
+    // Counts as a diagnostic rather than five lines on stderr: this is a
+    // library, and every consumer that is not a terminal — the viewer, a Python
+    // caller — was being written to regardless of whether it wanted it.
+    tr.result.diags.debug(codes::kDebugImportStats,
+                          std::format("{} node(s), {} logical volume(s), {} shape(s), "
+                                      "{} material(s)",
+                                      tr.result.scene.nodes.size(), tr.result.scene.logVols.size(),
+                                      tr.result.scene.shapes.size(),
+                                      tr.result.scene.materials.size()),
+                          "dd4hep");
 
     gErrorIgnoreLevel = savedRootLevel;
     dd4hep::setPrintLevel(savedDd4hepLevel);

@@ -240,17 +240,22 @@ on `manylinux_2_28`; anything newer must come from `libstdc++_nonshared.a` rathe
 than as a dynamic reference. `<print>` is the exposure — `std::println` resolves
 to `std::vprint_unicode`, which lives in the shared library at `GLIBCXX_3.4.32`.
 
-The exposure is **exactly one core TU**: `src/tessellation/tessellation_pass.cpp`,
-seven `std::println(stderr, …)` calls in `TessellationJob::take()` (`:1585-1592`,
-`:1638`). `src/detail/markup.hpp`'s `println` are templates and `markup.cpp`
-instantiates none of them, so markup contributes nothing.
+**Resolved ahead of the wheel, because it was a bug in its own right.** The
+exposure was two core TUs — seven `std::println(stderr, …)` in
+`TessellationJob::take()` and five more in the DD4hep importer — and step 1
+demonstrated what that means for a consumer: `import nodehammer; build(...)`
+printed six lines of tessellation stats to a Python session that never asked for
+them. A library does not get to decide its caller wants output.
 
-Verify with `auditwheel show` on the first Linux wheel. If it trips,
-`manylinux_2_34` does **not** help (its ceiling is `3.4.29`, still below
-`3.4.32`) — the fix is to replace those seven calls with `std::format` + `fputs`.
-Worth doing regardless: an installed library printing tessellation stats to
-stderr on every `take()` is noise a Python session would see, and removing it
-also drops the compiler floor to gcc 13.
+Both now report through the diagnostics channel instead (`NH0510`, `NH0104`),
+which is the pattern `take()` was already using two lines below for the
+coincident-face counts. No core TU calls `std::println` any more, so the
+`GLIBCXX_3.4.32` reference is gone before auditwheel ever sees it, and the
+compiler floor drops to gcc 13. The CLI output improved as a side effect: it was
+already printing its own summary line, so the six-line block was duplicating it.
+
+`auditwheel show` on the first Linux wheel is still the check — this removes the
+one known reference, not the possibility of others.
 
 ---
 

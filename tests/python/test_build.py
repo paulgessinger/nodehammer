@@ -86,3 +86,30 @@ def test_render_scene_writes_through_the_output_slice(tmp_path):
 
     assert out.exists()
     assert out.stat().st_size > 0
+
+
+def test_the_library_writes_nothing_to_stderr(capfd):
+    # A library does not get to decide that its caller wants output. This used
+    # to print six lines of tessellation stats straight to stderr from inside
+    # TessellationJob::take(), which every embedding application — a Python
+    # session most visibly — paid for whether or not it asked.
+    #
+    # capfd rather than capsys: the write was at the file-descriptor level, so
+    # capturing sys.stderr would not have seen it and this test would have
+    # passed against the bug.
+    nh.build(synthetic(), nh.SceneConfig())
+
+    captured = capfd.readouterr()
+    assert captured.err == ""
+    assert captured.out == ""
+
+
+def test_the_stats_are_reported_as_a_diagnostic_instead():
+    result = nh.build(synthetic(), nh.SceneConfig())
+
+    stats = [d for d in result.diags if d.code == "NH0510"]
+    assert len(stats) == 1
+    assert stats[0].severity is nh.Diagnostic.Severity.Debug
+    # The counts the printed block used to carry, still carried.
+    assert "1 render node(s)" in stats[0].message
+    assert "1 unique mesh(es)" in stats[0].message

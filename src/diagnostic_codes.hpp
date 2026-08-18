@@ -55,6 +55,11 @@ inline constexpr std::string_view kFatalImportFileNotFound = "NH0100";
 inline constexpr std::string_view kFatalImportFormatUnknown = "NH0101";
 inline constexpr std::string_view kWarnImportUnknownShape = "NH0102";
 inline constexpr std::string_view kWarnImportNoMaterial = "NH0103";
+// Debug: what an importer produced, as counts. A library cannot print this to
+// stderr — a Python session or an embedding application would get it whether it
+// asked or not — so it goes down the same channel as everything else and the
+// caller decides.
+inline constexpr std::string_view kDebugImportStats = "NH0104";
 
 // ── Scene operations ──────────────────────────────────────────────────────────
 // Info: how much deduplication actually merged. Reported rather than discarded
@@ -91,6 +96,10 @@ inline constexpr std::string_view kDebugTessCoincidentRemoved = "NH0508";
 // drop_coincident_faces would remove, but the option is off — a discoverability hint
 // that the optimisation exists and applies here (see tessellation_pass.cpp).
 inline constexpr std::string_view kWarnTessCoincidentCandidate = "NH0509";
+// Debug: what the pass produced, as counts. Same reasoning as kDebugImportStats
+// — this used to be printed to stderr from inside the library, which every
+// consumer paid for whether or not it wanted it.
+inline constexpr std::string_view kDebugTessStats = "NH0510";
 
 // ── Export ────────────────────────────────────────────────────────────────────
 inline constexpr std::string_view kFatalExportWriteFailed = "NH0600";
