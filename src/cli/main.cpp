@@ -1,7 +1,7 @@
 #include <CLI/CLI.hpp>
 #include <nodehammer/version.hpp>
 
-#include <print>
+#include <string>
 
 // Forward declarations — each command is implemented in its own translation unit.
 void registerCmdConvert(CLI::App &app);
@@ -19,14 +19,19 @@ int main(int argc, char **argv) {
     CLI::App app{"nodehammer -- HEP geometry conversion pipeline"};
     app.require_subcommand(1);
 
-    // --version flag: print and exit
-    app.add_flag_callback(
-        "-V,--version",
-        [] {
-            std::println("nodehammer {}", nodehammer::VERSION);
-            throw CLI::Success{};
-        },
-        "Print version and exit");
+    // set_version_flag rather than add_flag_callback, and the difference is the
+    // whole bug: a flag callback runs at the *end* of parsing, by which point
+    // require_subcommand(1) above has already failed, so `nodehammer --version`
+    // answered "A subcommand is required" and never printed anything. CLI11's
+    // version flag is checked while parsing and short-circuits, which is what
+    // makes it work in a build that requires a subcommand.
+    //
+    // It is also what makes the answer identical with and without the viewer:
+    // the flag is handled before either of the argc == 1 fallbacks below, so
+    // asking for the version never depends on which subcommands exist.
+    app.set_version_flag("-V,--version",
+                         std::string{"nodehammer "} + std::string{nodehammer::VERSION},
+                         "Print version and exit");
 
     registerCmdConvert(app);
     registerCmdInspect(app);
