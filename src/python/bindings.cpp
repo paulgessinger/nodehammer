@@ -76,6 +76,84 @@ std::filesystem::path baseDirOrNone(const std::optional<std::filesystem::path> &
     return baseDir ? *baseDir : std::filesystem::path{};
 }
 
+/// One rule for what a config source *is*, stated once and applied by every
+/// entry point that takes one.
+///
+/// `Config` is the only place in this API where a bare `str` is genuinely
+/// ambiguous — it could be a filename or a document — so it is the only place
+/// that needs a rule. A scene's content form is `bytes`, so `SemanticScene.read`
+/// has nothing to confuse a string with and keeps taking one as a path.
+///
+/// The rule is decided by **type**, never by asking the filesystem. Dispatching
+/// on whether a file happens to exist would make the meaning of an argument
+/// depend on the state of the disk — the same defect as a base directory that
+/// silently means the working directory — and would turn a mistyped path from a
+/// clean "file not found" into a parse error about a document nobody wrote.
+///
+/// This lives here rather than in a Python helper beside the module because a
+/// second implementation is a second convention waiting to disagree with this
+/// one.
+struct ConfigSource {
+    bool isPath = false;
+    std::filesystem::path path;
+    std::string text;
+};
+
+/// A one-line string ending in a config extension: almost certainly a path
+/// someone meant to open. Used only to improve a failure message, never to
+/// decide anything — a heuristic that steers dispatch is the thing this design
+/// exists to avoid.
+bool looksLikeAFilename(std::string_view src) {
+    if (src.find('\n') != std::string_view::npos) {
+        return false;
+    }
+    return src.ends_with(".toml") || src.ends_with(".lua");
+}
+
+ConfigSource configSource(nb::handle src) {
+    if (nb::isinstance<nb::str>(src)) {
+        return {false, {}, nb::cast<std::string>(src)};
+    }
+
+    // A dict is serialized and parsed, so it lands in the same validator as a
+    // file the CLI reads and produces the same diagnostic codes. tomli-w is
+    // imported at the call rather than at module load: it is the only thing the
+    // package needs at runtime, and only for this one shape of argument.
+    if (nb::isinstance<nb::dict>(src)) {
+        nb::object dumps;
+        try {
+            dumps = nb::module_::import_("tomli_w").attr("dumps");
+        } catch (const nb::python_error &) {
+            throw nb::import_error("a dict config needs tomli-w; install nodehammer[dict], or pass "
+                                   "TOML text or a Path instead.");
+        }
+        return {false, {}, nb::cast<std::string>(dumps(src))};
+    }
+
+    try {
+        return {true, nb::cast<std::filesystem::path>(src), {}};
+    } catch (const nb::cast_error &) {
+        throw nb::type_error("config source must be a str (TOML text), a dict, or a path");
+    }
+}
+
+/// Run `text` through `parse`, and if it fails on something that looks like a
+/// filename, say so. The check is in the error path only, so it cannot change
+/// what a successful call does.
+template <typename Fn> auto withFilenameHint(const std::string &text, Fn &&fn) {
+    try {
+        return fn();
+    } catch (const nh::Error &e) {
+        if (looksLikeAFilename(text)) {
+            throw nh::Error(e.code(),
+                            std::string{e.what()} + " -- a str is read as TOML text; pass Path(\"" +
+                                text + "\") to read it as a file",
+                            e.context());
+        }
+        throw;
+    }
+}
+
 /// The Python `nodehammer.Error`, created once at module init and held for the
 /// translator below. `PyErr_NewException` is limited-API, so this survives the
 /// stable-ABI build.
@@ -188,11 +266,24 @@ NB_MODULE(_nodehammer, m) {
     config.def(nb::init<>())
         .def_static(
             "read",
-            [](const std::filesystem::path &path) {
-                nb::gil_scoped_release unlocked;
-                return nh::Config::read(path);
+            [](nb::handle src, const std::optional<std::filesystem::path> &baseDir) {
+                const auto source = configSource(src);
+                const auto base = baseDirOrNone(baseDir);
+                if (source.isPath) {
+                    nb::gil_scoped_release unlocked;
+                    return nh::Config::read(source.path);
+                }
+                return withFilenameHint(source.text, [&] {
+                    nb::gil_scoped_release unlocked;
+                    return nh::Config::parse(source.text, base);
+                });
             },
-            "path"_a, "Read a .toml or .lua config, dispatching on the extension.")
+            "src"_a, "base_dir"_a = nb::none(),
+            nb::sig("def read(src: str | os.PathLike | dict, base_dir: str | os.PathLike | "
+                    "None = None) -> ConfigResult"),
+            "Load a config. A Path is a file (.toml or .lua, by extension), a str is "
+            "TOML text, a dict is serialized and parsed. `base_dir` roots any include; "
+            "None means the content has no location, so includes resolve to nothing.")
         .def_static(
             "parse",
             [](std::string_view toml, const std::optional<std::filesystem::path> &baseDir) {
@@ -208,11 +299,18 @@ NB_MODULE(_nodehammer, m) {
             "content has no location, so includes resolve to nothing.")
         .def_static(
             "check",
-            [](const std::filesystem::path &path) {
+            [](nb::handle src, const std::optional<std::filesystem::path> &baseDir) {
+                const auto source = configSource(src);
+                const auto base = baseDirOrNone(baseDir);
                 nb::gil_scoped_release unlocked;
-                return nh::Config::check(path);
+                return source.isPath ? nh::Config::check(source.path)
+                                     : nh::Config::checkString(source.text, base);
             },
-            "path"_a, "Report every problem in a config rather than throwing on the first.")
+            "src"_a, "base_dir"_a = nb::none(),
+            nb::sig("def check(src: str | os.PathLike | dict, base_dir: str | os.PathLike | "
+                    "None = None) -> DiagnosticList"),
+            "The reporting half of `read`: same sources, every problem returned rather "
+            "than the first one thrown.")
         // Named rather than overloaded for the same reason as in C++: a string
         // literal converts to both `path` and `string_view`, so `check("cfg")`
         // would silently check a *filename* as though it were a document.

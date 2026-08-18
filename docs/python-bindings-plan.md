@@ -127,11 +127,28 @@ Released on everything that does I/O or real work — `read`, `write`, `to_nhb` 
 `to_nhr`, `apply_selection`, `deduplicate`, `tessellate`, `build`. `build` is
 minutes on a real detector. Held for the counts, `valid()` and `formats()`.
 
-### Config from a dict (#41 §7)
+### A config source is decided by its type (#41 §7)
 
-Pure Python, no added C++ surface: `dict` → TOML text → `Config.parse(src, base_dir)`.
-Per #52's rule, an unspecified `base_dir` means *no location*, not the working
-directory — the Python sugar says so rather than inheriting a default.
+`Config.read` and `Config.check` take a `Path` (a file), a `str` (TOML text), or
+a `dict` (serialized with `tomli-w` and parsed, so it lands in the same validator
+as a file the CLI reads). The dispatch is **in the binding**, not in a Python
+helper beside it: a second implementation is a second convention waiting to
+disagree with the first, and an early cut of this had exactly that —
+`Config.check("cfg.toml")` treating the string as a path while a module-level
+`check_config("cfg.toml")` treated it as text.
+
+Type, never the filesystem. Existence-based dispatch would make the meaning of an
+argument depend on the state of the disk — the same defect as a base directory
+that silently means the working directory — and would turn a mistyped path from a
+clean "file not found" into a parse error about a document nobody wrote. A
+one-line `str` ending in `.toml`/`.lua` that fails to parse gets told to pass a
+`Path`, but only in the error path, where a heuristic cannot change what a
+successful call does.
+
+`Config` is the only place needing the rule: a scene's content form is `bytes`,
+so `SemanticScene.read` has nothing to confuse a string with and keeps taking one
+as a path. Per #52, an unspecified `base_dir` still means *no location*, not the
+working directory.
 
 ---
 

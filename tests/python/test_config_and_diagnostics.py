@@ -124,51 +124,47 @@ def test_error_is_a_runtime_error():
 # ── the dict sugar ──────────────────────────────────────────────────────────
 
 
-def test_load_config_accepts_toml_text():
-    assert nh.load_config("deduplicate_shapes = true\n").valid
+def test_read_accepts_toml_text():
+    assert nh.Config.read("deduplicate_shapes = true\n").config.valid
 
 
-def test_load_config_accepts_a_dict():
+def test_read_accepts_a_dict():
     pytest.importorskip("tomli_w")
 
-    config = nh.load_config({"deduplicate_shapes": True})
+    result = nh.Config.read({"deduplicate_shapes": True})
 
-    assert config.valid
-    assert config.scene.valid
+    assert result.config.valid
+    assert result.config.scene.valid
 
 
-def test_load_config_applies_overrides():
+def test_a_dict_routes_through_the_same_document_pipeline():
     pytest.importorskip("tomli_w")
 
-    config = nh.load_config(
-        {"export": {"gltf": {"unit_scale": 1.0}}},
-        export={"gltf": {"unit_scale": 0.01}},
-    )
-
-    assert config.valid
+    # A dict is serialized and parsed, so it reaches the same validator as a
+    # file the CLI reads -- there is no second path to keep in step.
+    assert nh.Config.read({"export": {"gltf": {"unit_scale": 0.01}}}).config.output.valid
 
 
-def test_load_config_routes_through_the_same_validator():
+def test_a_dict_gets_the_same_diagnostic_codes_as_a_file():
     pytest.importorskip("tomli_w")
 
-    # A dict-built config gets the CLI's diagnostic codes, because it is the
-    # same parser and the same validator — nothing here reimplements semantics.
     # NH0003 is what the CLI reports for the same document
     # (fixtures/configs/invalid_bad_tolerance.toml).
     with pytest.raises(nh.Error) as excinfo:
-        nh.load_config({"rules": [{"tessellation": {"max_segments_circle": -1}}]})
+        nh.Config.read({"rules": [{"tessellation": {"max_segments_circle": -1}}]})
 
     assert excinfo.value.code == "NH0003"
 
 
-def test_load_config_reads_a_path_and_parses_a_str(tmp_path):
-    # What `src` means is decided by its type, never by whether a file happens
-    # to exist: a Path is a file, a str is TOML text.
+def test_a_config_source_is_decided_by_type(tmp_path):
+    # Never by whether a file happens to exist: a Path is a file, a str is TOML
+    # text, a dict is serialized. One rule, stated in the binding, applied by
+    # every entry point that takes a source.
     path = tmp_path / "cfg.toml"
     path.write_text("deduplicate_shapes = true\n")
 
-    assert nh.load_config(path).valid  # Path -> read the file
-    assert nh.load_config("deduplicate_shapes = true\n").valid  # str -> TOML text
+    assert nh.Config.read(path).config.valid  # Path -> the file
+    assert nh.Config.read("deduplicate_shapes = true\n").config.valid  # str -> text
 
 
 def test_a_filename_passed_as_a_str_says_so(tmp_path):
@@ -179,14 +175,14 @@ def test_a_filename_passed_as_a_str_says_so(tmp_path):
     path.write_text("deduplicate_shapes = true\n")
 
     with pytest.raises(nh.Error) as excinfo:
-        nh.load_config(str(path))
+        nh.Config.read(str(path))
 
     assert "pass Path(" in str(excinfo.value)
 
 
-def test_overrides_are_rejected_for_non_mappings(tmp_path):
+def test_a_source_of_the_wrong_type_is_a_type_error():
     with pytest.raises(TypeError):
-        nh.load_config("deduplicate_shapes = true\n", hoist_orphans=True)
+        nh.Config.read(42)
 
 
 def test_the_cheap_accessors_are_properties_not_methods():
@@ -210,21 +206,21 @@ def test_work_and_io_stay_methods():
     assert isinstance(nh.Config.parse("").diags.items(), list)
 
 
-def test_check_config_is_the_reporting_half_of_load_config(tmp_path):
-    # Same dispatch, different promise: load_config raises, check_config reports.
+def test_check_is_the_reporting_half_of_read(tmp_path):
+    # Same sources, different promise: read raises, check reports.
     path = tmp_path / "broken.toml"
     path.write_text("this is not = = toml\n")
 
-    assert nh.check_config(path).has_errors  # Path -> a file
-    assert nh.check_config("this is not = = toml\n").has_errors  # str -> text
-    assert not nh.check_config("deduplicate_shapes = true\n").has_errors
+    assert nh.Config.check(path).has_errors  # Path -> a file
+    assert nh.Config.check("this is not = = toml\n").has_errors  # str -> text
+    assert not nh.Config.check("deduplicate_shapes = true\n").has_errors
 
     with pytest.raises(nh.Error):
-        nh.load_config(path)
+        nh.Config.read(path)
 
 
-def test_check_config_accepts_a_dict():
+def test_check_accepts_a_dict():
     pytest.importorskip("tomli_w")
 
-    assert not nh.check_config({"deduplicate_shapes": True}).has_errors
-    assert nh.check_config({"rules": [{"tessellation": {"max_segments_circle": -1}}]}).has_errors
+    assert not nh.Config.check({"deduplicate_shapes": True}).has_errors
+    assert nh.Config.check({"rules": [{"tessellation": {"max_segments_circle": -1}}]}).has_errors
