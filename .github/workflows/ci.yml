@@ -34,12 +34,23 @@ jobs:
             # is enough: x86_64 ELF is where the relocation check bites, and the
             # probe is skipped on Mach-O, Windows and wasm anyway.
             cmake-extra: -DNODEHAMMER_PIC_CHECK=ON
+            # Compile the nanobind extension and run its pytest suite, which
+            # ctest picks up as one more test. Without this the bindings are
+            # built nowhere in CI and a change to the public API could break them
+            # while every check stayed green -- the same blind spot ROOT/DD4hep
+            # had. On the three legs that wheels target; Windows is excluded
+            # deliberately (no wheels are planned for it, and the bindings have
+            # never been compiled against a dllimport build) rather than
+            # silently, and LCG buys nothing the native legs do not already give.
+            python-tests: true
           - os: ubuntu-24.04-arm
             kind: native
             artifact-name: nodehammer-linux-aarch64
+            python-tests: true
           - os: macos-26
             kind: native
             artifact-name: nodehammer-macos-aarch64
+            python-tests: true
           - os: windows-2025
             kind: native
             artifact-name: nodehammer-windows-x86_64
@@ -144,6 +155,17 @@ jobs:
       - name: Install Conan
         run: uv tool install conan
 
+      # One interpreter for both halves: CMake builds the extension against it
+      # and ctest runs pytest with it, so there is no way for the module to be
+      # compiled for one Python and imported by another. 3.12 is the abi3 floor.
+      - name: Set up Python for the bindings
+        if: matrix.python-tests
+        shell: bash
+        run: |
+          uv venv --python 3.12 .venv-ci
+          uv pip install --python .venv-ci nanobind pytest tomli-w
+          echo "NH_PYTHON=$PWD/.venv-ci/bin/python" >> "$GITHUB_ENV"
+
       - name: Detect Conan profile
         shell: bash
         run: |
@@ -177,7 +199,7 @@ jobs:
 
       - name: Configure
         shell: bash
-        run: ci/build.sh configure ${{ matrix.kind }} -DNODEHAMMER_WITH_VIEWER=ON ${{ matrix.cmake-extra }}
+        run: ci/build.sh configure ${{ matrix.kind }} -DNODEHAMMER_WITH_VIEWER=ON ${{ matrix.cmake-extra }} ${{ matrix.python-tests && format('-DNODEHAMMER_BUILD_PYTHON=ON -DPython_EXECUTABLE={0}', env.NH_PYTHON) || '' }}
 
       - name: Build
         shell: bash

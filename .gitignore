@@ -17,6 +17,11 @@
 # config-flatten output written to the repo root (generated from fixtures/).
 /*_flat.toml
 CMakeUserPresets.json
+
+# Python: the venv the wheel workflow builds against, and wheel output.
+/.venv/
+/dist/
+*.egg-info/
 .idea
 
 # Local perf/geometry analysis artifacts (screenshots, dumps)

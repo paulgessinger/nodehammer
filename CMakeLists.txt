@@ -93,6 +93,7 @@ option(NODEHAMMER_PROFILING     "Preserve symbols and frame pointers for samplin
 option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at build time (consumed in cmake/Sokol.cmake)" ON)
 option(NODEHAMMER_PIC_CHECK     "Link a probe shared module against the static library to prove every object is position-independent (consumed in cmake/PicProbe.cmake)" OFF)
 option(NODEHAMMER_BUILD_SHARED  "Also build and install the shared library + public headers + CMake package config" OFF)
+option(NODEHAMMER_BUILD_PYTHON  "Build the nanobind Python extension module (the wheel payload)" OFF)
 
 # DD4hep's importer *is* a TGeo importer with extra passes: it calls
 # `traverseTGeoManager`, and the importer registry registers `TGeoImporter`
@@ -109,6 +110,21 @@ option(NODEHAMMER_BUILD_SHARED  "Also build and install the shared library + pub
 if(NODEHAMMER_WITH_DD4HEP AND NOT NODEHAMMER_WITH_TGEO)
     message(STATUS "nodehammer: NODEHAMMER_WITH_DD4HEP implies NODEHAMMER_WITH_TGEO; enabling it")
     set(NODEHAMMER_WITH_TGEO ON CACHE BOOL "Enable TGeo/ROOT importer" FORCE)
+endif()
+
+# The extension links the shared library and reaches it only through
+# include/nodehammer, which is what makes "the bindings use only the public API"
+# a link-time fact instead of a review rule (docs/python-bindings-plan.md). There
+# is nothing else for it to link, so this is a forced implication rather than an
+# error, the same shape as the DD4hep rule above.
+if(NODEHAMMER_BUILD_PYTHON AND NOT NODEHAMMER_BUILD_SHARED)
+    message(STATUS "nodehammer: NODEHAMMER_BUILD_PYTHON implies NODEHAMMER_BUILD_SHARED; enabling it")
+    set(NODEHAMMER_BUILD_SHARED ON CACHE BOOL
+        "Also build and install the shared library + public headers + CMake package config" FORCE)
+endif()
+
+if(NODEHAMMER_BUILD_PYTHON AND EMSCRIPTEN)
+    message(FATAL_ERROR "NODEHAMMER_BUILD_PYTHON is native-only: there is no CPython to extend under Emscripten.")
 endif()
 
 include(cmake/Dependencies.cmake)
@@ -590,9 +606,40 @@ if(NODEHAMMER_BUILD_SHARED)
     set_target_properties(nodehammer_shared PROPERTIES
         OUTPUT_NAME nodehammer
         EXPORT_NAME nodehammer
-        VERSION ${PROJECT_VERSION}
-        SOVERSION ${PROJECT_VERSION_MAJOR}
     )
+
+    # Version the library only when it is going to be installed as a system
+    # library. A wheel is a zip, and pip extracts zips with `zipfile`, which does
+    # not restore symlinks — so the libnodehammer.so -> .so.0 -> .so.0.1.3 chain
+    # cannot survive the trip. Flattening it at install time is not an option
+    # either: what the extension records in DT_NEEDED / LC_LOAD_DYLIB is the
+    # *soname*, i.e. the middle link, which is precisely the file that is a
+    # symlink in a normal install.
+    #
+    # Dropping VERSION/SOVERSION makes the soname `libnodehammer.so` /
+    # `@rpath/libnodehammer.dylib`, the linker emits exactly one real file, and
+    # the extension's $ORIGIN/@loader_path rpath finds it with no symlink
+    # anywhere. The cost is that the wheel's copy carries no ABI tag, which is
+    # acceptable because nothing outside the wheel is meant to link it — the
+    # wheel ships both halves together by construction.
+    if(NOT NODEHAMMER_BUILD_PYTHON)
+        set_target_properties(nodehammer_shared PROPERTIES
+            VERSION ${PROJECT_VERSION}
+            SOVERSION ${PROJECT_VERSION_MAJOR}
+        )
+    else()
+        # CMAKE_INSTALL_RPATH_USE_LINK_PATH (top of this file) exists for the
+        # ROOT/DD4hep case, where a DT_NEEDED reference must be findable on the
+        # machine that built it. A wheel is the opposite: every dependency is a
+        # static archive absorbed into this .so, there is nothing left to point
+        # at, and an absolute build-machine path in RUNPATH is the one thing
+        # auditwheel and delocate cannot repair.
+        set_target_properties(nodehammer_shared PROPERTIES
+            INSTALL_RPATH_USE_LINK_PATH OFF
+            INSTALL_RPATH "$<IF:$<PLATFORM_ID:Darwin>,@loader_path,$ORIGIN>"
+            MACOSX_RPATH ON
+        )
+    endif()
 
     # Hidden visibility only governs objects *we* compile; the static
     # dependencies absorbed into this .so were not, so their symbols would land
@@ -766,6 +813,11 @@ if(NODEHAMMER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# ── Python extension ───────────────────────────────────────────────────────────
+if(NODEHAMMER_BUILD_PYTHON)
+    add_subdirectory(src/python)
+endif()
+
 # Included last: the probe links every library target that can end up inside a
 # shared object, so all of them have to exist first.
 include(cmake/PicProbe.cmake)
@@ -835,6 +887,22 @@ if(NODEHAMMER_BUILD_SHARED)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}   # Windows DLL
                 COMPONENT Runtime
     )
+
+    # The wheel payload: a second rule on the same target, into the Python
+    # package directory. A third component beside Runtime and Development, for
+    # the same reason those two exist — `cmake --install --component Python` has
+    # to produce exactly what belongs in the wheel and nothing else: no CLI
+    # executable, no headers, no package config. NAMELINK_SKIP is belt and
+    # braces; there is no namelink to install when VERSION/SOVERSION are unset.
+    if(NODEHAMMER_BUILD_PYTHON)
+        install(TARGETS nodehammer_shared
+            LIBRARY DESTINATION "${NH_PYTHON_PKG_DIR}"
+                    COMPONENT Python
+                    NAMELINK_SKIP
+            RUNTIME DESTINATION "${NH_PYTHON_PKG_DIR}"   # Windows DLL
+                    COMPONENT Python
+        )
+    endif()
 
     # FILES_MATCHING "*.hpp" also excludes version.hpp.in, which would otherwise
     # install an uninstantiated template next to the header generated from it.

@@ -23,7 +23,6 @@
 #include <format>
 #include <limits>
 #include <map>
-#include <print>
 #include <queue>
 
 namespace nodehammer::tessellation {
@@ -725,8 +724,8 @@ struct TessellationJob::Impl {
     std::atomic<size_t> totalNodes{0};
     std::atomic<size_t> processedNodes{0};
     // Running total of triangles dropped by removeCoincidentInteriorFaces()
-    // across every drop_coincident_faces group in this job — surfaced in the
-    // take()-time stats print so an A/B config toggle is verifiable without
+    // across every drop_coincident_faces group in this job — surfaced as a
+    // take()-time diagnostic so an A/B config toggle is verifiable without
     // a debugger (see tessellation_pass.cpp's merge-finalization step).
     std::atomic<size_t> coincidentFacesRemoved{0};
     // Number of merge_descendants nodes that had at least one coincident face
@@ -1582,15 +1581,21 @@ bool TessellationJob::advance(uint64_t budget_ns) {
 }
 
 TessellationPassResult TessellationJob::take() {
-    std::println(stderr, "Tessellation stats:");
-    std::println(stderr, "  Render nodes:     {}", impl_->result.scene.nodes.size());
-    std::println(stderr, "  Unique meshes:    {}", impl_->result.scene.meshAssets.size());
-    std::println(stderr, "  Unique materials: {}", impl_->result.scene.materials.size());
-    std::println(stderr, "  Mesh cache entries (shapes with tessellation): {}",
-                 impl_->meshCache.size());
+    // What the pass produced, down the channel every other observation uses.
+    // This was six lines printed straight to stderr, which is a decision the
+    // library is not entitled to make: an embedding application, and a Python
+    // session in particular, gets that output whether or not it asked. As a
+    // diagnostic the CLI still shows it, the viewer can toast it, and a caller
+    // that does not care simply does not look.
+    impl_->result.diags.debug(
+        codes::kDebugTessStats,
+        std::format("{} render node(s), {} unique mesh(es), {} material(s), {} shape(s) "
+                    "tessellated",
+                    impl_->result.scene.nodes.size(), impl_->result.scene.meshAssets.size(),
+                    impl_->result.scene.materials.size(), impl_->meshCache.size()),
+        "tessellation");
+
     const size_t coincRemoved = impl_->coincidentFacesRemoved.load(std::memory_order_relaxed);
-    std::println(stderr, "  Coincident interior faces removed (drop_coincident_faces): {}",
-                 coincRemoved);
     // Single aggregate diagnostic for the whole pass (one toast), replacing the
     // former per-node info diags that flooded the viewer.
     if (coincRemoved > 0) {
@@ -1635,11 +1640,6 @@ TessellationPassResult TessellationJob::take() {
             list += std::format("; +{} more structure(s)", groups.size() - kMaxStructuresListed);
         }
 
-        std::println(
-            stderr,
-            "  drop_coincident_faces candidate: {} removable interior face(s) across {} node(s) "
-            "in {} structure(s)",
-            totalFaces, totalNodes, groups.size());
         impl_->result.diags.warn(
             codes::kWarnTessCoincidentCandidate,
             std::format(
