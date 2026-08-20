@@ -399,9 +399,64 @@ jobs:
           path: wheelhouse/*.whl
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
 
+  # The wheels are cp312-abi3 on three platforms; Windows, ppc64le and anything
+  # else get nothing to install and no source to fall back to.
+  # [tool.scikit-build.sdist] has been shaped for one since the wheels landed --
+  # this builds it. Still needs Conan for CMAKE_TOOLCHAIN_FILE, so installing
+  # from it fails with a CMake error; that beats no sdist existing at all.
+  sdist:
+    name: sdist
+    runs-on: ubuntu-slim
+    # Output goes to a public index, so: minimum token, no credentials left in
+    # the checkout. The jobs around it predate this.
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # setuptools_scm reads tags, as in the wheels job.
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: false
+
+      # Cheapest job on the tag path, so the tag is checked here against the
+      # version the artifacts will claim: a mismatch fails in a minute rather
+      # than after the wheel matrix -- or on PyPI, after the number is spent.
+      - name: Check the tag matches the derived version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          derived=$(SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
+              uv run --no-project --with setuptools-scm python -m setuptools_scm | tail -1)
+          if [ "$tag" != "$derived" ]; then
+            echo "::error::tag $GITHUB_REF_NAME would be published as $derived"
+            echo "Tags must carry the PEP 440 *normalized* version after the v:" >&2
+            echo "  v0.2.0, v0.2.0rc1, v0.2.0b1  -- not v0.2.0-rc1 or v0.2.0.RC1." >&2
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME publishes as $derived"
+
+      - name: Build sdist
+        shell: bash
+        # no-local-version as in the wheels: PyPI rejects local identifiers, so
+        # a dev sdist carrying +g<sha> could not be uploaded with them.
+        run: |
+          SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
+            uv build --sdist --out-dir dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+
   publish-testpypi:
     name: Publish to TestPyPI
-    needs: wheels
+    needs: [wheels, sdist]
     # Main only. Every commit gets a distinct dev version from the commit count,
     # so uploads do not collide, and skip-existing covers a re-run of the same
     # commit.
@@ -431,10 +486,53 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sdist
+          path: dist
+
       - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+
+  publish-pypi:
+    name: Publish to PyPI
+    # Any v* tag, pre-releases included: v0.2.0rc1 uploads as a PEP 440
+    # pre-release, which only `--pre` or an exact pin resolves. Dev builds stay
+    # on TestPyPI -- a PyPI version number can be yanked but never reused.
+    if: startsWith(github.ref, 'refs/tags/')
+    # The whole matrix, not just the jobs it uploads. `wheels` keeps no `needs:`
+    # so PRs get wheel feedback in parallel; the gate belongs here, where the
+    # upload is irreversible.
+    needs: [build, wheels, sdist]
+    # Not ubuntu-slim: Docker container action, no daemon there. As above.
+    runs-on: ubuntu-24.04
+    # Needs a `pypi` environment whose deployment rule is *protected tags* (v*),
+    # not a branch, matching the trusted publisher registered on PyPI. That pair
+    # is what stops anything else in the repo minting this token.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/nodehammer
+    permissions:
+      # Trusted publishing: no long-lived token in the repo, and PEP 740
+      # attestations come along by default.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: sdist
+          path: dist
+
+      # No skip-existing, unlike TestPyPI: there it absorbs a re-run of the same
+      # commit, here a collision means the tag is wrong and should fail loudly.
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
   bench-summary:
     name: Benchmark summary
@@ -537,7 +635,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build, wheels]
+    needs: [build, wheels, sdist]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
