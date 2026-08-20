@@ -646,11 +646,42 @@ jobs:
         with:
           path: artifacts
 
+      # v3.0.2 infers nothing from the tag: `prerelease` is exactly what we
+      # pass here, and unset means "full release". Our tags are PEP 440 like
+      # the PyPI versions (v1.2.0, v1.2.0rc1), so a final release is exactly
+      # three dot-separated numbers -- anything trailing (rc/a/b/dev/post) is a
+      # pre-release.
+      - name: Classify tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Explicit globs, not `artifacts/**/*`: `download-artifact` with no
+      # pattern pulls *every* artifact of the run, and the five `bench-*` ones
+      # each hold a file named `bench.json`. Uploaded concurrently under one
+      # asset name they race on the overwrite path -- one deletes the asset
+      # another is updating, which 404s and fails the job (and leaves no
+      # bench.json attached at all). Anything not listed here stays out.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          files: artifacts/**/*
+          files: |
+            artifacts/nodehammer-*/*
+            artifacts/wheel-*/*
+            artifacts/sdist/*
           generate_release_notes: true
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          # Publish, never leave a draft behind. The action stages a full
+          # release as a draft and flips it live only after every asset is up,
+          # so a failed upload leaves nothing half-visible -- but it also means
+          # a *failed* job leaves the draft sitting there, which is what
+          # v1.2.0rc1 did until it was published by hand.
+          draft: false
 
   lcg:
     name: LCG 109 (el9-gcc15-opt)
