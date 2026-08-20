@@ -12,6 +12,7 @@
 // improves on the API it mirrors is a second API to keep in sync.
 
 #include <nodehammer/build.hpp>
+#include <nodehammer/cli.hpp>
 #include <nodehammer/config.hpp>
 #include <nodehammer/diagnostics.hpp>
 #include <nodehammer/render_scene.hpp>
@@ -496,6 +497,47 @@ NB_MODULE(_nodehammer, m) {
         },
         "scene"_a, "config"_a,
         "apply_selection + deduplicate + tessellate, in the order the CLI runs them.");
+
+    // ── the command line ────────────────────────────────────────────────────
+    // The same entry point the `nodehammer` executable is a shim over, which is
+    // what makes `nodehammer --version` from a wheel and `nodehammer.__version__`
+    // the same code rather than two constants a test pins together.
+    //
+    // Named `cli_run` and wrapped in Python (nodehammer/cli.py): the wrapper is
+    // where `args=None` means `sys.argv[1:]`, and keeping it there rather than
+    // here avoids reaching into the interpreter's state from C++.
+    //
+    // Not `_cli_run`, tempting as the underscore is for something meant to be
+    // private: nanobind's stub generator omits leading-underscore members, so
+    // the .pyi would not carry it while the py.typed beside it promises the
+    // package is annotated -- and the wrapper that calls it is the one file a
+    // checker would flag. It stays out of `__all__` instead, which is where
+    // "private" belongs in Python anyway.
+    //
+    // It returns the exit code instead of raising, and is the only verb in this
+    // module that reports failure that way. That is deliberate -- a command has
+    // already printed its diagnosis by the time it answers, so a caller wants
+    // the number, not a second telling of it as an exception. `Error` is still
+    // raised for a failure that escapes a command body, which is a defect.
+    //
+    // The GIL goes for the same reason as the verbs above: `run` may spend
+    // minutes in a tessellation, and it may also block in a pager waiting for a
+    // human to press q.
+    m.def(
+        "cli_run",
+        [](const std::vector<std::string> &args, bool pager) {
+            std::vector<std::string_view> views;
+            views.reserve(args.size());
+            for (const auto &arg : args) {
+                views.emplace_back(arg);
+            }
+            nh::cli::RunOptions options;
+            options.pager = pager;
+
+            nb::gil_scoped_release unlocked;
+            return nh::cli::run(views, options);
+        },
+        "args"_a, "pager"_a = false);
 
     // ── version ─────────────────────────────────────────────────────────────
     // `version()` is a symbol in the library; VERSION is a constant in the

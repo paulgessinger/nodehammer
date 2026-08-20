@@ -25,7 +25,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
 
-from . import _nodehammer
+from . import _nodehammer, cli
 from ._nodehammer import (
     VERSION,
     VERSION_MAJOR,
@@ -51,6 +51,7 @@ from ._nodehammer import (
 
 __all__ = [
     "VERSION",
+    "cli",
     "VERSION_MAJOR",
     "VERSION_MINOR",
     "VERSION_PATCH",

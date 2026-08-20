@@ -125,7 +125,11 @@ set_target_properties(nodehammer_python PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${NH_PYTHON_BUILD_PKG}"
 )
 
-foreach(_nh_py_file __init__.py py.typed)
+# The wheel copies python/nodehammer wholesale (wheel.packages in
+# pyproject.toml); this list is only the build-tree mirror, so it has to be kept
+# in step by hand. A file missing here is importable from an installed wheel and
+# not from `PYTHONPATH=<build>/python`, which is where the tests run.
+foreach(_nh_py_file __init__.py __main__.py cli.py py.typed)
     add_custom_command(
         OUTPUT "${NH_PYTHON_BUILD_PKG}/${_nh_py_file}"
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
