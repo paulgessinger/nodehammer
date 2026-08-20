@@ -22,7 +22,7 @@ void registerCmdConfigFlatten(CLI::App &app) {
                   "Skip ConfigValidator after parse (validation is on by default)");
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("config-flatten", [&] {
+        nodehammer::cli::runOrReport("config-flatten", [&] {
             std::string configPath;
             configOpt->results(configPath);
 
@@ -34,8 +34,7 @@ void registerCmdConfigFlatten(CLI::App &app) {
 
             if (*validate) {
                 auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
-                nodehammer::cli::printDiags(validationDiags);
-                nodehammer::diagnostics::throwIfErrors(validationDiags, configPath);
+                nodehammer::cli::reportOrThrow(validationDiags, configPath);
             }
 
             const std::string toml = nodehammer::config::configToToml(result.config);
@@ -45,9 +44,9 @@ void registerCmdConfigFlatten(CLI::App &app) {
                 outOpt->results(outPath);
                 std::ofstream out{outPath};
                 if (!out) {
-                    std::println(stderr, "config-flatten: could not open '{}' for writing",
-                                 outPath);
-                    std::exit(1);
+                    throw nodehammer::Error{nodehammer::codes::kFatalCliFileOpen,
+                                            std::format("could not open '{}' for writing", outPath),
+                                            outPath};
                 }
                 out << toml;
                 std::println(stderr, "config-flatten: wrote {} ({} bytes)", outPath, toml.size());

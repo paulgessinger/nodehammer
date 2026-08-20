@@ -1,7 +1,43 @@
+#include "cli_common.hpp"
+#include "run_internal.hpp"
+
 #include <CLI/CLI.hpp>
 #include <nodehammer/version.hpp>
 
+#include <print>
 #include <string>
+
+namespace {
+
+/// Parse and dispatch, and turn everything a command can now throw into an exit
+/// code.
+///
+/// This replaces `CLI11_PARSE`, which is a macro containing a `return` from
+/// `main` and so can only ever live in `main`. Written out, it is three catch
+/// clauses instead of one:
+///
+///   CLI::ParseError    what the macro handled — a bad flag, or `--help`.
+///   CommandFailure     a command that reported its failure and chose a code.
+///   nodehammer::Error  the backstop. Every command body runs inside
+///                      `runOrReport`, so nothing should reach here; a failure
+///                      that does is a missing wrapper, and printing it beats
+///                      the `std::terminate` an uncaught throw used to give.
+int parseAndRun(CLI::App &app, int argc, char **argv) {
+    try {
+        app.parse(argc, argv);
+    } catch (const CLI::ParseError &e) {
+        return app.exit(e);
+    } catch (const nodehammer::cli::detail::CommandFailure &failure) {
+        return failure.code;
+    } catch (const nodehammer::Error &e) {
+        nodehammer::cli::printDiag(e.diagnostic());
+        std::println(stderr, "nodehammer: {}", e.what());
+        return 1;
+    }
+    return 0;
+}
+
+} // namespace
 
 // Forward declarations — each command is implemented in its own translation unit.
 void registerCmdConvert(CLI::App &app);
@@ -51,8 +87,7 @@ int main(int argc, char **argv) {
     if (argc == 1) {
         char viewerArg[] = "viewer";
         char *defaultArgv[] = {argv[0], viewerArg};
-        CLI11_PARSE(app, 2, defaultArgv);
-        return 0;
+        return parseAndRun(app, 2, defaultArgv);
     }
 #else
     // No viewer to fall back to in this build — show the help text instead
@@ -62,11 +97,9 @@ int main(int argc, char **argv) {
     if (argc == 1) {
         char helpArg[] = "--help";
         char *defaultArgv[] = {argv[0], helpArg};
-        CLI11_PARSE(app, 2, defaultArgv);
-        return 0;
+        return parseAndRun(app, 2, defaultArgv);
     }
 #endif
 
-    CLI11_PARSE(app, argc, argv);
-    return 0;
+    return parseAndRun(app, argc, argv);
 }

@@ -217,7 +217,7 @@ void registerCmdDumpSemantic(CLI::App &app) {
         sub->add_flag("--size-report", "Print estimated FlatBuffer payload breakdown to stderr");
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("dump-semantic", [&] {
+        nodehammer::cli::runOrReport("dump-semantic", [&] {
             // ── Load config (optional) ─────────────────────────────────────────────
             nodehammer::config::NHConfig cfg;
             if (*configOpt) {

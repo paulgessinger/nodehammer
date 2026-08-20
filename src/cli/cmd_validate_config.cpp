@@ -12,7 +12,7 @@ void registerCmdValidateConfig(CLI::App &app) {
     auto *configOpt = sub->add_option("-c,--config", "TOML config file")->required();
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("validate-config", [&] {
+        nodehammer::cli::runOrReport("validate-config", [&] {
             std::string configPath;
             configOpt->results(configPath);
 

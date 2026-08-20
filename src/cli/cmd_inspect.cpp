@@ -263,7 +263,7 @@ void registerCmdInspect(CLI::App &app) {
     // ── summary ──────────────────────────────────────────────────────────────
     auto *sumSub = sub->add_subcommand("summary", "Print a high-level summary");
     sumSub->callback([=] {
-        nodehammer::cli::runOrExit("inspect summary", [&] {
+        nodehammer::cli::runOrReport("inspect summary", [&] {
             auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
             nodehammer::cli::Pager pager;
             printSummary(result, fmt);
@@ -278,7 +278,7 @@ void registerCmdInspect(CLI::App &app) {
         treeSub->add_option("--filter,-f", "Path glob filter (only show matching nodes)");
 
     treeSub->callback([=] {
-        nodehammer::cli::runOrExit("inspect tree", [&] {
+        nodehammer::cli::runOrReport("inspect tree", [&] {
             auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
 
             int maxDepth = -1;
@@ -300,7 +300,7 @@ void registerCmdInspect(CLI::App &app) {
     // ── tags ────────────────────────────────────���───────────────────────────���
     auto *tagsSub = sub->add_subcommand("tags", "List all unique tags and their values");
     tagsSub->callback([=] {
-        nodehammer::cli::runOrExit("inspect tags", [&] {
+        nodehammer::cli::runOrReport("inspect tags", [&] {
             auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
 
             std::string colorStr;

@@ -23,7 +23,7 @@ void registerCmdDumpRender(CLI::App &app) {
         sub->add_flag("--synthetic-box", "Use a synthetic single-box scene as input");
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("dump-render", [&] {
+        nodehammer::cli::runOrReport("dump-render", [&] {
             // ── Load config ────────────────────────────────────────────────────────
             nodehammer::config::NHConfig cfg;
             if (*configOpt) {

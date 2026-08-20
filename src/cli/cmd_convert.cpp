@@ -115,7 +115,7 @@ void registerCmdConvert(CLI::App &app) {
             ->needs(angleCutOpt);
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("convert", [&] {
+        nodehammer::cli::runOrReport("convert", [&] {
             std::string outputFmt;
             std::vector<std::string> outputPaths;
             outputOpt->results(outputPaths);
@@ -213,9 +213,13 @@ void registerCmdConvert(CLI::App &app) {
             for (const auto &outputPath : outputPaths) {
                 const auto *exp = expRegistry.resolve(outputPath, outputFmt);
                 if (!exp) {
-                    std::println(stderr, "[error] {} cannot determine output format for '{}'",
-                                 nodehammer::codes::kFatalExportWriteFailed, outputPath);
-                    std::exit(1);
+                    // Was a hand-rolled `[error] NH0600 ...` line followed by
+                    // `exit`, which is the shape `printDiag` exists to produce —
+                    // and the code it named was already the right one.
+                    throw nodehammer::Error{
+                        nodehammer::codes::kFatalExportWriteFailed,
+                        std::format("cannot determine output format for '{}'", outputPath),
+                        outputPath};
                 }
 
                 const auto ecfg =

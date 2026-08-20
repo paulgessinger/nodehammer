@@ -5,6 +5,10 @@
 
 namespace nodehammer::cli {
 
+// `nodehammer::detail::` is spelled in full throughout this header and its
+// implementation: `nodehammer::cli::detail` (run_internal.hpp) is the nearer
+// enclosing scope, so a bare `detail::` resolves there and does not fall back.
+
 /// RAII pager: on construction, if stdout is a TTY, opens a pipe to a pager
 /// (less -R, or $PAGER) and replaces the stdout file descriptor with the pipe.
 /// On destruction, restores stdout and waits for the pager to exit.
@@ -19,8 +23,8 @@ class Pager {
 
     /// Returns the color mode to use: Always when paging (pager handles ANSI),
     /// otherwise the requested mode.
-    [[nodiscard]] detail::ColorMode
-    effectiveColorMode(detail::ColorMode requested = detail::ColorMode::Auto) const;
+    [[nodiscard]] nodehammer::detail::ColorMode effectiveColorMode(
+        nodehammer::detail::ColorMode requested = nodehammer::detail::ColorMode::Auto) const;
 
     Pager(const Pager &) = delete;
     Pager &operator=(const Pager &) = delete;
