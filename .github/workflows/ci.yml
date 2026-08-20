@@ -192,6 +192,14 @@ jobs:
         uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
         with:
           key: ccache-${{ matrix.artifact-name }}
+          # The action appends a per-run timestamp to the key, so every save is a
+          # new entry rather than a replacement. Publishing from every branch put
+          # five of those into the quota on every push, and a cache written on a
+          # pull-request ref is scoped to that pull request, so none of them were
+          # reachable from anywhere else. Only main writes; everything else
+          # restores from it by key prefix, which the timestamped keys are shaped
+          # for. Same posture as the Conan and Emscripten caches around it.
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Conan install
         shell: bash
