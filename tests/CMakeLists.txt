@@ -46,6 +46,39 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
+# ── The command line ──────────────────────────────────────────────────────────
+#
+# `cli::run` in process, which is the only way these cases could exist: while
+# every command ended in `std::exit` a failing one took the test binary with it,
+# so there was nothing to assert afterwards and consequently no CLI tests at all.
+#
+# Linked here rather than as a target of its own because the suite it belongs to
+# is this one -- the cases are about behaviour, not about linkage. The *linkage*
+# question (is `cli::run` reachable through the installed shared library?) is
+# tests/public/'s, and is asked there.
+#
+# nodehammer_cli for now; once the command sources are part of the core this
+# line goes away with the target.
+#
+# Native only, and not for want of trying. This is the first binary that ever
+# links the CLI under Emscripten: the wasm build has the viewer on, so it emits
+# the runtime bundles and the compute worker and never the headless `nodehammer`
+# exe, which is the only wasm target that would otherwise pull these objects in.
+# Linking them makes the module crash in `__funcs_on_exit` with "function
+# signature mismatch" *after* every test has passed -- an atexit handler
+# registered by something these TUs drag in is called with a signature the
+# indirect-call table disagrees about.
+#
+# Excluded rather than worked around, and the distinction matters: filtering the
+# `[cli]` cases out at runtime does not help, because the crash is about what is
+# *linked*, not what runs. Nothing shipped is affected -- no wasm artifact
+# contains the CLI -- so this is a latent defect that this suite would be the
+# first to meet -- see issue #76.
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_tests PRIVATE cli/test_cli_run.cpp)
+    target_link_libraries(nodehammer_tests PRIVATE nodehammer_cli)
+endif()
+
 # ZipWorkingSet and the project manifest are unconditional in the core and
 # cross-platform, so these run everywhere.
 #
