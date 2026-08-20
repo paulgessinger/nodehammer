@@ -144,10 +144,16 @@ nh_set_compiler_options(nodehammer_tests)
 nh_apply_emscripten_exe_options(nodehammer_tests)
 
 # Tiny benchmark harness — `nodehammer_bench <cfg> <in> <out>`. Lives next to
-# the test binary because it shares the same dependency surface (linked
-# against nodehammer_lib only, no CLI11) and the same build/install
-# expectations (NODERAWFS under emscripten so Node can read fixtures from
-# the host filesystem). Driven by ci/bench.sh.
+# the test binary because it shares the same dependency surface and the same
+# build/install expectations (NODERAWFS under emscripten so Node can read
+# fixtures from the host filesystem). Driven by ci/bench.sh.
+#
+# It links nodehammer_lib, which now *contains* the CLI and therefore CLI11 —
+# and still pulls in neither, because a static archive is linked per object and
+# this binary names no registrar. That used to be guaranteed by the source list;
+# it is now guaranteed by the linker, which is weaker only in the sense that it
+# is invisible. Hence this note rather than the previous "no CLI11", which read
+# as a property of the dependency and was one.
 add_executable(nodehammer_bench bench_main.cpp)
 target_link_libraries(nodehammer_bench PRIVATE nodehammer_lib)
 nh_set_compiler_options(nodehammer_bench)
