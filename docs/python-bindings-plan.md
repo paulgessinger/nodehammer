@@ -324,9 +324,17 @@ the container.
 | 2 | `pyproject.toml` + scikit-build-core + Conan pre-step; local macOS wheel | fresh-venv install, suite green against the installed package; wheel contents inspected |
 | 3 | ✅ Linux wheel via cibuildwheel in a container | `auditwheel` clean at `manylinux_2_28` (tag came out `manylinux_2_27`), abi3audit clean, 42/42 against the installed wheel |
 | 4 | CI: canary on PR, matrix on main/tags, TestPyPI on main | green PR canary; a main push producing three wheels and an upload |
+| 5 | PyPI on `v*` tags, with an sdist built alongside the wheels | a tag producing three wheels + one sdist on PyPI; a tag whose name disagrees with the derived version rejected before anything is built |
 
 Each step is independently revertable, and step 1 lands with no packaging in the
 tree at all.
+
+Step 5 draws the line deliberately: **dev builds go to TestPyPI, tags go to
+PyPI.** A PyPI version number can be yanked but never reused, so spending one per
+commit is irreversible in a way TestPyPI is not. Release candidates need no dev
+builds: a `v0.2.0rc1` tag uploads as a PEP 440 pre-release, which only `--pre` or
+an exact pin resolves. TestPyPI stays what it is — not a distribution channel,
+but a continuous check that the publish path works.
 
 ## Open questions to settle while building
 
