@@ -16,18 +16,22 @@
 // bindings both go through, which is the thing that has two callers and
 // therefore the thing that can regress for one of them.
 //
-// Where the line with pytest will fall, once `nodehammer.cli.run` exists: what
-// stays here is what has to hold on *every* platform and on *both* linkages --
-// the survives-a-failure pairing, `--version` parity, help on no arguments.
-// NODEHAMMER_BUILD_PYTHON is off by default and CI runs the Python legs on
-// three of the matrix with Windows deliberately excluded, which is exactly the
-// platform whose CLI differs most (_dup, _popen, the console). And pytest can
-// only ever reach the shared library, while these cases link the archive.
+// Where the line with tests/python/test_cli.py falls: what stays here is what
+// has to hold on *every* platform and on *both* linkages -- the
+// survives-a-failure pairing, `--version` parity, help on no arguments, the
+// pager default. NODEHAMMER_BUILD_PYTHON is off by default and CI runs the
+// Python legs on three of the matrix with Windows deliberately excluded, which
+// is exactly the platform whose CLI differs most (_dup, _popen, the console
+// subsystem). And pytest can only ever reach the shared library, while these
+// cases link the archive.
 //
-// What moves there is breadth: per-command behaviour, and a parametrized sweep
-// over the converted `std::exit` sites, which `capfd` and `parametrize` express
-// far better than this file's hand-rolled capture does. The two cases below
-// marked as such are the ones to take.
+// Breadth lives there instead: per-command behaviour and a parametrized sweep
+// over the converted `std::exit` sites, which `capfd` and `parametrize` say far
+// better than this file's hand-rolled capture could.
+//
+// Neither reaches `viewer`, whose fifteen converted sites are registered by the
+// executable rather than by `cli::run`. Those are covered over the built binary
+// from tests/CMakeLists.txt, which is the only place they are reachable at all.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -188,34 +192,6 @@ TEST_CASE("the help flag succeeds and an unknown subcommand does not", "[cli]") 
 
     const auto unknown = runCaptured({"no-such-command"});
     CHECK(unknown.code != 0);
-}
-
-TEST_CASE("a usage error reports its code and returns one", "[cli]") {
-    // Moves to pytest with the rest of the per-command breadth. Here for now
-    // because it is the only coverage these sites have.
-    //
-    // One of the fifteen `std::exit(1)` calls that used to live in
-    // cmd_viewer.cpp -- chosen because it fails before any window is
-    // constructed, so it is the same check on a headless machine.
-    const auto outcome = runCaptured({"viewer", "--camera-distance", "5"});
-
-    if (outcome.mentions("no such subcommand") || outcome.code == 106) {
-        // Built without the native viewer: the subcommand does not exist, which
-        // is a different (and correct) failure. Nothing to assert about NH0900.
-        CHECK(outcome.code != 0);
-        return;
-    }
-    CHECK(outcome.code == 1);
-    CHECK(outcome.mentions("NH0900"));
-}
-
-TEST_CASE("a config that cannot be written reports it and returns one", "[cli]") {
-    // Moves to pytest, as above.
-    const auto missing = std::filesystem::path{"no-such-directory"} / "out.toml";
-    const auto outcome = runCaptured(
-        {"config-flatten", "--config", "no-such-config.toml", "--output", missing.string()});
-
-    CHECK(outcome.code == 1);
 }
 
 TEST_CASE("the pager is off unless the caller asks", "[cli]") {
