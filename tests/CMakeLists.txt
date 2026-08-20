@@ -57,8 +57,8 @@ endif()
 # question (is `cli::run` reachable through the installed shared library?) is
 # tests/public/'s, and is asked there.
 #
-# nodehammer_cli for now; once the command sources are part of the core this
-# line goes away with the target.
+# No link line of its own: the command sources are part of the core now, so
+# nodehammer_lib carries them like everything else this binary tests.
 #
 # Native only, and not for want of trying. This is the first binary that ever
 # links the CLI under Emscripten: the wasm build has the viewer on, so it emits
@@ -76,7 +76,6 @@ endif()
 # first to meet -- see issue #76.
 if(NOT EMSCRIPTEN)
     target_sources(nodehammer_tests PRIVATE cli/test_cli_run.cpp)
-    target_link_libraries(nodehammer_tests PRIVATE nodehammer_cli)
 endif()
 
 # ZipWorkingSet and the project manifest are unconditional in the core and
@@ -240,6 +239,7 @@ endif()
 if(NODEHAMMER_BUILD_SHARED)
     add_executable(nodehammer_public_tests
         public/test_public_build.cpp
+        public/test_public_cli.cpp
         public/test_public_config.cpp
         public/test_public_diagnostics.cpp
         public/test_public_render_scene.cpp
