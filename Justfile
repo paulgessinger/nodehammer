@@ -47,7 +47,7 @@ lint:
 # Create the virtualenv the bindings are built against and tested with
 python-deps:
     uv venv --python 3.12 .venv
-    uv pip install --python .venv nanobind pytest tomli-w
+    uv pip install --python .venv --group dev
 
 # Configure, build and test the Python bindings (run `just python-deps` first)
 python: python-configure python-build python-test
@@ -290,7 +290,10 @@ wasm-compute-smoke build='RelWithDebInfo':
 # ("object file was built for newer 'macOS' version") and the wheel claims a
 # floor its own payload does not honour -- which delocate checks and rejects, and
 # which would otherwise crash on a machine old enough to care.
-macos_deployment_target := "13.3"
+# Read with sed rather than a TOML parser because `just` evaluates backtick
+# assignments eagerly: this runs on every `just` invocation, on every platform,
+# including the ones that never look at the value.
+macos_deployment_target := `sed -n 's/^MACOSX_DEPLOYMENT_TARGET = "\(.*\)"/\1/p' pyproject.toml`
 
 # Resolve dependencies for a wheel build (Release, no viewer, pinned floor)
 wheel-deps: recipes
@@ -346,3 +349,20 @@ wheel-test: wheel
     uv venv --python 3.12 "$venv"
     VIRTUAL_ENV="$venv" uv pip install --quiet pytest tomli-w "$root"/dist/nodehammer-*.whl
     cd "$root" && "$venv/bin/python" -m pytest tests/python -q
+
+# Build the Linux wheels the way CI does, in a manylinux container. Needs Docker.
+# The same cibuildwheel configuration CI uses, so a failure here is a failure
+# there -- including `auditwheel repair`, which is the check that decides whether
+# the library's libstdc++ references fit the manylinux policy.
+wheel-linux *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    # The container has no .git, so setuptools_scm has to be told the answer from
+    # out here. Same override the publish job uses, so the version a local Linux
+    # wheel carries is the version CI would upload.
+    export SETUPTOOLS_SCM_PRETEND_VERSION=$(
+        SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
+        uv run --no-project --with setuptools-scm python -m setuptools_scm | tail -1)
+    echo "version: $SETUPTOOLS_SCM_PRETEND_VERSION"
+    uvx cibuildwheel --platform linux --output-dir "$root/dist" {{args}}

@@ -60,6 +60,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # cmake/Version.cmake derives the version from `git describe`, and the
+          # default shallow clone carries no tags -- so every artifact this job
+          # has ever produced reports 0.0.0. That was invisible until the wheels
+          # started reporting the truth: without this, a single tagged release
+          # would ship a tarball claiming 0.0.0 next to a wheel claiming 0.1.4.
+          fetch-depth: 0
 
       - name: Remove untrusted aws/tap (macOS)
         if: runner.os == 'macOS'
@@ -163,7 +170,7 @@ jobs:
         shell: bash
         run: |
           uv venv --python 3.12 .venv-ci
-          uv pip install --python .venv-ci nanobind pytest tomli-w
+          uv pip install --python .venv-ci --group dev
           echo "NH_PYTHON=$PWD/.venv-ci/bin/python" >> "$GITHUB_ENV"
 
       - name: Detect Conan profile
@@ -308,6 +315,116 @@ jobs:
           path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+  wheels:
+    name: wheel ${{ matrix.identifier }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            identifier: cp312-manylinux_x86_64
+          - os: ubuntu-24.04-arm
+            identifier: cp312-manylinux_aarch64
+          - os: macos-26
+            identifier: cp312-macosx_arm64
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # setuptools_scm reads tags. The default shallow, tagless clone is why
+          # every other job in this workflow builds a library reporting 0.0.0;
+          # a wheel must not inherit that.
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          enable-cache: false
+
+      - name: Derive the version outside the container
+        id: version
+        shell: bash
+        # cibuildwheel copies the project into the container without .git, so
+        # setuptools_scm cannot work it out in there. The local scheme is dropped
+        # because PyPI rejects local version identifiers on upload, and a wheel
+        # that cannot be uploaded is not worth building here.
+        run: |
+          v=$(SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
+              uv run --no-project --with setuptools-scm python -m setuptools_scm | tail -1)
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+          echo "building $v"
+
+      - name: Point Conan at a cacheable directory
+        if: runner.os == 'Linux'
+        shell: bash
+        # On Linux the dependencies are built *inside* the container, so a cache
+        # has to live on the other side of the /host mount cibuildwheel provides
+        # or it dies with the container. macOS needs nothing: before-all runs on
+        # the host, so Conan already writes to the home directory cached below.
+        run: echo "CONAN_HOME=/host${HOME}/.conan2" >> "$GITHUB_ENV"
+
+      # Keyed on conanfile.py alone, with no run id — unlike the caches in the
+      # build job. Those grow run to run and want a fresh entry each time; this
+      # one is a fixed dependency set that only changes when the recipe does, so
+      # a content key writes once and is reused until the recipe moves. That also
+      # keeps three more ~250 MB blobs from churning against the repository's
+      # cache quota, which one open PR has exhausted before (#51).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.conan2/p
+          key: conan-wheel-${{ matrix.identifier }}-${{ hashFiles('conanfile.py') }}
+
+      - uses: pypa/cibuildwheel@1828c10ab37f080699c7b81cea34097c684a7074 # v4.2.0
+        env:
+          CIBW_ONLY: ${{ matrix.identifier }}
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.value }}
+
+      # The container builds as root, so everything it wrote through the /host
+      # mount is owned by root on the runner and actions/cache cannot read it to
+      # save. Same workaround the LCG job already carries for the same reason.
+      - name: Fix Conan cache ownership
+        if: always() && runner.os == 'Linux'
+        run: sudo chown -R "$USER" "$HOME/.conan2" || true
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wheel-${{ matrix.identifier }}
+          path: wheelhouse/*.whl
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: wheels
+    # Main only. Every commit gets a distinct dev version from the commit count,
+    # so uploads do not collide, and skip-existing covers a re-run of the same
+    # commit.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-slim
+    # The environment is not decoration: TestPyPI's trusted publisher records it
+    # and rejects an OIDC token whose `environment` claim does not match, so it is
+    # what narrows "anything in this repo running ci.yml" down to "this job". The
+    # matching deployment-branch rule on the GitHub side (main only) is what stops
+    # a branch from entering the environment in the first place, which is why the
+    # `if:` above is defence in depth rather than the only guard.
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/nodehammer
+    permissions:
+      # Trusted publishing: the job proves its identity to TestPyPI with a
+      # short-lived OIDC token, so there is no API token in the repository to
+      # leak or rotate.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
   bench-summary:
     name: Benchmark summary
     needs: build
@@ -409,7 +526,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: build
+    needs: [build, wheels]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:

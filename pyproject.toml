@@ -27,6 +27,14 @@ dict = ["tomli-w>=1.0"]
 [project.urls]
 Homepage = "https://github.com/paulgessinger/nodehammer"
 
+# The environment the bindings are built against and tested in, named once so
+# `just python-deps` and CI's own venv cannot drift apart -- they now install
+# this group rather than each repeating the list. nanobind's floor matches
+# build-system.requires above: the same nanobind compiles the extension either
+# way. Not project dependencies; the wheel needs none of this at runtime.
+[dependency-groups]
+dev = ["nanobind>=2.5", "pytest", "tomli-w"]
+
 # ── scikit-build-core ────────────────────────────────────────────────────────
 [tool.scikit-build]
 minimum-version = "1.0"
@@ -86,7 +94,7 @@ NODEHAMMER_WERROR = "OFF"
 # version comes from setuptools_scm and is pushed *down* into CMake, which
 # prefers SKBUILD_PROJECT_VERSION when it is set. One source of truth per build,
 # and the test suite asserts the two agree.
-[tool.scikit-build.metadata.version]
+[[tool.dynamic-metadata]]
 provider = "scikit_build_core.metadata.setuptools_scm"
 
 [tool.setuptools_scm]
@@ -109,3 +117,61 @@ exclude = [
     "*.nhb.zst",
     "*.nhproj",
 ]
+
+# ── cibuildwheel ─────────────────────────────────────────────────────────────
+# One wheel per platform, not one per interpreter: with wheel.py-api = "cp312"
+# every cp31x build would emit the same cp312-abi3 file, so building more than
+# one is duplicated work for an identical artifact.
+[tool.cibuildwheel]
+build = "cp312-*"
+# musllinux would need its own Conan graph built against musl's toolchain, for an
+# audience (Alpine) this project has never targeted. glibc only.
+skip = "*-musllinux*"
+build-verbosity = 1
+test-requires = ["pytest", "tomli-w"]
+# Runs against the *installed* wheel in cibuildwheel's own environment, which is
+# the only thing that exercises the bundled library and its relative rpath. A
+# build tree proves neither.
+test-command = "pytest {project}/tests/python -q"
+
+[tool.cibuildwheel.linux]
+# Conan first, inside the container, for the reason it runs first everywhere
+# else: cppstd, libcxx and the deployment target live in CMakeToolchain, and a
+# CMake dependency provider cannot deliver them.
+before-all = [
+    "python3 -m pip install conan",
+    "conan profile detect --force",
+    "conan install {project} -of /tmp/conan -s build_type=Release -s:a compiler.cppstd=23 --build=missing",
+]
+
+# cibuildwheel copies the project into the container *without* .git, so
+# setuptools_scm cannot derive a version there and the build dies before it
+# reaches CMake. The host knows the version, so it computes it and passes it in;
+# `just wheel-linux` and the CI job both set it the same way.
+# CONAN_HOME rides along so CI can point it at a directory under cibuildwheel's
+# /host mount, which is the only way a cache survives the container. Unset
+# locally, where the container's own default is fine.
+environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION", "CONAN_HOME"]
+
+[tool.cibuildwheel.linux.environment]
+CMAKE_TOOLCHAIN_FILE = "/tmp/conan/build/Release/generators/conan_toolchain.cmake"
+
+[tool.cibuildwheel.macos]
+# Through uv, not the host interpreter. Unlike Linux, macOS before-all runs on
+# the *host*, whose python3 is Homebrew's and marked externally managed, so
+# `pip install conan` is refused outright (PEP 668). uvx gives Conan an
+# environment of its own; uv is on PATH here for the same reason the wheel job's
+# version step can call it, and `just` already builds wheels through it.
+before-all = [
+    "uvx conan profile detect --force",
+    "uvx conan install {project} -of /tmp/nh-conan -s build_type=Release -s:a compiler.cppstd=23 -s os.version=13.3 --build=missing",
+]
+
+[tool.cibuildwheel.macos.environment]
+CMAKE_TOOLCHAIN_FILE = "/tmp/nh-conan/build/Release/generators/conan_toolchain.cmake"
+# The canonical macOS floor, read from here by the Justfile so the two cannot
+# drift. 13.3 is measured, not chosen: Apple's libc++ gates floating-point
+# std::to_chars behind it and <format> uses it, so 11.0 does not compile. It must
+# match the -s os.version= above, or the dependencies are built for a different
+# floor than the wheel claims and delocate rejects the result.
+MACOSX_DEPLOYMENT_TARGET = "13.3"

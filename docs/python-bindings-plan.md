@@ -267,29 +267,29 @@ non-limited-API usage would creep in.
   `artifacts/**/*`, so wheels ride along — but it declares `needs: build`, so the
   wheel job must join that list or the release will race it.
 
-### The one risk that could block Linux wheels
+### The risk that could have blocked Linux wheels — measured, and gone
 
-auditwheel enforces a symbol-version ceiling of **`GLIBCXX_3.4.24`** (GCC 7-era)
-on `manylinux_2_28`; anything newer must come from `libstdc++_nonshared.a` rather
-than as a dynamic reference. `<print>` is the exposure — `std::println` resolves
-to `std::vprint_unicode`, which lives in the shared library at `GLIBCXX_3.4.32`.
+`auditwheel` enforces a symbol-version ceiling of `GLIBCXX_3.4.24` on
+`manylinux_2_28`; `std::println` resolves to `std::vprint_unicode`, which
+libstdc++ exports at `GLIBCXX_3.4.32`. Removing the twelve `println` calls from
+the two core TUs was predicted to clear it. A real `manylinux_2_28_aarch64` build
+confirms it:
 
-**Resolved ahead of the wheel, because it was a bug in its own right.** The
-exposure was two core TUs — seven `std::println(stderr, …)` in
-`TessellationJob::take()` and five more in the DD4hep importer — and step 1
-demonstrated what that means for a consumer: `import nodehammer; build(...)`
-printed six lines of tessellation stats to a Python session that never asked for
-them. A library does not get to decide its caller wants output.
+```
+libstdc++.so.6 with versions {..., 'GLIBCXX_3.4.21', 'CXXABI_1.3.11', ...}
+```
 
-Both now report through the diagnostics channel instead (`NH0510`, `NH0104`),
-which is the pattern `take()` was already using two lines below for the
-coincident-face counts. No core TU calls `std::println` any more, so the
-`GLIBCXX_3.4.32` reference is gone before auditwheel ever sees it, and the
-compiler floor drops to gcc 13. The CLI output improved as a side effect: it was
-already printing its own summary line, so the six-line block was duplicating it.
+The highest reference is `GLIBCXX_3.4.21` — GCC 5 era, well under the ceiling —
+because everything newer comes from `libstdc++_nonshared.a`, which is exactly the
+gcc-toolset mechanism the plan expected. The resulting tag is
+`manylinux_2_27_aarch64`, *more* compatible than the image's own policy, and it
+is constrained by glibc (`GLIBC_2.27` in libm) rather than by the C++ runtime at
+all.
 
-`auditwheel show` on the first Linux wheel is still the check — this removes the
-one known reference, not the possibility of others.
+`abi3audit` agrees on the other axis: both `libnodehammer.so` and
+`_nodehammer.abi3.so` report `is_abi3: true` against a 3.12 baseline with no
+non-abi3 symbols. And the 42-case suite passes against the wheel installed inside
+the container.
 
 ---
 
@@ -322,8 +322,8 @@ one known reference, not the possibility of others.
 |---|---|---|
 | 1 | Bindings + `NODEHAMMER_BUILD_PYTHON` wiring, built in-tree against `nodehammer_shared` | the pytest mirror of `tests/public/`, against the build tree |
 | 2 | `pyproject.toml` + scikit-build-core + Conan pre-step; local macOS wheel | fresh-venv install, suite green against the installed package; wheel contents inspected |
-| 3 | Linux wheel via cibuildwheel in a container | `auditwheel show` clean at `manylinux_2_28`; the `<print>` question settled |
-| 4 | CI: canary on PR, matrix on tags, wheels on the release | green PR canary; a tag producing three wheels |
+| 3 | ✅ Linux wheel via cibuildwheel in a container | `auditwheel` clean at `manylinux_2_28` (tag came out `manylinux_2_27`), abi3audit clean, 42/42 against the installed wheel |
+| 4 | CI: canary on PR, matrix on main/tags, TestPyPI on main | green PR canary; a main push producing three wheels and an upload |
 
 Each step is independently revertable, and step 1 lands with no packaging in the
 tree at all.
