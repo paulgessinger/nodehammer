@@ -37,3 +37,14 @@ repos:
         language: python
         types_or: [c++, c]
         exclude: '^third_party/'
+
+      # The command sources compile into libnodehammer now, so a `std::exit`
+      # among them ends whatever called `cli::run` -- for the Python bindings,
+      # the interpreter. Removing the 21 that were there was the bulk of the
+      # work; nothing in the type system stops the twenty-second, and it would
+      # look exactly like the code that used to be correct.
+      - id: cli-no-exit
+        name: no process-terminating calls under src/cli
+        entry: scripts/check_cli_no_exit.py
+        language: python
+        files: '^src/cli/.*\.(c|cc|cpp|cxx|h|hpp|hxx)$'
