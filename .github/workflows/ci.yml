@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: j178/prek-action@e98a699c41eb69ab013a45817a0406469a748f8d # v2.0.5
+      - uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
 
   build:
     name: ${{ matrix.artifact-name }}
@@ -73,7 +73,7 @@ jobs:
         run: brew untap aws/tap || true
 
       - name: Install CMake and Ninja
-        uses: lukka/get-cmake@e6906078ebd1ccb8ce51ab4626ac46a1b5a517e3 # v4.4.0
+        uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
 
       - name: Install GCC 14 and viewer deps (Linux)
         if: runner.os == 'Linux'
@@ -155,7 +155,7 @@ jobs:
           key: naga-cli-30.0.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
         with:
           enable-cache: false
 
@@ -278,7 +278,7 @@ jobs:
         run: ci/build.sh test ${{ matrix.kind }}
 
       - name: Install hyperfine
-        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: hyperfine
 
@@ -344,7 +344,7 @@ jobs:
           # a wheel must not inherit that.
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
         with:
           enable-cache: false
 
@@ -573,7 +573,7 @@ jobs:
             conan-lcg109-
 
       - name: Build and test in LCG view
-        uses: aidasoft/run-lcg-view@244e9064431262039252d1b2d5ae9751879f5485 # v6.0.1
+        uses: aidasoft/run-lcg-view@b4da52e1c5ccb70a60ad4e7216de0a90664d5849 # v6.0.2
         with:
           release-platform: "LCG_109/x86_64-el9-gcc15-opt"
           ccache-key: ccache-lcg109
