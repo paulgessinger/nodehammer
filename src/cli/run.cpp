@@ -4,6 +4,7 @@
 #include <CLI/CLI.hpp>
 #include <nodehammer/version.hpp>
 
+#include <cstdio>
 #include <print>
 #include <string>
 #include <vector>
@@ -116,12 +117,32 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
     // file: the define is applied to nodehammer_lib and to neither
     // nodehammer_shared nor the shared core objects, so the core is compiled
     // once, without it, for both.
+    // Flush before returning, on every path.
+    //
+    // The commands print through the C streams, and stdout is block-buffered
+    // whenever it is not a terminal. A process gets away with that because exit
+    // flushes; a *function* does not. Without this, `run` returns with its
+    // output still sitting in a FILE buffer, to be emitted later -- after the
+    // caller has read the exit code, after it has printed something of its own,
+    // or after it has redirected the descriptor somewhere else entirely.
+    //
+    // Found by pytest's capfd, which swaps file descriptor 1 for the duration of
+    // a test: everything the command printed to stdout arrived after the swap
+    // was undone, so the capture was empty and the text turned up at the end of
+    // the run instead. stderr is unbuffered and was never affected, which is
+    // what made it look like a capture quirk rather than a missing flush.
+    const auto flushed = [](int code) {
+        std::fflush(stdout);
+        std::fflush(stderr);
+        return code;
+    };
+
     if (args.empty()) {
         std::print("{}", app.help());
-        return 0;
+        return flushed(0);
     }
 
-    return parseAndDispatch(app, args);
+    return flushed(parseAndDispatch(app, args));
 }
 
 } // namespace detail
