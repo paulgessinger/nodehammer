@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <config/config_loader.hpp>
@@ -88,7 +89,9 @@ struct Strictness {
 
 } // namespace
 
-void registerCmdConvert(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdConvert(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand("convert", "Convert a geometry file to a render format");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file")->required();
@@ -115,7 +118,7 @@ void registerCmdConvert(CLI::App &app) {
             ->needs(angleCutOpt);
 
     sub->callback([=] {
-        nodehammer::cli::runOrReport("convert", [&] {
+        runOrReport("convert", [&] {
             std::string outputFmt;
             std::vector<std::string> outputPaths;
             outputOpt->results(outputPaths);
@@ -144,7 +147,7 @@ void registerCmdConvert(CLI::App &app) {
 
             // ── Import ─────────────────────────────────────────────────────────────
             nodehammer::detail::Timer importTimer;
-            auto [importResult, importFmt] = nodehammer::cli::importFrom(inputOpt, fmtInOpt);
+            auto [importResult, importFmt] = importFrom(inputOpt, fmtInOpt);
             timings.record("import", importTimer.elapsed());
             printDiags(importResult.diags);
             demandClean(importResult.diags, "import");
@@ -257,3 +260,5 @@ void registerCmdConvert(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

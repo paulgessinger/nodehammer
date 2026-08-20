@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <config/config_loader.hpp>
@@ -10,7 +11,9 @@
 #include <print>
 #include <string>
 
-void registerCmdConfigFlatten(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdConfigFlatten(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand(
         "config-flatten", "Inline all `include = [...]` references into a single self-contained "
                           "TOML file. Output is round-trippable through ConfigLoader.");
@@ -22,7 +25,7 @@ void registerCmdConfigFlatten(CLI::App &app) {
                   "Skip ConfigValidator after parse (validation is on by default)");
 
     sub->callback([=] {
-        nodehammer::cli::runOrReport("config-flatten", [&] {
+        runOrReport("config-flatten", [&] {
             std::string configPath;
             configOpt->results(configPath);
 
@@ -30,11 +33,11 @@ void registerCmdConfigFlatten(CLI::App &app) {
             // recursively into a single NHConfig — that's exactly the merged
             // form we want to serialise back out.
             auto result = nodehammer::config::ConfigLoader::loadFromFile(configPath);
-            nodehammer::cli::printDiags(result.diags);
+            printDiags(result.diags);
 
             if (*validate) {
                 auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
-                nodehammer::cli::reportOrThrow(validationDiags, configPath);
+                reportOrThrow(validationDiags, configPath);
             }
 
             const std::string toml = nodehammer::config::configToToml(result.config);
@@ -56,3 +59,5 @@ void registerCmdConfigFlatten(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

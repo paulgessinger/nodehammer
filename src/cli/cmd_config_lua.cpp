@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <config/config_validator.hpp>
@@ -12,7 +13,9 @@
 #include <sstream>
 #include <string>
 
-void registerCmdConfigLua(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdConfigLua(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand(
         "config-lua", "Evaluate a Lua config script and emit flattened TOML. Output is "
                       "round-trippable through ConfigLoader.");
@@ -24,7 +27,7 @@ void registerCmdConfigLua(CLI::App &app) {
                   "Skip ConfigValidator after evaluation (validation is on by default)");
 
     sub->callback([=] {
-        nodehammer::cli::runOrReport("config-lua", [&] {
+        runOrReport("config-lua", [&] {
             std::string configPath;
             configOpt->results(configPath);
 
@@ -47,11 +50,11 @@ void registerCmdConfigLua(CLI::App &app) {
 
             auto result = nodehammer::lua::evalLuaConfig(
                 buf.str(), rootKey, nodehammer::config::ConfigLoader::filesystemFetcher());
-            nodehammer::cli::reportOrThrow(result.diags, configPath);
+            reportOrThrow(result.diags, configPath);
 
             if (*validate) {
                 auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
-                nodehammer::cli::reportOrThrow(validationDiags, configPath);
+                reportOrThrow(validationDiags, configPath);
             }
 
             const std::string toml = nodehammer::config::configToToml(result.config);
@@ -73,3 +76,5 @@ void registerCmdConfigLua(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

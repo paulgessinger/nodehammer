@@ -60,7 +60,9 @@ bool isZipPath(const std::filesystem::path &path) {
 
 } // namespace
 
-void registerCmdViewer(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
 
     auto cfg = std::make_shared<nodehammer::viewer::Config>();
@@ -159,7 +161,7 @@ void registerCmdViewer(CLI::App &app) {
         // validated by hand and called `std::exit`, which meant a
         // `file_io::readFile` throw below had no handler at all and reached
         // `std::terminate`.
-        nodehammer::cli::runOrReport("viewer", [&] {
+        runOrReport("viewer", [&] {
             if (*cullModeOpt) {
                 using nodehammer::viewer::CullOverride;
                 CullOverride mode = CullOverride::Auto;
@@ -405,3 +407,5 @@ void registerCmdViewer(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

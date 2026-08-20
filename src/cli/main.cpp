@@ -1,105 +1,74 @@
+// The executable, which is a front door and nothing else.
+//
+// Everything that used to be here — the App, the version flag, the registrars,
+// the parse — is `cli::run` now, so that `nodehammer convert ...` and a caller
+// of the installed library reach one implementation rather than two that have
+// to be kept in step. What is left is the part that is genuinely about being a
+// program: argv, the exit code, and the two policies below that a library
+// caller must not inherit.
+
 #include "cli_common.hpp"
 #include "run_internal.hpp"
 
-#include <CLI/CLI.hpp>
-#include <nodehammer/version.hpp>
+#include <nodehammer/cli.hpp>
 
+#include <array>
+#include <cstddef>
 #include <print>
-#include <string>
+#include <string_view>
+#include <vector>
 
-namespace {
+int main(int argc, char **argv) {
+    std::vector<std::string_view> args;
+    args.reserve(static_cast<std::size_t>(argc > 0 ? argc - 1 : 0));
+    for (int i = 1; i < argc; ++i) {
+        args.emplace_back(argv[i]);
+    }
 
-/// Parse and dispatch, and turn everything a command can now throw into an exit
-/// code.
-///
-/// This replaces `CLI11_PARSE`, which is a macro containing a `return` from
-/// `main` and so can only ever live in `main`. Written out, it is three catch
-/// clauses instead of one:
-///
-///   CLI::ParseError    what the macro handled — a bad flag, or `--help`.
-///   CommandFailure     a command that reported its failure and chose a code.
-///   nodehammer::Error  the backstop. Every command body runs inside
-///                      `runOrReport`, so nothing should reach here; a failure
-///                      that does is a missing wrapper, and printing it beats
-///                      the `std::terminate` an uncaught throw used to give.
-int parseAndRun(CLI::App &app, int argc, char **argv) {
+    nodehammer::cli::RunOptions options;
+
+    // A person typed this, so long output may page. The library default is off
+    // (nodehammer/cli.hpp), because a TTY proves a terminal and not a reader:
+    // an interactive interpreter has one too, and paging inside a caller's
+    // process replaces its stdout and then blocks until somebody quits `less`.
+    options.pager = true;
+
+#ifdef NH_WITH_VIEWER
+    // No subcommand at all (double-clicked in a file manager, or run from a
+    // terminal with zero args) -> default to `viewer` instead of the help text.
+    // On Windows in particular the alternative prints to a console window that
+    // closes the instant the process exits, so the app appears to silently do
+    // nothing.
+    //
+    // This is why the default lives here and not in `run`: it is a claim about
+    // how the program was launched, which a library call cannot make. It also
+    // could not be written there — NH_WITH_VIEWER is applied to nodehammer_lib
+    // and to neither nodehammer_shared nor the shared core objects, so in a
+    // packaging build run.cpp is compiled once, without it, for both.
+    if (args.empty()) {
+        args.emplace_back("viewer");
+    }
+
+    const std::array extra{static_cast<nodehammer::cli::detail::Registrar>(
+        &nodehammer::cli::detail::registerCmdViewerNative)};
+#else
+    const std::array<nodehammer::cli::detail::Registrar, 0> extra{};
+#endif
+
+    // `runWith` rather than `run`: the native viewer command constructs a
+    // window, so it is compiled into this executable rather than into a shared
+    // library that has to resolve every symbol it names. Handing it in is the
+    // seam, and `CLI::App &` in its signature is exactly why that seam cannot
+    // be a public header.
     try {
-        app.parse(argc, argv);
-    } catch (const CLI::ParseError &e) {
-        return app.exit(e);
-    } catch (const nodehammer::cli::detail::CommandFailure &failure) {
-        return failure.code;
+        return nodehammer::cli::detail::runWith(args, options, extra);
     } catch (const nodehammer::Error &e) {
+        // The backstop, and deliberately here rather than inside `run`: every
+        // command body runs within `runOrReport`, so an `Error` arriving here is
+        // a missing wrapper. A program answers that by printing and exiting 1; a
+        // library caller is better served by the exception reaching them.
         nodehammer::cli::printDiag(e.diagnostic());
         std::println(stderr, "nodehammer: {}", e.what());
         return 1;
     }
-    return 0;
-}
-
-} // namespace
-
-// Forward declarations — each command is implemented in its own translation unit.
-void registerCmdConvert(CLI::App &app);
-void registerCmdInspect(CLI::App &app);
-void registerCmdValidateConfig(CLI::App &app);
-void registerCmdConfigFlatten(CLI::App &app);
-void registerCmdDumpSemantic(CLI::App &app);
-void registerCmdDumpRender(CLI::App &app);
-void registerCmdConfigLua(CLI::App &app);
-#ifdef NH_WITH_VIEWER
-void registerCmdViewer(CLI::App &app);
-#endif
-
-int main(int argc, char **argv) {
-    CLI::App app{"nodehammer -- HEP geometry conversion pipeline"};
-    app.require_subcommand(1);
-
-    // set_version_flag rather than add_flag_callback, and the difference is the
-    // whole bug: a flag callback runs at the *end* of parsing, by which point
-    // require_subcommand(1) above has already failed, so `nodehammer --version`
-    // answered "A subcommand is required" and never printed anything. CLI11's
-    // version flag is checked while parsing and short-circuits, which is what
-    // makes it work in a build that requires a subcommand.
-    //
-    // It is also what makes the answer identical with and without the viewer:
-    // the flag is handled before either of the argc == 1 fallbacks below, so
-    // asking for the version never depends on which subcommands exist.
-    app.set_version_flag("-V,--version",
-                         std::string{"nodehammer "} + std::string{nodehammer::VERSION},
-                         "Print version and exit");
-
-    registerCmdConvert(app);
-    registerCmdInspect(app);
-    registerCmdValidateConfig(app);
-    registerCmdConfigFlatten(app);
-    registerCmdDumpSemantic(app);
-    registerCmdDumpRender(app);
-    registerCmdConfigLua(app);
-#ifdef NH_WITH_VIEWER
-    registerCmdViewer(app);
-
-    // No subcommand at all (double-clicked in a file manager, or run from a
-    // terminal with zero args) -> default to `viewer` instead of CLI11's
-    // "a subcommand is required" error. On Windows in particular that error
-    // prints to a console window that closes the instant the process exits,
-    // so the app appears to silently do nothing.
-    if (argc == 1) {
-        char viewerArg[] = "viewer";
-        char *defaultArgv[] = {argv[0], viewerArg};
-        return parseAndRun(app, 2, defaultArgv);
-    }
-#else
-    // No viewer to fall back to in this build — show the help text instead
-    // of CLI11's "a subcommand is required" error, so a bare double-click
-    // (or a zero-arg invocation) leaves the user with something readable
-    // rather than a console that opens and closes instantly.
-    if (argc == 1) {
-        char helpArg[] = "--help";
-        char *defaultArgv[] = {argv[0], helpArg};
-        return parseAndRun(app, 2, defaultArgv);
-    }
-#endif
-
-    return parseAndRun(app, argc, argv);
 }

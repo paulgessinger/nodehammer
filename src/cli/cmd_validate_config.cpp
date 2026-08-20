@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <config/config_loader.hpp>
@@ -6,13 +7,15 @@
 #include <print>
 #include <string>
 
-void registerCmdValidateConfig(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdValidateConfig(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand("validate-config", "Validate a TOML config file");
 
     auto *configOpt = sub->add_option("-c,--config", "TOML config file")->required();
 
     sub->callback([=] {
-        nodehammer::cli::runOrReport("validate-config", [&] {
+        runOrReport("validate-config", [&] {
             std::string configPath;
             configOpt->results(configPath);
 
@@ -20,7 +23,7 @@ void registerCmdValidateConfig(CLI::App &app) {
             // so a document that will not parse is its answer rather than its
             // failure (docs/error-model.md).
             auto result = nodehammer::config::ConfigLoader::collectFromFile(configPath);
-            nodehammer::cli::printDiags(result.diags);
+            printDiags(result.diags);
 
             if (result.diags.hasErrors()) {
                 std::println(stderr, "config: INVALID (parse errors)");
@@ -28,7 +31,7 @@ void registerCmdValidateConfig(CLI::App &app) {
             }
 
             auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
-            nodehammer::cli::printDiags(validationDiags);
+            printDiags(validationDiags);
 
             if (validationDiags.hasErrors()) {
                 std::println(stderr, "config: INVALID");
@@ -38,3 +41,5 @@ void registerCmdValidateConfig(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <config/config_ast.hpp>
@@ -11,7 +12,9 @@
 #include <string>
 #include <tessellation/tessellation_pass.hpp>
 
-void registerCmdDumpRender(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdDumpRender(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand("dump-render", "Dump the render IR of a geometry as JSON");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");
@@ -23,14 +26,14 @@ void registerCmdDumpRender(CLI::App &app) {
         sub->add_flag("--synthetic-box", "Use a synthetic single-box scene as input");
 
     sub->callback([=] {
-        nodehammer::cli::runOrReport("dump-render", [&] {
+        runOrReport("dump-render", [&] {
             // ── Load config ────────────────────────────────────────────────────────
             nodehammer::config::NHConfig cfg;
             if (*configOpt) {
                 std::string cfgPath;
                 configOpt->results(cfgPath);
                 auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
-                nodehammer::cli::printDiags(loaded.diags);
+                printDiags(loaded.diags);
                 cfg = std::move(loaded.config);
             }
 
@@ -39,8 +42,8 @@ void registerCmdDumpRender(CLI::App &app) {
             if (syntheticBoxOpt->count()) {
                 semScene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
             } else if (*inputOpt) {
-                auto [importResult, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
-                nodehammer::cli::printDiags(importResult.diags);
+                auto [importResult, fmt] = importFrom(inputOpt, formatOpt);
+                printDiags(importResult.diags);
                 semScene = std::move(importResult.scene);
             } else {
                 std::println(stderr,
@@ -58,7 +61,7 @@ void registerCmdDumpRender(CLI::App &app) {
             // ── Tessellate ─────────────────────────────────────────────────────────
             nodehammer::tessellation::TessellationPass pass{cfg};
             auto passResult = pass.lower(semScene);
-            nodehammer::cli::printDiags(passResult.diags);
+            printDiags(passResult.diags);
 
             // ── Serialize ──────────────────────────────────────────────────────────
             nlohmann::json j = passResult.scene;
@@ -73,3 +76,5 @@ void registerCmdDumpRender(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

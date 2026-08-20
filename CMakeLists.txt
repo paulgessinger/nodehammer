@@ -673,6 +673,7 @@ endif()
 # its own C-export bootstrap (src/web/viewer_main.cpp) and the CI bench is
 # a separate exe under tests/. Nothing in the wasm closure links this lib.
 add_library(nodehammer_cli STATIC
+    src/cli/run.cpp
     src/cli/pager.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp

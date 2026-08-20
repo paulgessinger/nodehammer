@@ -83,8 +83,8 @@ PagerChoice choosePager() {
 
 } // namespace
 
-Pager::Pager() {
-    if (!nodehammer::detail::Console::isTTY()) {
+Pager::Pager(bool enabled) {
+    if (!enabled || !nodehammer::detail::Console::isTTY()) {
         return;
     }
 

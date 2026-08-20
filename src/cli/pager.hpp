@@ -9,13 +9,19 @@ namespace nodehammer::cli {
 // implementation: `nodehammer::cli::detail` (run_internal.hpp) is the nearer
 // enclosing scope, so a bare `detail::` resolves there and does not fall back.
 
-/// RAII pager: on construction, if stdout is a TTY, opens a pipe to a pager
-/// (less -R, or $PAGER) and replaces the stdout file descriptor with the pipe.
-/// On destruction, restores stdout and waits for the pager to exit.
-/// If stdout is not a TTY (piped/redirected), does nothing.
+/// RAII pager: on construction, if paging is enabled and stdout is a TTY, opens
+/// a pipe to a pager (less -R, or $PAGER) and replaces the stdout file
+/// descriptor with the pipe. On destruction, restores stdout and waits for the
+/// pager to exit. If stdout is not a TTY (piped/redirected), does nothing.
+///
+/// `enabled` is not a convenience. A TTY is the *executable's* evidence that a
+/// human is reading; for `cli::run` called as an API it is evidence of nothing —
+/// an interactive interpreter has a TTY too, and paging there replaces the
+/// caller's fd 1 with a pipe and then blocks in `pclose` until somebody quits
+/// `less`. So the caller says, and `RunOptions::pager` is where they say it.
 class Pager {
   public:
-    Pager();
+    explicit Pager(bool enabled);
     ~Pager();
 
     /// True when output is going through a pager.
