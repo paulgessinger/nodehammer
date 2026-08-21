@@ -41,6 +41,13 @@ add_executable(nodehammer_tests
 # FilesystemProjectFs and NativeBagProjectFs are native-only; the
 # sources are gated the same way in nodehammer_lib. Tests follow.
 if(NOT EMSCRIPTEN)
+    # The static server and its tests: no sockets in the wasm sandbox, and the
+    # module the server exists to serve is the thing being served. httplib is
+    # PRIVATE to the core, so this suite declares it rather than inheriting it
+    # by accident -- the same rule tinygltf follows below.
+    target_sources(nodehammer_tests PRIVATE web/test_static_server.cpp web/test_stage.cpp)
+    target_link_libraries(nodehammer_tests PRIVATE httplib::httplib)
+
     target_sources(nodehammer_tests PRIVATE
         viewer/test_filesystem_project_fs.cpp
         viewer/test_native_bag_project_fs.cpp

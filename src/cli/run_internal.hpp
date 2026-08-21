@@ -18,7 +18,10 @@
 
 #include <nodehammer/cli.hpp>
 
+#include <functional>
+#include <memory>
 #include <span>
+#include <string>
 #include <string_view>
 
 // Declared, not included: `CLI::App &` inside a function-pointer type needs no
@@ -80,8 +83,47 @@ void registerCmdDumpSemantic(CLI::App &app, const RunOptions &options);
 void registerCmdDumpRender(CLI::App &app, const RunOptions &options);
 void registerCmdConfigLua(CLI::App &app, const RunOptions &options);
 
-/// Compiled into the executable, never into the library. Declared here so
-/// main.cpp can name it without a second forward declaration going stale.
+// ── `viewer`, in two halves ───────────────────────────────────────────────────
+//
+// The library registers the subcommand and serves the browser; the executable
+// adds the window's options and takes over the dispatch. They live in different
+// binaries — `cmd_viewer_native.cpp` constructs a `viewer::App`, which
+// `--no-undefined` on the shared library would turn into a link error rather
+// than a missing feature — so nothing can be passed between them at run time.
+//
+// Nothing needs to be. The parsed values live in the `CLI::App`, so the native
+// half reads the shared options straight off the subcommand it was handed, and
+// the two halves share declarations rather than state. That is what removes the
+// registration singleton this used to need.
+//
+// None of it is compiled under Emscripten: serving the viewer is something a
+// *host* does, and there the module holding this code would be the thing being
+// served. `run.cpp` skips the registration to match.
+
+/// Declare the options both modes take.
+void addViewerCommonOptions(CLI::App &sub);
+
+/// Declare `--web` and the options that need it.
+void addViewerWebOptions(CLI::App &sub);
+
+/// Whether `--web` was given on an already-parsed subcommand.
+[[nodiscard]] bool viewerWebRequested(const CLI::App &sub);
+
+/// Stage a root, serve it, open a browser, and wait. Reads its inputs from the
+/// parsed subcommand, which is what lets the native half call it too.
+void runViewerWeb(CLI::App &sub);
+
+/// Registers `viewer` with the shared and web options, and a callback that
+/// serves or explains. The native half replaces that callback.
+void registerCmdViewer(CLI::App &app, const RunOptions &options);
+
+/// Extends the `viewer` subcommand with the native window: its options, and the
+/// run path plain `viewer` takes.
+///
+/// Compiled into the executable, never into the library — it constructs a
+/// `viewer::App`, which `--no-undefined` on the shared library would turn into a
+/// link error rather than a missing feature. Declared here so main.cpp can name
+/// it without a second forward declaration going stale.
 void registerCmdViewerNative(CLI::App &app, const RunOptions &options);
 
 } // namespace nodehammer::cli::detail

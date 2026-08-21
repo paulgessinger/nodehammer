@@ -101,7 +101,7 @@ cat > "$out/index.html" <<HTML
         locked scene straight away.
     </p>
 
-    <a class="card" href="app/viewer.html">
+    <a class="card" href="app/">
         <strong>Application</strong>
         <span>
             Comes up empty and restores your last project from browser storage.
@@ -110,7 +110,7 @@ cat > "$out/index.html" <<HTML
         </span>
     </a>
 
-    <a class="card" href="odd/viewer.html">
+    <a class="card" href="odd/">
         <strong>Open Data Detector — full</strong>
         <span>
             Publication of <code>fixtures/configs/odd.toml</code>: tracker,
@@ -118,7 +118,7 @@ cat > "$out/index.html" <<HTML
         </span>
     </a>
 
-    <a class="card" href="odd-simple/viewer.html">
+    <a class="card" href="odd-simple/">
         <strong>Open Data Detector — simplified</strong>
         <span>
             Publication of <code>fixtures/configs/odd_simple.toml</code>:

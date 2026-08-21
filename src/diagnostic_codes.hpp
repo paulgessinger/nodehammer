@@ -150,5 +150,7 @@ inline constexpr std::string_view kFatalCliFileOpen = "NH0902";
 // apart, which is the whole reason there are two codes here.
 inline constexpr std::string_view kFatalWebRuntimeNotFound = "NH1000";
 inline constexpr std::string_view kFatalWebRuntimeSchema = "NH1001";
+inline constexpr std::string_view kFatalWebServeBind = "NH1002";
+inline constexpr std::string_view kFatalWebStage = "NH1003";
 
 } // namespace nodehammer::codes

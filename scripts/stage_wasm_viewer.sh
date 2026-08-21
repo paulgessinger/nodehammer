@@ -84,7 +84,7 @@ stage_file() {
 # missing install rule would look fine here and fail wherever no checkout
 # exists. A *build directory* carries neither, so the checkout answers — which
 # is also what keeps the local loop live, since `link` mode then symlinks the
-# working copy and an edit to viewer.html needs no rebuild.
+# working copy and an edit to index.html needs no rebuild.
 stage_runtime_file() {
     local name="$1"
     local fallback="$2"
@@ -96,7 +96,7 @@ stage_runtime_file() {
 }
 
 mkdir -p "$out"
-stage_runtime_file viewer.html "$root/web/viewer.html"
+stage_runtime_file index.html "$root/web/index.html"
 # Worker script that hosts the headless compute module (off-main-thread
 # tessellation/wedge cut). Served alongside the viewer; loaded as a classic
 # Worker by the viewer when one is available.

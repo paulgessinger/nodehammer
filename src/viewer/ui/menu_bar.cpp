@@ -46,7 +46,7 @@ void renderMenuBar(UiState &state, const ViewerUiContext &ctx, const UiActions &
                 actions.save_archive();
             }
         }
-        // Publish a self-contained web package (viewer.html + runtime + sidecar +
+        // Publish a self-contained web package (index.html + runtime + sidecar +
         // archive). Web only for now; enabled once there's a project to publish.
         if constexpr (platform::kIsWeb) {
             if (ImGui::MenuItem("Publish package...", nullptr, false, ctx.is_archive_mode) &&

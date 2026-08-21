@@ -178,7 +178,7 @@ static constexpr const char *kProjectBlobKey = "project/default";
 EM_JS(void, nh_viewer_publish_fetch_runtime, (), {
     var path = window.location.pathname;
     var base = path.slice(0, path.lastIndexOf('/') + 1);
-    var names = ['viewer.html',
+    var names = ['index.html',
                  'nodehammer-gles3.js', 'nodehammer-gles3.wasm',
                  'nodehammer-wgpu.js',  'nodehammer-wgpu.wasm',
                  'nodehammer-compute.js', 'nodehammer-compute.wasm'];

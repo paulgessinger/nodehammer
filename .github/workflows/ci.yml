@@ -647,7 +647,7 @@ jobs:
 
           # The layout the ladder's third rung resolves: <exe>/../share/nodehammer/web.
           test -x stage/bin/nodehammer || test -f stage/bin/nodehammer.exe
-          test -f stage/share/nodehammer/web/viewer.html
+          test -f stage/share/nodehammer/web/index.html
 
           rm -f "$archive"
           if [ "${archive##*.}" = "zip" ]; then

@@ -10,7 +10,7 @@ parts a static check *can* see:
     bundles were built against, which is what `nodehammer viewer --web` checks
     before serving a directory it was merely pointed at;
   - the application posture has no sidecar — that absence *is* what selects
-    application mode in `viewer.html`;
+    application mode in `index.html`;
   - every publication's sidecar names an archive that exists, and that archive
     is self-describing: its root `nodehammer.toml` `[project]` config/geometry
     keys resolve to entries inside the same archive.
@@ -28,7 +28,7 @@ import zipfile
 from pathlib import Path
 
 RUNTIME_FILES = (
-    "viewer.html",
+    "index.html",
     "compute_worker.js",
     "nh_runtime.json",
     "nodehammer-gles3.js",

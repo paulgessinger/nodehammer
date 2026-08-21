@@ -101,6 +101,12 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
     registerCmdDumpSemantic(app, options);
     registerCmdDumpRender(app, options);
     registerCmdConfigLua(app, options);
+    // Before `extra`: the native half extends the subcommand this registers, so
+    // it has to exist first. Absent under Emscripten, where there is no host to
+    // serve from and the whole web half is excluded from the build.
+#ifndef __EMSCRIPTEN__
+    registerCmdViewer(app, options);
+#endif
     for (const auto registrar : extra) {
         registrar(app, options);
     }

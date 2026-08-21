@@ -20,7 +20,7 @@ see every use.
 
 Only C/C++ sources are scanned: their EM_JS bodies are linked into the module
 and go through Closure. Hand-written JS that stays *outside* the module
-(web/viewer.html, src/web/compute_worker.js) is never minified and correctly
+(web/index.html, src/web/compute_worker.js) is never minified and correctly
 uses dot access against the literal names, so it must not be flagged here.
 
 Usage: check_em_js_closure.py [files...]   (defaults to git-tracked C/C++ sources)

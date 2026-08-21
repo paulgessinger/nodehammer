@@ -59,6 +59,27 @@ FetchContent_Declare(nlohmann_json
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
+# ── cpp-httplib ───────────────────────────────────────────────────────────────
+# The static server behind `viewer --web`. Native only: the wasm build has no
+# sockets, and the module it would serve is the thing being served.
+#
+# Chosen over the ~370 hand-rolled lines it replaces because it is *less* code
+# for today's behaviour, not only because of what comes next. What comes next
+# does matter though: `HttpProjectFs` needs request bodies and routing, and an
+# experiment framework pushing events needs a parser that has been attacked. The
+# `set_mount_point` + `set_default_headers` + `bind_to_any_port` trio covers the
+# static case in a few lines, and WebSocket (since 0.33.0) plus chunked content
+# providers cover the rest without a second dependency.
+if(NOT EMSCRIPTEN)
+    FetchContent_Declare(httplib
+        SYSTEM
+        GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+        GIT_TAG        v0.47.0
+        FIND_PACKAGE_ARGS 0.47.0
+    )
+    FetchContent_MakeAvailable(httplib)
+endif()
+
 # ── GLM ───────────────────────────────────────────────────────────────────────
 FetchContent_Declare(glm
     SYSTEM
