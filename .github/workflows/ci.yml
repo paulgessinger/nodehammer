@@ -603,16 +603,21 @@ jobs:
         run: |
           mkdir -p wasm-runtime
           tar xzf wasm-artifact/nodehammer-wasm32.tar.gz -C wasm-runtime
-          ls -la wasm-runtime/bin
+          ls -la wasm-runtime/share/nodehammer/web
 
       # The native build is only here to mint the .nhb fixture for the smoke
       # below; this job otherwise deals purely in the wasm artifact.
       # Landing page + one self-contained directory per web posture:
       # app/ (no sidecar -> application mode) and odd/ + odd-simple/
       # (sidecar -> locked .nhproj publications).
+      # share/nodehammer/web, not bin/: the artifact's servable payload is a
+      # directory holding the shell and the worker script alongside the
+      # bundles, and staging from it is what proves those install rules exist
+      # -- reading the shell out of this job's checkout would hide a payload
+      # that no machine without a checkout could serve.
       - name: Assemble site
         shell: bash
-        run: scripts/build_pages_site.sh wasm-runtime/bin _site
+        run: scripts/build_pages_site.sh wasm-runtime/share/nodehammer/web _site
 
       # Keeps the assembly honest on pull requests, which never deploy: the
       # artifact stays browsable and the job fails here if a posture is
