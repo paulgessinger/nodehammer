@@ -96,6 +96,52 @@ if(NODEHAMMER_WITH_VIEWER AND NOT EMSCRIPTEN)
         PASS_REGULAR_EXPRESSION "nodehammer \\[OPTIONS\\]")
 endif()
 
+# ── The viewer command, over the built executable ─────────────────────────────
+#
+# The only place its fifteen converted `std::exit` sites can be reached. The
+# `viewer` subcommand is registered by src/cli/main.cpp, not by `cli::run` --
+# it constructs a window, so it cannot live in a shared library that must
+# resolve every symbol it names -- which means neither the in-process cases
+# above nor tests/python/test_cli.py can see it. Both of those skipped it
+# silently before this existed, which is a worse kind of gap than no test.
+#
+# Two entries per case because CTest reads them separately:
+# PASS_REGULAR_EXPRESSION supersedes the exit code, so the code needs a WILL_FAIL
+# test of its own. Both are cheap -- these fail during argument validation,
+# before any window or GPU context is touched, so they run on a headless CI
+# machine exactly as they do on a desktop.
+if(NODEHAMMER_WITH_VIEWER AND NOT EMSCRIPTEN)
+    function(nh_add_viewer_usage_test name code)
+        add_test(NAME cli_viewer_${name}_reports
+                 COMMAND $<TARGET_FILE:nodehammer> ${ARGN})
+        set_tests_properties(cli_viewer_${name}_reports PROPERTIES
+            PASS_REGULAR_EXPRESSION "${code}")
+
+        add_test(NAME cli_viewer_${name}_fails
+                 COMMAND $<TARGET_FILE:nodehammer> ${ARGN})
+        set_tests_properties(cli_viewer_${name}_fails PROPERTIES WILL_FAIL TRUE)
+    endfunction()
+
+    nh_add_viewer_usage_test(partial_camera NH0900 viewer --camera-distance 5)
+    nh_add_viewer_usage_test(screenshot_without_input NH0900
+                             viewer --screenshot shot.png)
+    nh_add_viewer_usage_test(bench_without_input NH0900 viewer --bench bench.json)
+    nh_add_viewer_usage_test(missing_project_path NH0901
+                             viewer no-such-directory-anywhere)
+    nh_add_viewer_usage_test(missing_input NH0901
+                             viewer --input no-such-file.gdml)
+
+    # `--help` explicitly, alongside the bare invocation above. They reach the
+    # text by different routes -- `run` prints it directly when there are no
+    # arguments, while this one goes through CLI11's own help path -- and the
+    # program name is set in a third place again, so the two together are what
+    # pin all three to the same answer.
+    add_test(NAME cli_help_names_the_program
+             COMMAND $<TARGET_FILE:nodehammer> --help)
+    set_tests_properties(cli_help_names_the_program PROPERTIES
+        PASS_REGULAR_EXPRESSION "nodehammer \\[OPTIONS\\]")
+endif()
+
 # ZipWorkingSet and the project manifest are unconditional in the core and
 # cross-platform, so these run everywhere.
 #

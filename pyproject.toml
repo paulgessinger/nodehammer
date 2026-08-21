@@ -18,6 +18,14 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Physics",
 ]
 
+# The command, without a compiled executable in the wheel. `install.components =
+# ["Python"]` below still excludes the CLI binary; this generates a launcher that
+# imports the extension and calls into libnodehammer, which is where the CLI
+# lives since the command sources joined the core. That is what makes
+# `uvx nodehammer` work, and it costs the wheel nothing but a script.
+[project.scripts]
+nodehammer = "nodehammer.__main__:main"
+
 [project.optional-dependencies]
 # load_config(dict) serializes to TOML and hands it to Config.parse, so the
 # validator sees exactly what a file would produce. tomli-w is the only thing
