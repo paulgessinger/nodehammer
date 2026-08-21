@@ -257,6 +257,11 @@ set(NH_CORE_SOURCES
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
     src/detail/markup.cpp
+    # Host-side, despite the directory: locating and vetting the wasm runtime is
+    # something the *serving* process does. src/web/'s other two TUs are the
+    # Emscripten entry points and are not core.
+    src/web/runtime_locator.cpp
+    src/web/executable_path.cpp
     src/scene_build.cpp
     src/export_resolve.cpp
     src/version.cpp
@@ -373,6 +378,11 @@ set(NH_CORE_PRIVATE_DEPS
 )
 
 set(NH_CORE_DEFINES "")
+
+# The web runtime's schema id, compiled in so `web::compiledSchema()` and the
+# `nh_runtime.json` the install rules stamp come from one `set()` and cannot
+# drift. See the contract block above GNUInstallDirs.
+list(APPEND NH_CORE_DEFINES NH_WEB_RUNTIME_SCHEMA=${NH_WEB_RUNTIME_SCHEMA})
 
 # Extra include directories for dependencies that ship variables instead of
 # imported targets — Geant4 is the only one today. Everything else propagates

@@ -585,6 +585,112 @@ jobs:
       - name: Render summary
         run: python3 ci/bench-summary.py bench-results >> "$GITHUB_STEP_SUMMARY"
 
+  web-runtime-merge:
+    name: web runtime into ${{ matrix.artifact }}
+    needs: build
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        artifact:
+          - nodehammer-linux-x86_64
+          - nodehammer-linux-aarch64
+          - nodehammer-macos-aarch64
+          - nodehammer-windows-x86_64
+    steps:
+      # A native build cannot produce the web runtime: the bundles are
+      # Emscripten output, so no native `cmake --install` has anything to copy.
+      # A platform archive that carries one therefore has to be assembled, and
+      # this is the only place that can do it. The wasm tree is
+      # platform-independent, so one build overlays onto all four.
+      #
+      # Without this, `nodehammer viewer --web` from a downloaded release finds
+      # nothing at share/nodehammer/web and can only tell the user to go get a
+      # runtime -- the same friction the Python side rejected when it made
+      # nodehammer-web a default dependency rather than an extra.
+      - name: Download the platform archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: platform
+
+      - name: Download the web runtime
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nodehammer-wasm32
+          path: wasm-artifact
+
+      - name: Overlay the runtime
+        id: overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wasm stage
+          tar xzf wasm-artifact/nodehammer-wasm32.tar.gz -C wasm
+          runtime=wasm/share/nodehammer/web
+          test -f "$runtime/nh_runtime.json" || {
+              echo "::error::the wasm artifact carries no web runtime at share/nodehammer/web"
+              exit 1
+          }
+
+          name='${{ matrix.artifact }}'
+          if [ -f "platform/$name.zip" ]; then
+              unzip -q "platform/$name.zip" -d stage
+              archive="$name.zip"
+          else
+              tar xzf "platform/$name.tar.gz" -C stage
+              archive="$name.tar.gz"
+          fi
+
+          mkdir -p stage/share/nodehammer
+          cp -R "$runtime" stage/share/nodehammer/web
+
+          # The layout the ladder's third rung resolves: <exe>/../share/nodehammer/web.
+          test -x stage/bin/nodehammer || test -f stage/bin/nodehammer.exe
+          test -f stage/share/nodehammer/web/viewer.html
+
+          rm -f "$archive"
+          if [ "${archive##*.}" = "zip" ]; then
+              (cd stage && zip -qr "../$archive" .)
+          else
+              tar czf "$archive" -C stage .
+          fi
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      # The two halves were built by different jobs from different toolchains,
+      # and nothing else compares them. `download-artifact` is scoped to this
+      # run, so they cannot come from different commits -- what this catches is
+      # two legs that derived their versions differently, which is exactly what
+      # a pre-release tag did to cmake/Version.cmake once already. Only on the
+      # leg whose binary this runner can execute; one check is enough, since
+      # both inputs are shared by all four.
+      - name: The two halves agree on the version
+        if: matrix.artifact == 'nodehammer-linux-x86_64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          native=$(stage/bin/nodehammer --version | awk '{print $NF}')
+          stamped=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' \
+                    stage/share/nodehammer/web/nh_runtime.json)
+          echo "native=$native  runtime=$stamped"
+          if [ "$native" != "$stamped" ]; then
+              echo "::error::the native build says $native, the web runtime says $stamped"
+              exit 1
+          fi
+
+      # Same name, overwriting what `build` uploaded: the merged archive *is*
+      # the release artifact, and leaving both variants around would only invite
+      # publishing the one without a runtime. The wasm artifact is untouched, so
+      # the Pages job (which stages from it) is unaffected.
+      - name: Replace the platform archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ steps.overlay.outputs.archive }}
+          overwrite: true
+          if-no-files-found: error
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+
   pages:
     name: Build Pages site
     needs: build
@@ -674,7 +780,10 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build, wheels, sdist]
+    # web-runtime-merge, not just build: it replaces the four platform
+    # archives in place, and without waiting for it this job races the
+    # overwrite and can publish the archive that carries no web runtime.
+    needs: [build, web-runtime-merge, wheels, sdist]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
