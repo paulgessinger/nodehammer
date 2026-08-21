@@ -135,10 +135,14 @@ test-requires = ["pytest", "tomli-w"]
 test-command = "pytest {project}/tests/python -q"
 
 [tool.cibuildwheel.linux]
-# Conan first, inside the container, for the reason it runs first everywhere
+# ccache first: it's a system package, not a Python one, and everything after
+# this compiles through it. The manylinux_2_28 image ships EPEL already enabled,
+# so a plain dnf install resolves it -- no repo wrangling needed.
+# Conan next, inside the container, for the reason it runs first everywhere
 # else: cppstd, libcxx and the deployment target live in CMakeToolchain, and a
 # CMake dependency provider cannot deliver them.
 before-all = [
+    "dnf install -y ccache",
     "python3 -m pip install conan",
     "conan profile detect --force",
     "conan install {project} -of /tmp/conan -s build_type=Release -s:a compiler.cppstd=23 --build=missing",
@@ -148,13 +152,18 @@ before-all = [
 # setuptools_scm cannot derive a version there and the build dies before it
 # reaches CMake. The host knows the version, so it computes it and passes it in;
 # `just wheel-linux` and the CI job both set it the same way.
-# CONAN_HOME rides along so CI can point it at a directory under cibuildwheel's
-# /host mount, which is the only way a cache survives the container. Unset
-# locally, where the container's own default is fine.
-environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION", "CONAN_HOME"]
+# CONAN_HOME and CCACHE_DIR ride along so CI can point them at directories under
+# cibuildwheel's /host mount, which is the only way either cache survives the
+# container. Unset locally, where the container's own defaults are fine.
+environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION", "CONAN_HOME", "CCACHE_DIR"]
 
 [tool.cibuildwheel.linux.environment]
 CMAKE_TOOLCHAIN_FILE = "/tmp/conan/build/Release/generators/conan_toolchain.cmake"
+# scikit-build-core reads CMAKE_ARGS itself (unlike CMAKE_TOOLCHAIN_FILE, CMake
+# has no environment-variable fallback for *_COMPILER_LAUNCHER), so this is the
+# reliable way to route the build through ccache rather than nodehammer's object
+# files recompiling from scratch on every wheel build.
+CMAKE_ARGS = "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
 
 [tool.cibuildwheel.macos]
 # Through uv, not the host interpreter. Unlike Linux, macOS before-all runs on
@@ -169,6 +178,10 @@ before-all = [
 
 [tool.cibuildwheel.macos.environment]
 CMAKE_TOOLCHAIN_FILE = "/tmp/nh-conan/build/Release/generators/conan_toolchain.cmake"
+# Unlike Linux, the macOS build isn't containerized, so ccache (installed by the
+# CI job's ccache-action step, same as the build job) is already on PATH and
+# CCACHE_DIR already in the environment -- this just has to point CMake at it.
+CMAKE_ARGS = "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
 # The canonical macOS floor, read from here by the Justfile so the two cannot
 # drift. 13.3 is measured, not chosen: Apple's libc++ gates floating-point
 # std::to_chars behind it and <format> uses it, so 11.0 does not compile. It must
