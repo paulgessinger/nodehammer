@@ -1,0 +1,6 @@
+# Vendored because conan-center stops at 2.6.2, and 2.6.2 cannot be linked into
+# a wasm module that runs its atexit chain -- see recipes/cli11/conanfile.py.
+sources:
+  "2.7.2":
+    url: "https://github.com/CLIUtils/CLI11/archive/refs/tags/v2.7.2.tar.gz"
+    sha256: "46eef3101da70852ec7af026e09d485ccee81813331c8c6052d39344443b83da"
