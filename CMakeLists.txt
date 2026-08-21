@@ -465,11 +465,30 @@ list(APPEND NH_CORE_DEPS manifold::manifold)
 # the web *runtime* no longer references BagProjectFs (static-lib dead-strip
 # keeps it out of the wasm viewer), but the native CLI (cmd_viewer) and the
 # unit tests on both platforms still use it.
+#
+# The web viewer's server and staging are native-only for a plainer reason:
+# they exist to *serve* the wasm runtime to a browser, and a wasm module is the
+# thing being served. Sockets are the giveaway -- there are none in the sandbox.
+# The locator above is not gated, because "where would the runtime be" is a
+# question the wasm build can be asked and answer "nowhere" to.
 if(NOT EMSCRIPTEN)
     list(APPEND NH_CORE_SOURCES
         src/viewer/filesystem_project_fs.cpp
         src/viewer/native_bag_project_fs.cpp
+        src/web/static_server.cpp
+        src/web/stage.cpp
+        src/web/open_browser.cpp
+        # `viewer --web` itself. Excluded here rather than #ifdef'd inside:
+        # every line of it calls something in the three files above, so a wasm
+        # build of this TU would be a shell around a refusal. `run.cpp` skips
+        # the registration to match, and a wasm module simply has no `viewer`
+        # subcommand — which is right, since it *is* the viewer.
+        src/cli/cmd_viewer_web.cpp
     )
+    # Private: httplib.h is included by static_server.cpp and by nothing else,
+    # least of all a header. Header-only, so the shared library gains no link
+    # dependency and its package config gains no requirement.
+    list(APPEND NH_CORE_PRIVATE_DEPS httplib::httplib)
 endif()
 
 # WatchedFilesystemProjectFs (strategy doc step 4) decorates FilesystemProjectFs
@@ -748,7 +767,7 @@ endif()
 # executable per backend. Native picks the right backend for the host
 # (Metal on Apple, GLCORE on Linux/Windows). Emscripten builds BOTH GLES3
 # and WGPU executables from a single configure so the wasm shell can pick
-# at runtime via navigator.gpu — see web/viewer.html.
+# at runtime via navigator.gpu — see web/index.html.
 if(NODEHAMMER_WITH_VIEWER)
     # Defines nodehammer_shaders custom target + NH_SHADER_INCLUDE_DIR.
     add_subdirectory(shaders)
@@ -759,7 +778,7 @@ if(NODEHAMMER_WITH_VIEWER)
     # dispatcher (`nodehammer viewer …` alongside the other subcommands);
     # the wasm build skips CLI11 entirely and uses src/web/viewer_main.cpp,
     # which exposes a single `nh_viewer_start(opts_json)` C export driven
-    # by web/viewer.html.
+    # by web/index.html.
     function(nh_add_viewer_exe name viewer_lib)
         if(EMSCRIPTEN)
             add_executable(${name} src/web/viewer_main.cpp)
@@ -911,11 +930,11 @@ if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
     endforeach()
 
     # The two files the browser loads that no compiler produced. They are as
-    # much a part of the runtime as the bundles — viewer.html is what picks a
+    # much a part of the runtime as the bundles — index.html is what picks a
     # backend at all, and a bundle without its worker script tessellates on the
     # main thread or not at all.
     install(FILES
-            "${CMAKE_CURRENT_SOURCE_DIR}/web/viewer.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/web/compute_worker.js"
         DESTINATION "${NH_WEB_RUNTIME_DIR}"
         COMPONENT WebRuntime
@@ -923,7 +942,9 @@ if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
 
     # The stamp, written beside the bundles in the build tree so that a build
     # directory and an install tree are the same shape — `just wasm-serve` and
-    # `just pages-site` stage straight out of the former.
+    # `just pages-site` stage straight out of the former, and `viewer --web
+    # --web-assets build/emscripten/Release` is the first thing any developer
+    # reaches for.
     file(GENERATE
         OUTPUT "$<TARGET_FILE_DIR:nodehammer-gles3>/${NH_WEB_RUNTIME_STAMP}"
         CONTENT "{\n  \"schema\": ${NH_WEB_RUNTIME_SCHEMA},\n  \"version\": \"${NODEHAMMER_VERSION}\"\n}\n"
@@ -932,6 +953,25 @@ if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
         DESTINATION "${NH_WEB_RUNTIME_DIR}"
         COMPONENT WebRuntime
     )
+
+    # "The same shape" has to include the two files no compiler produces, or the
+    # claim above is false in exactly the way that bites: a build tree carrying a
+    # stamp and bundles but no shell passes every check a stamp can make and then
+    # serves 404 on `/`.
+    #
+    # Symlinks, not copies, and that is the whole point: an edit to web/index.html
+    # is live in a served build tree with no rebuild, which is what `just
+    # wasm-serve`'s link mode has always given. COPY_ON_ERROR covers Windows,
+    # where an unprivileged symlink fails and a stale copy is better than an
+    # incomplete directory.
+    foreach(_nh_shell_file
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/index.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/web/compute_worker.js")
+        get_filename_component(_nh_shell_name "${_nh_shell_file}" NAME)
+        file(CREATE_LINK "${_nh_shell_file}"
+             "${CMAKE_CURRENT_BINARY_DIR}/${_nh_shell_name}"
+             COPY_ON_ERROR SYMBOLIC)
+    endforeach()
 else()
     # Native: the single nodehammer executable. Emscripten with no viewer: the
     # headless nodehammer bundle (just the .js + .wasm).

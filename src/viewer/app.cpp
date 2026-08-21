@@ -190,7 +190,7 @@ struct App::Impl {
     std::chrono::steady_clock::time_point last_url_commit_{};
 
     // In-flight "Publish package" working set: seeded with the sidecar + archive,
-    // then the async runtime fetch adds the viewer.html + wasm files before
+    // then the async runtime fetch adds the index.html + wasm files before
     // finalize serializes + downloads it.
     std::optional<ZipWorkingSet> package_ws_;
     SceneRenderer scene_renderer;     ///< draws the uncut base scene
@@ -2260,12 +2260,12 @@ void App::Impl::publishPackage() {
     }
     auto archive_bytes = ar->serialize();
     const std::string name = "project." + contentHashHex(archive_bytes) + ".nhproj";
-    // A minimal sidecar: viewer.html fetches nh_manifest.json → viewer mode.
+    // A minimal sidecar: index.html fetches nh_manifest.json → viewer mode.
     const std::string sidecar = "{\n  \"archive\": \"" + name + "\",\n  \"lock\": true\n}\n";
     package_ws_ = ZipWorkingSet::create();
     package_ws_->writeEntry("nh_manifest.json", stringToBytes(sidecar));
     package_ws_->writeEntry(name, std::move(archive_bytes));
-    // Async: the runtime fetch adds viewer.html + the js/wasm, then finalize().
+    // Async: the runtime fetch adds index.html + the js/wasm, then finalize().
     platform_->fetchRuntimeForPublish();
 }
 
@@ -2988,7 +2988,7 @@ int App::run() {
     desc.high_dpi = true;
     desc.swap_interval = impl_->cfg.vsync ? 1 : 0;
     // Default canvas selector for emscripten: matches the <canvas id="canvas">
-    // in web/viewer.html.
+    // in web/index.html.
     desc.html5.canvas_selector = "#canvas";
     desc.logger.func = slog_func;
     // Enable drag-and-drop file events. The buffer size needs to be at

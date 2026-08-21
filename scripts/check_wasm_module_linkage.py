@@ -17,7 +17,7 @@ that particular handler runs, which is how they reach the deployed site.
 
 A name resolves if either:
   - the built module assigns it (`d._foo=`, `h.HEAPU8=`, `Module["x"]=`), or
-  - the host page supplies it. web/viewer.html builds `window.Module = {...}`
+  - the host page supplies it. web/index.html builds `window.Module = {...}`
     before the runtime loads, and is never minified, so keys it sets (canvas,
     print, printErr, ...) are live under their literal names.
 
@@ -35,7 +35,7 @@ from pathlib import Path
 QUOTED_ACCESS = re.compile(r"Module\['([^']+)'\]")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".hxx"}
 
-HOST_PAGE = Path("web/viewer.html")
+HOST_PAGE = Path("web/index.html")
 
 
 def glue_names() -> dict[str, list[str]]:
@@ -63,7 +63,7 @@ def glue_names() -> dict[str, list[str]]:
 
 
 def host_provided() -> set[str]:
-    """Keys web/viewer.html sets on Module before the runtime loads."""
+    """Keys web/index.html sets on Module before the runtime loads."""
     if not HOST_PAGE.exists():
         return set()
     text = HOST_PAGE.read_text(encoding="utf-8", errors="replace")

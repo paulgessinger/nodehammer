@@ -66,14 +66,16 @@ class TempDir {
     fs::path path_;
 };
 
-/// A directory that passes every check.
+/// A directory that passes every check: the stamp *and* the payload.
 void makeGoodRuntime(const TempDir &dir) {
-    dir.write("viewer.html", "<!doctype html>");
+    for (const auto *name : {"index.html", "compute_worker.js", "nodehammer-gles3.js",
+                             "nodehammer-gles3.wasm", "nodehammer-wgpu.js", "nodehammer-wgpu.wasm",
+                             "nodehammer-compute.js", "nodehammer-compute.wasm"}) {
+        dir.write(name, "x");
+    }
     dir.write("nh_runtime.json", std::format("{{\"schema\": {}, \"version\": \"9.9.9-test\"}}",
                                              web::compiledSchema()));
 }
-
-std::string messageOf(const nodehammer::Error &e) { return e.what(); }
 
 /// Sets (or clears, with nullopt) an environment variable for one test case and
 /// puts it back. Clearing matters as much as setting: a developer who has
@@ -124,7 +126,7 @@ TEST_CASE("a schema the library does not serve is refused, not served", "[web][r
     // built against a different contract. This is the whole reason the stamp
     // carries an integer rather than only a version string.
     TempDir dir;
-    dir.write("viewer.html", "<!doctype html>");
+    dir.write("index.html", "<!doctype html>");
     dir.write("nh_runtime.json", std::format("{{\"schema\": {}, \"version\": \"9.9.9-test\"}}",
                                              web::compiledSchema() + 1));
 
@@ -134,13 +136,55 @@ TEST_CASE("a schema the library does not serve is refused, not served", "[web][r
     } catch (const nodehammer::Error &e) {
         CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeSchema);
         // The refusal has to name both ids and the directory, or the reader
-        // cannot tell which of the two halves to move.
-        CHECK_THAT(messageOf(e), Catch::Matchers::ContainsSubstring(dir.path().string()));
-        CHECK_THAT(messageOf(e),
+        // cannot tell which of the two halves to move. The directory rides in
+        // the context and the ids in the explanation, because `Error::what()` is
+        // echoed twice by the CLI's reporter and so stays one sentence.
+        CHECK(e.context() == dir.path().string());
+        const std::string explained = web::explainLadder(web::walkLadder(dir.path()));
+        CHECK_THAT(explained, Catch::Matchers::ContainsSubstring(dir.path().string()));
+        CHECK_THAT(explained,
                    Catch::Matchers::ContainsSubstring(std::to_string(web::compiledSchema() + 1)));
-        CHECK_THAT(messageOf(e),
+        CHECK_THAT(explained,
                    Catch::Matchers::ContainsSubstring(std::to_string(web::compiledSchema())));
     }
+}
+
+TEST_CASE("a stamp is not a payload", "[web][runtime]") {
+    // The bug this exists for was real and silent. The wasm *build tree* carries
+    // a stamp and the bundles but neither the shell nor the worker script --
+    // those two are only ever installed -- so a schema-only check accepted it and
+    // the server then answered 404 on `/`. That is precisely the blank page the
+    // stamp is supposed to prevent, arriving through the stamp check itself.
+    TempDir dir;
+    dir.write("nh_runtime.json", std::format("{{\"schema\": {}, \"version\": \"9.9.9-test\"}}",
+                                             web::compiledSchema()));
+    dir.write("nodehammer-gles3.js", "x");
+
+    try {
+        (void)web::locateRuntime(dir.path());
+        FAIL("a stamped but incomplete runtime was accepted");
+    } catch (const nodehammer::Error &e) {
+        CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeNotFound);
+        const std::vector<web::RuntimeCandidate> ladder = web::walkLadder(dir.path());
+        REQUIRE(ladder.size() == 1);
+        // Names what is absent, not merely that something is.
+        CHECK_THAT(ladder.front().rejection, Catch::Matchers::ContainsSubstring("incomplete"));
+        CHECK_THAT(ladder.front().rejection, Catch::Matchers::ContainsSubstring("index.html"));
+        CHECK_THAT(ladder.front().rejection,
+                   Catch::Matchers::ContainsSubstring("compute_worker.js"));
+    }
+}
+
+TEST_CASE("the explanation says what to do, not only what failed", "[web][runtime]") {
+    // A native build legitimately has no runtime, so this message is the primary
+    // user-facing behaviour of `--web` for anyone building from source. If it
+    // reads as "broken build", the feature reads as broken.
+    const ScopedEnv clear("NODEHAMMER_WEB_ASSETS", std::nullopt);
+    const std::string text = web::explainLadder(web::walkLadder());
+
+    CHECK_THAT(text, Catch::Matchers::ContainsSubstring("--web-assets"));
+    CHECK_THAT(text, Catch::Matchers::ContainsSubstring("NODEHAMMER_WEB_ASSETS"));
+    CHECK_THAT(text, Catch::Matchers::ContainsSubstring("separate Emscripten"));
 }
 
 TEST_CASE("a directory that is not a runtime says so, and says which", "[web][runtime]") {
@@ -150,8 +194,10 @@ TEST_CASE("a directory that is not a runtime says so, and says which", "[web][ru
         FAIL("an empty directory was accepted");
     } catch (const nodehammer::Error &e) {
         CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeNotFound);
-        CHECK_THAT(messageOf(e), Catch::Matchers::ContainsSubstring(dir.path().string()));
-        CHECK_THAT(messageOf(e), Catch::Matchers::ContainsSubstring("nh_runtime.json"));
+        CHECK(e.context() == dir.path().string());
+        const std::string explained = web::explainLadder(web::walkLadder(dir.path()));
+        CHECK_THAT(explained, Catch::Matchers::ContainsSubstring(dir.path().string()));
+        CHECK_THAT(explained, Catch::Matchers::ContainsSubstring("nh_runtime.json"));
     }
 }
 
@@ -160,19 +206,21 @@ TEST_CASE("a runtime older than the stamp is diagnosed as old, not as absent", "
     // one somebody assembled by hand. Calling that "not a nodehammer web
     // runtime" would send the reader looking in the wrong place.
     TempDir dir;
-    dir.write("viewer.html", "<!doctype html>");
+    dir.write("index.html", "<!doctype html>");
 
     try {
         (void)web::locateRuntime(dir.path());
         FAIL("a stampless runtime was accepted");
     } catch (const nodehammer::Error &e) {
-        CHECK_THAT(messageOf(e), Catch::Matchers::ContainsSubstring("no nh_runtime.json"));
+        CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeNotFound);
+        CHECK_THAT(web::explainLadder(web::walkLadder(dir.path())),
+                   Catch::Matchers::ContainsSubstring("no nh_runtime.json"));
     }
 }
 
 TEST_CASE("a malformed stamp is refused rather than half-read", "[web][runtime]") {
     TempDir dir;
-    dir.write("viewer.html", "<!doctype html>");
+    dir.write("index.html", "<!doctype html>");
 
     SECTION("not JSON at all") {
         dir.write("nh_runtime.json", "this is not json");

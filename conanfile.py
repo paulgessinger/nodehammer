@@ -71,6 +71,18 @@ class Nodehammer(ConanFile):
         # never calls the `.lua` path, which today is both wasm bundles.
         self.requires("lua/5.4.6")
         self.requires("sol2/3.5.0")
+        # The static server behind `viewer --web`. Gated on the platform rather
+        # than unconditional, unlike miniz and lua above, because this one is not
+        # a capability of the library: it exists to *serve* the wasm runtime to a
+        # browser, and under Emscripten the wasm module is the thing being
+        # served. There are no sockets in the sandbox, and src/web/static_server.cpp
+        # is excluded from NH_CORE_SOURCES there for the same reason.
+        #
+        # Header-only, so it adds no link dependency beyond the platform's own
+        # sockets, and no OpenSSL unless CPPHTTPLIB_OPENSSL_SUPPORT is defined,
+        # which nothing here defines.
+        if self.settings.os != "Emscripten":
+            self.requires("cpp-httplib/0.47.0")
         # Viewer-only runtime dep. PlatformFolders resolves the OS-appropriate
         # cache / config directory on native; not needed on web. Skip under
         # Emscripten — the wasm viewer never links it and the package fails to

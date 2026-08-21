@@ -75,6 +75,16 @@ struct RuntimeLocation {
 /// rung 3 is a guess, and only its absence is ordinary.
 [[nodiscard]] RuntimeLocation locateRuntime(const std::filesystem::path &explicitDir = {});
 
+/// The ladder as walked, rendered for a person: every rung, why each did not
+/// answer, and what to do about it.
+///
+/// Separate from the `Error` on purpose. `Error::what()` is echoed twice by the
+/// CLI's reporter — once as a diagnostic, once as a `command: message` summary —
+/// which is fine for one line and unreadable for a page. So the exception stays
+/// a sentence and this is printed once, on the failure path, by whoever has a
+/// terminal to print to.
+[[nodiscard]] std::string explainLadder(const std::vector<RuntimeCandidate> &ladder);
+
 /// The ladder as walked, without throwing — every rung considered, in order.
 ///
 /// `locateRuntime` is this plus "the first one that answered, or an `Error`

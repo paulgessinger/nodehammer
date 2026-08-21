@@ -63,7 +63,11 @@ bool isZipPath(const std::filesystem::path &path) {
 namespace nodehammer::cli::detail {
 
 void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
-    auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
+    // Extends, does not create. `registerCmdViewer` in the library owns the
+    // subcommand and its shared options, because `viewer --web` has to exist in
+    // builds this file is not compiled into -- a wheel above all. What is left
+    // here is the window: its options, and the run path plain `viewer` takes.
+    CLI::App *sub = app.get_subcommand("viewer");
 
     auto cfg = std::make_shared<nodehammer::viewer::Config>();
     auto initialCamera = std::make_shared<nodehammer::viewer::Camera>();
@@ -72,7 +76,6 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
     sub->add_option("--width", cfg->width, "Initial window width in pixels")->capture_default_str();
     sub->add_option("--height", cfg->height, "Initial window height in pixels")
         ->capture_default_str();
-    sub->add_option("--title", cfg->title, "Window title")->capture_default_str();
     sub->add_flag("!--no-vsync", cfg->vsync, "Disable vsync (default: vsync on)");
     auto cullModeStr = std::make_shared<std::string>("auto");
     auto *cullModeOpt =
@@ -115,16 +118,12 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
     auto *cameraPitchOpt =
         sub->add_option("--camera-pitch", *cameraPitchDeg, "Initial camera pitch in degrees");
 
-    auto *inputOpt = sub->add_option("-i,--input", "Input geometry file (.nhb / .nhb.zst)");
-    auto *configOpt = sub->add_option("-c,--config", "TOML config file");
-
-    // Positional: open a project directly. A .nhproj path opens as an
-    // ArchiveProjectFs; a directory opens as a live FilesystemProjectFs. When
-    // set, --config / --input (if given) name the root keys *inside* the
-    // project; otherwise it opens and the user picks roots from the project
-    // panel.
-    auto *pathOpt = sub->add_option("path", "Project to open: a .nhproj archive or a directory")
-                        ->type_name("PATH");
+    // -i/--input, -c/--config, `path` and --title belong to the library's half
+    // of this command and are read off the subcommand below. A .nhproj path opens
+    // as an ArchiveProjectFs; a directory
+    // opens as a live FilesystemProjectFs. When `path` is set, --config /
+    // --input (if given) name the root keys *inside* the project; otherwise it
+    // opens and the user picks roots from the project panel.
 
     // Headless screenshot mode: render one high-res PNG (all quality maxed) once
     // the scene settles, then quit. Useful for CI thumbnails / automated renders.
@@ -151,11 +150,20 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
                     "past the refresh so total/composite timings aren't present-paced")
         ->capture_default_str();
 
-    sub->callback([cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt, cullModeStr,
+    // Replaces the library's callback rather than filling a slot it left: with a
+    // window in the build, *this* file is the one that has to choose between the
+    // two modes, and one dispatch per binary beats a callback pointer handed
+    // across a library boundary.
+    sub->callback([sub, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt, cullModeStr,
                    screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt,
                    angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
                    cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, inputOpt, configOpt, pathOpt, benchOpt, benchScale]() {
+                   cameraPitchOpt, benchOpt, benchScale]() {
+        if (viewerWebRequested(*sub)) {
+            runViewerWeb(*sub);
+            return;
+        }
+
         // The only command that never had one. Every other `cmd_*.cpp` has run
         // its body through this since the error model landed; this one instead
         // validated by hand and called `std::exit`, which meant a
@@ -223,15 +231,17 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
                 cfg->startup_overrides.camera = *initialCamera;
             }
 
-            std::string inputPath, configPath, projectPath;
-            if (*inputOpt) {
-                inputOpt->results(inputPath);
-            }
-            if (*configOpt) {
-                configOpt->results(configPath);
-            }
-            if (*pathOpt) {
-                pathOpt->results(projectPath);
+            // Read off the subcommand rather than from Options this file owns:
+            // the library declared them, and the parser is where the values are.
+            const auto text = [sub](const char *name) {
+                const CLI::Option *opt = sub->get_option(name);
+                return opt->count() > 0 ? opt->as<std::string>() : std::string{};
+            };
+            const std::string inputPath = text("--input");
+            const std::string configPath = text("--config");
+            std::string projectPath = text("path");
+            if (const std::string title = text("--title"); !title.empty()) {
+                cfg->title = title;
             }
 
             std::string screenshotPath;

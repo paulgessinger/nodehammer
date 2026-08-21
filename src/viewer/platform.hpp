@@ -176,7 +176,7 @@ class Platform {
     void clearProjectBlob();
 
     /// Web "Publish package": fetch the running app's own same-origin runtime
-    /// siblings (viewer.html + the gles3/wgpu/compute js+wasm) and hand each back
+    /// siblings (index.html + the gles3/wgpu/compute js+wasm) and hand each back
     /// to `App::addPackageFile`, then call `App::finalizePackage` to serialize the
     /// self-contained deployable and download it. Native is a no-op for now — a
     /// native publish would copy a staged web runtime (§6.6, feasibility TBD).

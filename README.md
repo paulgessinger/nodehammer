@@ -120,7 +120,7 @@ natively, in the browser, and behind a published link.
 | **Working set** | the live, editable in-memory project (`ZipWorkingSet`) — what the viewer edits |
 | **Archive** | a serialized `.nhproj` of a working set — the portable, publishable unit |
 | **Project manifest** | root `nodehammer.toml` *inside* the archive: `[project]` entry keys + `[view]` initial steer |
-| **Sidecar** | `nh_manifest.json` next to `viewer.html` — points at archive(s), carries deployment presentation (lock, steer overrides) |
+| **Sidecar** | `nh_manifest.json` next to `index.html` — points at archive(s), carries deployment presentation (lock, steer overrides) |
 | **Steer** | view-state (camera, angle cut, rotation, toggles) — the ephemeral per-link layer, committed to the URL query |
 | **Provenance** | `Empty \| Local(name) \| Remote(url)` — where the working set came from; drives persistence and posture |
 | **Package** | the self-contained static folder emitted by **Publish** — drop it on any static host, zero server code |
@@ -227,9 +227,9 @@ web build supports:
 
 | | |
 |---|---|
-| [`/app/`](https://paulgessinger.github.io/nodehammer/app/viewer.html) | the open application — empty start; drop a `.nhproj` or loose config/geometry files onto it |
-| [`/odd/`](https://paulgessinger.github.io/nodehammer/odd/viewer.html) | the full Open Data Detector, preconfigured and content-locked |
-| [`/odd-simple/`](https://paulgessinger.github.io/nodehammer/odd-simple/viewer.html) | the simplified ODD — same, lighter to build |
+| [`/app/`](https://paulgessinger.github.io/nodehammer/app/) | the open application — empty start; drop a `.nhproj` or loose config/geometry files onto it |
+| [`/odd/`](https://paulgessinger.github.io/nodehammer/odd/) | the full Open Data Detector, preconfigured and content-locked |
+| [`/odd-simple/`](https://paulgessinger.github.io/nodehammer/odd-simple/) | the simplified ODD — same, lighter to build |
 
 Each directory is a self-contained static package of the kind the viewer's
 **Publish** command emits. Reproduce the whole site locally with
