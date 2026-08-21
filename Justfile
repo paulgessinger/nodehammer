@@ -329,13 +329,68 @@ wheel *args:
     # the only visible difference is the filename. Catch that here rather than
     # discovering it as a CI matrix that grew from one wheel per platform to one
     # per interpreter.
-    for whl in "$root"/dist/*.whl; do
+    # dist/ also holds nodehammer_web-*.whl, which is py3-none-any by design, so
+    # the glob names this distribution rather than every wheel in the directory.
+    for whl in "$root"/dist/nodehammer-*.whl; do
         case "$whl" in
             *-abi3-*) ;;
             *) echo "not an abi3 wheel: $(basename "$whl") -- STABLE_ABI did not engage" >&2
                exit 1 ;;
         esac
     done
+
+# ── the web runtime wheel ─────────────────────────────────────────────────────
+# `nodehammer-web` is the other half of the Python story: a py3-none-any wheel
+# holding the Emscripten build, because no native toolchain can produce one and
+# a headless install has no use for 7 MB of it. See packaging/web/pyproject.toml.
+#
+# `src` is anything the runtime locator would accept -- a wasm build directory or
+# an install tree's share/nodehammer/web -- and it is staged by the same script
+# the Pages site uses, in application mode, so the payload is the one CI deploys.
+
+# Build the nodehammer-web wheel from a wasm build (run `just wasm-release` first)
+wheel-web src="build/emscripten/Release":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    src="{{src}}"
+    case "$src" in /*) ;; *) src="$root/$src" ;; esac
+    runtime="$root/packaging/web/src/nodehammer_web/runtime"
+    # Both sides emptied rather than overlaid. The staging directory is the
+    # obvious one; setuptools' build/lib is the one that bites, because
+    # `build_py` copies into it and never prunes -- a file dropped from the
+    # payload survives there and is added to the wheel from a previous run.
+    # Caught doing exactly that with a stale nodehammer-wgpu.wasm.zst.
+    rm -rf "$runtime" "$root/packaging/web/build"
+    "$root/scripts/stage_wasm_viewer.sh" copy none "$runtime" "$src"
+    uv build --wheel --out-dir "$root/dist" "$root/packaging/web"
+    # The mirror of the abi3 check above, and the same kind of silent failure:
+    # a wheel that picked up a platform tag would install nowhere it is needed.
+    for whl in "$root"/dist/nodehammer_web-*.whl; do
+        case "$whl" in
+            *-py3-none-any.whl) ;;
+            *) echo "not a pure wheel: $(basename "$whl")" >&2
+               exit 1 ;;
+        esac
+    done
+
+# The only check that reaches the rung a wheel fills. `--web-assets` and
+# NODEHAMMER_WEB_ASSETS are cleared out of the way on purpose: both outrank the
+# package, so leaving either set would test the wrong rung and pass anyway.
+
+# Install both wheels from local files and serve the viewer out of them
+wheel-web-test: wheel wheel-web
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="{{justfile_directory()}}"
+    venv=$(mktemp -d)/venv
+    uv venv --python 3.12 "$venv"
+    # --no-index: the pair under test is the one just built, never whatever an
+    # index happens to resolve. Both are named because the dependency between
+    # them is not declared yet.
+    VIRTUAL_ENV="$venv" uv pip install --quiet --no-index \
+        --find-links "$root/dist" nodehammer nodehammer-web
+    env -u NODEHAMMER_WEB_ASSETS "$root/scripts/check_web_serve.py" "$venv/bin/nodehammer"
 
 # The Python counterpart of ci/shared_consumer: the build tree resolves
 # libnodehammer through CMake's own rpath, so only an installed wheel proves the

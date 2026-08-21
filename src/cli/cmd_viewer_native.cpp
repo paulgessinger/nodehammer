@@ -62,7 +62,7 @@ bool isZipPath(const std::filesystem::path &path) {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
+void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
     // Extends, does not create. `registerCmdViewer` in the library owns the
     // subcommand and its shared options, because `viewer --web` has to exist in
     // builds this file is not compiled into -- a wheel above all. What is left
@@ -154,13 +154,13 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &) {
     // window in the build, *this* file is the one that has to choose between the
     // two modes, and one dispatch per binary beats a callback pointer handed
     // across a library boundary.
-    sub->callback([sub, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt, cullModeStr,
-                   screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt, orbitSpeedOpt,
-                   angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt, cameraTargetXOpt,
-                   cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt, cameraYawOpt,
-                   cameraPitchOpt, benchOpt, benchScale]() {
+    sub->callback([sub, &options, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt,
+                   cullModeStr, screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt,
+                   orbitSpeedOpt, angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt,
+                   cameraTargetXOpt, cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt,
+                   cameraYawOpt, cameraPitchOpt, benchOpt, benchScale]() {
         if (viewerWebRequested(*sub)) {
-            runViewerWeb(*sub);
+            runViewerWeb(*sub, options);
             return;
         }
 

@@ -116,6 +116,11 @@ version_scheme = "no-guess-dev"
 [tool.scikit-build.sdist]
 exclude = [
     "/.github",
+    # The nodehammer-web wheel's staged payload: 7 MB of Emscripten output that
+    # a local `just wheel-web` leaves behind. It is gitignored, but an sdist
+    # builder that walks the tree rather than asking git would ship it inside a
+    # distribution that has no use for it at all.
+    "/packaging/web/src/nodehammer_web/runtime",
     "/analysis",
     "/branding",
     "/build",

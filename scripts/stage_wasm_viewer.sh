@@ -113,15 +113,24 @@ if [ ! -f "$src/nh_runtime.json" ]; then
 fi
 stage_file "$src/nh_runtime.json" "$out/nh_runtime.json"
 
-# Compute module bundle (nodehammer-compute.{js,wasm}) is staged alongside the
-# per-backend viewer bundles.
-bundles=("$src"/nodehammer-gles3.* "$src"/nodehammer-wgpu.* "$src"/nodehammer-compute.*)
-if [ "${#bundles[@]}" -eq 0 ]; then
-    echo "no nodehammer-{gles3,wgpu} artifacts in $src - run 'just wasm-build' first." >&2
-    exit 1
-fi
-for bundle in "${bundles[@]}"; do
-    stage_file "$bundle" "$out/$(basename "$bundle")"
+# The two viewer backends plus the headless compute module, named rather than
+# globbed. `"$src"/nodehammer-wgpu.*` also matches whatever else a long-lived
+# build directory has accumulated under that prefix -- a stale
+# nodehammer-wgpu.wasm.zst from an old experiment, say -- and a payload assembled
+# by glob is how 900 KB of nothing gets deployed to Pages and published in a
+# wheel. The runtime's contents are a contract, so this states them.
+#
+# Keep in step with kRequiredFiles (src/web/runtime_locator.cpp) and
+# RUNTIME_FILES (scripts/check_pages_site.py), which are the same list read by
+# the code that serves it and the check that inspects it.
+for bundle in nodehammer-gles3.js nodehammer-gles3.wasm \
+              nodehammer-wgpu.js nodehammer-wgpu.wasm \
+              nodehammer-compute.js nodehammer-compute.wasm; do
+    if [ ! -f "$src/$bundle" ]; then
+        echo "no $bundle in $src - run 'just wasm-build' first." >&2
+        exit 1
+    fi
+    stage_file "$src/$bundle" "$out/$bundle"
 done
 
 # Clean any stale manifest/archive from a previous run; we'll re-emit below only

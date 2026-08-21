@@ -115,7 +115,7 @@ TEST_CASE("an explicit directory that is a runtime answers the ladder", "[web][r
     TempDir dir;
     makeGoodRuntime(dir);
 
-    const web::RuntimeLocation loc = web::locateRuntime(dir.path());
+    const web::RuntimeLocation loc = web::locateRuntime({.explicitDir = dir.path()});
     CHECK(loc.dir == dir.path());
     CHECK(loc.schema == web::compiledSchema());
     CHECK(loc.version == "9.9.9-test");
@@ -131,7 +131,7 @@ TEST_CASE("a schema the library does not serve is refused, not served", "[web][r
                                              web::compiledSchema() + 1));
 
     try {
-        (void)web::locateRuntime(dir.path());
+        (void)web::locateRuntime({.explicitDir = dir.path()});
         FAIL("a mismatched runtime was accepted");
     } catch (const nodehammer::Error &e) {
         CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeSchema);
@@ -140,7 +140,8 @@ TEST_CASE("a schema the library does not serve is refused, not served", "[web][r
         // the context and the ids in the explanation, because `Error::what()` is
         // echoed twice by the CLI's reporter and so stays one sentence.
         CHECK(e.context() == dir.path().string());
-        const std::string explained = web::explainLadder(web::walkLadder(dir.path()));
+        const std::string explained =
+            web::explainLadder(web::walkLadder({.explicitDir = dir.path()}));
         CHECK_THAT(explained, Catch::Matchers::ContainsSubstring(dir.path().string()));
         CHECK_THAT(explained,
                    Catch::Matchers::ContainsSubstring(std::to_string(web::compiledSchema() + 1)));
@@ -161,11 +162,12 @@ TEST_CASE("a stamp is not a payload", "[web][runtime]") {
     dir.write("nodehammer-gles3.js", "x");
 
     try {
-        (void)web::locateRuntime(dir.path());
+        (void)web::locateRuntime({.explicitDir = dir.path()});
         FAIL("a stamped but incomplete runtime was accepted");
     } catch (const nodehammer::Error &e) {
         CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeNotFound);
-        const std::vector<web::RuntimeCandidate> ladder = web::walkLadder(dir.path());
+        const std::vector<web::RuntimeCandidate> ladder =
+            web::walkLadder({.explicitDir = dir.path()});
         REQUIRE(ladder.size() == 1);
         // Names what is absent, not merely that something is.
         CHECK_THAT(ladder.front().rejection, Catch::Matchers::ContainsSubstring("incomplete"));
@@ -190,12 +192,13 @@ TEST_CASE("the explanation says what to do, not only what failed", "[web][runtim
 TEST_CASE("a directory that is not a runtime says so, and says which", "[web][runtime]") {
     TempDir dir;
     try {
-        (void)web::locateRuntime(dir.path());
+        (void)web::locateRuntime({.explicitDir = dir.path()});
         FAIL("an empty directory was accepted");
     } catch (const nodehammer::Error &e) {
         CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeNotFound);
         CHECK(e.context() == dir.path().string());
-        const std::string explained = web::explainLadder(web::walkLadder(dir.path()));
+        const std::string explained =
+            web::explainLadder(web::walkLadder({.explicitDir = dir.path()}));
         CHECK_THAT(explained, Catch::Matchers::ContainsSubstring(dir.path().string()));
         CHECK_THAT(explained, Catch::Matchers::ContainsSubstring("nh_runtime.json"));
     }
@@ -209,11 +212,11 @@ TEST_CASE("a runtime older than the stamp is diagnosed as old, not as absent", "
     dir.write("index.html", "<!doctype html>");
 
     try {
-        (void)web::locateRuntime(dir.path());
+        (void)web::locateRuntime({.explicitDir = dir.path()});
         FAIL("a stampless runtime was accepted");
     } catch (const nodehammer::Error &e) {
         CHECK(e.code() == nodehammer::codes::kFatalWebRuntimeNotFound);
-        CHECK_THAT(web::explainLadder(web::walkLadder(dir.path())),
+        CHECK_THAT(web::explainLadder(web::walkLadder({.explicitDir = dir.path()})),
                    Catch::Matchers::ContainsSubstring("no nh_runtime.json"));
     }
 }
@@ -224,27 +227,28 @@ TEST_CASE("a malformed stamp is refused rather than half-read", "[web][runtime]"
 
     SECTION("not JSON at all") {
         dir.write("nh_runtime.json", "this is not json");
-        CHECK_THROWS_AS(web::locateRuntime(dir.path()), nodehammer::Error);
+        CHECK_THROWS_AS(web::locateRuntime({.explicitDir = dir.path()}), nodehammer::Error);
     }
     SECTION("JSON without a schema") {
         dir.write("nh_runtime.json", "{\"version\": \"1.0\"}");
-        CHECK_THROWS_AS(web::locateRuntime(dir.path()), nodehammer::Error);
+        CHECK_THROWS_AS(web::locateRuntime({.explicitDir = dir.path()}), nodehammer::Error);
     }
     SECTION("a schema that is not an integer") {
         dir.write("nh_runtime.json", "{\"schema\": \"1\", \"version\": \"1.0\"}");
-        CHECK_THROWS_AS(web::locateRuntime(dir.path()), nodehammer::Error);
+        CHECK_THROWS_AS(web::locateRuntime({.explicitDir = dir.path()}), nodehammer::Error);
     }
     SECTION("no version") {
         dir.write("nh_runtime.json", std::format("{{\"schema\": {}}}", web::compiledSchema()));
-        CHECK_THROWS_AS(web::locateRuntime(dir.path()), nodehammer::Error);
+        CHECK_THROWS_AS(web::locateRuntime({.explicitDir = dir.path()}), nodehammer::Error);
     }
 }
 
 TEST_CASE("the environment variable is a rung, below an explicit path", "[web][runtime]") {
-    // This is the rung the Python side supplies -- the console-script shim sets
-    // it only when it is empty, precisely so an explicit --web-assets still
-    // wins by the ladder's own precedence. Both halves of that are asserted
-    // here, because "set only if unset" is worth nothing if the order is wrong.
+    // The escape hatch: it has to outrank anything automatic (the sibling
+    // package, the install tree) so a locally built runtime can be tried
+    // without uninstalling anything, and be outranked by the flag so a command
+    // line still means what it says. Both halves are asserted here, because an
+    // ordering is worth nothing if only one end of it is checked.
     TempDir fromEnv;
     makeGoodRuntime(fromEnv);
     ScopedEnv env("NODEHAMMER_WEB_ASSETS", fromEnv.path().string());
@@ -257,7 +261,7 @@ TEST_CASE("the environment variable is a rung, below an explicit path", "[web][r
     SECTION("an explicit path outranks it") {
         TempDir explicitDir;
         makeGoodRuntime(explicitDir);
-        const web::RuntimeLocation loc = web::locateRuntime(explicitDir.path());
+        const web::RuntimeLocation loc = web::locateRuntime({.explicitDir = explicitDir.path()});
         CHECK(loc.dir == explicitDir.path());
         CHECK(loc.dir != fromEnv.path());
     }
@@ -268,6 +272,52 @@ TEST_CASE("the environment variable is a rung, below an explicit path", "[web][r
         REQUIRE(ladder.size() == 1);
         CHECK(ladder.front().rung == web::RuntimeRung::Environment);
         CHECK_THROWS_AS(web::locateRuntime(), nodehammer::Error);
+    }
+}
+
+TEST_CASE("the embedder rung sits between the environment and the install tree", "[web][runtime]") {
+    // The rung a wheel fills: `nodehammer-web` installs the runtime into
+    // site-packages, which nothing below could guess, and `nodehammer.cli.run`
+    // hands the path down through RunOptions rather than the library going
+    // looking for an interpreter.
+    //
+    // Its *position* is the whole design and is what is asserted here. It is an
+    // automatic default, so a person must be able to override it; it is a
+    // statement about a real installed package, so a broken one must not fall
+    // through to a guess and serve something else.
+    const ScopedEnv clear("NODEHAMMER_WEB_ASSETS", std::nullopt);
+
+    TempDir fromPackage;
+    makeGoodRuntime(fromPackage);
+
+    SECTION("it answers when nothing more explicit was given") {
+        const web::RuntimeLocation loc = web::locateRuntime({.embedderDir = fromPackage.path()});
+        CHECK(loc.dir == fromPackage.path());
+    }
+
+    SECTION("an explicit path outranks it") {
+        TempDir explicitDir;
+        makeGoodRuntime(explicitDir);
+        const web::RuntimeLocation loc = web::locateRuntime(
+            {.explicitDir = explicitDir.path(), .embedderDir = fromPackage.path()});
+        CHECK(loc.dir == explicitDir.path());
+    }
+
+    SECTION("so does the environment variable") {
+        TempDir fromEnv;
+        makeGoodRuntime(fromEnv);
+        const ScopedEnv env("NODEHAMMER_WEB_ASSETS", fromEnv.path().string());
+        const web::RuntimeLocation loc = web::locateRuntime({.embedderDir = fromPackage.path()});
+        CHECK(loc.dir == fromEnv.path());
+    }
+
+    SECTION("and a broken one is an error, not a reason to keep looking") {
+        const std::vector<web::RuntimeCandidate> ladder =
+            web::walkLadder({.embedderDir = fromPackage.path() / "nope"});
+        REQUIRE(ladder.size() == 1);
+        CHECK(ladder.front().rung == web::RuntimeRung::Embedder);
+        CHECK_THROWS_AS(web::locateRuntime({.embedderDir = fromPackage.path() / "nope"}),
+                        nodehammer::Error);
     }
 }
 
@@ -296,7 +346,8 @@ TEST_CASE("a stated rung that does not answer stops the walk", "[web][runtime]")
     // installed would serve something other than what was asked for, and say
     // nothing about having done so.
     TempDir dir;
-    const std::vector<web::RuntimeCandidate> ladder = web::walkLadder(dir.path() / "nope");
+    const std::vector<web::RuntimeCandidate> ladder =
+        web::walkLadder({.explicitDir = dir.path() / "nope"});
 
     REQUIRE(ladder.size() == 1);
     CHECK(ladder.front().rung == web::RuntimeRung::Explicit);

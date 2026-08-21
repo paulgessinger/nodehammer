@@ -488,9 +488,200 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
 
+  # ── the web runtime, as a wheel ──────────────────────────────────────────────
+  # `nodehammer` is three platform wheels carrying a compiled library;
+  # `nodehammer-web` is one py3-none-any wheel carrying the Emscripten build the
+  # viewer needs. Separate distributions because they come from different
+  # toolchains: no native leg can produce WebAssembly, so folding the runtime in
+  # would mean giving all three an emsdk they have no other use for, to emit
+  # three byte-identical copies of one payload.
+  #
+  # No compiler, no CMake, no emsdk in this job. It downloads what the `build`
+  # matrix's wasm leg already produced and zips it, so the payload is the same
+  # bytes the Pages site is deployed from.
+  web-wheel:
+    name: wheel nodehammer-web
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0  # setuptools_scm reads tags, as in the wheels job.
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+        with:
+          enable-cache: false
+
+      - name: Download the web runtime
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nodehammer-wasm32
+          path: wasm-artifact
+
+      # Derived here and pushed in, rather than left to setuptools_scm's own
+      # read of the checkout: this must be the *same string* the platform wheels
+      # carry, and the surest way to get that is to compute it with the same
+      # command against the same config. no-local-version for the same reason as
+      # there -- PyPI rejects local identifiers.
+      - name: Stage the runtime and build the wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p wasm
+          tar xzf wasm-artifact/nodehammer-wasm32.tar.gz -C wasm
+          runtime="$PWD/wasm/share/nodehammer/web"
+          test -f "$runtime/nh_runtime.json" || {
+              echo "::error::the wasm artifact carries no web runtime at share/nodehammer/web"
+              exit 1
+          }
+
+          SETUPTOOLS_SCM_PRETEND_VERSION=$(
+              SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
+              uv run --no-project --with setuptools-scm python -m setuptools_scm | tail -1)
+          export SETUPTOOLS_SCM_PRETEND_VERSION
+          echo "building nodehammer-web $SETUPTOOLS_SCM_PRETEND_VERSION"
+
+          # The same staging the Pages site uses, in application mode (no
+          # sidecar): a wheel must come up as the application, not locked to
+          # somebody's fixture. `just wheel-web` is the local twin of these two
+          # lines.
+          scripts/stage_wasm_viewer.sh copy none \
+              packaging/web/src/nodehammer_web/runtime "$runtime"
+          uv build --wheel --out-dir dist packaging/web
+
+      # Installed and inspected, not just built. A wheel with the accessor and
+      # no bundles is the failure this package exists to make impossible, and it
+      # is invisible in a build log -- `include-package-data` defaulting on would
+      # produce exactly that, since the runtime is gitignored.
+      - name: The installed wheel holds the runtime, and nothing else
+        shell: bash
+        run: |
+          set -euo pipefail
+          whl=$(echo dist/nodehammer_web-*-py3-none-any.whl)
+          test -f "$whl" || {
+              echo "::error::no py3-none-any wheel in dist/ -- it picked up a platform tag"
+              exit 1
+          }
+          uv venv --python 3.12 venv
+          VIRTUAL_ENV=venv uv pip install --quiet "$whl"
+          venv/bin/python - <<'EOF'
+          import sys
+
+          sys.path.insert(0, "scripts")
+          from check_pages_site import RUNTIME_FILES
+
+          from nodehammer_web import __version__, runtime_dir
+
+          runtime = runtime_dir()
+          missing = [n for n in RUNTIME_FILES if not (runtime / n).is_file()]
+          if missing:
+              sys.exit(f"::error::installed wheel is missing {', '.join(missing)}")
+          # Nothing *but* the runtime, which is the half a "missing" check cannot
+          # see: the staging used to glob, and a stale bundle from an old
+          # experiment rode along into the payload for 900 KB of nothing.
+          extra = sorted(p.name for p in runtime.iterdir() if p.name not in RUNTIME_FILES)
+          if extra:
+              sys.exit(f"::error::unexpected files in the runtime: {', '.join(extra)}")
+          print(f"nodehammer-web {__version__}: {len(RUNTIME_FILES)} files in {runtime}")
+          EOF
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # Not `wheel-*`: the publish jobs sweep that pattern into one directory
+          # for a single upload, and this is a different PyPI project that has to
+          # be uploaded on its own token. The `nodehammer-*` prefix is what puts
+          # it in the GitHub release alongside the platform archives.
+          name: nodehammer-web-wheel
+          path: dist/*.whl
+          if-no-files-found: error
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 90 || 7 }}
+
+  # The only check that reaches the rung a wheel fills.
+  #
+  # cibuildwheel's own test step installs the platform wheel *with* resolution,
+  # so what it exercises is whatever an index happened to serve -- fine for the
+  # API, useless for this. Here both halves come from local files with
+  # `--no-index`, so the pair under test is the pair this run just built, and
+  # the runtime in it cannot be a stale release that merely satisfied a
+  # constraint.
+  web-pair:
+    name: nodehammer + nodehammer-web, from local files
+    needs: [wheels, web-wheel]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@ae62891fec2bb8e7d6c99fc78c9fec3a63790f8d # v10.0.0
+        with:
+          enable-cache: false
+
+      - name: Download the platform wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: wheel-cp312-manylinux_x86_64
+          path: dist
+
+      - name: Download the web wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nodehammer-web-wheel
+          path: dist
+
+      # NODEHAMMER_WEB_ASSETS cleared on purpose: it outranks the package, so
+      # leaving one set would test a different rung and pass anyway.
+      - name: Serve the viewer out of the installed pair
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 venv
+          VIRTUAL_ENV=venv uv pip install --quiet --no-index \
+              --find-links dist nodehammer nodehammer-web
+          env -u NODEHAMMER_WEB_ASSETS scripts/check_web_serve.py venv/bin/nodehammer
+
+      # The other half of the contract, and the one a user hits first: without
+      # the runtime the command has to *explain*, not traceback and not serve a
+      # blank page. It is also the state a deliberately headless install stays
+      # in, so it must remain a supported configuration rather than a broken one.
+      - name: Without it, the refusal names the package
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 venv-solo
+          VIRTUAL_ENV=venv-solo uv pip install --quiet --no-index \
+              --find-links dist nodehammer
+          # Every other command still works: the runtime is one flag's
+          # dependency, not the CLI's.
+          venv-solo/bin/nodehammer --version
+
+          set +e
+          out=$(env -u NODEHAMMER_WEB_ASSETS venv-solo/bin/nodehammer viewer --web \
+                --no-browser 2>&1)
+          code=$?
+          set -e
+          echo "$out"
+          test "$code" -ne 0 || { echo "::error::it served something without a runtime"; exit 1; }
+          case "$out" in
+              *Traceback*) echo "::error::the refusal escaped as an exception"; exit 1 ;;
+          esac
+          case "$out" in
+              *nodehammer-web*) ;;
+              *) echo "::error::the refusal does not name the package that supplies a runtime"
+                 exit 1 ;;
+          esac
+
   publish-testpypi:
     name: Publish to TestPyPI
-    needs: [wheels, sdist]
+    # web-pair as well as web-wheel: it is what proves the two dists actually
+    # work together, and publishing a pair that cannot serve the viewer would
+    # spend a version number to find out.
+    needs: [wheels, sdist, web-wheel, web-pair]
     # Main only. Every commit gets a distinct dev version from the commit count,
     # so uploads do not collide, and skip-existing covers a re-run of the same
     # commit.
@@ -525,7 +716,32 @@ jobs:
           name: sdist
           path: dist
 
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      # A separate directory, because it is a separate PyPI project: trusted
+      # publishing mints a token from this job's OIDC identity, and each project
+      # is uploaded under its own. Merging both into dist/ would put two names in
+      # one upload.
+      - name: Download the web wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nodehammer-web-wheel
+          path: dist-web
+
+      # nodehammer-web goes up first, and the order is the whole of the safety
+      # here: PyPI has no transaction, so if the second upload fails one of the
+      # two states is left behind. A depended-on package with no dependent is
+      # inert; a dependent whose dependency is missing is uninstallable. Both
+      # ship from this one job, so a failed wasm leg publishes neither, and the
+      # only window in which the pair is incomplete is the seconds between these
+      # two steps.
+      - name: Publish nodehammer-web
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          packages-dir: dist-web
+          skip-existing: true
+
+      - name: Publish nodehammer
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
@@ -539,7 +755,7 @@ jobs:
     # The whole matrix, not just the jobs it uploads. `wheels` keeps no `needs:`
     # so PRs get wheel feedback in parallel; the gate belongs here, where the
     # upload is irreversible.
-    needs: [build, wheels, sdist]
+    needs: [build, wheels, sdist, web-wheel, web-pair]
     # Not ubuntu-slim: Docker container action, no daemon there. As above.
     runs-on: ubuntu-24.04
     # Needs a `pypi` environment whose deployment rule is *protected tags* (v*),
@@ -564,9 +780,29 @@ jobs:
           name: sdist
           path: dist
 
+      # A separate directory, because it is a separate PyPI project: trusted
+      # publishing mints a token from this job's OIDC identity, and each project
+      # is uploaded under its own. Merging both into dist/ would put two names in
+      # one upload.
+      - name: Download the web wheel
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nodehammer-web-wheel
+          path: dist-web
+
+      # nodehammer-web first, for the reason the TestPyPI job spells out: PyPI
+      # has no transaction, and of the two incomplete states this order leaves
+      # the inert one.
+      #
       # No skip-existing, unlike TestPyPI: there it absorbs a re-run of the same
       # commit, here a collision means the tag is wrong and should fail loudly.
-      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+      - name: Publish nodehammer-web
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist-web
+
+      - name: Publish nodehammer
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
   bench-summary:
     name: Benchmark summary
@@ -783,7 +1019,7 @@ jobs:
     # web-runtime-merge, not just build: it replaces the four platform
     # archives in place, and without waiting for it this job races the
     # overwrite and can publish the archive that carries no web runtime.
-    needs: [build, web-runtime-merge, wheels, sdist]
+    needs: [build, web-runtime-merge, wheels, sdist, web-wheel]
     runs-on: ubuntu-slim
     if: startsWith(github.ref, 'refs/tags/')
     permissions:

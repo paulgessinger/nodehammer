@@ -22,13 +22,39 @@ namespace nodehammer::web {
 
 /// Where a candidate directory came from. The order is the precedence.
 enum class RuntimeRung {
-    /// An explicit path: `--web-assets DIR`, or the parameter an embedder passed.
+    /// An explicit path: `--web-assets DIR`.
     Explicit,
     /// `NODEHAMMER_WEB_ASSETS`.
     Environment,
+    /// A directory the calling program supplied because it knows where its own
+    /// runtime is — `RunOptions::webAssets`. The Python wheel is the case this
+    /// exists for: `nodehammer-web` installs the runtime into site-packages,
+    /// which no rung below could guess, and `nodehammer.cli.run` hands the path
+    /// down rather than the library going looking for an interpreter.
+    ///
+    /// Below the environment variable on purpose. It is an automatic default,
+    /// not a request, so a person testing a locally built runtime must be able
+    /// to override it without uninstalling a package.
+    Embedder,
     /// `<executable>/../share/nodehammer/web` — a native install tree that a
     /// wasm install tree was merged into.
     InstallTree,
+};
+
+/// Everything the ladder is *told*, as opposed to what it works out.
+///
+/// A struct rather than parameters because the rungs that can be supplied from
+/// outside are the ones that grow: a version-keyed download cache is the next,
+/// and adding it should not resign every caller.
+/// Every member is defaulted, and not only for tidiness: naming a subset with a
+/// designated initializer -- which is the whole point of the struct -- trips
+/// GCC's -Wmissing-field-initializers, and this build treats that as an error.
+/// A member with a default member initializer is exempt from it.
+struct LadderInputs {
+    /// Rung 1. Empty means "not given".
+    std::filesystem::path explicitDir{};
+    /// Rung 3. Empty means "the caller does not know of one".
+    std::filesystem::path embedderDir{};
 };
 
 /// The name a message should use for a rung.
@@ -64,16 +90,16 @@ struct RuntimeLocation {
 /// Walk the ladder and return the first directory that is a runtime this
 /// library can serve.
 ///
-/// `explicitDir` is rung 1; empty means "not given". Throws `Error` when no rung
-/// answers, with a message naming every directory it looked at and why each one
-/// did not do — because the *normal* state of a from-source build is that no
-/// rung answers at all (the wasm is a separate Emscripten build), so a bare
-/// "not found" would read as a bug in the build the user just made.
+/// Throws `Error` when no rung answers, with a message naming every directory it
+/// looked at and why each one did not do — because the *normal* state of a
+/// from-source build is that no rung answers at all (the wasm is a separate
+/// Emscripten build), so a bare "not found" would read as a bug in the build the
+/// user just made.
 ///
-/// Rungs 1 and 2 are deliberate statements: if either names a directory that is
-/// not a usable runtime, that is the error, not a reason to keep looking. Only
-/// rung 3 is a guess, and only its absence is ordinary.
-[[nodiscard]] RuntimeLocation locateRuntime(const std::filesystem::path &explicitDir = {});
+/// Every supplied rung is a deliberate statement: if one names a directory that
+/// is not a usable runtime, that is the error, not a reason to keep looking.
+/// Only the install tree is a guess, and only its absence is ordinary.
+[[nodiscard]] RuntimeLocation locateRuntime(const LadderInputs &inputs = {});
 
 /// The ladder as walked, rendered for a person: every rung, why each did not
 /// answer, and what to do about it.
@@ -91,7 +117,6 @@ struct RuntimeLocation {
 /// built from the whole list". Exposed because a caller that wants to *show*
 /// the search (a `--verbose` path, a test) should not have to trigger a failure
 /// to see it.
-[[nodiscard]] std::vector<RuntimeCandidate>
-walkLadder(const std::filesystem::path &explicitDir = {});
+[[nodiscard]] std::vector<RuntimeCandidate> walkLadder(const LadderInputs &inputs = {});
 
 } // namespace nodehammer::web

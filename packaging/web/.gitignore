@@ -1,0 +1,7 @@
+# Staged from a wasm build by `just wheel-web`, never committed: it is 7 MB of
+# Emscripten output produced by a toolchain this directory does not describe.
+src/nodehammer_web/runtime/
+
+# setuptools' own staging. Listed because it is not empty between builds and
+# what it holds is a *previous* payload.
+build/

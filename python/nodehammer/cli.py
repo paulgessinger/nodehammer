@@ -23,12 +23,53 @@ cell. Capture it with ``os.dup2`` or pytest's ``capfd``, not with
 
 from __future__ import annotations
 
+import functools
 import sys
 from collections.abc import Sequence
 
 from . import _nodehammer
 
 __all__ = ["run"]
+
+
+@functools.cache
+def _web_runtime_dir() -> str:
+    """Where the ``nodehammer-web`` package put the wasm viewer runtime.
+
+    ``viewer --web`` needs a directory of Emscripten output that this wheel does
+    not carry -- it is a separate ``py3-none-any`` distribution, so a headless
+    install can drop it and a GUI one can have it without either being a
+    different build. C++ cannot find it: under a wheel the running executable is
+    the interpreter, and in a virtualenv ``/proc/self/exe`` resolves the symlink
+    to the *base* interpreter, so looking beside it lands in the wrong prefix.
+    Python knows exactly where an installed package is, so Python answers.
+
+    ``""`` when the package is absent, which is not an error here -- it costs one
+    rung of the search the library does, and the message that search produces
+    names the package. Raising would break every non-viewer command in an install
+    that deliberately went without it.
+
+    A ``str`` and not a ``Path``, even though the C++ side takes a path and
+    nanobind would convert either: ``Path("")`` is ``PosixPath(".")``, so the
+    absent case would arrive as *the current directory* and the library would
+    dutifully consider it a candidate runtime. The empty string converts to an
+    empty path, which is the "not given" the ladder is looking for.
+
+    Cached because :func:`run` is called per command and a *failed* import is not
+    cached by the interpreter, so an install without the package would repeat the
+    whole search on every call.
+    """
+    try:
+        from nodehammer_web import runtime_dir
+    except ImportError:
+        return ""
+    try:
+        return str(runtime_dir())
+    except Exception:  # noqa: BLE001 - a broken sibling must not break the CLI
+        # The package is installed but its payload is not where it should be.
+        # Returning empty leaves the library to report the whole ladder, which
+        # says more than a traceback from an import would.
+        return ""
 
 
 def run(args: Sequence[str] | None = None, *, pager: bool = False) -> int:
@@ -54,10 +95,16 @@ def run(args: Sequence[str] | None = None, *, pager: bool = False) -> int:
     :raises nodehammer.Error: only for a failure that escaped a command body,
         which is a defect rather than a diagnosis.
 
+    ``viewer --web`` is told where the wasm runtime is, if the ``nodehammer-web``
+    package is installed alongside this one -- see :func:`_web_runtime_dir`. That
+    is a default and not an override: ``--web-assets`` and
+    ``NODEHAMMER_WEB_ASSETS`` still win, so a locally built runtime can be tried
+    without uninstalling anything.
+
     Nothing here calls ``exit``: the interpreter, its stack and its ``finally``
     blocks all survive a failing command. That is not incidental -- it is why
     the CLI had to move into the shared library before this function could exist.
     """
     if args is None:
         args = sys.argv[1:]
-    return _nodehammer.cli_run([str(a) for a in args], pager)
+    return _nodehammer.cli_run([str(a) for a in args], pager, _web_runtime_dir())

@@ -197,22 +197,22 @@ void addViewerWebOptions(CLI::App &sub) {
 
 bool viewerWebRequested(const CLI::App &sub) { return sub.count("--web") > 0; }
 
-void runViewerWeb(CLI::App &sub) {
+void runViewerWeb(CLI::App &sub, const RunOptions &options) {
     refuseNativeOnlyOptions(sub);
 
     runOrReport("viewer", [&] {
-        const std::string assets = optionText(sub, "--web-assets");
-        const std::filesystem::path explicitAssets =
-            assets.empty() ? std::filesystem::path{} : std::filesystem::path{assets};
+        web::LadderInputs inputs{};
+        inputs.explicitDir = optionText(sub, "--web-assets");
+        inputs.embedderDir = options.webAssets;
 
         // Walked a second time only on the failure path, which is the one where
         // being helpful is worth a directory stat. See web/runtime_locator.hpp
         // for why the detail is not carried by the exception.
         const auto locate = [&] {
             try {
-                return web::locateRuntime(explicitAssets);
+                return web::locateRuntime(inputs);
             } catch (const nodehammer::Error &) {
-                std::print(stderr, "{}\n", web::explainLadder(web::walkLadder(explicitAssets)));
+                std::print(stderr, "{}\n", web::explainLadder(web::walkLadder(inputs)));
                 throw;
             }
         };
@@ -273,7 +273,7 @@ void runViewerWeb(CLI::App &sub) {
     });
 }
 
-void registerCmdViewer(CLI::App &app, const RunOptions &) {
+void registerCmdViewer(CLI::App &app, const RunOptions &options) {
     auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
     addViewerCommonOptions(*sub);
     addViewerWebOptions(*sub);
@@ -281,7 +281,12 @@ void registerCmdViewer(CLI::App &app, const RunOptions &) {
     // Replaced wholesale by the native half where there is a window, which is
     // what keeps the dispatch in one place per binary instead of a callback slot
     // one half fills in for the other.
-    sub->callback([sub] {
+    //
+    // `options` is the caller's object and outlives the parse (see the
+    // `Registrar` comment in run_internal.hpp), so capturing the pointer keeps
+    // this a reference to what the front door actually said rather than a copy
+    // taken at registration time.
+    sub->callback([sub, &options] {
         if (!viewerWebRequested(*sub)) {
             // The build has no window. Name the flag that does work rather than
             // failing as though the command were unknown — this is the normal
@@ -291,7 +296,7 @@ void registerCmdViewer(CLI::App &app, const RunOptions &) {
                                     "this build has no native viewer; use `nodehammer viewer "
                                     "--web` to open the viewer in a browser"};
         }
-        runViewerWeb(*sub);
+        runViewerWeb(*sub, options);
     });
 }
 
