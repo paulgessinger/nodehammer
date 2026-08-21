@@ -19,7 +19,10 @@
 #   scripts/build_pages_site.sh <runtime-dir> <out-dir>
 #
 # `runtime-dir` holds the built nodehammer-{gles3,wgpu,compute}.{js,wasm}
-# bundles (an install tree's bin/, or build/emscripten/Release locally).
+# bundles and the nh_runtime.json stamp: an install tree's
+# share/nodehammer/web (which also carries the shell and the worker script), or
+# build/emscripten/Release locally (which does not -- see
+# scripts/stage_wasm_viewer.sh for which copy wins).
 
 set -euo pipefail
 

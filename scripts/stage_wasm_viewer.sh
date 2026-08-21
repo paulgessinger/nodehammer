@@ -77,12 +77,41 @@ stage_file() {
     fi
 }
 
+# The shell and the worker script exist in two places, and which one is right
+# depends on what $src is. An *install tree* (share/nodehammer/web) carries its
+# own copies, and those are the ones to stage: staging the checkout's instead
+# would mean CI's Pages job never once serves the files it installed, so a
+# missing install rule would look fine here and fail wherever no checkout
+# exists. A *build directory* carries neither, so the checkout answers — which
+# is also what keeps the local loop live, since `link` mode then symlinks the
+# working copy and an edit to viewer.html needs no rebuild.
+stage_runtime_file() {
+    local name="$1"
+    local fallback="$2"
+    if [ -f "$src/$name" ]; then
+        stage_file "$src/$name" "$out/$name"
+    else
+        stage_file "$fallback" "$out/$name"
+    fi
+}
+
 mkdir -p "$out"
-stage_file "$root/web/viewer.html" "$out/viewer.html"
+stage_runtime_file viewer.html "$root/web/viewer.html"
 # Worker script that hosts the headless compute module (off-main-thread
 # tessellation/wedge cut). Served alongside the viewer; loaded as a classic
 # Worker by the viewer when one is available.
-stage_file "$root/src/web/compute_worker.js" "$out/compute_worker.js"
+stage_runtime_file compute_worker.js "$root/src/web/compute_worker.js"
+
+# The stamp. Unlike the two above it has no checkout fallback -- it says which
+# schema id these bundles were built against, so only the build that produced
+# them can write it, and a served root without one is a root `web::serve`
+# cannot vouch for. CMake emits it at generate time, which is why the fix for a
+# build directory older than the stamp is a reconfigure and not a rebuild.
+if [ ! -f "$src/nh_runtime.json" ]; then
+    echo "no nh_runtime.json in $src - reconfigure that build directory (e.g. 'just wasm-configure')." >&2
+    exit 1
+fi
+stage_file "$src/nh_runtime.json" "$out/nh_runtime.json"
 
 # Compute module bundle (nodehammer-compute.{js,wasm}) is staged alongside the
 # per-backend viewer bundles.

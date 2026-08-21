@@ -134,6 +134,32 @@ include(cmake/CompilerOptions.cmake)
 # into the shared target's INSTALL_INTERFACE include path.
 include(GNUInstallDirs)
 
+# ── The web runtime's contract ───────────────────────────────────────────────
+# The wasm viewer is delivered as a directory, not a program: a shell, a worker
+# script, three bundles and the stamp below. `nodehammer viewer --web` locates
+# one through a ladder of candidate directories (a flag, an environment
+# variable, this install path, later a download cache), which means it can be
+# handed a directory that nobody validated — an old checkout's build tree is
+# exactly the mistake a person makes while debugging, and no wheel metadata or
+# version pin can see it. So the runtime says what it is and the library checks
+# before it serves anything.
+#
+# What is compared is the schema id, not the version. What actually has to
+# agree between the two halves is the .nhproj + nh_manifest.json shape and the
+# compute worker's postMessage protocol — the last of which has already broken
+# once, silently, under Closure (dcc4a06, and scripts/check_wasm_module_
+# linkage.py exists because of it). An integer is at once stricter than a
+# version, because it catches same-version skew from a hand-pointed directory,
+# and looser, because it does not cry wolf on a patch release where nothing
+# about the contract moved. The version rides along in the stamp only so the
+# refusal can name it.
+#
+# BUMP THIS when the manifest/archive shape or the worker protocol changes.
+# Monotonic; never reused.
+set(NH_WEB_RUNTIME_SCHEMA 1)
+set(NH_WEB_RUNTIME_STAMP "nh_runtime.json")
+set(NH_WEB_RUNTIME_DIR "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/web")
+
 # ── FlatBuffers code generation ──────────────────────────────────────────────
 set(NH_FBS_SCHEMAS
     ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs
@@ -837,37 +863,79 @@ include(cmake/PicProbe.cmake)
 # (GNUInstallDirs is included near the top — the core-library helper needs
 # CMAKE_INSTALL_INCLUDEDIR for the shared target's INSTALL_INTERFACE.)
 
-# Native: single nodehammer executable. Emscripten + viewer: per-backend
-# wasm bundles named nodehammer-{gles3,wgpu}.{js,wasm}. Emscripten + no
-# viewer: headless nodehammer (just the .js + .wasm).
-if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
-    set(NH_INSTALL_TARGETS nodehammer-gles3 nodehammer-wgpu nodehammer-compute)
-else()
-    set(NH_INSTALL_TARGETS nodehammer)
-endif()
-
 # Every install rule names a COMPONENT: Runtime to run nodehammer, Development
-# to build against it. A plain `cmake --install` still installs everything, so
-# existing callers are unaffected; what this adds is `--component Runtime` for a
-# release artifact that wants the CLI and its licences but not the headers.
+# to build against it, WebRuntime for the servable wasm payload. A plain
+# `cmake --install` still installs everything, so existing callers are
+# unaffected; what this adds is `--component Runtime` for a release artifact
+# that wants the CLI and its licences but not the headers.
 #
 # Tag every rule, not just the new ones — an untagged rule lands in a default
 # component named Unspecified and would be silently missing from *both* halves.
-install(TARGETS ${NH_INSTALL_TARGETS}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-            COMPONENT Runtime
-)
+if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
+    # This configuration does not install a *program*. What it installs is a
+    # directory a web server can point at: the shell, the worker script, the
+    # per-backend bundles and a stamp saying what they are. Six blobs under
+    # bin/ were never that — `scripts/build_pages_site.sh` only worked because
+    # it read the shell out of the source tree it happened to be running in, so
+    # the artifact alone could not be served by anything that did not also have
+    # a checkout.
+    #
+    # share/nodehammer/web is also the rung the asset ladder looks for relative
+    # to the executable (docs/cli-and-web-viewer-plan.md Part 1), which is why
+    # it is a datadir path and not an opaque one: a native install tree and a
+    # wasm install tree merge into one directory that `nodehammer viewer --web`
+    # can resolve without being told where anything is.
+    install(TARGETS nodehammer-gles3 nodehammer-wgpu nodehammer-compute
+        RUNTIME DESTINATION "${NH_WEB_RUNTIME_DIR}"
+                COMPONENT WebRuntime
+    )
 
-# Emscripten produces a sidecar .wasm next to each .js loader; CMake's
-# install(TARGETS RUNTIME) only picks up the primary output, so install
-# the blobs explicitly.
-if(EMSCRIPTEN)
-    foreach(_t ${NH_INSTALL_TARGETS})
+    # Emscripten produces a sidecar .wasm next to each .js loader; CMake's
+    # install(TARGETS RUNTIME) only picks up the primary output, so install
+    # the blobs explicitly.
+    foreach(_t nodehammer-gles3 nodehammer-wgpu nodehammer-compute)
         install(FILES "$<TARGET_FILE_DIR:${_t}>/${_t}.wasm"
+            DESTINATION "${NH_WEB_RUNTIME_DIR}"
+            COMPONENT WebRuntime
+        )
+    endforeach()
+
+    # The two files the browser loads that no compiler produced. They are as
+    # much a part of the runtime as the bundles — viewer.html is what picks a
+    # backend at all, and a bundle without its worker script tessellates on the
+    # main thread or not at all.
+    install(FILES
+            "${CMAKE_CURRENT_SOURCE_DIR}/web/viewer.html"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/web/compute_worker.js"
+        DESTINATION "${NH_WEB_RUNTIME_DIR}"
+        COMPONENT WebRuntime
+    )
+
+    # The stamp, written beside the bundles in the build tree so that a build
+    # directory and an install tree are the same shape — `just wasm-serve` and
+    # `just pages-site` stage straight out of the former.
+    file(GENERATE
+        OUTPUT "$<TARGET_FILE_DIR:nodehammer-gles3>/${NH_WEB_RUNTIME_STAMP}"
+        CONTENT "{\n  \"schema\": ${NH_WEB_RUNTIME_SCHEMA},\n  \"version\": \"${NODEHAMMER_VERSION}\"\n}\n"
+    )
+    install(FILES "$<TARGET_FILE_DIR:nodehammer-gles3>/${NH_WEB_RUNTIME_STAMP}"
+        DESTINATION "${NH_WEB_RUNTIME_DIR}"
+        COMPONENT WebRuntime
+    )
+else()
+    # Native: the single nodehammer executable. Emscripten with no viewer: the
+    # headless nodehammer bundle (just the .js + .wasm).
+    install(TARGETS nodehammer
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+                COMPONENT Runtime
+    )
+
+    if(EMSCRIPTEN)
+        install(FILES "$<TARGET_FILE_DIR:nodehammer>/nodehammer.wasm"
             DESTINATION ${CMAKE_INSTALL_BINDIR}
             COMPONENT Runtime
         )
-    endforeach()
+    endif()
 endif()
 
 install(FILES "${CMAKE_SOURCE_DIR}/LICENSE"
