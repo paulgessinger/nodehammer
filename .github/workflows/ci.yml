@@ -361,14 +361,17 @@ jobs:
           echo "value=$v" >> "$GITHUB_OUTPUT"
           echo "building $v"
 
-      - name: Point Conan at a cacheable directory
+      - name: Point Conan and ccache at cacheable directories
         if: runner.os == 'Linux'
         shell: bash
-        # On Linux the dependencies are built *inside* the container, so a cache
-        # has to live on the other side of the /host mount cibuildwheel provides
-        # or it dies with the container. macOS needs nothing: before-all runs on
-        # the host, so Conan already writes to the home directory cached below.
-        run: echo "CONAN_HOME=/host${HOME}/.conan2" >> "$GITHUB_ENV"
+        # On Linux the dependencies (and now the compile itself) happen *inside*
+        # the container, so each cache has to live on the other side of the
+        # /host mount cibuildwheel provides or it dies with the container. macOS
+        # needs nothing here: before-all and the build both run on the host, so
+        # Conan and ccache already write to the home directory cached below.
+        run: |
+          echo "CONAN_HOME=/host${HOME}/.conan2" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=/host${HOME}/.cache/ccache" >> "$GITHUB_ENV"
 
       # Keyed on conanfile.py alone, with no run id — unlike the caches in the
       # build job. Those grow run to run and want a fresh entry each time; this
@@ -381,6 +384,30 @@ jobs:
           path: ~/.conan2/p
           key: conan-wheel-${{ matrix.identifier }}-${{ hashFiles('conanfile.py') }}
 
+      # ccache itself, unlike the Conan cache above, grows run to run the same
+      # way the build job's does -- a run-id key plus prefix restore-keys, only
+      # saved from main, same reasoning as ci.yml's other evolving caches.
+      - name: Restore ccache
+        if: runner.os == 'Linux'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ccache
+          key: ccache-wheel-${{ matrix.identifier }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-wheel-${{ matrix.identifier }}-
+
+      # macOS builds on the host, so this is the same ccache-action the build
+      # job uses -- it installs ccache and handles the GitHub Actions cache
+      # restore/save itself. Linux instead installs ccache inside the container
+      # (pyproject.toml before-all) and manages the cache manually above/below,
+      # since the container is where the compiling happens.
+      - name: Set up ccache
+        if: runner.os == 'macOS'
+        uses: hendrikmuhs/ccache-action@d62db5f07c26379fc4b4e0916f098a92573c3b03 # v1.2.23
+        with:
+          key: ccache-wheel-${{ matrix.identifier }}
+          save: ${{ github.ref == 'refs/heads/main' }}
+
       - uses: pypa/cibuildwheel@1828c10ab37f080699c7b81cea34097c684a7074 # v4.2.0
         env:
           CIBW_ONLY: ${{ matrix.identifier }}
@@ -389,9 +416,16 @@ jobs:
       # The container builds as root, so everything it wrote through the /host
       # mount is owned by root on the runner and actions/cache cannot read it to
       # save. Same workaround the LCG job already carries for the same reason.
-      - name: Fix Conan cache ownership
+      - name: Fix cache ownership
         if: always() && runner.os == 'Linux'
-        run: sudo chown -R "$USER" "$HOME/.conan2" || true
+        run: sudo chown -R "$USER" "$HOME/.conan2" "$HOME/.cache/ccache" || true
+
+      - name: Save ccache
+        if: always() && runner.os == 'Linux' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ccache
+          key: ccache-wheel-${{ matrix.identifier }}-${{ github.run_id }}
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
