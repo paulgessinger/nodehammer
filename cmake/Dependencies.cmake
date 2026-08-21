@@ -39,11 +39,14 @@ FetchContent_Declare(Catch2
 FetchContent_MakeAvailable(Catch2)
 
 # ── CLI11 ─────────────────────────────────────────────────────────────────────
+# 2.7.2 is a floor, not a preference. Up to and including 2.6.2 CLI11's character
+# tables were namespace-scope references bound to temporaries, which Emscripten
+# cannot run an atexit chain over -- see recipes/cli11/conanfile.py and issue #76.
 FetchContent_Declare(CLI11
     SYSTEM
     GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
-    GIT_TAG        v2.6.2
-    FIND_PACKAGE_ARGS 2.6.2
+    GIT_TAG        v2.7.2
+    FIND_PACKAGE_ARGS 2.7.2
 )
 FetchContent_MakeAvailable(CLI11)
 

@@ -60,23 +60,16 @@ endif()
 # No link line of its own: the command sources are part of the core now, so
 # nodehammer_lib carries them like everything else this binary tests.
 #
-# Native only, and not for want of trying. This is the first binary that ever
-# links the CLI under Emscripten: the wasm build has the viewer on, so it emits
-# the runtime bundles and the compute worker and never the headless `nodehammer`
-# exe, which is the only wasm target that would otherwise pull these objects in.
-# Linking them makes the module crash in `__funcs_on_exit` with "function
-# signature mismatch" *after* every test has passed -- an atexit handler
-# registered by something these TUs drag in is called with a signature the
-# indirect-call table disagrees about.
-#
-# Excluded rather than worked around, and the distinction matters: filtering the
-# `[cli]` cases out at runtime does not help, because the crash is about what is
-# *linked*, not what runs. Nothing shipped is affected -- no wasm artifact
-# contains the CLI -- so this is a latent defect that this suite would be the
-# first to meet -- see issue #76.
-if(NOT EMSCRIPTEN)
-    target_sources(nodehammer_tests PRIVATE cli/test_cli_run.cpp)
-endif()
+# Emscripten included, deliberately. This is the only binary that links the CLI
+# into a wasm module -- the wasm build has the viewer on, so it emits the runtime
+# bundles and the compute worker and never the headless `nodehammer` exe -- which
+# made it the first thing ever to meet issue #76: CLI11 up to 2.6.2 wrote its
+# character tables as namespace-scope references bound to temporaries, and a
+# module that links one traps in `__funcs_on_exit` with "function signature
+# mismatch" on the way out, after every test has passed. The fix is the CLI11
+# floor in cmake/Dependencies.cmake and recipes/cli11; this line is what would
+# notice it slipping, so it is a regression test and not merely a suite member.
+target_sources(nodehammer_tests PRIVATE cli/test_cli_run.cpp)
 
 # ── A bare invocation, over the built executable ──────────────────────────────
 #

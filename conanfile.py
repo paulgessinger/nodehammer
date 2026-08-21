@@ -30,7 +30,7 @@ class Nodehammer(ConanFile):
     def requirements(self):
         self.requires("zstd/1.5.7")
         self.requires("catch2/3.15.1")
-        self.requires("cli11/2.6.2")
+        self.requires("cli11/2.7.2")
         self.requires("nlohmann_json/3.12.0")
         self.requires("glm/1.0.3")
         self.requires("tomlplusplus/3.4.0")

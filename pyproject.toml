@@ -149,10 +149,16 @@ test-command = "pytest {project}/tests/python -q"
 # Conan next, inside the container, for the reason it runs first everywhere
 # else: cppstd, libcxx and the deployment target live in CMakeToolchain, and a
 # CMake dependency provider cannot deliver them.
+#
+# cli11 alone out of the six recipes in recipes/, because it is the only vendored
+# one the wheel's graph contains: the other five are the viewer's, and the wheel
+# builds with viewer=False. See recipes/cli11/conanfile.py for why it is vendored
+# at all. Keep the version in step with conanfile.py, the Justfile and ci/build.sh.
 before-all = [
     "dnf install -y ccache",
     "python3 -m pip install conan",
     "conan profile detect --force",
+    "conan export {project}/recipes/cli11 --version=2.7.2",
     "conan install {project} -of /tmp/conan -s build_type=Release -s:a compiler.cppstd=23 --build=missing",
 ]
 
@@ -179,8 +185,11 @@ CMAKE_ARGS = "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=c
 # `pip install conan` is refused outright (PEP 668). uvx gives Conan an
 # environment of its own; uv is on PATH here for the same reason the wheel job's
 # version step can call it, and `just` already builds wheels through it.
+# The cli11 export is the Linux list's, for the same reason and against the same
+# CONAN_HOME -- uvx gives each invocation a fresh environment, not a fresh cache.
 before-all = [
     "uvx conan profile detect --force",
+    "uvx conan export {project}/recipes/cli11 --version=2.7.2",
     "uvx conan install {project} -of /tmp/nh-conan -s build_type=Release -s:a compiler.cppstd=23 -s os.version=13.3 --build=missing",
 ]
 

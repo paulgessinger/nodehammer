@@ -50,6 +50,7 @@ esac
 
 case "$cmd" in
   conan-install)
+    conan export recipes/cli11 --version=2.7.2
     conan export recipes/sokol --version=2026.07.02
     conan export recipes/imgui --version=1.92.8
     conan export recipes/implot --version=1.0.0
