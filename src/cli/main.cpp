@@ -34,21 +34,21 @@ int main(int argc, char **argv) {
     options.pager = true;
 
 #ifdef NH_WITH_VIEWER
-    // No subcommand at all (double-clicked in a file manager, or run from a
-    // terminal with zero args) -> default to `viewer` instead of the help text.
-    // On Windows in particular the alternative prints to a console window that
-    // closes the instant the process exits, so the app appears to silently do
-    // nothing.
+    // No default subcommand. A bare `nodehammer` prints the help and returns 0,
+    // here exactly as it does from `cli::run({})` and from the wheel's console
+    // script — one answer, on every platform and from every front door.
     //
-    // This is why the default lives here and not in `run`: it is a claim about
-    // how the program was launched, which a library call cannot make. It also
-    // could not be written there — NH_WITH_VIEWER is applied to nodehammer_lib
-    // and to neither nodehammer_shared nor the shared core objects, so in a
-    // packaging build run.cpp is compiled once, without it, for both.
-    if (args.empty()) {
-        args.emplace_back("viewer");
-    }
-
+    // It used to open the viewer when `argc == 1`, for double-clicking in a file
+    // manager. The intent was right and the test was not: argument count cannot
+    // tell a double-click from somebody typing `nodehammer` and expecting usage,
+    // and it never fixed the Windows case it named — the subsystem is a field in
+    // the PE header, so Explorer allocates a console for this binary whatever it
+    // then chooses to run.
+    //
+    // The GUI entry point belongs to packaging instead, where each platform can
+    // say it directly: an .app bundle, a .desktop carrying `Exec=nodehammer
+    // viewer`, an installer shortcut pointing at a GUI-subsystem binary. See
+    // issue #74. `viewer` remains a subcommand like any other.
     const std::array extra{static_cast<nodehammer::cli::detail::Registrar>(
         &nodehammer::cli::detail::registerCmdViewerNative)};
 #else

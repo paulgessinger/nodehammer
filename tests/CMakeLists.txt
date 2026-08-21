@@ -78,6 +78,24 @@ if(NOT EMSCRIPTEN)
     target_sources(nodehammer_tests PRIVATE cli/test_cli_run.cpp)
 endif()
 
+# ── A bare invocation, over the built executable ──────────────────────────────
+#
+# The assertion neither in-process suite can make. `cli::run({})` has always
+# printed the help, so tests/cli/ cannot see the difference; what changed is the
+# *executable*, which used to turn no arguments into `viewer` before calling in.
+# Only running the real binary distinguishes those, and only in a build where the
+# viewer exists to be defaulted to -- which is exactly the configuration where
+# the old behaviour lived.
+#
+# It asserts the usage line rather than merely a zero exit, because opening a
+# window would also exit 0 eventually; the help text is the part that a viewer
+# launch would not produce.
+if(NODEHAMMER_WITH_VIEWER AND NOT EMSCRIPTEN)
+    add_test(NAME cli_bare_invocation_prints_help COMMAND $<TARGET_FILE:nodehammer>)
+    set_tests_properties(cli_bare_invocation_prints_help PROPERTIES
+        PASS_REGULAR_EXPRESSION "nodehammer \\[OPTIONS\\]")
+endif()
+
 # ZipWorkingSet and the project manifest are unconditional in the core and
 # cross-platform, so these run everywhere.
 #
