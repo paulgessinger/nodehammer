@@ -30,6 +30,7 @@
 //   NH0700–NH0799  compute worker (web)
 //   NH0800–NH0899  public API boundary
 //   NH0900–NH0999  CLI usage
+//   NH1000–NH1099  web viewer runtime
 
 namespace nodehammer::codes {
 
@@ -139,5 +140,15 @@ inline constexpr std::string_view kFatalApiInvalidHandle = "NH0800";
 inline constexpr std::string_view kFatalCliUsage = "NH0900";
 inline constexpr std::string_view kFatalCliPathNotFound = "NH0901";
 inline constexpr std::string_view kFatalCliFileOpen = "NH0902";
+
+// ── Web viewer runtime ────────────────────────────────────────────────────────
+// The wasm runtime is built by a different toolchain than the library that
+// serves it, so "where is it" and "is it the right one" are two failures, not
+// one, and they have different remedies: find or install a runtime, versus
+// match the two halves that disagree. A caller that wants to say `pip install
+// nodehammer-web` on the first and `rebuild` on the second needs to tell them
+// apart, which is the whole reason there are two codes here.
+inline constexpr std::string_view kFatalWebRuntimeNotFound = "NH1000";
+inline constexpr std::string_view kFatalWebRuntimeSchema = "NH1001";
 
 } // namespace nodehammer::codes
