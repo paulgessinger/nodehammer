@@ -185,10 +185,18 @@ endif()
 
 # ── Core library configuration ────────────────────────────────────────────────
 # Pipeline core: IR + config + selection + tessellation + importers/exporters
-# + scene_build. Deliberately free of CLI11 and the cmd_*.cpp dispatchers so
-# the bench harness, the test binary, and the future browser entry point can
-# link against it without pulling subcommand registration code (and CLI11's
-# header-only template forest) into their closure.
+# + scene_build, and — since the CLI became callable rather than only runnable —
+# the subcommand dispatchers too.
+#
+# That reads like a reversal of the rule this list used to state ("deliberately
+# free of CLI11 and the cmd_*.cpp dispatchers, so the bench harness, the test
+# binary and the browser entry point can link against it without pulling
+# subcommand registration into their closure"), and it is not: a static archive
+# is linked per object, so a target that names no registrar still links none of
+# them. The bench harness and the compute module are unchanged in size. What
+# does change is the *shared* library, which has no such granularity and now
+# carries the CLI — which is the entire point, since that is the copy the Python
+# extension links, and `nodehammer::cli::run` is what it is there to reach.
 #
 # Accumulated into variables rather than written onto a target, because a
 # packaging build describes the core once and builds it twice: the static
@@ -241,6 +249,29 @@ set(NH_CORE_SOURCES
     # Archive-internal project manifest (nodehammer.toml [project]) parser — pure
     # toml++, no GUI deps, so it lives in the lib and the unit tests link it.
     src/viewer/project_manifest.cpp
+    # The command line. `run.cpp` holds the entry point the public
+    # include/nodehammer/cli.hpp declares; the rest are its subcommands.
+    #
+    # Core rather than app because `cli::run` is published: the whole reason
+    # these moved out of a static archive is that an archive cannot be linked
+    # into the Python extension — it would put a second copy of the core in the
+    # process, with duplicate globals and two type_infos for
+    # `nodehammer::Error`, so a `catch` across that boundary would silently miss.
+    #
+    # `cmd_viewer_native.cpp` is deliberately absent: it constructs a
+    # `viewer::App`, and --no-undefined on the shared library turns that into a
+    # link error naming the sokol symbol rather than a rule someone must
+    # remember. It is compiled into the executable instead, and reaches the
+    # parser through the `Registrar` seam in src/cli/run_internal.hpp.
+    src/cli/run.cpp
+    src/cli/pager.cpp
+    src/cli/cmd_convert.cpp
+    src/cli/cmd_inspect.cpp
+    src/cli/cmd_validate_config.cpp
+    src/cli/cmd_config_flatten.cpp
+    src/cli/cmd_dump_semantic.cpp
+    src/cli/cmd_dump_render.cpp
+    src/cli/cmd_config_lua.cpp
 )
 
 # ── Application sources ───────────────────────────────────────────────────────
@@ -281,6 +312,14 @@ configure_file(
 # remove one and the build fails. (Scope on the shared library is a different
 # question — there everything is PRIVATE behind $<BUILD_INTERFACE:>.)
 set(NH_CORE_DEPS
+    # PUBLIC on the static archive rather than private, because an *internal*
+    # header names it where an out-of-core target sees it: src/cli/cli_common.hpp
+    # includes <CLI/CLI.hpp>, and src/cli/cmd_viewer_native.cpp is compiled
+    # outside the core. A PRIVATE dependency propagates as $<LINK_ONLY:>, which
+    # carries the link and drops the include directory — so the viewer
+    # executable would fail to find the header. Header-only, so this adds no
+    # link dependency to the shared library and nothing to its package config.
+    CLI11::CLI11
     # src/config/config_ast.hpp, src/ir/render.hpp — `using ExtrasMap = nlohmann::json`
     nlohmann_json::nlohmann_json
     # src/detail/glm_json.hpp, src/viewer/camera.hpp
@@ -668,34 +707,6 @@ if(NODEHAMMER_BUILD_SHARED)
     endif()
 endif()
 
-# ── CLI library ────────────────────────────────────────────────────────────────
-# Subcommand dispatchers + CLI11 glue. Native-only: the wasm viewer ships
-# its own C-export bootstrap (src/web/viewer_main.cpp) and the CI bench is
-# a separate exe under tests/. Nothing in the wasm closure links this lib.
-add_library(nodehammer_cli STATIC
-    src/cli/pager.cpp
-    src/cli/cmd_convert.cpp
-    src/cli/cmd_inspect.cpp
-    src/cli/cmd_validate_config.cpp
-    src/cli/cmd_config_flatten.cpp
-    src/cli/cmd_dump_semantic.cpp
-    src/cli/cmd_dump_render.cpp
-)
-
-target_link_libraries(nodehammer_cli PUBLIC
-    nodehammer_lib
-    CLI11::CLI11
-)
-
-nh_set_compiler_options(nodehammer_cli)
-
-# The `config-lua` subcommand: evaluates a Lua config script into an NHConfig
-# and emits flattened TOML (Option A of docs/config-scripting-lua.md). The
-# engine itself is in the core; only the dispatcher is CLI-side. Unconditional
-# now that the core carries the interpreter everywhere — the wasm CLI runs under
-# node with NODERAWFS, so it has both an interpreter and files to point it at.
-target_sources(nodehammer_cli PRIVATE src/cli/cmd_config_lua.cpp)
-
 # ── Optional viewer (sokol + Dear ImGui) ──────────────────────────────────────
 # When the viewer is on, we build a per-backend sokol STATIC lib + a viewer
 # executable per backend. Native picks the right backend for the host
@@ -719,8 +730,8 @@ if(NODEHAMMER_WITH_VIEWER)
             target_link_libraries(${name} PRIVATE ${viewer_lib})
             nh_apply_emscripten_viewer_options(${name})
         else()
-            add_executable(${name} src/cli/main.cpp src/cli/cmd_viewer.cpp)
-            target_link_libraries(${name} PRIVATE nodehammer_cli ${viewer_lib})
+            add_executable(${name} src/cli/main.cpp src/cli/cmd_viewer_native.cpp)
+            target_link_libraries(${name} PRIVATE nodehammer_lib ${viewer_lib})
             nh_apply_emscripten_exe_options(${name})
         endif()
         nh_set_compiler_options(${name})
@@ -773,9 +784,9 @@ if(NODEHAMMER_WITH_VIEWER)
         nh_set_compiler_options(imgui-kitchen-sink)
     endif()
 else()
-    # Headless build: just the CLI dispatcher, no viewer subcommand.
+    # Headless build: the entry point with no viewer subcommand handed to it.
     add_executable(nodehammer src/cli/main.cpp)
-    target_link_libraries(nodehammer PRIVATE nodehammer_cli)
+    target_link_libraries(nodehammer PRIVATE nodehammer_lib)
     nh_set_compiler_options(nodehammer)
     nh_apply_emscripten_exe_options(nodehammer)
 endif()

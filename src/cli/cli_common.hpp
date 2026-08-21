@@ -1,5 +1,7 @@
 #pragma once
 
+#include "run_internal.hpp"
+
 #include <CLI/CLI.hpp>
 #include <detail/markup.hpp>
 #include <diagnostic_codes.hpp>
@@ -17,7 +19,11 @@ namespace nodehammer::cli {
 
 /// Print one diagnostic to stderr with coloured severity.
 inline void printDiag(const Diagnostic &d) {
-    static detail::Console errCon{detail::ColorMode::Auto};
+    // Deliberately not `static`. A `Console` holds a colour *mode*, not a
+    // decision — `shouldColorize` re-checks the descriptor on every call — so
+    // the static cached nothing, and process-lifetime state in a library that
+    // can now be called twice is a hazard for no gain.
+    const nodehammer::detail::Console errCon{nodehammer::detail::ColorMode::Auto};
     std::string_view color;
     std::string_view label;
     if (d.severity == diagnostics::Severity::Fatal) {
@@ -45,19 +51,39 @@ inline void printDiags(std::span<const Diagnostic> diags) {
     }
 }
 
-/// Run a command body, and turn a named failure into the one exit path a CLI
-/// has.
+/// Print what a stage collected, then fail if it collected an error.
+///
+/// The two halves are deliberately exclusive. `throwIfErrors` puts the whole
+/// list on the exception and `runOrReport` prints that list, so printing here
+/// as well would say everything twice — which is what the hand-written
+/// `printDiags(...); if (hasErrors()) { println("..."); exit(1); }` ladders
+/// avoided only by not throwing at all.
+inline void reportOrThrow(const DiagnosticList &diags, std::string_view context) {
+    if (!diags.hasErrors()) {
+        printDiags(diags);
+        return;
+    }
+    diagnostics::throwIfErrors(diags, context);
+}
+
+/// Run a command body, and turn a named failure into an exit code.
 ///
 /// This is what replaces the per-stage `if (diags.hasErrors()) exit(1)` ladder
 /// every command used to carry: under docs/error-model.md a stage that could
 /// not deliver throws, so there is exactly one place per command that has to
 /// know what to do about it.
 ///
+/// It reports, then throws `CommandFailure` — it does *not* terminate. That
+/// distinction is the whole point of this pass: these command bodies now compile
+/// into the shared library, where `std::exit` would end the caller's process,
+/// which for a Python caller means the interpreter, with no traceback and no
+/// `finally`.
+///
 /// `Error::observed()` is printed first — for a failure that came from a
 /// collector it holds every problem found, not just the one the exception
 /// names. When it is empty the failure had nothing to collect, so the fatal
 /// diagnostic itself is printed instead.
-template <typename Body> void runOrExit(std::string_view command, Body &&body) {
+template <typename Body> void runOrReport(std::string_view command, Body &&body) {
     try {
         std::forward<Body>(body)();
         return;
@@ -69,7 +95,7 @@ template <typename Body> void runOrExit(std::string_view command, Body &&body) {
         }
         std::println(stderr, "{}: {}", command, e.what());
     }
-    std::exit(1);
+    throw detail::CommandFailure{1};
 }
 
 /// Result of importFrom: the import result plus the format name.

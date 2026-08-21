@@ -21,12 +21,19 @@ anyway: a symbol wrongly *missing* leaves nothing to inspect.
 
 The rules are derived rather than listed, so no allowlist goes stale:
 
-  1. Internal namespaces are harvested from src/ on every run.
+  1. Internal namespaces are harvested from src/ on every run, minus any that a
+     public header also declares — `nodehammer::cli` is written in both places,
+     and `include/` is the half that decides.
   2. A symbol is a leak if scoped into one of those, or if it is under neither
      `nodehammer::` nor a tolerated runtime prefix.
   3. Backstop for a namespace the harvest misses: a lowercase second component
-     *followed by* `::` reads as internal. Testing the separator is what keeps
-     `nodehammer::tessellate(...)` — a lowercase public verb — from matching.
+     *followed by* `::` reads as internal, unless a public header declares it.
+     Testing the separator is what keeps `nodehammer::tessellate(...)` — a
+     lowercase public verb — from matching.
+
+Nesting resolves the way you would want without a rule of its own: rule 1 tries
+the harvested names longest-first, so `nodehammer::cli::detail` is judged before
+rule 3 ever sees `cli`, and a seam under a public namespace stays internal.
 
 Linux/ELF only; the caller skips macOS, where ld64 has no --exclude-libs and
 property A would fail for a reason that is not a defect here.
@@ -73,11 +80,18 @@ TOLERATED_PREFIXES = (
 )
 
 
-def internal_namespaces(source_dir: Path) -> set[str]:
-    """Harvest `namespace nodehammer::x::y` declarations from the source tree."""
+def declared_namespaces(root: Path) -> set[str]:
+    """Harvest `namespace nodehammer::x::y` declarations under `root`.
+
+    Only the joined spelling is matched, which is the one the tree uses. A
+    nested `namespace nodehammer { namespace cli {` would register as neither,
+    so a header written that way would not claim its namespace as public —
+    noted here because that is the failure mode, and it fails safe: the symbol
+    is reported as a leak rather than waved through.
+    """
     pattern = re.compile(r"^namespace\s+(nodehammer(?:::[A-Za-z_][A-Za-z0-9_]*)+)", re.M)
     found: set[str] = set()
-    for path in (source_dir / "src").rglob("*"):
+    for path in root.rglob("*"):
         if path.suffix not in {".hpp", ".cpp", ".h", ".cc", ".mm"}:
             continue
         try:
@@ -86,6 +100,20 @@ def internal_namespaces(source_dir: Path) -> set[str]:
             continue
         found.update(m.group(1) for m in pattern.finditer(text))
     return found
+
+
+def internal_namespaces(source_dir: Path) -> set[str]:
+    """Namespaces that exist only in src/.
+
+    `nodehammer::cli` is declared in both halves — `src/cli/cli_common.hpp` and
+    the installed `include/nodehammer/cli.hpp` — because the CLI has a published
+    entry point and an unpublished registration surface. The public declaration
+    is what settles it, so the subtraction runs in that direction.
+
+    `nodehammer` itself is never subtracted: the regex needs at least one `::`,
+    so a header opening plain `namespace nodehammer {` matches nothing.
+    """
+    return declared_namespaces(source_dir / "src") - declared_namespaces(source_dir / "include")
 
 
 def defined_dynamic_symbols(library: Path) -> list[str]:
@@ -153,7 +181,8 @@ def scope_of(name: str) -> str:
     return word.strip()
 
 
-def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
+def bucket(symbol: str, internal: set[str],
+           public: frozenset[str] = frozenset()) -> tuple[str, str | None]:
     """Sort a symbol into "public", "tolerated" or "leak".
 
     The reason is a message for leaks and a grouping key for tolerated symbols.
@@ -193,10 +222,38 @@ def bucket(symbol: str, internal: set[str]) -> tuple[str, str | None]:
             return "leak", f"internal namespace {ns}"
 
     head, sep, _ = scope[len(TOP):].partition("::")
-    if sep and head[:1].islower():
-        return "leak", f"looks like an internal namespace (nodehammer::{head}) not found in src/"
+    if sep and head[:1].islower() and f"{TOP}{head}" not in public:
+        return "leak", (f"looks like an internal namespace (nodehammer::{head}) "
+                        f"that no public header declares")
 
     return "public", None
+
+
+def classify(symbols: list[str], internal: set[str],
+             public_namespaces: frozenset[str]) -> tuple[list[str], dict[str, int],
+                                                         list[tuple[str, str]]]:
+    """Sort every symbol into public / tolerated / leaked.
+
+    Its own function because `--self-test` has to go through the same code the
+    real run does. It previously reimplemented only `bucket`, which left the
+    *wiring* untested — and the wiring is where a bug lived: `main` bound the
+    public-namespace set to a name it then reused for the list of public
+    symbols, so the set was an empty list by the time it reached `bucket`, the
+    exemption never fired, and `nodehammer::cli::run` was reported as a leak on
+    every ELF leg while `--self-test` stayed green.
+    """
+    public: list[str] = []
+    tolerated: dict[str, int] = {}
+    leaks: list[tuple[str, str]] = []
+    for symbol in symbols:
+        kind, why = bucket(symbol, internal, public_namespaces)
+        if kind == "public":
+            public.append(symbol)
+        elif kind == "tolerated":
+            tolerated[why or "?"] = tolerated.get(why or "?", 0) + 1
+        else:
+            leaks.append((symbol, why or "?"))
+    return public, tolerated, leaks
 
 
 # Checked by --self-test, which needs no ELF library and so runs anywhere.
@@ -234,6 +291,15 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("nodehammer::diagnostics::DiagnosticList::hasErrors() const", "leak"),
     ("nodehammer::config::keys::kExport", "leak"),
     ("nodehammer::viewer::ui::icon_font::glyphs", "leak"),
+    # `nodehammer::cli` is the first namespace declared in *both* halves of the
+    # tree: src/cli/ registers subcommands, include/nodehammer/cli.hpp publishes
+    # `run`. The public declaration decides, and the seam beneath it does not
+    # inherit that — which is what these four pin down, in both directions.
+    ("nodehammer::cli::run(std::span<std::basic_string_view<char> const, 18446744073709551615ul>, "
+     "nodehammer::cli::RunOptions const&)", "public"),
+    ("nodehammer::cli::detail::runWith(nodehammer::cli::RunOptions const&)", "leak"),
+    ("typeinfo for nodehammer::cli::detail::CommandFailure", "leak"),
+    ("nodehammer::cli::detail::registerCmdConvert(CLI::App&)", "leak"),
     ("nodehammer::detail::zstd_io::compress(std::span<std::byte const>)", "leak"),
     ("typeinfo for nodehammer::ir::semantic::Scene", "leak"),
     # A namespace nobody has written yet: rule 1 cannot know it, rule 3 must.
@@ -280,20 +346,37 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
 
 def self_test(source_dir: Path) -> int:
     internal = internal_namespaces(source_dir)
+    public_namespaces = frozenset(declared_namespaces(source_dir / "include"))
     if not internal:
         print(f"error: no internal namespaces harvested from {source_dir}/src", file=sys.stderr)
         return 2
 
     failures = 0
+    # Through `classify`, not `bucket` directly: routing the cases the same way
+    # the real run routes them is what makes this a test of the check rather
+    # than a test of one function inside it.
+    verdicts, _, leaked = classify([s for s, _ in SELF_TEST_CASES], internal,
+                                   public_namespaces)
+    got_public = set(verdicts)
+    got_leak = {s for s, _ in leaked}
     for symbol, expected in SELF_TEST_CASES:
-        got, why = bucket(symbol, internal)
+        if expected == "public":
+            got = "public" if symbol in got_public else ("leak" if symbol in got_leak
+                                                         else "tolerated")
+        elif expected == "leak":
+            got = "leak" if symbol in got_leak else ("public" if symbol in got_public
+                                                     else "tolerated")
+        else:
+            got = ("public" if symbol in got_public
+                   else "leak" if symbol in got_leak else "tolerated")
         if got != expected:
             failures += 1
-            print(f"FAIL: expected {symbol!r} to be {expected}, got {got} ({why})",
+            print(f"FAIL: expected {symbol!r} to be {expected}, got {got}",
                   file=sys.stderr)
 
     print(f"self-test: {len(SELF_TEST_CASES) - failures}/{len(SELF_TEST_CASES)} cases pass "
-          f"against {len(internal)} harvested namespaces")
+          f"against {len(internal)} harvested namespaces, "
+          f"{len(public_namespaces)} declared public")
     return 1 if failures else 0
 
 
@@ -325,6 +408,7 @@ def main() -> int:
         return 2
 
     internal = internal_namespaces(args.source_dir)
+    public_namespaces = frozenset(declared_namespaces(args.source_dir / "include"))
     if not internal:
         print(
             f"error: found no internal namespaces under {args.source_dir}/src — "
@@ -334,18 +418,7 @@ def main() -> int:
         return 2
 
     symbols = defined_dynamic_symbols(args.library)
-
-    public: list[str] = []
-    tolerated: dict[str, int] = {}
-    leaks: list[tuple[str, str]] = []
-    for symbol in symbols:
-        kind, why = bucket(symbol, internal)
-        if kind == "public":
-            public.append(symbol)
-        elif kind == "tolerated":
-            tolerated[why or "?"] = tolerated.get(why or "?", 0) + 1
-        else:
-            leaks.append((symbol, why or "?"))
+    public, tolerated, leaks = classify(symbols, internal, public_namespaces)
 
     print(f"{args.library.name}: {len(symbols)} exported symbols, "
           f"{len(internal)} internal namespaces harvested from src/")

@@ -29,6 +29,7 @@
 //   NH0600–NH0699  export
 //   NH0700–NH0799  compute worker (web)
 //   NH0800–NH0899  public API boundary
+//   NH0900–NH0999  CLI usage
 
 namespace nodehammer::codes {
 
@@ -123,5 +124,20 @@ inline constexpr std::string_view kFatalComputeWorker = "NH0700";
 // is left unassigned rather than reused, since a code that meant something else
 // once is worse than a gap.
 inline constexpr std::string_view kFatalApiInvalidHandle = "NH0800";
+
+// ── CLI usage ─────────────────────────────────────────────────────────────────
+// Raised by src/cli/ only, for the failures that belong to the *invocation*
+// rather than to the pipeline: a combination of options that cannot be honoured,
+// or a path the user typed that is not there.
+//
+// They exist because the CLI stopped calling `std::exit`. Every one of these
+// used to be a bare message on stderr followed by termination, which inside a
+// library is the caller's process ending mid-call — so each became a thrown
+// `Error`, and an `Error` needs a code. Deliberately three rather than one per
+// site: what a caller could branch on is which *kind* of invocation failed, not
+// which line noticed.
+inline constexpr std::string_view kFatalCliUsage = "NH0900";
+inline constexpr std::string_view kFatalCliPathNotFound = "NH0901";
+inline constexpr std::string_view kFatalCliFileOpen = "NH0902";
 
 } // namespace nodehammer::codes

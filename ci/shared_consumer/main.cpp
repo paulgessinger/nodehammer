@@ -22,11 +22,13 @@
 // down to packaging or to the API depending on whether the other went with it.
 
 #include <nodehammer/build.hpp>
+#include <nodehammer/cli.hpp>
 #include <nodehammer/config.hpp>
 #include <nodehammer/render_scene.hpp>
 #include <nodehammer/semantic_scene.hpp>
 #include <nodehammer/version.hpp>
 
+#include <array>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
@@ -292,6 +294,26 @@ int main() {
         std::cerr << "Error did not carry its observations across the boundary\n";
         return 1;
     }
+
+    // The command line, from outside the build tree. tests/public/ asks whether
+    // `cli::run` is exported; this asks the neighbouring question -- whether an
+    // installed consumer can reach it with no include paths but the prefix's
+    // own, and whether it still refuses to end the process it is called from.
+    const std::string_view versionArg{"--version"};
+    const std::span<const std::string_view> versionArgs{&versionArg, 1};
+    if (nodehammer::cli::run(versionArgs) != 0) {
+        std::cerr << "cli::run(--version) did not succeed\n";
+        return 1;
+    }
+
+    const std::array<std::string_view, 5> failingArgs{"convert", "--input", "no-such-file.gdml",
+                                                      "--output", "out.glb"};
+    if (nodehammer::cli::run(failingArgs) == 0) {
+        std::cerr << "a failing command reported success\n";
+        return 1;
+    }
+    // Reaching this line is the assertion: an installed libnodehammer that
+    // called std::exit would have ended the process two statements ago.
 
     std::cout << "nodehammer " << linked << ": " << rendered.scene.nodeCount() << " nodes, "
               << rendered.scene.triangleCount() << " triangles" << std::endl;

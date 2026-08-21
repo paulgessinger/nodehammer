@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <config/config_loader.hpp>
@@ -88,7 +89,9 @@ struct Strictness {
 
 } // namespace
 
-void registerCmdConvert(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdConvert(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand("convert", "Convert a geometry file to a render format");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file")->required();
@@ -115,7 +118,7 @@ void registerCmdConvert(CLI::App &app) {
             ->needs(angleCutOpt);
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("convert", [&] {
+        runOrReport("convert", [&] {
             std::string outputFmt;
             std::vector<std::string> outputPaths;
             outputOpt->results(outputPaths);
@@ -144,7 +147,7 @@ void registerCmdConvert(CLI::App &app) {
 
             // ── Import ─────────────────────────────────────────────────────────────
             nodehammer::detail::Timer importTimer;
-            auto [importResult, importFmt] = nodehammer::cli::importFrom(inputOpt, fmtInOpt);
+            auto [importResult, importFmt] = importFrom(inputOpt, fmtInOpt);
             timings.record("import", importTimer.elapsed());
             printDiags(importResult.diags);
             demandClean(importResult.diags, "import");
@@ -213,9 +216,13 @@ void registerCmdConvert(CLI::App &app) {
             for (const auto &outputPath : outputPaths) {
                 const auto *exp = expRegistry.resolve(outputPath, outputFmt);
                 if (!exp) {
-                    std::println(stderr, "[error] {} cannot determine output format for '{}'",
-                                 nodehammer::codes::kFatalExportWriteFailed, outputPath);
-                    std::exit(1);
+                    // Was a hand-rolled `[error] NH0600 ...` line followed by
+                    // `exit`, which is the shape `printDiag` exists to produce —
+                    // and the code it named was already the right one.
+                    throw nodehammer::Error{
+                        nodehammer::codes::kFatalExportWriteFailed,
+                        std::format("cannot determine output format for '{}'", outputPath),
+                        outputPath};
                 }
 
                 const auto ecfg =
@@ -253,3 +260,5 @@ void registerCmdConvert(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

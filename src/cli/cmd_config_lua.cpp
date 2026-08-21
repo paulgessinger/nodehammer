@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <config/config_validator.hpp>
@@ -12,7 +13,9 @@
 #include <sstream>
 #include <string>
 
-void registerCmdConfigLua(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdConfigLua(CLI::App &app, const RunOptions &) {
     auto *sub = app.add_subcommand(
         "config-lua", "Evaluate a Lua config script and emit flattened TOML. Output is "
                       "round-trippable through ConfigLoader.");
@@ -24,14 +27,15 @@ void registerCmdConfigLua(CLI::App &app) {
                   "Skip ConfigValidator after evaluation (validation is on by default)");
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("config-lua", [&] {
+        runOrReport("config-lua", [&] {
             std::string configPath;
             configOpt->results(configPath);
 
             std::ifstream in{configPath, std::ios::binary};
             if (!in) {
-                std::println(stderr, "config-lua: could not open '{}' for reading", configPath);
-                std::exit(1);
+                throw nodehammer::Error{nodehammer::codes::kFatalCliFileOpen,
+                                        std::format("could not open '{}' for reading", configPath),
+                                        configPath};
             }
             std::ostringstream buf;
             buf << in.rdbuf();
@@ -46,19 +50,11 @@ void registerCmdConfigLua(CLI::App &app) {
 
             auto result = nodehammer::lua::evalLuaConfig(
                 buf.str(), rootKey, nodehammer::config::ConfigLoader::filesystemFetcher());
-            nodehammer::cli::printDiags(result.diags);
-            if (result.diags.hasErrors()) {
-                std::println(stderr, "config-lua: evaluation failed");
-                std::exit(1);
-            }
+            reportOrThrow(result.diags, configPath);
 
             if (*validate) {
                 auto validationDiags = nodehammer::config::ConfigValidator::validate(result.config);
-                nodehammer::cli::printDiags(validationDiags);
-                if (validationDiags.hasErrors()) {
-                    std::println(stderr, "config-lua: validation failed");
-                    std::exit(1);
-                }
+                reportOrThrow(validationDiags, configPath);
             }
 
             const std::string toml = nodehammer::config::configToToml(result.config);
@@ -68,8 +64,9 @@ void registerCmdConfigLua(CLI::App &app) {
                 outOpt->results(outPath);
                 std::ofstream out{outPath};
                 if (!out) {
-                    std::println(stderr, "config-lua: could not open '{}' for writing", outPath);
-                    std::exit(1);
+                    throw nodehammer::Error{nodehammer::codes::kFatalCliFileOpen,
+                                            std::format("could not open '{}' for writing", outPath),
+                                            outPath};
                 }
                 out << toml;
                 std::println(stderr, "config-lua: wrote {} ({} bytes)", outPath, toml.size());
@@ -79,3 +76,5 @@ void registerCmdConfigLua(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

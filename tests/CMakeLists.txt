@@ -46,6 +46,56 @@ if(NOT EMSCRIPTEN)
     )
 endif()
 
+# ── The command line ──────────────────────────────────────────────────────────
+#
+# `cli::run` in process, which is the only way these cases could exist: while
+# every command ended in `std::exit` a failing one took the test binary with it,
+# so there was nothing to assert afterwards and consequently no CLI tests at all.
+#
+# Linked here rather than as a target of its own because the suite it belongs to
+# is this one -- the cases are about behaviour, not about linkage. The *linkage*
+# question (is `cli::run` reachable through the installed shared library?) is
+# tests/public/'s, and is asked there.
+#
+# No link line of its own: the command sources are part of the core now, so
+# nodehammer_lib carries them like everything else this binary tests.
+#
+# Native only, and not for want of trying. This is the first binary that ever
+# links the CLI under Emscripten: the wasm build has the viewer on, so it emits
+# the runtime bundles and the compute worker and never the headless `nodehammer`
+# exe, which is the only wasm target that would otherwise pull these objects in.
+# Linking them makes the module crash in `__funcs_on_exit` with "function
+# signature mismatch" *after* every test has passed -- an atexit handler
+# registered by something these TUs drag in is called with a signature the
+# indirect-call table disagrees about.
+#
+# Excluded rather than worked around, and the distinction matters: filtering the
+# `[cli]` cases out at runtime does not help, because the crash is about what is
+# *linked*, not what runs. Nothing shipped is affected -- no wasm artifact
+# contains the CLI -- so this is a latent defect that this suite would be the
+# first to meet -- see issue #76.
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_tests PRIVATE cli/test_cli_run.cpp)
+endif()
+
+# ── A bare invocation, over the built executable ──────────────────────────────
+#
+# The assertion neither in-process suite can make. `cli::run({})` has always
+# printed the help, so tests/cli/ cannot see the difference; what changed is the
+# *executable*, which used to turn no arguments into `viewer` before calling in.
+# Only running the real binary distinguishes those, and only in a build where the
+# viewer exists to be defaulted to -- which is exactly the configuration where
+# the old behaviour lived.
+#
+# It asserts the usage line rather than merely a zero exit, because opening a
+# window would also exit 0 eventually; the help text is the part that a viewer
+# launch would not produce.
+if(NODEHAMMER_WITH_VIEWER AND NOT EMSCRIPTEN)
+    add_test(NAME cli_bare_invocation_prints_help COMMAND $<TARGET_FILE:nodehammer>)
+    set_tests_properties(cli_bare_invocation_prints_help PROPERTIES
+        PASS_REGULAR_EXPRESSION "nodehammer \\[OPTIONS\\]")
+endif()
+
 # ZipWorkingSet and the project manifest are unconditional in the core and
 # cross-platform, so these run everywhere.
 #
@@ -112,10 +162,16 @@ nh_set_compiler_options(nodehammer_tests)
 nh_apply_emscripten_exe_options(nodehammer_tests)
 
 # Tiny benchmark harness — `nodehammer_bench <cfg> <in> <out>`. Lives next to
-# the test binary because it shares the same dependency surface (linked
-# against nodehammer_lib only, no CLI11) and the same build/install
-# expectations (NODERAWFS under emscripten so Node can read fixtures from
-# the host filesystem). Driven by ci/bench.sh.
+# the test binary because it shares the same dependency surface and the same
+# build/install expectations (NODERAWFS under emscripten so Node can read
+# fixtures from the host filesystem). Driven by ci/bench.sh.
+#
+# It links nodehammer_lib, which now *contains* the CLI and therefore CLI11 —
+# and still pulls in neither, because a static archive is linked per object and
+# this binary names no registrar. That used to be guaranteed by the source list;
+# it is now guaranteed by the linker, which is weaker only in the sense that it
+# is invisible. Hence this note rather than the previous "no CLI11", which read
+# as a property of the dependency and was one.
 add_executable(nodehammer_bench bench_main.cpp)
 target_link_libraries(nodehammer_bench PRIVATE nodehammer_lib)
 nh_set_compiler_options(nodehammer_bench)
@@ -207,6 +263,7 @@ endif()
 if(NODEHAMMER_BUILD_SHARED)
     add_executable(nodehammer_public_tests
         public/test_public_build.cpp
+        public/test_public_cli.cpp
         public/test_public_config.cpp
         public/test_public_diagnostics.cpp
         public/test_public_render_scene.cpp

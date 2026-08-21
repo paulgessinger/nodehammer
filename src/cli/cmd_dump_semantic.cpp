@@ -1,5 +1,6 @@
 #include "cli_common.hpp"
 #include "pager.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <cmath>
@@ -194,7 +195,9 @@ void printRichTree(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
 
 } // namespace
 
-void registerCmdDumpSemantic(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdDumpSemantic(CLI::App &app, const RunOptions &options) {
     auto *sub = app.add_subcommand("dump-semantic", "Dump the semantic IR of a geometry");
 
     auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");
@@ -217,29 +220,29 @@ void registerCmdDumpSemantic(CLI::App &app) {
         sub->add_flag("--size-report", "Print estimated FlatBuffer payload breakdown to stderr");
 
     sub->callback([=] {
-        nodehammer::cli::runOrExit("dump-semantic", [&] {
+        runOrReport("dump-semantic", [&] {
             // ── Load config (optional) ─────────────────────────────────────────────
             nodehammer::config::NHConfig cfg;
             if (*configOpt) {
                 std::string cfgPath;
                 configOpt->results(cfgPath);
                 auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
-                nodehammer::cli::printDiags(loaded.diags);
+                printDiags(loaded.diags);
                 cfg = std::move(loaded.config);
                 auto validDiags = nodehammer::config::ConfigValidator::validate(cfg);
-                nodehammer::cli::printDiags(validDiags);
+                printDiags(validDiags);
                 nodehammer::diagnostics::throwIfErrors(validDiags, cfgPath);
             }
 
             // ── Import ─────────────────────────────────────────────────────────────
-            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
-            nodehammer::cli::printDiags(result.diags);
+            auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            printDiags(result.diags);
 
             // ── Select ─────────────────────────────────────────────────────────────
             if (!cfg.selection.empty()) {
                 nodehammer::selection::SelectionEngine sel{cfg.selection, cfg.hoistOrphans};
                 auto selDiags = sel.prune(result.scene);
-                nodehammer::cli::printDiags(selDiags);
+                printDiags(selDiags);
             }
 
             // ── Deduplicate shapes ─────────────────────────────────────────────────
@@ -266,7 +269,7 @@ void registerCmdDumpSemantic(CLI::App &app) {
                 std::string colorStr;
                 colorOpt->results(colorStr);
 
-                nodehammer::cli::Pager pager;
+                Pager pager{options.pager};
                 nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
                 printRichTree(result.scene, maxDepth, filter, con);
             } else {
@@ -320,3 +323,5 @@ void registerCmdDumpSemantic(CLI::App &app) {
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

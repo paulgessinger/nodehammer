@@ -1,5 +1,6 @@
 #include "cli_common.hpp"
 #include "pager.hpp"
+#include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <detail/markup.hpp>
@@ -249,7 +250,9 @@ void printTags(const nodehammer::ir::semantic::Scene &scene,
 
 } // namespace
 
-void registerCmdInspect(CLI::App &app) {
+namespace nodehammer::cli::detail {
+
+void registerCmdInspect(CLI::App &app, const RunOptions &options) {
     auto *sub = app.add_subcommand("inspect", "Inspect a geometry file")->require_subcommand(1);
 
     // Shared options on the parent.
@@ -263,9 +266,9 @@ void registerCmdInspect(CLI::App &app) {
     // ── summary ──────────────────────────────────────────────────────────────
     auto *sumSub = sub->add_subcommand("summary", "Print a high-level summary");
     sumSub->callback([=] {
-        nodehammer::cli::runOrExit("inspect summary", [&] {
-            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
-            nodehammer::cli::Pager pager;
+        runOrReport("inspect summary", [&] {
+            auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            Pager pager{options.pager};
             printSummary(result, fmt);
         });
     });
@@ -278,8 +281,8 @@ void registerCmdInspect(CLI::App &app) {
         treeSub->add_option("--filter,-f", "Path glob filter (only show matching nodes)");
 
     treeSub->callback([=] {
-        nodehammer::cli::runOrExit("inspect tree", [&] {
-            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
+        runOrReport("inspect tree", [&] {
+            auto [result, fmt] = importFrom(inputOpt, formatOpt);
 
             int maxDepth = -1;
             depthOpt->results(maxDepth);
@@ -291,7 +294,7 @@ void registerCmdInspect(CLI::App &app) {
             std::string colorStr;
             colorOpt->results(colorStr);
 
-            nodehammer::cli::Pager pager;
+            Pager pager{options.pager};
             nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
             printTree(result.scene, maxDepth, filter, con);
         });
@@ -300,15 +303,17 @@ void registerCmdInspect(CLI::App &app) {
     // ── tags ────────────────────────────────────���───────────────────────────���
     auto *tagsSub = sub->add_subcommand("tags", "List all unique tags and their values");
     tagsSub->callback([=] {
-        nodehammer::cli::runOrExit("inspect tags", [&] {
-            auto [result, fmt] = nodehammer::cli::importFrom(inputOpt, formatOpt);
+        runOrReport("inspect tags", [&] {
+            auto [result, fmt] = importFrom(inputOpt, formatOpt);
 
             std::string colorStr;
             colorOpt->results(colorStr);
 
-            nodehammer::cli::Pager pager;
+            Pager pager{options.pager};
             nodehammer::detail::Console con{pager.effectiveColorMode(parseColorMode(colorStr))};
             printTags(result.scene, con);
         });
     });
 }
+
+} // namespace nodehammer::cli::detail

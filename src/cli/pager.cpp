@@ -83,8 +83,8 @@ PagerChoice choosePager() {
 
 } // namespace
 
-Pager::Pager() {
-    if (!nodehammer::detail::Console::isTTY()) {
+Pager::Pager(bool enabled) {
+    if (!enabled || !nodehammer::detail::Console::isTTY()) {
         return;
     }
 
@@ -124,9 +124,11 @@ Pager::~Pager() {
 
 bool Pager::isActive() const { return active_; }
 
-detail::ColorMode Pager::effectiveColorMode(detail::ColorMode requested) const {
-    if (active_ && requested == detail::ColorMode::Auto) {
-        return pagerSupportsAnsi_ ? detail::ColorMode::Always : detail::ColorMode::Never;
+nodehammer::detail::ColorMode
+Pager::effectiveColorMode(nodehammer::detail::ColorMode requested) const {
+    if (active_ && requested == nodehammer::detail::ColorMode::Auto) {
+        return pagerSupportsAnsi_ ? nodehammer::detail::ColorMode::Always
+                                  : nodehammer::detail::ColorMode::Never;
     }
     return requested;
 }
