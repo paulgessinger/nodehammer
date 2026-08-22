@@ -129,14 +129,34 @@ if(NODEHAMMER_WITH_VIEWER AND NOT EMSCRIPTEN)
         set_tests_properties(cli_viewer_${name}_fails PROPERTIES WILL_FAIL TRUE)
     endfunction()
 
-    nh_add_viewer_usage_test(partial_camera NH0900 viewer --camera-distance 5)
-    nh_add_viewer_usage_test(screenshot_without_input NH0900
-                             viewer --screenshot shot.png)
-    nh_add_viewer_usage_test(bench_without_input NH0900 viewer --bench bench.json)
+    nh_add_viewer_usage_test(partial_camera NH0900 viewer open --camera-distance 5)
+    nh_add_viewer_usage_test(shot_without_input NH0900 viewer shot -o shot.png)
+    nh_add_viewer_usage_test(bench_without_input NH0900 viewer bench -o bench.json)
     nh_add_viewer_usage_test(missing_project_path NH0901
-                             viewer no-such-directory-anywhere)
+                             viewer no-such-directory-anywhere open)
     nh_add_viewer_usage_test(missing_input NH0901
-                             viewer --input no-such-file.gdml)
+                             viewer --input no-such-file.gdml open)
+
+    # The boundary the split exists to enforce. A window option under `serve`
+    # used to be caught by `refuseNativeOnlyOptions`, a hand-maintained
+    # allowlist inside the command; now `serve` simply never declares one, so
+    # CLI11 refuses it and the list cannot fall out of step with reality.
+    # `--screenshot` was the case that motivated the check, because it would
+    # otherwise have looked like it worked.
+    add_test(NAME cli_viewer_serve_refuses_window_options
+             COMMAND $<TARGET_FILE:nodehammer> viewer serve --width 100)
+    set_tests_properties(cli_viewer_serve_refuses_window_options PROPERTIES
+        WILL_FAIL TRUE)
+
+    # A bare `viewer` still opens a window: a .desktop `Exec=` or an installer
+    # shortcut invokes exactly that (#74). It cannot be run headless, so what is
+    # asserted is that the parser accepts it and reaches the window rather than
+    # answering "a subcommand is required" -- which is what `require_subcommand(1)`
+    # would have done.
+    add_test(NAME cli_viewer_bare_is_not_a_usage_error
+             COMMAND $<TARGET_FILE:nodehammer> viewer no-such-directory-anywhere)
+    set_tests_properties(cli_viewer_bare_is_not_a_usage_error PROPERTIES
+        PASS_REGULAR_EXPRESSION "NH0901")
 
     # `--help` explicitly, alongside the bare invocation above. They reach the
     # text by different routes -- `run` prints it directly when there are no

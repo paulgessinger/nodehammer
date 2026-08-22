@@ -38,9 +38,7 @@ class TempDir {
     TempDir(const TempDir &) = delete;
     TempDir &operator=(const TempDir &) = delete;
 
-    [[nodiscard]] std::string at(std::string_view name) const {
-        return (path_ / name).string();
-    }
+    [[nodiscard]] std::string at(std::string_view name) const { return (path_ / name).string(); }
 
   private:
     fs::path path_;
@@ -55,8 +53,7 @@ TEST_CASE("convert stops at the semantic scene when that is all that was asked f
     TempDir dir;
     const auto target = dir.at("scene.nhb");
 
-    const auto outcome =
-        nhtest::runCaptured({"convert", "--synthetic-box", "--output", target});
+    const auto outcome = nhtest::runCaptured({"convert", "--synthetic-box", "--output", target});
 
     INFO("stderr was: " << outcome.err);
     REQUIRE(outcome.code == 0);
@@ -70,8 +67,7 @@ TEST_CASE("convert tessellates when a render output asks it to", "[cli][convert]
     TempDir dir;
     const auto target = dir.at("scene.nhr");
 
-    const auto outcome =
-        nhtest::runCaptured({"convert", "--synthetic-box", "--output", target});
+    const auto outcome = nhtest::runCaptured({"convert", "--synthetic-box", "--output", target});
 
     INFO("stderr was: " << outcome.err);
     REQUIRE(outcome.code == 0);
@@ -111,8 +107,8 @@ TEST_CASE(".json means the shallower of the two scenes", "[cli][convert]") {
 
     SECTION("by name: the render scene, which tessellates") {
         const auto target = dir.at("render.json");
-        const auto outcome = nhtest::runCaptured({"convert", "--synthetic-box", "--output-format",
-                                                  "render-json", "--output", target});
+        const auto outcome = nhtest::runCaptured(
+            {"convert", "--synthetic-box", "--output-format", "render-json", "--output", target});
         INFO("stderr was: " << outcome.err);
         REQUIRE(outcome.code == 0);
         CHECK(outcome.out.find("Triangles") != std::string::npos);

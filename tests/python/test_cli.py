@@ -188,7 +188,7 @@ def test_a_failing_command_gives_the_shell_a_nonzero_status():
 
 # ── the web runtime, and the rung this package fills ─────────────────────────
 #
-# `viewer --web` serves a directory of Emscripten output that no native build
+# `viewer serve` serves a directory of Emscripten output that no native build
 # produces, so the wheel gets it from a sibling distribution, `nodehammer-web`.
 # C++ cannot find that directory on its own: under a wheel the running
 # executable is the interpreter, and in a virtualenv the platform call behind
@@ -222,7 +222,7 @@ def test_the_runtime_directory_reaches_the_library(monkeypatch, tmp_path, capfd)
     monkeypatch.setattr(nh.cli, "_web_runtime_dir", lambda: str(pretend))
     monkeypatch.delenv("NODEHAMMER_WEB_ASSETS", raising=False)
 
-    code = nh.cli.run(["viewer", "--web", "--no-browser"])
+    code = nh.cli.run(["viewer", "serve", "--no-browser"])
 
     assert code != 0
     err = capfd.readouterr().err
@@ -234,13 +234,13 @@ def test_the_runtime_directory_reaches_the_library(monkeypatch, tmp_path, capfd)
 
 def test_the_failure_names_the_package_that_supplies_a_runtime(monkeypatch, capfd):
     # The message a person actually hits: `pip install nodehammer`, no
-    # `nodehammer-web`, `nodehammer viewer --web`. Naming the package is the
+    # `nodehammer-web`, `nodehammer viewer serve`. Naming the package is the
     # whole remedy, and it is the one thing the ladder's explanation cannot
     # derive from what it found -- it has to say it.
     monkeypatch.setattr(nh.cli, "_web_runtime_dir", lambda: "")
     monkeypatch.delenv("NODEHAMMER_WEB_ASSETS", raising=False)
 
-    code = nh.cli.run(["viewer", "--web", "--no-browser"])
+    code = nh.cli.run(["viewer", "serve", "--no-browser"])
 
     assert code != 0
     assert "nodehammer-web" in capfd.readouterr().err

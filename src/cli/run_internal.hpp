@@ -103,19 +103,20 @@ void registerCmdProject(CLI::App &app, const RunOptions &options);
 /// Declare the options both modes take.
 void addViewerCommonOptions(CLI::App &sub);
 
-/// Declare `--web` and the options that need it.
-void addViewerWebOptions(CLI::App &sub);
+/// Declare the options `viewer serve` takes.
+void addViewerServeOptions(CLI::App &sub);
 
-/// Whether `--web` was given on an already-parsed subcommand.
-[[nodiscard]] bool viewerWebRequested(const CLI::App &sub);
-
-/// Stage a root, serve it, open a browser, and wait. Reads its inputs from the
-/// parsed subcommand, which is what lets the native half call it too.
+/// Stage a root, serve it, open a browser, and wait.
+///
+/// Takes both Apps because the options are split across them: the shared ones
+/// (`path`, `--config`, `--input`, `--title`) live on `viewer`, the server's own
+/// on `serve`. Reading them from the parser rather than from a struct is what
+/// lets the native half register modes this half declared.
 ///
 /// `options` rides along for `webAssets`: the runtime's location is a property
 /// of the front door rather than of the command line, so it arrives with the
 /// other front-door properties instead of through an option nobody typed.
-void runViewerWeb(CLI::App &sub, const RunOptions &options);
+void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options);
 
 /// Registers `viewer` with the shared and web options, and a callback that
 /// serves or explains. The native half replaces that callback.

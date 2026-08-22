@@ -151,31 +151,15 @@ std::string optionText(const CLI::App &sub, const char *name, std::string fallba
     return opt->count() > 0 ? opt->as<std::string>() : std::move(fallback);
 }
 
-/// Native-only options *reject* under --web rather than being ignored.
-/// `--screenshot` in particular would otherwise look like it had worked.
-void refuseNativeOnlyOptions(const CLI::App &sub) {
-    static constexpr std::string_view kWebSafe[] = {
-        "--web",   "--port", "--host", "--no-browser", "--web-assets",
-        "--title", "--help", "path",   "--config",     "--input"};
-    for (const CLI::Option *opt : sub.get_options()) {
-        if (opt->count() == 0 || opt->get_name().empty()) {
-            continue;
-        }
-        const bool shared = std::ranges::any_of(kWebSafe, [opt](std::string_view name) {
-            return opt->check_name(std::string{name}) || opt->get_name() == name;
-        });
-        if (!shared) {
-            throw CLI::ValidationError(opt->get_name(),
-                                       "is a native-viewer option and has no effect with --web");
-        }
-    }
-}
-
 } // namespace
 
 namespace nodehammer::cli::detail {
 
 void addViewerCommonOptions(CLI::App &sub) {
+    // On the parent, and read off it by whichever mode ran. That is the shape
+    // `inspect` already uses for `--input`/`--color`, so the two commands are
+    // typed the same way: shared options before the mode, the mode's own after.
+    //
     // Unbound on purpose: the values live in the parser, so the native half can
     // read the same options without this half handing it anything.
     sub.add_option("path", "Project to open: a .nhproj archive or a directory")->type_name("PATH");
@@ -184,25 +168,27 @@ void addViewerCommonOptions(CLI::App &sub) {
     sub.add_option("--title", "Window or browser-tab title");
 }
 
-void addViewerWebOptions(CLI::App &sub) {
-    auto *webOpt = sub.add_flag("--web", "Serve the wasm viewer and open it in a browser");
+void addViewerServeOptions(CLI::App &sub) {
+    // No `->needs(--web)` any more. These used to hang off a flag on a command
+    // that did two jobs; `serve` *is* the web mode, so they are simply its
+    // options -- and the window options are simply not here, which is what
+    // retired `refuseNativeOnlyOptions` and its hand-maintained allowlist. A
+    // native-only option under `serve` is now rejected by the parser, which
+    // knows nothing about this command and cannot fall out of step with it.
+
     // 0, not 8000: an ephemeral port cannot collide with `just wasm-serve` or
     // with a second copy of this command, and neither collision is interesting
     // enough to make the default worse.
-    sub.add_option("--port", "Port to serve on (0 picks a free one)")->needs(webOpt);
-    sub.add_option("--host", "Address to bind (default 127.0.0.1)")->needs(webOpt);
-    sub.add_flag("--no-browser", "Print the URL, open nothing")->needs(webOpt);
-    sub.add_option("--web-assets", "Directory holding the built wasm runtime")->needs(webOpt);
+    sub.add_option("--port", "Port to serve on (0 picks a free one)");
+    sub.add_option("--host", "Address to bind (default 127.0.0.1)");
+    sub.add_flag("--no-browser", "Print the URL, open nothing");
+    sub.add_option("--web-assets", "Directory holding the built wasm runtime");
 }
 
-bool viewerWebRequested(const CLI::App &sub) { return sub.count("--web") > 0; }
-
-void runViewerWeb(CLI::App &sub, const RunOptions &options) {
-    refuseNativeOnlyOptions(sub);
-
-    runOrReport("viewer", [&] {
+void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options) {
+    runOrReport("viewer serve", [&] {
         web::LadderInputs inputs{};
-        inputs.explicitDir = optionText(sub, "--web-assets");
+        inputs.explicitDir = optionText(serve, "--web-assets");
         inputs.embedderDir = options.webAssets;
 
         // Walked a second time only on the failure path, which is the one where
@@ -222,19 +208,19 @@ void runViewerWeb(CLI::App &sub, const RunOptions &options) {
         web::StageOptions stage{};
         stage.runtime = runtime.dir;
         stage.target = staging.path();
-        stage.title = optionText(sub, "--title");
-        stage.project = optionText(sub, "path");
-        stage.config = optionText(sub, "--config");
-        stage.geometry = optionText(sub, "--input");
+        stage.title = optionText(viewer, "--title");
+        stage.project = optionText(viewer, "path");
+        stage.config = optionText(viewer, "--config");
+        stage.geometry = optionText(viewer, "--input");
         const web::StagedRoot staged = web::stageRoot(stage);
 
-        const std::string host = optionText(sub, "--host", "127.0.0.1");
-        web::ServeOptions serve{};
-        serve.root = staged.dir;
-        serve.host = host;
-        serve.port = static_cast<unsigned short>(
-            sub.count("--port") > 0 ? sub.get_option("--port")->as<int>() : 0);
-        web::ServerHandle server = web::serve(serve);
+        const std::string host = optionText(serve, "--host", "127.0.0.1");
+        web::ServeOptions serveOptions{};
+        serveOptions.root = staged.dir;
+        serveOptions.host = host;
+        serveOptions.port = static_cast<unsigned short>(
+            serve.count("--port") > 0 ? serve.get_option("--port")->as<int>() : 0);
+        web::ServerHandle server = web::serve(serveOptions);
 
         if (host != "127.0.0.1" && host != "localhost") {
             std::println(stderr,
@@ -248,7 +234,7 @@ void runViewerWeb(CLI::App &sub, const RunOptions &options) {
                      runtime.version);
         std::println("serving {}", server.url());
 
-        if (sub.count("--no-browser") == 0 && !web::openInBrowser(server.url())) {
+        if (serve.count("--no-browser") == 0 && !web::openInBrowser(server.url())) {
             std::println(stderr, "could not open a browser; the URL above still works");
         }
         std::println("Ctrl-C to stop.");
@@ -273,30 +259,68 @@ void runViewerWeb(CLI::App &sub, const RunOptions &options) {
     });
 }
 
-void registerCmdViewer(CLI::App &app, const RunOptions &options) {
-    auto *sub = app.add_subcommand("viewer", "Open the interactive 3D viewer");
-    addViewerCommonOptions(*sub);
-    addViewerWebOptions(*sub);
+/// The message a build with no window has to give, wherever it is reached from.
+///
+/// This is the normal state inside a wheel, and on a headless machine it is the
+/// state the user is trying to get around -- so it names the mode that does work
+/// rather than failing as though the command were unknown.
+[[noreturn]] void refuseWithoutNativeViewer(std::string_view mode) {
+    throw nodehammer::Error{
+        nodehammer::codes::kFatalCliUsage,
+        std::format("this build has no native viewer, so `viewer {}` is unavailable; "
+                    "use `nodehammer viewer serve` to open the viewer in a browser",
+                    mode)};
+}
 
-    // Replaced wholesale by the native half where there is a window, which is
-    // what keeps the dispatch in one place per binary instead of a callback slot
-    // one half fills in for the other.
+void registerCmdViewer(CLI::App &app, const RunOptions &options) {
+    // (0, 1) rather than (1): a bare `nodehammer viewer` still opens a window,
+    // which is what a .desktop `Exec=` or an installer shortcut invokes (#74).
+    // The native half turns that into `open`; here it is the refusal below.
+    auto *sub =
+        app.add_subcommand("viewer", "Open the interactive 3D viewer")->require_subcommand(0, 1);
+    addViewerCommonOptions(*sub);
+
+    // ── serve ────────────────────────────────────────────────────────────────
     //
-    // `options` is the caller's object and outlives the parse (see the
-    // `Registrar` comment in run_internal.hpp), so capturing the pointer keeps
-    // this a reference to what the front door actually said rather than a copy
-    // taken at registration time.
-    sub->callback([sub, &options] {
-        if (!viewerWebRequested(*sub)) {
-            // The build has no window. Name the flag that does work rather than
-            // failing as though the command were unknown — this is the normal
-            // state inside a wheel, and on a headless machine it is the state
-            // the user is trying to get around.
-            throw nodehammer::Error{nodehammer::codes::kFatalCliUsage,
-                                    "this build has no native viewer; use `nodehammer viewer "
-                                    "--web` to open the viewer in a browser"};
+    // The only mode this half can run, and the only one that exists in a build
+    // without a window. It takes no `--web` flag because serving is possible no
+    // other way.
+    auto *serveSub = sub->add_subcommand("serve", "Serve the wasm viewer and open it in a browser");
+    addViewerServeOptions(*serveSub);
+    serveSub->callback([sub, serveSub, &options] { runViewerServe(*sub, *serveSub, options); });
+
+    // ── open / shot / bench ──────────────────────────────────────────────────
+    //
+    // Declared here and *filled in* by `cmd_viewer_native.cpp`, which replaces
+    // each callback and adds the options only a window has. Declaring them in
+    // this half is what lets a wheel answer `viewer open` with the message
+    // above instead of CLI11's "unexpected argument", and it is the same
+    // create-here/extend-there seam the command as a whole already used.
+    //
+    // A browser-driven `shot` would land in this half rather than the other --
+    // it needs the server and a headless browser, not a GPU -- and would
+    // replace this stub in place. Nothing about the shape has to change for it.
+    struct NativeMode {
+        const char *name;
+        const char *help;
+    };
+    static constexpr NativeMode kNativeModes[] = {
+        {"open", "Open the scene in a native window"},
+        {"shot", "Render one PNG and quit"},
+        {"bench", "Run the headless GPU benchmark and quit"},
+    };
+    for (const auto &mode : kNativeModes) {
+        auto *modeSub = sub->add_subcommand(mode.name, mode.help);
+        const char *name = mode.name;
+        modeSub->callback([name] { refuseWithoutNativeViewer(name); });
+    }
+
+    // Bare `viewer`, with no mode named. Replaced by the native half, which
+    // sends it to `open`.
+    sub->callback([sub] {
+        if (sub->get_subcommands().empty()) {
+            refuseWithoutNativeViewer("open");
         }
-        runViewerWeb(*sub, options);
     });
 }
 
