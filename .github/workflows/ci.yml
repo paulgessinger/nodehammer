@@ -326,6 +326,13 @@ jobs:
   wheels:
     name: wheel ${{ matrix.identifier }}
     runs-on: ${{ matrix.os }}
+    # cibuildwheel installs the wheel it just built *with* resolution, and the
+    # wheel now requires `nodehammer-web==X.Y.*`. Resolving that from an index
+    # would deadlock the release: on a minor bump nothing on PyPI satisfies the
+    # new minor yet, and the job that would upload it (publish-pypi) sits behind
+    # this one. So the runtime comes from the same run instead -- see the
+    # find-links below. The cost is that wheels no longer start at t=0.
+    needs: web-wheel
     strategy:
       fail-fast: false
       matrix:
@@ -408,10 +415,26 @@ jobs:
           key: ccache-wheel-${{ matrix.identifier }}
           save: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Download the web wheel the built wheel will require
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: nodehammer-web-wheel
+          path: dist-web
+
       - uses: pypa/cibuildwheel@1828c10ab37f080699c7b81cea34097c684a7074 # v4.2.0
         env:
           CIBW_ONLY: ${{ matrix.identifier }}
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.value }}
+          # find-links, not --no-index: the test environment still needs an
+          # index for `test-requires`. It only has to be *possible* to satisfy
+          # the pin without the sibling being published, which is what breaks
+          # the release deadlock. Which candidate wins is not load-bearing here
+          # -- `web-pair` is where the same-commit pair is pinned down, with
+          # --no-index. Linux runs in a container with the project at /project;
+          # macOS runs on the host, so the workspace path is the real one.
+          CIBW_TEST_ENVIRONMENT: >-
+            PIP_FIND_LINKS=${{ runner.os == 'Linux' && '/project/dist-web'
+            || format('{0}/dist-web', github.workspace) }}
 
       # The container builds as root, so everything it wrote through the /host
       # mount is owned by root on the runner and actions/cache cannot read it to
@@ -634,15 +657,25 @@ jobs:
           name: nodehammer-web-wheel
           path: dist
 
-      # NODEHAMMER_WEB_ASSETS cleared on purpose: it outranks the package, so
-      # leaving one set would test a different rung and pass anyway.
+      # Metadata first, because it is the cheap half and it names a failure the
+      # install cannot: two dists that are each individually correct and came
+      # from different commits. The generated pin cannot drift by being
+      # mistyped; a stale artifact in a re-run is what it cannot see.
+      - name: The two dists are a matched pair
+        shell: bash
+        run: uv run --no-project --with packaging scripts/check_wheel_pair.py dist
+
+      # Only `nodehammer` is named: pulling the runtime in is the dependency's
+      # job, and naming both would pass even if the generated pin had gone
+      # missing entirely. NODEHAMMER_WEB_ASSETS is cleared for the same kind of
+      # reason -- it outranks the package, so leaving one set would test a
+      # different rung.
       - name: Serve the viewer out of the installed pair
         shell: bash
         run: |
           set -euo pipefail
           uv venv --python 3.12 venv
-          VIRTUAL_ENV=venv uv pip install --quiet --no-index \
-              --find-links dist nodehammer nodehammer-web
+          VIRTUAL_ENV=venv uv pip install --quiet --no-index --find-links dist nodehammer
           env -u NODEHAMMER_WEB_ASSETS scripts/check_web_serve.py venv/bin/nodehammer
 
       # The other half of the contract, and the one a user hits first: without
@@ -654,7 +687,10 @@ jobs:
         run: |
           set -euo pipefail
           uv venv --python 3.12 venv-solo
-          VIRTUAL_ENV=venv-solo uv pip install --quiet --no-index \
+          # --no-deps: the runtime is a dependency now, so this is the only way
+          # to reach the state a deliberately headless install lives in --
+          # `pip install --no-deps nodehammer`, or an uninstall of the sibling.
+          VIRTUAL_ENV=venv-solo uv pip install --quiet --no-index --no-deps \
               --find-links dist nodehammer
           # Every other command still works: the runtime is one flag's
           # dependency, not the CLI's.

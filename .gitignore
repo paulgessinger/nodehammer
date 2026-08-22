@@ -21,6 +21,7 @@ CMakeUserPresets.json
 # Python: the venv the wheel workflow builds against, and wheel output.
 /.venv/
 /dist/
+/dist-web/
 *.egg-info/
 .idea
 

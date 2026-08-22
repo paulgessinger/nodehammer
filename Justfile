@@ -377,19 +377,25 @@ wheel-web src="build/emscripten/Release":
 # The only check that reaches the rung a wheel fills. `--web-assets` and
 # NODEHAMMER_WEB_ASSETS are cleared out of the way on purpose: both outrank the
 # package, so leaving either set would test the wrong rung and pass anyway.
+#
+# The pair check reads dist/, so it fails on a directory holding two versions of
+# either distribution -- which is the stale-artifact case it exists to catch, and
+# locally usually just means `rm -rf dist` first.
 
 # Install both wheels from local files and serve the viewer out of them
 wheel-web-test: wheel wheel-web
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{justfile_directory()}}"
+    uv run --no-project --with packaging "$root/scripts/check_wheel_pair.py" "$root/dist"
     venv=$(mktemp -d)/venv
     uv venv --python 3.12 "$venv"
     # --no-index: the pair under test is the one just built, never whatever an
-    # index happens to resolve. Both are named because the dependency between
-    # them is not declared yet.
+    # index happens to resolve. Only `nodehammer` is named -- pulling the runtime
+    # in is the dependency's job, and naming it here would pass even if the
+    # generated pin had gone missing.
     VIRTUAL_ENV="$venv" uv pip install --quiet --no-index \
-        --find-links "$root/dist" nodehammer nodehammer-web
+        --find-links "$root/dist" nodehammer
     env -u NODEHAMMER_WEB_ASSETS "$root/scripts/check_web_serve.py" "$venv/bin/nodehammer"
 
 # The Python counterpart of ci/shared_consumer: the build tree resolves
@@ -403,7 +409,14 @@ wheel-test: wheel
     root="{{justfile_directory()}}"
     venv=$(mktemp -d)/venv
     uv venv --python 3.12 "$venv"
-    VIRTUAL_ENV="$venv" uv pip install --quiet pytest tomli-w "$root"/dist/nodehammer-*.whl
+    VIRTUAL_ENV="$venv" uv pip install --quiet pytest tomli-w
+    # --no-deps, in its own command so the test tools above still resolve.
+    # `nodehammer` requires `nodehammer-web`, which is built by a separate
+    # Emscripten toolchain -- resolving it here would either reach an index for
+    # something this recipe is not testing, or fail on a machine with no emsdk.
+    # What this recipe is for is the platform wheel's own payload and its
+    # relative rpath; `just wheel-web-test` is the one that exercises the pair.
+    VIRTUAL_ENV="$venv" uv pip install --quiet --no-deps "$root"/dist/nodehammer-*.whl
     cd "$root" && "$venv/bin/python" -m pytest tests/python -q
 
 # Build the Linux wheels the way CI does, in a manylinux container. Needs Docker.
