@@ -78,7 +78,11 @@ endif()
 # mismatch" on the way out, after every test has passed. The fix is the CLI11
 # floor in cmake/Dependencies.cmake and recipes/cli11; this line is what would
 # notice it slipping, so it is a regression test and not merely a suite member.
-target_sources(nodehammer_tests PRIVATE cli/test_cli_run.cpp cli/test_cli_inspect_json.cpp)
+target_sources(nodehammer_tests PRIVATE
+    cli/test_cli_run.cpp
+    cli/test_cli_inspect_json.cpp
+    cli/test_cli_config.cpp
+)
 
 # ── A bare invocation, over the built executable ──────────────────────────────
 #

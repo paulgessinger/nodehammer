@@ -100,15 +100,15 @@ def test_args_default_to_sys_argv(monkeypatch, capfd):
         # library. The point of the sweep is less the individual codes than the
         # fact that a run of them in a row cannot end this process.
         (["convert", "--input", "no-such-file.gdml", "--output", "out.glb"], "NH0101"),
-        (["config-lua", "--config", "no-such-script.lua"], "NH0902"),
-        (["config-flatten", "--config", "no-such-config.toml"], "NH0100"),
+        (["config", "flatten", "--config", "no-such-script.lua"], "NH0902"),
+        (["config", "flatten", "--config", "no-such-config.toml"], "NH0100"),
         # `inspect` requires a nested subcommand of its own, so the sweep says
         # so -- a bare `inspect --input ...` fails for that reason instead and
         # would assert nothing about the import path.
         (["inspect", "--input", "no-such-file.gdml", "summary"], "NH0101"),
         (["dump-semantic", "--input", "no-such-file.gdml"], "NH0101"),
         (["dump-render", "--input", "no-such-file.gdml"], "NH0101"),
-        (["validate-config", "--config", "no-such-config.toml"], "NH0100"),
+        (["config", "validate", "--config", "no-such-config.toml"], "NH0100"),
     ],
 )
 def test_converted_exit_sites_report_and_return(args, code_in_output, capfd):
@@ -129,7 +129,7 @@ def test_a_diagnosis_is_printed_once_not_twice(capfd):
     # `throwIfErrors` puts the whole collected list on the exception and the
     # command's handler prints it, so an eager `printDiags` before the throw
     # said everything twice. `reportOrThrow` made the halves exclusive.
-    assert nh.cli.run(["config-flatten", "--config", "no-such-config.toml"]) != 0
+    assert nh.cli.run(["config", "flatten", "--config", "no-such-config.toml"]) != 0
 
     err = capfd.readouterr().err
     assert err.count("NH0100") <= 1 or err.count("no-such-config.toml") <= 2

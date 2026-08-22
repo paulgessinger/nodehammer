@@ -77,11 +77,9 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
 // line at fault.
 void registerCmdConvert(CLI::App &app, const RunOptions &options);
 void registerCmdInspect(CLI::App &app, const RunOptions &options);
-void registerCmdValidateConfig(CLI::App &app, const RunOptions &options);
-void registerCmdConfigFlatten(CLI::App &app, const RunOptions &options);
+void registerCmdConfig(CLI::App &app, const RunOptions &options);
 void registerCmdDumpSemantic(CLI::App &app, const RunOptions &options);
 void registerCmdDumpRender(CLI::App &app, const RunOptions &options);
-void registerCmdConfigLua(CLI::App &app, const RunOptions &options);
 
 // Native-only: packing mounts a `FilesystemProjectFs`, which the web build
 // does not have. Registered beside `viewer` for the same reason.

@@ -299,11 +299,9 @@ set(NH_CORE_SOURCES
     src/cli/pager.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
-    src/cli/cmd_validate_config.cpp
-    src/cli/cmd_config_flatten.cpp
+    src/cli/cmd_config.cpp
     src/cli/cmd_dump_semantic.cpp
     src/cli/cmd_dump_render.cpp
-    src/cli/cmd_config_lua.cpp
 )
 
 # ── Application sources ───────────────────────────────────────────────────────
