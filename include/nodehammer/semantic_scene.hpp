@@ -44,7 +44,7 @@ class SemanticScene {
     /// without the enclosing type (#41 §4).
     struct ReadOptions {
         /// Explicit input format — one of the names `formats()` reports, e.g.
-        /// "synthetic", "json", "flatbuffer", or "tgeo"/"dd4hep" where the
+        /// "synthetic", "json", "nhb", or "tgeo"/"dd4hep" where the
         /// backend is present. Empty means "infer from the path extension". A
         /// name this build does not have throws rather than failing to link: the
         /// format is a value, so nothing earlier could have known.
@@ -55,9 +55,10 @@ class SemanticScene {
         /// Explicit output format: "json" or "nhb". Empty means "infer from the
         /// path extension".
         ///
-        /// The write side spells the FlatBuffer format "nhb" where the read side
-        /// spells it "flatbuffer" — the two registries were named independently
-        /// and `formats()` reports both rather than picking a winner.
+        /// The same names the read side takes. The two registries were named
+        /// independently and disagreed for a while — the FlatBuffer format was
+        /// "nhb" to write and "flatbuffer" to read, so `formats()` listed both
+        /// and a caller had to know which direction it was facing.
         std::string format;
     };
 

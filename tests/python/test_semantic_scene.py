@@ -43,7 +43,7 @@ def test_formats_reports_what_this_build_can_read_and_write():
     # than merely minimal.
     assert "synthetic" in formats
     assert "json" in formats
-    assert "flatbuffer" in formats
+    assert "nhb" in formats
     assert "nhb" in formats  # the write side's name for it
 
 

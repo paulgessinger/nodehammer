@@ -40,7 +40,7 @@ TEST_CASE("SemanticScene::formats reports what this build can read and write",
     // than merely minimal.
     REQUIRE(nhtest::listed(formats, "synthetic"));
     REQUIRE(nhtest::listed(formats, "json"));
-    REQUIRE(nhtest::listed(formats, "flatbuffer"));
+    REQUIRE(nhtest::listed(formats, "nhb"));
     REQUIRE(nhtest::listed(formats, "nhb")); // the write side's name for it
 
     // A view over library-lifetime storage, not a container handed across the
@@ -127,8 +127,9 @@ TEST_CASE("SemanticScene::write honours an explicit format", "[public][semantic]
     const auto path = dir / "scene.bin";
     scene.write(path, nh::SemanticScene::WriteOptions{"nhb"});
     REQUIRE(std::filesystem::file_size(path) > 0);
-    REQUIRE(nh::SemanticScene::read(path, nh::SemanticScene::ReadOptions{"flatbuffer"})
-                .scene.nodeCount() == scene.nodeCount());
+    REQUIRE(
+        nh::SemanticScene::read(path, nh::SemanticScene::ReadOptions{"nhb"}).scene.nodeCount() ==
+        scene.nodeCount());
 }
 
 TEST_CASE("SemanticScene::write rejects a format this build does not have", "[public][semantic]") {

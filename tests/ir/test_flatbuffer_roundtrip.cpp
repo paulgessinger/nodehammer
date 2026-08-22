@@ -427,7 +427,7 @@ TEST_CASE("FlatBuffer importer resolves compound .nhb.zst extension", "[ir][flat
     const auto *imp = reg.resolve("anything.nhb.zst", "");
 
     REQUIRE(imp != nullptr);
-    REQUIRE(imp->formatName() == "flatbuffer");
+    REQUIRE(imp->formatName() == "nhb");
 }
 
 TEST_CASE("FlatBufferImporter::importFromBytes accepts raw .nhb bytes", "[ir][flatbuffer][bytes]") {
