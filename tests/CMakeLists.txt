@@ -164,6 +164,10 @@ if(NOT EMSCRIPTEN)
         viewer/test_archive_project_fs.cpp
         viewer/test_archive_export.cpp
     )
+
+    # Packing mounts a FilesystemProjectFs, so it is native-only for the same
+    # reason src/project/pack.cpp is.
+    target_sources(nodehammer_tests PRIVATE project/test_pack.cpp)
 endif()
 
 # WatchedFilesystemProjectFs keeps both gates: wtr.watcher is still a

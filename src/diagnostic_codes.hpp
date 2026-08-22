@@ -153,4 +153,11 @@ inline constexpr std::string_view kFatalWebRuntimeSchema = "NH1001";
 inline constexpr std::string_view kFatalWebServeBind = "NH1002";
 inline constexpr std::string_view kFatalWebStage = "NH1003";
 
+// ── Project archives ──────────────────────────────────────────────────────────
+// Packing is its own failure domain, not the web's. It answers to `project
+// pack`, to the viewer's Save as archive, and to the archive `viewer --web`
+// builds on the fly -- three callers with nothing in common except that each
+// wants to know the archive could not be assembled, and why.
+inline constexpr std::string_view kFatalProjectPack = "NH1100";
+
 } // namespace nodehammer::codes

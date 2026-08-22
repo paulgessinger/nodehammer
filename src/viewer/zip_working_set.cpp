@@ -6,15 +6,40 @@
 
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 #include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace nodehammer::viewer {
 
 namespace {
+
+/// The instant that lands on 1980-01-01T00:00:00 *local* time.
+///
+/// `serialize()` pins entry mtimes so that identical content serializes to
+/// identical bytes, and 1980-01-01 is the earliest a DOS timestamp can hold. But
+/// miniz converts the `time_t` it is given through `localtime`, so pinning the
+/// obvious constant (315532800, midnight UTC) pins the *instant* and leaves the
+/// stored DOS field varying by timezone -- the same content packed in Zurich and
+/// in Tokyo produced different archives, which is exactly the property the
+/// pinning exists to remove.
+///
+/// `mktime` is the inverse of that conversion: it reads a broken-down time as
+/// local and returns the instant. Handing miniz *its* answer means the field
+/// miniz writes is the same everywhere, which is the half that ends up in the
+/// bytes.
+MZ_TIME_T zipEpoch() {
+    std::tm midnight1980{};
+    midnight1980.tm_year = 80; // 1900-based
+    midnight1980.tm_mon = 0;
+    midnight1980.tm_mday = 1;
+    midnight1980.tm_isdst = -1;
+    return std::mktime(&midnight1980);
+}
 
 /// Normalise a directory prefix to the "" (root) or "dir/subdir/" form used to
 /// match entry keys. Empty and "/" both mean root.
@@ -257,13 +282,40 @@ std::vector<std::byte> ZipWorkingSet::serialize() const {
         }
     }
 
-    // Then overrides (added or replacing an original).
+    // Then overrides (added or replacing an original), in key order.
+    //
+    // **Sorted, and stamped with a fixed time.** `overrides` is an
+    // `unordered_map`, so iterating it straight into the writer ordered the
+    // entries by hash bucket -- stable for one build of one library, and not a
+    // property anything may rely on. `mz_zip_writer_add_mem` additionally
+    // stamps `time(NULL)` into each local header. Together those made two
+    // serializations of identical content differ byte for byte, which is enough
+    // to break the one thing the bytes are hashed for: `publish` names the
+    // archive `project.<hash>.nhproj` so that republishing cache-busts and an
+    // unchanged publication keeps its URL. A hash that changes every run makes
+    // both halves of that false. `scripts/make_nhproj.py` pins the same two
+    // things for the same reason.
+    //
+    // 1980-01-01 is not an arbitrary sentinel: it is the earliest instant a DOS
+    // timestamp can represent, so it is the one value guaranteed to survive the
+    // conversion unchanged.
+    std::vector<const std::string *> names;
+    names.reserve(impl_->overrides.size());
     for (const auto &[name, buf] : impl_->overrides) {
-        const auto sp = buf.span();
-        if (!mz_zip_writer_add_mem(&writer, name.c_str(), sp.data(), sp.size(),
-                                   static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION))) {
+        (void)buf;
+        names.push_back(&name);
+    }
+    std::sort(names.begin(), names.end(),
+              [](const std::string *a, const std::string *b) { return *a < *b; });
+
+    MZ_TIME_T pinned = zipEpoch();
+    for (const auto *name : names) {
+        const auto sp = impl_->overrides.at(*name).span();
+        if (!mz_zip_writer_add_mem_ex_v2(&writer, name->c_str(), sp.data(), sp.size(), nullptr, 0,
+                                         static_cast<mz_uint>(MZ_DEFAULT_COMPRESSION), 0, 0,
+                                         &pinned, nullptr, 0, nullptr, 0)) {
             mz_zip_writer_end(&writer);
-            throw std::runtime_error("ZipWorkingSet: failed to write ZIP entry '" + name + "'");
+            throw std::runtime_error("ZipWorkingSet: failed to write ZIP entry '" + *name + "'");
         }
     }
 

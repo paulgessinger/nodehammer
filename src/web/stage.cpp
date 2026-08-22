@@ -1,9 +1,7 @@
 #include "web/stage.hpp"
 
 #include "diagnostic_codes.hpp"
-#include "viewer/archive_export.hpp"
-#include "viewer/filesystem_project_fs.hpp"
-#include "viewer/zip_working_set.hpp"
+#include "project/pack.hpp"
 
 #include <nodehammer/diagnostics.hpp>
 
@@ -16,28 +14,6 @@ namespace nodehammer::web {
 namespace {
 
 constexpr std::string_view kSidecar = "nh_manifest.json";
-
-/// The deepest directory containing both paths.
-///
-/// The archive walk needs *one* mount point whose keys reach the entry config,
-/// its includes and the geometry. Mounting each file's own parent would give two
-/// roots and no key that spans them; mounting the working directory would work
-/// only when the user happened to run the command from above both.
-std::filesystem::path commonAncestor(std::filesystem::path a, std::filesystem::path b) {
-    a = a.lexically_normal();
-    b = b.lexically_normal();
-    std::filesystem::path shared;
-    auto ia = a.begin();
-    auto ib = b.begin();
-    for (; ia != a.end() && ib != b.end() && *ia == *ib; ++ia, ++ib) {
-        shared /= *ia;
-    }
-    return shared;
-}
-
-std::string keyUnder(const std::filesystem::path &root, const std::filesystem::path &file) {
-    return file.lexically_relative(root).generic_string();
-}
 
 std::filesystem::path requireExisting(const std::filesystem::path &p, std::string_view what) {
     std::error_code ec;
@@ -56,45 +32,6 @@ void writeBytes(const std::filesystem::path &target, std::span<const std::byte> 
     if (!out) {
         throw Error{codes::kFatalWebStage, "cannot write into the staged root", target.string()};
     }
-}
-
-/// Pack a loose config + geometry into an archive, includes and all.
-///
-/// The same `buildArchiveWorkingSet` the viewer's "Create archive from scene"
-/// uses, so a CLI-staged publication and a hand-published one have the same
-/// shape -- including the root `nodehammer.toml` that makes an archive
-/// self-describing, which that function writes itself.
-std::vector<std::byte> packLooseFiles(const std::filesystem::path &config,
-                                      const std::filesystem::path &geometry) {
-    const std::filesystem::path configAbs = requireExisting(config, "config file");
-    const std::filesystem::path geometryAbs = requireExisting(geometry, "input file");
-    if (configAbs == geometryAbs) {
-        throw Error{codes::kFatalWebStage, "--config and --input name the same file",
-                    config.string()};
-    }
-
-    const std::filesystem::path mount =
-        commonAncestor(configAbs.parent_path(), geometryAbs.parent_path());
-    if (mount.empty()) {
-        throw Error{codes::kFatalWebStage,
-                    "config and input share no common directory to pack from"};
-    }
-
-    viewer::FilesystemProjectFs fs{mount};
-    std::vector<std::string> skipped;
-    viewer::ZipWorkingSet ws = viewer::buildArchiveWorkingSet(
-        fs, keyUnder(mount, configAbs), keyUnder(mount, geometryAbs), &skipped);
-    if (!skipped.empty()) {
-        // Not fatal on its own -- the walk reports what it could not resolve and
-        // an archive missing an include still opens -- but silently publishing a
-        // partial scene is worse than refusing, because the failure surfaces in
-        // a browser as a build error with no mention of this machine.
-        throw Error{codes::kFatalWebStage,
-                    std::format("cannot pack: {} unreadable entr{}, first is '{}'", skipped.size(),
-                                skipped.size() == 1 ? "y" : "ies", skipped.front()),
-                    skipped.front()};
-    }
-    return ws.serialize();
 }
 
 } // namespace
@@ -151,9 +88,13 @@ StagedRoot stageRoot(const StageOptions &options) {
                         "--config and --input go together: an archive needs both an entry "
                         "config and the geometry it names"};
         }
-        const std::vector<std::byte> bytes = packLooseFiles(options.config, options.geometry);
+        // The same packer `nodehammer project pack` uses, so a root staged on
+        // the way to a browser and an archive written to a path are the same
+        // bytes rather than two implementations that agree today.
+        const project::PackResult packed =
+            project::pack({.config = options.config, .geometry = options.geometry});
         staged.archive = "project.nhproj";
-        writeBytes(options.target / staged.archive, bytes);
+        writeBytes(options.target / staged.archive, packed.bytes);
         staged.posture = Posture::Viewer;
     }
 
