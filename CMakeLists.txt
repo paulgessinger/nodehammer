@@ -254,6 +254,7 @@ set(NH_CORE_SOURCES
     src/ir/obj/render/exporter.cpp
     src/ir/render/exporter_registry.cpp
     src/ir/fb/render/exporter.cpp
+    src/ir/render/json_exporter.cpp
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
@@ -300,8 +301,6 @@ set(NH_CORE_SOURCES
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
     src/cli/cmd_config.cpp
-    src/cli/cmd_dump_semantic.cpp
-    src/cli/cmd_dump_render.cpp
 )
 
 # ── Application sources ───────────────────────────────────────────────────────
@@ -871,7 +870,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         src/scene_build.cpp
         src/selection/selector.cpp
         src/cli/cmd_convert.cpp
-        src/cli/cmd_dump_semantic.cpp
         PROPERTIES COMPILE_OPTIONS "-Wno-maybe-uninitialized"
     )
 endif()

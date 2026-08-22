@@ -106,8 +106,6 @@ def test_args_default_to_sys_argv(monkeypatch, capfd):
         # so -- a bare `inspect --input ...` fails for that reason instead and
         # would assert nothing about the import path.
         (["inspect", "--input", "no-such-file.gdml", "summary"], "NH0101"),
-        (["dump-semantic", "--input", "no-such-file.gdml"], "NH0101"),
-        (["dump-render", "--input", "no-such-file.gdml"], "NH0101"),
         (["config", "validate", "--config", "no-such-config.toml"], "NH0100"),
     ],
 )

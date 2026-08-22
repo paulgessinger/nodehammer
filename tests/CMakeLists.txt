@@ -82,6 +82,7 @@ target_sources(nodehammer_tests PRIVATE
     cli/test_cli_run.cpp
     cli/test_cli_inspect_json.cpp
     cli/test_cli_config.cpp
+    cli/test_cli_convert_stages.cpp
 )
 
 # ── A bare invocation, over the built executable ──────────────────────────────
