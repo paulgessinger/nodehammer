@@ -1,0 +1,63 @@
+# The wasm viewer runtime, as a wheel.
+#
+# `nodehammer` is a platform wheel carrying a compiled library; this is
+# `py3-none-any` carrying no Python to speak of and 7 MB of Emscripten output.
+# They are separate distributions because they are built by different toolchains
+# on different machines -- the runtime cannot be produced by any native build, so
+# folding it into the platform wheel would mean each of the three platform legs
+# needing an emsdk it has no other use for, and producing three byte-identical
+# copies of the same payload.
+#
+# Wheel-only, no sdist: `src/nodehammer_web/runtime/` is staged from a wasm build
+# rather than committed, so an sdist would either be empty or need emsdk to
+# build. A sdist that cannot become a wheel is a trap, not a courtesy.
+#
+# Built by `just wheel-web` locally and by ci.yml's `web-wheel` job, which stages
+# the same artifact the Pages site is deployed from. See
+# docs/cli-and-web-viewer-plan.md Part 3.
+
+[build-system]
+requires = ["setuptools>=77", "setuptools_scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nodehammer-web"
+description = "The nodehammer web viewer runtime: WebAssembly bundles and their shell"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Paul Gessinger" }]
+dynamic = ["version"]
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Physics",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
+
+[project.urls]
+Homepage = "https://github.com/paulgessinger/nodehammer"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# The payload, named explicitly -- and `include-package-data` turned *off* to
+# make that stick. It defaults to true for a pyproject-configured build, which
+# hands file selection to setuptools_scm's git file-finder; the runtime is
+# gitignored (it is staged, not committed), so the default would silently ship a
+# wheel with the accessor and no bundles. The one case the stamp check cannot
+# catch, since there would be no stamp to read.
+[tool.setuptools]
+include-package-data = false
+
+[tool.setuptools.package-data]
+nodehammer_web = ["runtime/*"]
+
+# The same version as the platform wheel, from the same git state: `root` walks
+# up to the repository, and `version_scheme` matches the root pyproject.toml so
+# the two cannot spell one commit two ways. CI overrides both with
+# SETUPTOOLS_SCM_PRETEND_VERSION computed once, which is what makes the pair
+# identical rather than merely consistent.
+[tool.setuptools_scm]
+root = "../.."
+version_scheme = "no-guess-dev"

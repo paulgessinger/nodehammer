@@ -150,6 +150,8 @@ std::string_view describe(RuntimeRung rung) noexcept {
         return "--web-assets";
     case RuntimeRung::Environment:
         return kEnvVar;
+    case RuntimeRung::Embedder:
+        return "host program";
     case RuntimeRung::InstallTree:
         return "install tree";
     }
@@ -158,7 +160,7 @@ std::string_view describe(RuntimeRung rung) noexcept {
 
 int compiledSchema() noexcept { return NH_WEB_RUNTIME_SCHEMA; }
 
-std::vector<RuntimeCandidate> walkLadder(const std::filesystem::path &explicitDir) {
+std::vector<RuntimeCandidate> walkLadder(const LadderInputs &inputs) {
     std::vector<RuntimeCandidate> ladder;
 
     auto consider = [&ladder](RuntimeRung rung, const std::filesystem::path &dir) {
@@ -168,13 +170,13 @@ std::vector<RuntimeCandidate> walkLadder(const std::filesystem::path &explicitDi
         return ladder.back().rejection.empty();
     };
 
-    if (!explicitDir.empty() && consider(RuntimeRung::Explicit, explicitDir)) {
-        return ladder;
-    }
-    // A rung that was *stated* and did not answer stops the walk. Falling
-    // through from a wrong --web-assets to whatever happens to be installed
-    // would serve something other than what was asked for and say nothing.
-    if (!ladder.empty()) {
+    // A rung that was *stated* and did not answer stops the walk, which is why
+    // each of the three below returns rather than falling through. Continuing
+    // from a wrong --web-assets — or from a broken sibling package — to whatever
+    // happens to be installed would serve something other than what was named,
+    // and say nothing about it.
+    if (!inputs.explicitDir.empty()) {
+        consider(RuntimeRung::Explicit, inputs.explicitDir);
         return ladder;
     }
 
@@ -184,10 +186,20 @@ std::vector<RuntimeCandidate> walkLadder(const std::filesystem::path &explicitDi
         return ladder;
     }
 
+    if (!inputs.embedderDir.empty()) {
+        consider(RuntimeRung::Embedder, inputs.embedderDir);
+        return ladder;
+    }
+
     // The only rung that is a guess. `<exe>/../share/nodehammer/web` is where a
     // native install tree carries a merged wasm one; its absence is the normal
     // state of a build from source, since the wasm is a separate Emscripten
     // build that a native configure cannot produce.
+    //
+    // It is also, deliberately, the rung a Python caller never reaches: under a
+    // wheel the "executable" is the interpreter, and `/proc/self/exe` resolves
+    // the venv's symlink to the *base* interpreter, so this would look under the
+    // wrong prefix entirely. That is what the rung above exists to answer.
     if (const auto exe = executablePath()) {
         consider(RuntimeRung::InstallTree,
                  exe->parent_path().parent_path() / "share" / "nodehammer" / "web");
@@ -221,12 +233,14 @@ std::string explainLadder(const std::vector<RuntimeCandidate> &ladder) {
     out += kEnvVar;
     out += "=DIR.\n"
            "A wasm build tree is itself a runtime, so `--web-assets build/emscripten/Release`\n"
-           "works after `just wasm-release`; so does an install tree's share/nodehammer/web.\n";
+           "works after `just wasm-release`; so does an install tree's share/nodehammer/web.\n"
+           "From Python, installing the `nodehammer-web` package supplies one — it is what\n"
+           "fills the `host program` rung above.\n";
     return out;
 }
 
-RuntimeLocation locateRuntime(const std::filesystem::path &explicitDir) {
-    const std::vector<RuntimeCandidate> ladder = walkLadder(explicitDir);
+RuntimeLocation locateRuntime(const LadderInputs &inputs) {
+    const std::vector<RuntimeCandidate> ladder = walkLadder(inputs);
 
     if (!ladder.empty() && ladder.back().rejection.empty()) {
         const std::filesystem::path &dir = ladder.back().path;

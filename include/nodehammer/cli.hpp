@@ -20,6 +20,7 @@
 
 #include <nodehammer/visibility.hpp>
 
+#include <filesystem>
 #include <span>
 #include <string_view>
 
@@ -39,6 +40,27 @@ struct RunOptions {
     /// typed the command, wrong when a program called a function. A TTY alone
     /// cannot tell those apart: an interactive interpreter has one.
     bool pager = false;
+
+    /// Where the wasm viewer runtime is, for callers that know.
+    ///
+    /// `viewer --web` needs a directory of Emscripten output that this library
+    /// cannot build and, in an embedded process, cannot find: under the Python
+    /// wheel the running executable is the interpreter, so the install-tree
+    /// guess resolves to the wrong prefix entirely. The `nodehammer-web` package
+    /// knows exactly where its own payload is, so it says.
+    ///
+    /// Empty means "I do not know of one", which is not an error — it costs one
+    /// rung of the search. It is a *default*, not an override: `--web-assets`
+    /// and `NODEHAMMER_WEB_ASSETS` both outrank it, so a person can point at a
+    /// locally built runtime without uninstalling anything.
+    ///
+    /// A `path` rather than a `string`, like every other file-taking member of
+    /// this API — and here it is not only consistency. On Windows a `path` holds
+    /// `wchar_t`, and building one from a narrow string decodes it in the active
+    /// code page, so a runtime under a directory with a non-ASCII name would
+    /// arrive mangled. Callers that have the real encoding — nanobind's
+    /// `stl/filesystem.h` caster above all — can hand it over intact.
+    std::filesystem::path webAssets;
 };
 
 /// Run one command line. Returns the exit code the executable would have.

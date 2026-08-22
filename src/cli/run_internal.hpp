@@ -111,7 +111,11 @@ void addViewerWebOptions(CLI::App &sub);
 
 /// Stage a root, serve it, open a browser, and wait. Reads its inputs from the
 /// parsed subcommand, which is what lets the native half call it too.
-void runViewerWeb(CLI::App &sub);
+///
+/// `options` rides along for `webAssets`: the runtime's location is a property
+/// of the front door rather than of the command line, so it arrives with the
+/// other front-door properties instead of through an option nobody typed.
+void runViewerWeb(CLI::App &sub, const RunOptions &options);
 
 /// Registers `viewer` with the shared and web options, and a callback that
 /// serves or explains. The native half replaces that callback.

@@ -523,9 +523,21 @@ NB_MODULE(_nodehammer, m) {
     // The GIL goes for the same reason as the verbs above: `run` may spend
     // minutes in a tessellation, and it may also block in a pager waiting for a
     // human to press q.
+    //
+    // `web_assets` is a path the *wrapper* supplies, not the user: it is where
+    // the `nodehammer-web` package put the wasm runtime, which C++ cannot find
+    // on its own because under a wheel the running executable is the interpreter
+    // (see web/runtime_locator.hpp). Empty is the ordinary answer when that
+    // package is not installed.
+    //
+    // Taken as a `std::filesystem::path` so nanobind's caster does the decoding.
+    // Through a `std::string` the bytes would be re-decoded in the active code
+    // page on Windows, which mangles any path this API cannot assume is ASCII --
+    // and a site-packages directory under a user's name is exactly that.
     m.def(
         "cli_run",
-        [](const std::vector<std::string> &args, bool pager) {
+        [](const std::vector<std::string> &args, bool pager,
+           const std::filesystem::path &webAssets) {
             std::vector<std::string_view> views;
             views.reserve(args.size());
             for (const auto &arg : args) {
@@ -533,11 +545,12 @@ NB_MODULE(_nodehammer, m) {
             }
             nh::cli::RunOptions options;
             options.pager = pager;
+            options.webAssets = webAssets;
 
             nb::gil_scoped_release unlocked;
             return nh::cli::run(views, options);
         },
-        "args"_a, "pager"_a = false);
+        "args"_a, "pager"_a = false, "web_assets"_a = std::filesystem::path{});
 
     // ── version ─────────────────────────────────────────────────────────────
     // `version()` is a symbol in the library; VERSION is a constant in the

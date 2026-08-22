@@ -186,3 +186,71 @@ def test_a_failing_command_gives_the_shell_a_nonzero_status():
     # exception instead.
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
+
+
+# ── the web runtime, and the rung this package fills ─────────────────────────
+#
+# `viewer --web` serves a directory of Emscripten output that no native build
+# produces, so the wheel gets it from a sibling distribution, `nodehammer-web`.
+# C++ cannot find that directory on its own: under a wheel the running
+# executable is the interpreter, and in a virtualenv the platform call behind
+# `<exe>/../share` resolves `bin/python` to the *base* interpreter. So Python
+# looks the package up and passes the path down.
+#
+# The serving half is not testable here -- it needs a 7 MB runtime this suite
+# does not have, and the C++ cases already cover the ladder's precedence. What
+# is testable is the wiring: that the path is passed at all, that a missing
+# sibling is a supported state rather than an error, and that the failure names
+# the package.
+
+
+def test_the_web_runtime_is_optional(monkeypatch):
+    # The headless install: no `nodehammer_web`, and every other command still
+    # works. An eager import here would have made this package a hard dependency
+    # of the whole CLI rather than of one flag on one subcommand.
+    monkeypatch.setattr(nh.cli, "_web_runtime_dir", lambda: "")
+
+    assert nh.cli.run(["--version"]) == 0
+
+
+def test_the_runtime_directory_reaches_the_library(monkeypatch, tmp_path, capfd):
+    # The wiring itself, and observable only through the refusal: the library
+    # reports every rung it walked, so a path that arrived is a path that gets
+    # named. Standing in for the sibling package with a directory that is *not*
+    # a runtime is what makes it show up -- a real one would be served, and say
+    # nothing about where it came from.
+    pretend = tmp_path / "site-packages" / "nodehammer_web" / "runtime"
+    pretend.mkdir(parents=True)
+    monkeypatch.setattr(nh.cli, "_web_runtime_dir", lambda: str(pretend))
+    monkeypatch.delenv("NODEHAMMER_WEB_ASSETS", raising=False)
+
+    code = nh.cli.run(["viewer", "--web", "--no-browser"])
+
+    assert code != 0
+    err = capfd.readouterr().err
+    assert str(pretend) in err
+    # The rung it was attributed to. Reporting it as the environment variable or
+    # as `--web-assets` would send the reader to fix something they never set.
+    assert "host program" in err
+
+
+def test_the_failure_names_the_package_that_supplies_a_runtime(monkeypatch, capfd):
+    # The message a person actually hits: `pip install nodehammer`, no
+    # `nodehammer-web`, `nodehammer viewer --web`. Naming the package is the
+    # whole remedy, and it is the one thing the ladder's explanation cannot
+    # derive from what it found -- it has to say it.
+    monkeypatch.setattr(nh.cli, "_web_runtime_dir", lambda: "")
+    monkeypatch.delenv("NODEHAMMER_WEB_ASSETS", raising=False)
+
+    code = nh.cli.run(["viewer", "--web", "--no-browser"])
+
+    assert code != 0
+    assert "nodehammer-web" in capfd.readouterr().err
+
+
+def test_cli_run_takes_the_runtime_directory_as_an_argument():
+    # The binding's signature, asserted directly: the wrapper is what fills this
+    # in, and a default of "" is what makes the sibling package optional rather
+    # than the wrapper needing to know whether the argument exists.
+    assert nh._nodehammer.cli_run(["--version"], False, "") == 0
+    assert nh._nodehammer.cli_run(["--version"], pager=False, web_assets="") == 0
