@@ -19,6 +19,12 @@ same inputs always hash to the same name — the archive is named
 `project.<content-hash>.nhproj` so republishing cache-busts for free while an
 unchanged publication keeps its URL.
 
+`nodehammer project pack` is the shipped way to build one of these, and produces
+the same shape from the same `buildArchiveWorkingSet` walk. This script stays for
+the wasm dev loop and the Pages build, which run against an Emscripten tree
+without necessarily having a native `nodehammer` binary to call — and which want
+the content-hashed name that `pack` does not generate.
+
 Usage:
     scripts/make_nhproj.py <scene> <out-dir>
 

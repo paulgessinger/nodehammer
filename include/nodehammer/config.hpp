@@ -121,7 +121,7 @@ class Config {
     /// open says nothing about a document's contents, which is what this
     /// promised to describe.
     ///
-    /// This is what `nodehammer validate-config` does, available to a caller
+    /// This is what `nodehammer config validate` does, available to a caller
     /// that wants to check a config without committing to using it — an editor,
     /// a CI step, a settings dialog.
     [[nodiscard]] NH_API static DiagnosticList check(const std::filesystem::path &path);

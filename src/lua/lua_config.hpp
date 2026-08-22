@@ -40,7 +40,7 @@ namespace nodehammer::lua {
 /// `diagnostics::throwIfErrors` over the result — which is what `Config::read`
 /// does (docs/error-model.md).
 ///
-/// This is the Option-A core of the scripting front-end: the `config-lua` CLI
+/// This is the Option-A core of the scripting front-end: the `config flatten` CLI
 /// command wraps it with `configToToml`. The same entry point can later back an
 /// embedded `ConfigLoader::loadFromLua` (Option B) unchanged.
 [[nodiscard]] config::ConfigResult evalLuaConfig(std::string_view src, std::string_view rootKey,

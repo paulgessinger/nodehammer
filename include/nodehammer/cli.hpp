@@ -43,7 +43,7 @@ struct RunOptions {
 
     /// Where the wasm viewer runtime is, for callers that know.
     ///
-    /// `viewer --web` needs a directory of Emscripten output that this library
+    /// `viewer serve` needs a directory of Emscripten output that this library
     /// cannot build and, in an embedded process, cannot find: under the Python
     /// wheel the running executable is the interpreter, so the install-tree
     /// guess resolves to the wrong prefix entirely. The `nodehammer-web` package

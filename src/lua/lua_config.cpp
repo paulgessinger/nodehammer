@@ -39,7 +39,7 @@
 // Option-A Lua config front-end: evaluate a script through a global-function
 // builder DSL that assembles an NHConfig. The primitives reuse the existing
 // predicate parser (parsePredicateExpr) and enum converters, and replicate the
-// TOML loader's field mapping exactly so `config-lua` output round-trips
+// TOML loader's field mapping exactly so `config flatten` output round-trips
 // through ConfigLoader identically to hand-written TOML. See
 // docs/config-scripting-lua.md.
 

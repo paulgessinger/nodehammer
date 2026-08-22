@@ -5,7 +5,7 @@
 // This is `web/stage.cpp`'s `packLooseFiles` promoted out of an anonymous
 // namespace, because packing is not a web concern: the same operation backs
 // `nodehammer project pack`, the viewer's "Save as archive", and the archive
-// `viewer --web` builds on the fly. It lived under `web/` only because that is
+// `viewer serve` builds on the fly. It lived under `web/` only because that is
 // where it was needed first.
 //
 // The archive it produces is the one `buildArchiveWorkingSet` produces — the

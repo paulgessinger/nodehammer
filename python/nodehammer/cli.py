@@ -36,7 +36,7 @@ __all__ = ["run"]
 def _web_runtime_dir() -> str:
     """Where the ``nodehammer-web`` package put the wasm viewer runtime.
 
-    ``viewer --web`` needs a directory of Emscripten output that this wheel does
+    ``viewer serve`` needs a directory of Emscripten output that this wheel does
     not carry -- it is a separate ``py3-none-any`` distribution, so a headless
     install can drop it and a GUI one can have it without either being a
     different build. C++ cannot find it: under a wheel the running executable is
@@ -95,7 +95,7 @@ def run(args: Sequence[str] | None = None, *, pager: bool = False) -> int:
     :raises nodehammer.Error: only for a failure that escaped a command body,
         which is a defect rather than a diagnosis.
 
-    ``viewer --web`` is told where the wasm runtime is, if the ``nodehammer-web``
+    ``viewer serve`` is told where the wasm runtime is, if the ``nodehammer-web``
     package is installed alongside this one -- see :func:`_web_runtime_dir`. That
     is a default and not an override: ``--web-assets`` and
     ``NODEHAMMER_WEB_ASSETS`` still win, so a locally built runtime can be tried

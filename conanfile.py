@@ -57,7 +57,7 @@ class Nodehammer(ConanFile):
         # — and static-lib dead-strip keeps it out of any binary that does not
         # reference it.
         self.requires("miniz/3.0.2")
-        # Lua scripting config front-end: the `config-lua` CLI command and
+        # Lua scripting config front-end: the `config flatten` CLI command and
         # `Config::read`'s `.lua` branch. Lua is a small C interpreter; sol2 is
         # its header-only C++ binding (and pulls lua transitively, but we pin lua
         # explicitly for parity with the CMake find_package).
@@ -71,7 +71,7 @@ class Nodehammer(ConanFile):
         # never calls the `.lua` path, which today is both wasm bundles.
         self.requires("lua/5.4.6")
         self.requires("sol2/3.5.0")
-        # The static server behind `viewer --web`. Gated on the platform rather
+        # The static server behind `viewer serve`. Gated on the platform rather
         # than unconditional, unlike miniz and lua above, because this one is not
         # a capability of the library: it exists to *serve* the wasm runtime to a
         # browser, and under Emscripten the wasm module is the thing being

@@ -113,7 +113,7 @@ NODEHAMMER_WERROR = "OFF"
 provider = "scikit_build_core.metadata.setuptools_scm"
 
 # ── the dependency on nodehammer-web ─────────────────────────────────────────
-# `viewer --web` needs a runtime no native build can produce, so it comes from a
+# `viewer serve` needs a runtime no native build can produce, so it comes from a
 # sibling distribution. That is a plain dependency rather than an extra: the wasm
 # never runs unless asked, so a headless install pays 2.9 MB and nothing else,
 # and "the GUI works after pip install nodehammer" is worth more than that.

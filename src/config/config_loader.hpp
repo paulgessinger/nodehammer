@@ -76,7 +76,7 @@ struct ConfigLoader {
     // all, and never throw for anything the document *says*. They still throw
     // when there is no document to report on: a file that will not open.
     //
-    // This is what `nodehammer validate-config` and `Config::check` are built
+    // This is what `nodehammer config validate` and `Config::check` are built
     // from, and why the doctrine's "no result type represents failure" does not
     // apply to them: the report *is* the result.
 

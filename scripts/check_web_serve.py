@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run `viewer --web`, fetch everything it serves, and stop it.
+"""Run `viewer serve`, fetch everything it serves, and stop it.
 
 The staged root and the server agree or they do not, and the only cheap proof is
 to ask the server for every file the runtime is supposed to contain. A browser
@@ -82,7 +82,7 @@ def main() -> None:
     if len(sys.argv) < 2:
         sys.exit(__doc__)
 
-    command = [*sys.argv[1:], "viewer", "--web", "--no-browser", "--port", "0"]
+    command = [*sys.argv[1:], "viewer", "serve", "--no-browser", "--port", "0"]
     print("$ " + " ".join(command), flush=True)
 
     # stderr is merged in rather than discarded: the ladder's explanation goes

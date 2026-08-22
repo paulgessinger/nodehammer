@@ -1,6 +1,6 @@
 # Scripted configuration (Lua) — design exploration
 
-**Status:** Option A implemented — the `config-lua` CLI command (backed by
+**Status:** Option A implemented — the `config flatten` CLI command (backed by
 `src/lua/lua_config.cpp`, compiled into `nodehammer_lib`) evaluates a Lua script
 into an `NHConfig` and emits flattened TOML, and `Config::read` dispatches `.lua`
 by extension.
@@ -66,7 +66,7 @@ untouched. The entry points it would sit beside are
 ([`config_loader.hpp`](../src/config/config_loader.hpp)).
 
 There is already an `NHConfig → TOML` writer (`configToToml`) and a
-`config-flatten` command, so the data model round-trips *out* to TOML today.
+`config flatten` command, so the data model round-trips *out* to TOML today.
 
 ---
 
@@ -525,7 +525,7 @@ defaults { tessellation = { max_segments_circle = 10, fallback = "skip" },
 
 This sketch now ships as a real fixture: `fixtures/configs/lua/odd.lua`, with its
 fragments under `fixtures/configs/lua/odd/`. It is a *faithful* port —
-`config-lua -c fixtures/configs/lua/odd.lua` and `config-flatten -c
+`config flatten -c fixtures/configs/lua/odd.lua` and `config flatten -c
 fixtures/configs/odd.toml` emit byte-identical TOML, which is what keeps the two
 front ends honest on a real config rather than only on `parity.lua`.
 
@@ -570,7 +570,7 @@ That is a denial of the tab it is running in, not an escape from it.
 
 ## 10. Constraints and open questions
 
-1. **One-way by construction.** `configToToml` / `config-flatten` can still emit
+1. **One-way by construction.** `configToToml` / `config flatten` can still emit
    flattened TOML from the *result*, but there is no script ← config direction.
    Inherent to any Turing-complete config; worth stating, not a defect.
 2. **A vs B** is the load-bearing decision (§4): in-browser execution → B;

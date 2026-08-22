@@ -692,12 +692,12 @@ jobs:
           # `pip install --no-deps nodehammer`, or an uninstall of the sibling.
           VIRTUAL_ENV=venv-solo uv pip install --quiet --no-index --no-deps \
               --find-links dist nodehammer
-          # Every other command still works: the runtime is one flag's
+          # Every other command still works: the runtime is one mode's
           # dependency, not the CLI's.
           venv-solo/bin/nodehammer --version
 
           set +e
-          out=$(env -u NODEHAMMER_WEB_ASSETS venv-solo/bin/nodehammer viewer --web \
+          out=$(env -u NODEHAMMER_WEB_ASSETS venv-solo/bin/nodehammer viewer serve \
                 --no-browser 2>&1)
           code=$?
           set -e
@@ -876,7 +876,7 @@ jobs:
       # this is the only place that can do it. The wasm tree is
       # platform-independent, so one build overlays onto all four.
       #
-      # Without this, `nodehammer viewer --web` from a downloaded release finds
+      # Without this, `nodehammer viewer serve` from a downloaded release finds
       # nothing at share/nodehammer/web and can only tell the user to go get a
       # runtime -- the same friction the Python side rejected when it made
       # nodehammer-web a default dependency rather than an extra.

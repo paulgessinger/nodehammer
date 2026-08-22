@@ -55,7 +55,7 @@ struct CommandFailure {
 /// How a subcommand joins the parser.
 ///
 /// `RunOptions` rides along because some commands need to know what kind of
-/// caller they have before they do anything — `inspect` and `dump-semantic` ask
+/// caller they have before they do anything — `inspect` asks
 /// it whether they may page. It is a reference to the caller's object, which
 /// outlives the parse.
 using Registrar = void (*)(CLI::App &, const RunOptions &);

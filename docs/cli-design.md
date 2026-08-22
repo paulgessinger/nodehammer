@@ -1,8 +1,10 @@
 # The nodehammer CLI — one vocabulary, five front doors
 
-> Status: design of record. Nothing here has shipped; the implementation plan is
-> §9. Written at 0.2.0rc3, deliberately before 1.0, because command names are the
-> one part of a tool that cannot be refactored quietly afterwards.
+> Status: design of record, **implemented**. All seven phases of §9 have landed;
+> what §1 and §2 describe is the surface as it was, kept because the findings are
+> the argument for the shape in §3. Written at 0.2.0rc3, deliberately before 1.0,
+> because command names are the one part of a tool that cannot be refactored
+> quietly afterwards.
 
 ## 1. Where it stands
 
@@ -455,8 +457,10 @@ The most code motion, and the least coupled to the rest.
 1. README's CLI block, `docs/*` that name old commands (`event-display-design.md`,
    `viewer-single-instance.md`, `error-model.md`, `config-scripting-lua.md`).
 2. `Justfile` recipes, `scripts/*`, CI workflow invocations.
-3. Retire `scripts/make_nhproj.py` in favour of `project pack`, or reduce it to a
-   thin wrapper.
+3. `scripts/make_nhproj.py` stays: the wasm dev loop and the Pages build run
+   against an Emscripten tree without necessarily having a native binary to call,
+   and they want the content-hashed name `pack` does not generate. Its docstring
+   now points at `project pack` as the shipped equivalent.
 
 ### Sequencing notes
 
