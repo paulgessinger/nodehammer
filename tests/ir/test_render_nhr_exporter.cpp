@@ -16,6 +16,7 @@
 #include <ir/fb/render/flatbuffer.hpp>
 #include <ir/render/exporter.hpp>
 
+#include <nodehammer/diagnostics.hpp>
 #include <nodehammer/render_scene.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -113,4 +114,27 @@ TEST_CASE("writing through the registry produces a readable scene", "[ir][render
         CHECK(restored.nodes.at(restored.rootId).name == "root");
         fs::remove(target);
     }
+}
+
+// `convert` calls the exporter directly, with no translating catch of its own,
+// and its backstop catches only `nodehammer::Error` — so an exporter that let a
+// plain `std::runtime_error` out would escape the NH0600 diagnostic and the
+// exit code that goes with it. Every other exporter translates at its own
+// boundary; this one has to as well.
+TEST_CASE("a write that cannot open its file reports NH0600", "[ir][render][nhr]") {
+    const auto reg = RenderExporterRegistry::makeDefault();
+    const auto scene = makeTinyScene();
+    const fs::path target = "/nodehammer/definitely/not/here.nhr";
+
+    const auto *exp = reg.resolve(target, "");
+    REQUIRE(exp != nullptr);
+
+    bool caught = false;
+    try {
+        exp->write(scene, target, ExportConfig{});
+    } catch (const nodehammer::Error &e) {
+        caught = true;
+        CHECK(e.code() == "NH0600");
+    }
+    CHECK(caught);
 }
