@@ -20,15 +20,19 @@
 
 namespace nodehammer::project {
 
+// Every member carries its own `{}`, including the two that are required. A
+// caller naming a subset — `pack({.config = c})`, which is a call this API
+// answers, by refusing — is otherwise a `-Wmissing-field-initializers` error
+// under GCC, which does not warn for a member that has a default initializer.
 struct PackOptions {
     /// Entry config: TOML, or Lua whose include set is discovered by running it.
-    std::filesystem::path config;
+    std::filesystem::path config{};
 
     /// Input geometry, in any format this build can import. A `.nhb`/`.nhb.zst`
     /// is embedded verbatim; anything else is imported and re-emitted as
     /// `<stem>.nhb.zst` at the archive root, so the archive always carries the
     /// one format every platform can open without a backend.
-    std::filesystem::path geometry;
+    std::filesystem::path geometry{};
 
     /// Mount point that defines the archive's key space. Empty picks the
     /// deepest directory containing everything that has to be reachable.
