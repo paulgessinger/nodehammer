@@ -248,6 +248,16 @@ std::vector<ZipDirEntry> ZipWorkingSet::listAtPrefix(std::string_view prefix) co
             out.push_back(ZipDirEntry{std::string{remainder}, key, false, size});
         } else {
             std::string dir_name{remainder.substr(0, slash)};
+            // `/file` and `dir//file` are legal ZIP entry names that name no
+            // directory: the segment before the slash is empty, so the key this
+            // would build is the prefix being listed -- a directory holding
+            // itself, which walks forever. Reported as a leaf at the level it
+            // was found instead, under its own key, because an entry an archive
+            // really contains should not vanish from a listing of it.
+            if (dir_name.empty()) {
+                out.push_back(ZipDirEntry{std::string{remainder}, key, false, size});
+                continue;
+            }
             std::string dir_key = base + dir_name;
             if (seen_dirs.insert(dir_key).second) {
                 out.push_back(ZipDirEntry{std::move(dir_name), std::move(dir_key), true, 0});

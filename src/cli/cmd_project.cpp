@@ -17,6 +17,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -52,13 +53,24 @@ void writeBytes(const std::filesystem::path &target, std::span<const std::byte> 
 std::vector<viewer::ZipDirEntry> allFiles(const viewer::ZipWorkingSet &ws) {
     std::vector<viewer::ZipDirEntry> files;
     std::deque<std::string> dirs;
+    // A ZIP is not a tree until something checks. `dir//file` and `/file` are
+    // both legal entry names, and a directory that normalises back to the prefix
+    // it came from would have this loop hand it to itself forever -- on an
+    // archive from anywhere, which `info` is precisely the command for. The
+    // listing drops the empty segments those names produce; this refuses to walk
+    // a prefix twice whatever the listing says, because a hang is the one
+    // failure that reports nothing at all.
+    std::unordered_set<std::string> visited;
     dirs.emplace_back();
+    visited.insert("");
     while (!dirs.empty()) {
         const std::string dir = std::move(dirs.front());
         dirs.pop_front();
         for (auto &entry : ws.listAtPrefix(dir)) {
             if (entry.is_directory) {
-                dirs.push_back(entry.key);
+                if (visited.insert(entry.key).second) {
+                    dirs.push_back(entry.key);
+                }
             } else {
                 files.push_back(std::move(entry));
             }
@@ -172,12 +184,27 @@ void registerCmdProject(CLI::App &app, const RunOptions &options) {
                 throw nodehammer::Error{nodehammer::codes::kFatalProjectPack, "no such archive",
                                         path.string()};
             }
-            viewer::ZipWorkingSet ws = viewer::ZipWorkingSet::openFromFile(path);
+            // `openFromFile` throws `std::runtime_error` for a file that is not
+            // a readable ZIP, and `runOrReport` catches `Error` alone -- so
+            // without this, `project info` on any regular file that is not an
+            // archive terminates instead of reporting one.
+            viewer::ZipWorkingSet ws = [&] {
+                try {
+                    return viewer::ZipWorkingSet::openFromFile(path);
+                } catch (const nodehammer::Error &) {
+                    throw;
+                } catch (const std::exception &ex) {
+                    throw nodehammer::Error{
+                        nodehammer::codes::kFatalProjectPack,
+                        std::format("cannot read the archive '{}': {}", path.string(), ex.what()),
+                        path.string()};
+                }
+            }();
 
             // The manifest is what makes an archive self-describing, so its
             // absence is the headline rather than a missing line: an archive
             // without one opens blank and waits to be told what to build.
-            if (const auto toml = ws.read("nodehammer.toml")) {
+            if (const auto toml = ws.read(viewer::kProjectManifestKey)) {
                 if (const auto manifest = viewer::parseProjectManifest(toml->span())) {
                     std::println("config    {}", manifest->config_key);
                     std::println("geometry  {}", manifest->geometry_key);

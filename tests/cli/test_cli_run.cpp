@@ -43,6 +43,7 @@
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,6 +55,7 @@
 #include <unistd.h>
 #endif
 
+using nhtest::currentProcessId;
 using nhtest::Outcome;
 using nhtest::runCaptured;
 
@@ -118,3 +120,29 @@ TEST_CASE("the pager is off unless the caller asks", "[cli]") {
     CHECK(runCaptured({"--version"}).code == 0);
     CHECK(nodehammer::cli::RunOptions{}.pager == false);
 }
+
+// Native-only: `project` is not registered under Emscripten (there is no host
+// to serve from), so over there this would be asserting on an unknown
+// subcommand rather than on an unreadable archive.
+#ifndef __EMSCRIPTEN__
+TEST_CASE("project info on a file that is not an archive reports, and returns", "[cli][project]") {
+    // `ZipWorkingSet::openFromFile` throws `std::runtime_error`, which the
+    // command's reporting layer does not catch: this line used to abort the
+    // process -- and with it this test binary -- on any regular file that is
+    // not a ZIP. The assertions after it are the point, as above.
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("nh_not_an_archive_" +
+                       std::to_string(static_cast<long long>(currentProcessId())) + ".nhproj");
+    {
+        std::ofstream out(path, std::ios::binary);
+        out << "this is not a ZIP archive\n";
+    }
+
+    const auto outcome = runCaptured({"project", "info", path.string()});
+    CHECK(outcome.code != 0);
+    CHECK(outcome.mentions(path.filename().string()));
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+#endif

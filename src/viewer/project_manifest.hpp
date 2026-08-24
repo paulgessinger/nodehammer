@@ -4,8 +4,15 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace nodehammer::viewer {
+
+/// The archive key the manifest occupies. Reserved: an archive carries exactly
+/// one, at its root, and whatever writes it supersedes anything already there —
+/// so a packer copying a file to this key has to say so rather than let the
+/// stamp overwrite it.
+inline constexpr std::string_view kProjectManifestKey = "nodehammer.toml";
 
 /// The archive-internal project manifest (`nodehammer.toml` at the archive root)
 /// that makes a `.nhproj` self-describing: opening it "just builds" on any

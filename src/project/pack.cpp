@@ -6,6 +6,7 @@
 #include "viewer/project_manifest.hpp"
 #include "viewer/zip_working_set.hpp"
 
+#include <detail/file_io.hpp>
 #include <detail/zstd_io.hpp>
 #include <nodehammer/diagnostics.hpp>
 #include <nodehammer/semantic_scene.hpp>
@@ -148,11 +149,15 @@ PackResult pack(const PackOptions &options) {
 
     viewer::FilesystemProjectFs fs{mount};
     std::vector<std::string> skipped;
-    // The geometry key is withheld when it is not in the mount: the walk would
-    // look for a file that is not there and report it skipped. It is written in
-    // below instead, along with the manifest the walk consequently does not.
-    viewer::ZipWorkingSet ws =
-        viewer::buildArchiveWorkingSet(fs, *configKey, embed ? geometryKey : "", &skipped);
+    // The walk is asked for the config's closure and nothing else -- no geometry
+    // key, so it does not stamp the manifest either. Both are written in below.
+    //
+    // Withholding the geometry was already necessary for an imported input,
+    // which is not in the mount for the walk to find. Doing it for an embedded
+    // one too costs a read this file was going to do anyway and buys the check
+    // underneath: with the stamp deferred, an entry sitting on the manifest key
+    // is still visible here, rather than already overwritten by it.
+    viewer::ZipWorkingSet ws = viewer::buildArchiveWorkingSet(fs, *configKey, "", &skipped);
     if (!skipped.empty()) {
         // Not fatal on its own -- the walk reports what it could not resolve and
         // an archive missing an include still opens -- but silently publishing a
@@ -164,19 +169,46 @@ PackResult pack(const PackOptions &options) {
                     skipped.front()};
     }
 
-    if (!embed) {
+    // The manifest key belongs to the archive, not to what is being packed. The
+    // stamp below would overwrite whatever the walk put here and report nothing,
+    // and the archive would open naming a config whose bytes are the manifest's
+    // own -- so this refuses instead. Reached by a config *named*
+    // `nodehammer.toml` and by an include that resolves to it, which is why the
+    // question is asked of the packed key set rather than of `configKey`.
+    if (ws.contains(viewer::kProjectManifestKey)) {
+        throw Error{codes::kFatalProjectPack,
+                    std::format("'{}' is the archive's own manifest key: rename the file that "
+                                "packs to it, or pack from a root that does not reach it",
+                                viewer::kProjectManifestKey),
+                    std::string{viewer::kProjectManifestKey}};
+    }
+
+    if (embed) {
+        // Read here rather than through the walk, so `readFile`'s
+        // `std::runtime_error` -- for a file that vanished between the check
+        // above and now, or that cannot be opened -- leaves as the `Error` every
+        // caller of this function reports.
+        try {
+            ws.writeEntry(geometryKey, detail::file_io::readFile(geometryAbs));
+        } catch (const Error &) {
+            throw;
+        } catch (const std::exception &ex) {
+            throw Error{codes::kFatalProjectPack,
+                        std::format("cannot read the input: {}", ex.what()), geometryAbs.string()};
+        }
+    } else {
         const SemanticResult imported = SemanticScene::read(geometryAbs);
         const std::vector<std::byte> nhb = imported.scene.toNhb();
         ws.writeEntry(geometryKey, detail::zstd_io::compress(nhb));
-
-        // `buildArchiveWorkingSet` writes the manifest only when it was given
-        // both keys, and it was not given this one. Same serializer, so the two
-        // paths cannot drift into two manifest shapes.
-        const auto toml =
-            viewer::serializeProjectManifest(viewer::ProjectManifest{*configKey, geometryKey});
-        const auto *first = reinterpret_cast<const std::byte *>(toml.data());
-        ws.writeEntry("nodehammer.toml", std::vector<std::byte>(first, first + toml.size()));
     }
+
+    // One manifest write for both kinds of input, from the same serializer the
+    // walk would have used, so the two paths cannot drift into two shapes.
+    const auto toml =
+        viewer::serializeProjectManifest(viewer::ProjectManifest{*configKey, geometryKey});
+    const auto *first = reinterpret_cast<const std::byte *>(toml.data());
+    ws.writeEntry(std::string{viewer::kProjectManifestKey},
+                  std::vector<std::byte>(first, first + toml.size()));
 
     return PackResult{ws.serialize(), mount, *configKey, geometryKey, !embed};
 }

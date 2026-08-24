@@ -206,3 +206,44 @@ TEST_CASE("identical inputs pack to identical bytes", "[project][pack]") {
 
     CHECK(first.bytes == second.bytes);
 }
+
+// The manifest key is the archive's, and a pack that lands a file on it used to
+// win the write and lose the file: the stamp went in last and said nothing, so
+// the archive was published naming a config whose bytes were the manifest's own.
+// Both spellings of the collision, because the check is on the packed key set
+// rather than on the config key alone.
+TEST_CASE("a file packing to the manifest key is refused, not overwritten", "[project][pack]") {
+    TempDir src;
+    const fs::path blob = fakeBlob(src, "odd.nhb.zst");
+
+    SECTION("the config is itself named nodehammer.toml") {
+        const fs::path config = src.write(std::string{viewer::kProjectManifestKey}, "[project]\n");
+        CHECK_THROWS_AS(project::pack({.config = config, .geometry = blob}), nodehammer::Error);
+    }
+
+    SECTION("an include resolves to it") {
+        src.write(std::string{viewer::kProjectManifestKey}, "[render]\n");
+        const fs::path config =
+            src.write("scene.toml", std::format("include = \"{}\"\n", viewer::kProjectManifestKey));
+        CHECK_THROWS_AS(project::pack({.config = config, .geometry = blob}), nodehammer::Error);
+    }
+}
+
+// The manifest a good pack writes still has to be the manifest, and still has to
+// name the two entry keys — the check above must not have cost the stamp.
+TEST_CASE("a pack that does not collide still stamps its manifest", "[project][pack]") {
+    TempDir src;
+    const fs::path config = src.write("scene.toml", "[project]\n");
+    const fs::path blob = fakeBlob(src, "odd.nhb.zst");
+
+    const auto packed = project::pack({.config = config, .geometry = blob});
+    viewer::ZipWorkingSet ws = viewer::ZipWorkingSet::openFromBytes(packed.bytes);
+    const auto toml = ws.read(viewer::kProjectManifestKey);
+    REQUIRE(toml.has_value());
+    const auto manifest = viewer::parseProjectManifest(toml->span());
+    REQUIRE(manifest.has_value());
+    CHECK(manifest->config_key == "scene.toml");
+    CHECK(manifest->geometry_key == "odd.nhb.zst");
+    // And the config itself is still in there, under its own key.
+    CHECK(ws.contains("scene.toml"));
+}
