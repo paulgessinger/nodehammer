@@ -186,6 +186,7 @@ void addViewerServeOptions(CLI::App &sub) {
 }
 
 void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options) {
+    const Narrator say{options};
     runOrReport("viewer serve", [&] {
         web::LadderInputs inputs{};
         inputs.explicitDir = optionText(serve, "--web-assets");
@@ -198,6 +199,7 @@ void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options
             try {
                 return web::locateRuntime(inputs);
             } catch (const nodehammer::Error &) {
+                // Unconditional: a failure explaining itself is not narration.
                 std::print(stderr, "{}\n", web::explainLadder(web::walkLadder(inputs)));
                 throw;
             }
@@ -229,16 +231,25 @@ void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options
                          host);
         }
 
-        std::println("nodehammer viewer — {} mode, runtime {}",
-                     staged.posture == web::Posture::Viewer ? "viewer" : "application",
-                     runtime.version);
-        std::println("serving {}", server.url());
+        say("nodehammer viewer — {} mode, runtime {}",
+            staged.posture == web::Posture::Viewer ? "viewer" : "application", runtime.version);
+
+        // The URL alone on stdout, for the same reason `project pack` puts the
+        // archive path there: it is the one thing a caller wants back, and a
+        // script that starts a server in the background and needs to know where
+        // it landed should not have to find it inside a banner.
+        std::println("{}", server.url());
 
         if (serve.count("--no-browser") == 0 && !web::openInBrowser(server.url())) {
-            std::println(stderr, "could not open a browser; the URL above still works");
+            say("could not open a browser; the URL above still works");
         }
-        std::println("Ctrl-C to stop.");
+        say("Ctrl-C to stop.");
+        // Both descriptors: the URL has a reader waiting on it, and under `-v`
+        // the commentary around it should not arrive out of order behind a block
+        // buffer. `run` flushes on the way out, which is much too late for a
+        // command that then blocks for as long as somebody keeps the tab open.
         std::fflush(stdout);
+        std::fflush(stderr);
 
         // The wait loop lives here, in the front door, and not in `serve`: an
         // embedder that blocked would have no way to be interrupted, and a
@@ -252,8 +263,8 @@ void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
         if (ScopedInterruptHandler::interrupted()) {
-            std::println("");
-            std::println("stopping.");
+            say("");
+            say("stopping.");
         }
         server.stop();
     });

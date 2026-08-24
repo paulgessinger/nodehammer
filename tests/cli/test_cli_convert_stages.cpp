@@ -53,26 +53,32 @@ TEST_CASE("convert stops at the semantic scene when that is all that was asked f
     TempDir dir;
     const auto target = dir.at("scene.nhb");
 
-    const auto outcome = nhtest::runCaptured({"convert", "--synthetic-box", "--output", target});
+    const auto outcome =
+        nhtest::runCaptured({"convert", "--synthetic-box", "--output", target}, {.quiet = false});
 
     INFO("stderr was: " << outcome.err);
     REQUIRE(outcome.code == 0);
     REQUIRE(fs::is_regular_file(target));
     // Tessellation did not run, so nothing counted triangles.
-    CHECK(outcome.out.find("Triangles") == std::string::npos);
-    CHECK(outcome.out.find("Shapes") != std::string::npos);
+    CHECK(outcome.err.find("Triangles") == std::string::npos);
+    CHECK(outcome.err.find("Shapes") != std::string::npos);
+    // And the summary is read off stderr because that is the only place it is
+    // written. `convert`'s answer is the file; stdout carries nothing at all,
+    // which is what lets a caller put this command in a pipe.
+    CHECK(outcome.out.empty());
 }
 
 TEST_CASE("convert tessellates when a render output asks it to", "[cli][convert]") {
     TempDir dir;
     const auto target = dir.at("scene.nhr");
 
-    const auto outcome = nhtest::runCaptured({"convert", "--synthetic-box", "--output", target});
+    const auto outcome =
+        nhtest::runCaptured({"convert", "--synthetic-box", "--output", target}, {.quiet = false});
 
     INFO("stderr was: " << outcome.err);
     REQUIRE(outcome.code == 0);
     REQUIRE(fs::is_regular_file(target));
-    CHECK(outcome.out.find("Triangles") != std::string::npos);
+    CHECK(outcome.err.find("Triangles") != std::string::npos);
 }
 
 TEST_CASE("two outputs at two depths are one run", "[cli][convert]") {
@@ -83,7 +89,7 @@ TEST_CASE("two outputs at two depths are one run", "[cli][convert]") {
     const auto render = dir.at("scene.nhr");
 
     const auto outcome = nhtest::runCaptured(
-        {"convert", "--synthetic-box", "--output", semantic, "--output", render});
+        {"convert", "--synthetic-box", "--output", semantic, "--output", render}, {.quiet = false});
 
     INFO("stderr was: " << outcome.err);
     REQUIRE(outcome.code == 0);
@@ -99,19 +105,20 @@ TEST_CASE(".json means the shallower of the two scenes", "[cli][convert]") {
 
     SECTION("by extension: semantic, so no tessellation") {
         const auto target = dir.at("scene.json");
-        const auto outcome =
-            nhtest::runCaptured({"convert", "--synthetic-box", "--output", target});
+        const auto outcome = nhtest::runCaptured({"convert", "--synthetic-box", "--output", target},
+                                                 {.quiet = false});
         REQUIRE(outcome.code == 0);
-        CHECK(outcome.out.find("Triangles") == std::string::npos);
+        CHECK(outcome.err.find("Triangles") == std::string::npos);
     }
 
     SECTION("by name: the render scene, which tessellates") {
         const auto target = dir.at("render.json");
         const auto outcome = nhtest::runCaptured(
-            {"convert", "--synthetic-box", "--output-format", "render-json", "--output", target});
+            {"convert", "--synthetic-box", "--output-format", "render-json", "--output", target},
+            {.quiet = false});
         INFO("stderr was: " << outcome.err);
         REQUIRE(outcome.code == 0);
-        CHECK(outcome.out.find("Triangles") != std::string::npos);
+        CHECK(outcome.err.find("Triangles") != std::string::npos);
     }
 }
 

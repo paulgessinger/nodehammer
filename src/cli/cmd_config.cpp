@@ -60,7 +60,11 @@ nodehammer::config::ConfigResult loadEitherWay(const std::string &path) {
 }
 
 /// Write `text` to `outOpt`'s path, or to stdout when it was not given.
-void emit(const CLI::Option *outOpt, std::string_view what, const std::string &text) {
+///
+/// The document itself is the answer, so it goes to stdout unswitched. The
+/// receipt for a document written *elsewhere* is narration, and says so.
+void emit(const CLI::Option *outOpt, const nodehammer::cli::Narrator &say, std::string_view what,
+          const std::string &text) {
     if (!*outOpt) {
         std::print("{}", text);
         return;
@@ -73,14 +77,43 @@ void emit(const CLI::Option *outOpt, std::string_view what, const std::string &t
                                 std::format("could not open '{}' for writing", outPath), outPath};
     }
     out << text;
-    std::println(stderr, "{}: wrote {} ({} bytes)", what, outPath, text.size());
+    say("{}: wrote {} ({} bytes)", what, outPath, text.size());
+}
+
+/// Answer the question `config validate` was asked: one word on stdout, and an
+/// exit code that says the same thing.
+///
+/// Both, deliberately. The word is for a person reading; the code is for the
+/// `if` in a shell script and the `!= 0` in Python, which is the only thing a
+/// caller can check without parsing text. The two used to disagree — `INVALID`
+/// went to stderr and the command still answered 0 — so learning whether a
+/// config was valid meant scraping a stream for something the process had
+/// already decided.
+///
+/// One stream for both answers, too. Picking stdout for OK and stderr for
+/// INVALID meant a caller reading either one saw a verdict only half the time.
+///
+/// Not narration: `-q` silences the account of the work, never the answer.
+///
+/// `CommandFailure` rather than `Error` because the report *is* the diagnosis —
+/// by this point every diagnostic has been printed, and all that is left to
+/// carry out is the number. Reporting rather than failing is still the contract
+/// (docs/error-model.md): an invalid document is this command's answer, which is
+/// why it prints a verdict instead of a fatal.
+void verdict(bool ok, std::string_view word) {
+    std::println("config: {}", word);
+    if (!ok) {
+        throw nodehammer::cli::detail::CommandFailure{1};
+    }
 }
 
 } // namespace
 
 namespace nodehammer::cli::detail {
 
-void registerCmdConfig(CLI::App &app, const RunOptions &) {
+void registerCmdConfig(CLI::App &app, const RunOptions &options) {
+    const Narrator say{options};
+
     auto *sub =
         app.add_subcommand("config", "Work with TOML and Lua configs")->require_subcommand(1);
 
@@ -105,30 +138,26 @@ void registerCmdConfig(CLI::App &app, const RunOptions &) {
                 auto result = loadEitherWay(configPath);
                 printDiags(result.diags);
                 if (result.diags.hasErrors()) {
-                    std::println(stderr, "config: INVALID (script errors)");
+                    verdict(false, "INVALID (script errors)");
                     return;
                 }
                 auto validationDiags = config::ConfigValidator::validate(result.config);
                 printDiags(validationDiags);
-                std::println(validationDiags.hasErrors() ? stderr : stdout, "config: {}",
-                             validationDiags.hasErrors() ? "INVALID" : "OK");
+                verdict(!validationDiags.hasErrors(),
+                        validationDiags.hasErrors() ? "INVALID" : "OK");
                 return;
             }
 
             auto result = config::ConfigLoader::collectFromFile(configPath);
             printDiags(result.diags);
             if (result.diags.hasErrors()) {
-                std::println(stderr, "config: INVALID (parse errors)");
+                verdict(false, "INVALID (parse errors)");
                 return;
             }
 
             auto validationDiags = config::ConfigValidator::validate(result.config);
             printDiags(validationDiags);
-            if (validationDiags.hasErrors()) {
-                std::println(stderr, "config: INVALID");
-            } else {
-                std::println("config: OK");
-            }
+            verdict(!validationDiags.hasErrors(), validationDiags.hasErrors() ? "INVALID" : "OK");
         });
     });
 
@@ -167,7 +196,7 @@ void registerCmdConfig(CLI::App &app, const RunOptions &) {
                 reportOrThrow(validationDiags, configPath);
             }
 
-            emit(flatOutOpt, "config flatten", config::configToToml(result.config));
+            emit(flatOutOpt, say, "config flatten", config::configToToml(result.config));
         });
     });
 }

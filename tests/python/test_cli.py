@@ -250,5 +250,87 @@ def test_cli_run_takes_the_runtime_directory_as_an_argument():
     # The binding's signature, asserted directly: the wrapper is what fills this
     # in, and a default of "" is what makes the sibling package optional rather
     # than the wrapper needing to know whether the argument exists.
-    assert nh._nodehammer.cli_run(["--version"], False, "") == 0
-    assert nh._nodehammer.cli_run(["--version"], pager=False, web_assets="") == 0
+    assert nh._nodehammer.cli_run(["--version"], False, True, "") == 0
+    assert nh._nodehammer.cli_run(["--version"], pager=False, quiet=True, web_assets="") == 0
+    # Every argument past the first is optional, which is what lets the wrapper
+    # add one without every caller of the binding learning about it.
+    assert nh._nodehammer.cli_run(["--version"]) == 0
+
+
+def test_narration_is_off_for_a_caller_and_on_for_the_console_script(tmp_path, capfd):
+    """The whole point of ``quiet``: same command, two front doors, two answers.
+
+    The commentary is written for somebody watching a conversion happen. Called
+    as a function there is nobody watching, so it is off; reached through the
+    console script a person typed the command, so it is on.
+    """
+    out = tmp_path / "out.glb"
+
+    assert nh.cli.run(["convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)]) == 0
+    captured = capfd.readouterr()
+    assert "Writing" not in captured.err
+    # Not silence: a diagnostic is not narration, and no switch hides one.
+    assert "NH0510" in captured.err
+
+    assert (
+        nh.cli.run(
+            ["convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)], quiet=False
+        )
+        == 0
+    )
+    assert "Writing" in capfd.readouterr().err
+
+
+def test_the_arguments_can_turn_narration_back_on(tmp_path, capfd):
+    # For a caller that does not own the call -- a harness, a notebook cell
+    # being debugged -- `-v` reaches the same switch from the argument list.
+    out = tmp_path / "out.glb"
+
+    code = nh.cli.run(["-v", "convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)])
+
+    assert code == 0
+    assert "Writing" in capfd.readouterr().err
+
+
+def test_progress_never_lands_on_the_stream_a_caller_parses(tmp_path, capfd):
+    """stdout is the answer, and for ``convert`` the answer is a file.
+
+    This is the regression that motivated the contract: ``convert`` wrote
+    ``Writing ...`` and a node/mesh summary to *stdout*, which is the one stream
+    a caller reads. Nothing it says about its own progress belongs there, so with
+    an ``--output`` given it says nothing there at all.
+    """
+    out = tmp_path / "out.glb"
+
+    code = nh.cli.run(
+        ["convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)], quiet=False
+    )
+
+    assert code == 0
+    assert out.is_file()
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    assert "Writing" in captured.err
+
+
+def test_an_invalid_config_is_a_non_zero_code_and_not_only_a_word(tmp_path, capfd):
+    """A verdict a caller can act on without reading text.
+
+    ``config validate`` reports rather than fails -- an invalid document is its
+    answer, not its error -- but it used to report by printing ``INVALID`` and
+    then answering 0, so the only way to learn the verdict from Python was to
+    scrape a stream. Both now say the same thing, and the word is on stdout for
+    valid and invalid alike rather than switching streams with the answer.
+    """
+    good = tmp_path / "ok.toml"
+    good.write_text("hoist_orphans = true\n")
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[[rules]]\nmatch = "*"\nmax_segments_circle = -1\n')
+
+    assert nh.cli.run(["config", "validate", "-c", str(good)]) == 0
+    assert "config: OK" in capfd.readouterr().out
+
+    assert nh.cli.run(["config", "validate", "-c", str(bad)]) != 0
+    captured = capfd.readouterr()
+    assert "INVALID" in captured.out
+    assert "INVALID" not in captured.err

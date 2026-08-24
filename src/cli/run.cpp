@@ -94,18 +94,44 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
                          std::string{"nodehammer "} + std::string{nodehammer::VERSION},
                          "Print version and exit");
 
-    registerCmdConvert(app, options);
-    registerCmdInspect(app, options);
-    registerCmdConfig(app, options);
+    // A mutable copy, and the registrars below capture *this* rather than the
+    // caller's object. `-q` has to be able to write somewhere the command
+    // bodies read, and the front door's own settings are exactly that place:
+    // one `RunOptions`, whether the answer came from an embedder or from the
+    // command line. It outlives the parse, which is all a `Narrator` needs.
+    RunOptions effective = options;
+
+    // The stderr narration, switchable from the command line in both
+    // directions — because the default differs by front door. Somebody who
+    // typed the command gets commentary and silences it with `-q`; a program
+    // that called `cli::run` gets silence and asks for commentary with `-v`,
+    // without having to reach a member it may not own the construction of.
+    //
+    // Narration only. What a caller might parse is on stdout and has no switch;
+    // diagnostics are on stderr and have none either. See cli_common.hpp.
+    app.add_flag("-q,--quiet,!-v,!--verbose", effective.quiet,
+                 "Silence progress and summaries on stderr (-v to restore them)");
+
+    // So that `-q` and `-v` are accepted after the command as well as before
+    // it. CLI11 copies this to every subcommand at construction
+    // (`App_inl.hpp:57`), so it reaches `project pack` two levels down without
+    // each registrar remembering to ask — which is the only way a global flag
+    // can be typed where people actually type it. Set before the registrars for
+    // that reason.
+    app.fallthrough();
+
+    registerCmdConvert(app, effective);
+    registerCmdInspect(app, effective);
+    registerCmdConfig(app, effective);
     // Before `extra`: the native half extends the subcommand this registers, so
     // it has to exist first. Absent under Emscripten, where there is no host to
     // serve from and the whole web half is excluded from the build.
 #ifndef __EMSCRIPTEN__
-    registerCmdProject(app, options);
-    registerCmdViewer(app, options);
+    registerCmdProject(app, effective);
+    registerCmdViewer(app, effective);
 #endif
     for (const auto registrar : extra) {
-        registrar(app, options);
+        registrar(app, effective);
     }
 
     // No arguments at all: print the help and succeed.

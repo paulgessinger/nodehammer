@@ -1,10 +1,10 @@
 # The nodehammer CLI — one vocabulary, five front doors
 
-> Status: design of record, **implemented**. All seven phases of §9 have landed;
-> what §1 and §2 describe is the surface as it was, kept because the findings are
-> the argument for the shape in §3. Written at 0.2.0rc3, deliberately before 1.0,
-> because command names are the one part of a tool that cannot be refactored
-> quietly afterwards.
+> Status: design of record, **implemented**. All seven phases of §9 have landed,
+> and §10 — the output contract — followed them; what §1 and §2 describe is the
+> surface as it was, kept because the findings are the argument for the shape in
+> §3. Written at 0.2.0rc3, deliberately before 1.0, because command names are the
+> one part of a tool that cannot be refactored quietly afterwards.
 
 ## 1. Where it stands
 
@@ -477,3 +477,86 @@ The most code motion, and the least coupled to the rest.
 in someone's script, and §8 gives them no grace period. That is the accepted
 cost: every release so far is a pre-release, and the same change after a stable
 one costs a major version instead of a note in the changelog.
+
+## 10. Two streams, one contract
+
+Everything above is about what the commands are *called*. This is about what
+they *say*, and it is the half that only became load-bearing once `cli::run`
+moved into the library (PR #72): `nodehammer convert ...` typed at a shell and
+`nh.cli.run(["convert", ...])` are now the same code, so every line a command
+prints is a line some caller has to live with. Two of them had no policy at all
+and drifted apart.
+
+### 10.1 The rule
+
+- **stdout is the answer.** The flattened document, the `inspect` JSON, the path
+  to the archive `project pack` wrote, the URL `viewer serve` is serving.
+  Exactly what a caller would substitute into the next command, and nothing
+  else — so `$(nodehammer project pack ...)` is the archive rather than a report
+  about one, and `convert -o out.glb` says nothing at all, because its answer is
+  a file.
+- **stderr is everything about producing it.** Diagnostics, progress, what was
+  merged, where a root landed.
+- **the exit code carries the verdict**, always, and never disagrees with the
+  words. A caller must never have to scrape a stream for something the process
+  already decided.
+
+### 10.2 What was wrong
+
+**`convert` narrated onto stdout.** `Writing out.glb ...`, the node/mesh
+summary and the output sizes all went to fd 1 — the one stream a caller parses —
+while its dedup and wedge-cut lines went to fd 2. Inverted relative to `project
+pack`, and inverted against itself.
+
+**`config validate` picked its stream by severity.** `config: OK` on stdout,
+`config: INVALID` on stderr. A caller watching either one saw a verdict half the
+time.
+
+**`config validate` answered 0 for an invalid document.** "Reports rather than
+fails" (docs/error-model.md) is about what a bad *document* does to that command
+— it is answered rather than thrown — not about the exit code lying. It now
+prints the verdict on stdout *and* answers non-zero, which is the only form a
+shell `if` or a Python `!= 0` can read.
+
+**Nothing could be turned off.** Under `nh.cli.run` the commentary arrives at the
+file-descriptor level, past `contextlib.redirect_stdout`, in a session that never
+asked for it. That is the same complaint `fix(diagnostics): a library does not
+print, it reports` answered for `TessellationJob` and the DD4hep importer,
+arriving through a door that did not exist when it was written.
+
+### 10.3 The switch
+
+`RunOptions::quiet`, beside `RunOptions::pager` and defaulted the opposite way
+for the same reason: the front door knows what kind of caller it has, decides
+once, and every command inherits the answer.
+
+| front door | `pager` | `quiet` |
+|---|---|---|
+| `nodehammer` executable (`src/cli/main.cpp`) | on | off |
+| `nodehammer` console script (`python/nodehammer/__main__.py`) | on | off |
+| `cli::run` / `nh.cli.run` | off | **on** |
+| `-q` / `-v` on the command line | — | either, and it wins |
+
+It silences narration only. Diagnostics and the line a failing command prints
+before answering non-zero always come through — a switch that hides errors is a
+trap rather than a setting — and so do reports the caller named (`--timing`,
+`--size-report`), because naming a report is asking for it.
+
+`-q`/`-v` are global and work before *or* after the command, including two
+levels down at `project pack`: CLI11 copies `fallthrough` into every subcommand
+it constructs, so `app.fallthrough()` in `runWith` covers the whole tree without
+each registrar remembering to ask.
+
+### 10.4 Where it lives
+
+`cli::Narrator` (`src/cli/cli_common.hpp`) is the only way a command writes
+narration, which is what makes the rule reviewable rather than remembered: a
+`std::println` to stdout in a command body is now visibly a claim that what
+follows is the answer, and there are few enough of them to check by eye.
+
+Not mechanically checked, unlike `std::exit` under `src/cli` — there a hook can
+say "never", and here it cannot, because the legitimate stdout writes (`project
+info`, `inspect`, the `config` document and verdict, `pack`'s path, `serve`'s
+URL) look exactly like the illegitimate ones. A hook would need a per-line
+opt-out, which is friction bought against a mistake that a `Narrator` in scope
+already makes awkward to write.

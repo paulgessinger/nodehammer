@@ -53,7 +53,13 @@ convertOutputArtifacts(const std::filesystem::path &primary,
     return paths;
 }
 
-void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidates) {
+void printWrittenOutputSizes(const nodehammer::cli::Narrator &say,
+                             const std::vector<std::filesystem::path> &candidates) {
+    if (!say.enabled()) {
+        // Every line below is a `stat` per candidate, for a line nobody will
+        // read. The one place `enabled()` earns its keep.
+        return;
+    }
     std::string msg = "  Output:";
     bool any = false;
     for (const auto &p : candidates) {
@@ -72,7 +78,7 @@ void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidate
         any = true;
     }
     if (any) {
-        std::println("{}", msg);
+        say("{}", msg);
     }
 }
 
@@ -95,7 +101,12 @@ struct Strictness {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdConvert(CLI::App &app, const RunOptions &) {
+void registerCmdConvert(CLI::App &app, const RunOptions &options) {
+    // What this command says about its progress is narration, and it was on
+    // stdout until now — the one stream a caller parses. See cli_common.hpp for
+    // the contract; `Narrator` is where it is enforced.
+    const Narrator say{options};
+
     auto *sub = app.add_subcommand(
         "convert", "Import geometry, apply a config, and write it out. The output format "
                    "decides how far the pipeline runs: .nhb stops at the semantic scene, "
@@ -239,13 +250,11 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
                 const auto shapesRemoved = importResult.scene.deduplicateShapes();
                 const auto logVolsRemoved = importResult.scene.deduplicateLogVols();
                 if (shapesRemoved > 0 || logVolsRemoved > 0 || matsRemoved > 0) {
-                    std::println(stderr,
-                                 "Dedup: {} shapes, {} logVols, {} materials merged ({} shapes, {} "
-                                 "logVols, {} materials unique)",
-                                 shapesRemoved, logVolsRemoved, matsRemoved,
-                                 importResult.scene.shapes.size(),
-                                 importResult.scene.logVols.size(),
-                                 importResult.scene.materials.size());
+                    say("Dedup: {} shapes, {} logVols, {} materials merged ({} shapes, {} "
+                        "logVols, {} materials unique)",
+                        shapesRemoved, logVolsRemoved, matsRemoved,
+                        importResult.scene.shapes.size(), importResult.scene.logVols.size(),
+                        importResult.scene.materials.size());
                 }
             }
 
@@ -266,14 +275,15 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
                 }
                 const auto wcStats =
                     nodehammer::tessellation::applyWedgeCut(importResult.scene, wcp);
-                std::println(
-                    stderr,
-                    "Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} kept, "
-                    "{} skipped, {} pruned",
+                say("Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} "
+                    "kept, {} skipped, {} pruned",
                     wcp.startDeg, wcp.endDeg, wcStats.cut, wcStats.cutUnique, wcStats.emptied,
                     wcStats.kept, wcStats.skipped, wcStats.pruned);
             }
 
+            // Not narration: the caller named `--size-report`, and naming a
+            // report is asking for it. `-q` silences the running commentary, not
+            // the thing somebody typed an option to get.
             if (sizeReportOpt->count() > 0) {
                 const auto report =
                     nodehammer::ir::semanticFlatbufferSizeReport(importResult.scene);
@@ -286,15 +296,14 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
                 if (target.semantic == nullptr) {
                     continue;
                 }
-                std::println("Writing {} ...", target.path);
+                say("Writing {} ...", target.path);
                 nodehammer::detail::Timer expTimer;
                 target.semantic->write(importResult.scene, target.path,
                                        nodehammer::ir::SemanticExportConfig{});
                 timings.record(std::format("export[{}]", target.path), expTimer.elapsed());
-                std::println("  Nodes: {}  Shapes: {}  Materials: {}",
-                             importResult.scene.nodes.size(), importResult.scene.shapes.size(),
-                             importResult.scene.materials.size());
-                printWrittenOutputSizes({std::filesystem::path{target.path}});
+                say("  Nodes: {}  Shapes: {}  Materials: {}", importResult.scene.nodes.size(),
+                    importResult.scene.shapes.size(), importResult.scene.materials.size());
+                printWrittenOutputSizes(say, {std::filesystem::path{target.path}});
             }
 
             if (!needsTessellation) {
@@ -323,7 +332,7 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
                 const auto ecfg =
                     nodehammer::pipeline::resolveExportConfig(cfg, target.path, outputFmt);
 
-                std::println("Writing {} ...", target.path);
+                say("Writing {} ...", target.path);
                 nodehammer::detail::Timer expTimer;
                 target.render->write(tessResult.scene, target.path, ecfg);
                 timings.record(std::format("export[{}]", target.path), expTimer.elapsed());
@@ -342,12 +351,12 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
                 for (const auto &[id, ma] : tessResult.scene.meshAssets) {
                     totalTris += ma.indices.size() / 3;
                 }
-                std::println("  Nodes: {}  Meshes: {}  Triangles: {}  Materials: {}  "
-                             "Warnings: {}  Errors: {}",
-                             tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(),
-                             totalTris, tessResult.scene.materials.size(), warnings, errors);
+                say("  Nodes: {}  Meshes: {}  Triangles: {}  Materials: {}  "
+                    "Warnings: {}  Errors: {}",
+                    tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(), totalTris,
+                    tessResult.scene.materials.size(), warnings, errors);
                 printWrittenOutputSizes(
-                    convertOutputArtifacts(std::filesystem::path{target.path}, ecfg.format));
+                    say, convertOutputArtifacts(std::filesystem::path{target.path}, ecfg.format));
             }
 
             if (showTiming) {

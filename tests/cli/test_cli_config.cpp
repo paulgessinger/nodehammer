@@ -85,14 +85,32 @@ TEST_CASE("config flatten writes to a path when given one", "[cli][config]") {
     const auto entry = dir.write("scene.toml", "hoist_orphans = true\n");
     const auto target = dir.at("flat.toml");
 
-    const auto outcome =
-        nhtest::runCaptured({"config", "flatten", "--config", entry, "--output", target});
+    const auto outcome = nhtest::runCaptured(
+        {"config", "flatten", "--config", entry, "--output", target}, {.quiet = false});
 
     REQUIRE(outcome.code == 0);
     REQUIRE(fs::is_regular_file(target));
     // Nothing on stdout, so the report cannot be mistaken for the document.
     CHECK(outcome.out.empty());
     CHECK(outcome.err.find("wrote") != std::string::npos);
+}
+
+TEST_CASE("the receipt for a written document is narration, and can be silenced",
+          "[cli][config][streams]") {
+    // The default `RunOptions` is the *library* posture, which is the one a
+    // Python caller gets: the document went where it was asked to go, and there
+    // is nobody watching to be told so.
+    TempDir dir;
+    const auto entry = dir.write("scene.toml", "hoist_orphans = true\n");
+    const auto target = dir.at("flat.toml");
+
+    const auto outcome =
+        nhtest::runCaptured({"config", "flatten", "--config", entry, "--output", target});
+
+    REQUIRE(outcome.code == 0);
+    REQUIRE(fs::is_regular_file(target));
+    CHECK(outcome.out.empty());
+    CHECK(outcome.err.empty());
 }
 
 TEST_CASE("config validate reports rather than fails", "[cli][config]") {
@@ -111,7 +129,27 @@ TEST_CASE("config validate reports rather than fails", "[cli][config]") {
         const auto entry =
             dir.write("bad.toml", "[[rules]]\nmatch = \"*\"\nmax_segments_circle = -1\n");
         const auto outcome = nhtest::runCaptured({"config", "validate", "--config", entry});
-        CHECK(outcome.mentions("INVALID"));
+        CHECK(outcome.out.find("INVALID") != std::string::npos);
+        // The code and the word say the same thing. They used to disagree: the
+        // verdict was printed and the command still answered 0, so the only way
+        // to learn it from a script was to scrape a stream. "Reports rather than
+        // fails" is about what a bad *document* does to this command -- it is
+        // answered, not thrown -- not about the exit code lying.
+        CHECK(outcome.code != 0);
+    }
+
+    SECTION("the verdict is on one stream, whichever way it goes") {
+        // Not stdout for OK and stderr for INVALID: a caller reading either one
+        // would see a verdict only half the time.
+        const auto good = dir.write("fine.toml", "hoist_orphans = true\n");
+        const auto bad =
+            dir.write("wrong.toml", "[[rules]]\nmatch = \"*\"\nmax_segments_circle = -1\n");
+
+        CHECK(nhtest::runCaptured({"config", "validate", "--config", good}).out.find("config:") !=
+              std::string::npos);
+        const auto rejected = nhtest::runCaptured({"config", "validate", "--config", bad});
+        CHECK(rejected.out.find("config:") != std::string::npos);
+        CHECK(rejected.err.find("config: ") == std::string::npos);
     }
 }
 

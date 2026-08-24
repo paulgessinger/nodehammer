@@ -84,6 +84,11 @@ std::vector<viewer::ZipDirEntry> allFiles(const viewer::ZipWorkingSet &ws) {
 namespace nodehammer::cli::detail {
 
 void registerCmdProject(CLI::App &app, const RunOptions &options) {
+    // Copied into each callback below rather than reached through `options`:
+    // it is a pointer to the caller's object, so copying it costs nothing and
+    // it still sees a `-q` written during the parse.
+    const Narrator say{options};
+
     auto *sub = app.add_subcommand("project", "Build and publish .nhproj project archives")
                     ->require_subcommand(1);
 
@@ -98,7 +103,7 @@ void registerCmdProject(CLI::App &app, const RunOptions &options) {
     packSub->add_option("-o,--output", "Archive to write")->required()->type_name("FILE");
     packSub->add_option("--root", "Directory defining the archive's key space")->type_name("DIR");
 
-    packSub->callback([packSub] {
+    packSub->callback([packSub, say] {
         runOrReport("project pack", [&] {
             const project::PackResult packed =
                 project::pack({.config = optionText(*packSub, "--config"),
@@ -111,12 +116,12 @@ void registerCmdProject(CLI::App &app, const RunOptions &options) {
             // The root is reported because it is not visible anywhere else and
             // it decided every key in the archive: an include that resolves is
             // the difference between this file opening and opening empty.
-            std::println(stderr, "root      {}", packed.root.string());
-            std::println(stderr, "config    {}", packed.configKey);
-            std::println(stderr, "geometry  {}{}", packed.geometryKey,
-                         packed.imported ? " (imported)" : "");
+            say("root      {}", packed.root.string());
+            say("config    {}", packed.configKey);
+            say("geometry  {}{}", packed.geometryKey, packed.imported ? " (imported)" : "");
             // The path alone on stdout, so `$(nodehammer project pack ...)` is
-            // the archive and not a report about it.
+            // the archive and not a report about it. Not narration and not
+            // silenced by `-q`: it is what the command was asked for.
             std::println("{}", out.string());
         });
     });
@@ -133,7 +138,7 @@ void registerCmdProject(CLI::App &app, const RunOptions &options) {
     pubSub->add_option("--title", "Browser-tab title");
     pubSub->add_option("--web-assets", "Directory holding the built wasm runtime");
 
-    pubSub->callback([pubSub, &options] {
+    pubSub->callback([pubSub, &options, say] {
         runOrReport("project publish", [&] {
             web::LadderInputs inputs{};
             inputs.explicitDir = optionText(*pubSub, "--web-assets");
@@ -145,6 +150,9 @@ void registerCmdProject(CLI::App &app, const RunOptions &options) {
                 try {
                     return web::locateRuntime(inputs);
                 } catch (const nodehammer::Error &) {
+                    // Printed unconditionally: this is the diagnosis of a
+                    // failure in progress, not an account of work going well,
+                    // and `-q` does not hide those.
                     std::print(stderr, "{}\n", web::explainLadder(web::walkLadder(inputs)));
                     throw;
                 }
@@ -161,12 +169,11 @@ void registerCmdProject(CLI::App &app, const RunOptions &options) {
             stage.geometry = optionText(*pubSub, "--input");
             const web::StagedRoot staged = web::stageRoot(stage);
 
-            std::println(stderr, "runtime   {}", runtime.version);
-            std::println(stderr, "posture   {}",
-                         staged.posture == web::Posture::Viewer ? "viewer (locked)"
-                                                                : "application (empty)");
+            say("runtime   {}", runtime.version);
+            say("posture   {}",
+                staged.posture == web::Posture::Viewer ? "viewer (locked)" : "application (empty)");
             if (!staged.archive.empty()) {
-                std::println(stderr, "archive   {}", staged.archive);
+                say("archive   {}", staged.archive);
             }
             std::println("{}", out.string());
         });

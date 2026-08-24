@@ -98,6 +98,59 @@ template <typename Body> void runOrReport(std::string_view command, Body &&body)
     throw detail::CommandFailure{1};
 }
 
+/// The stderr half of the output contract, with an off switch.
+///
+/// Two channels, and the split is what makes the CLI callable rather than only
+/// typeable:
+///
+/// - **stdout is the answer.** The flattened document, the JSON, the path to the
+///   archive that was just written, the URL being served. Exactly what a caller
+///   would substitute into the next command, and nothing else — so
+///   `$(nodehammer project pack ...)` is the archive rather than a report about
+///   one.
+/// - **stderr is everything about producing it.** Diagnostics, progress, the
+///   summary of what got merged. A person watching wants all of it; a program
+///   that will read the exit code wants none of it.
+///
+/// This narrates the second channel, and `RunOptions::quiet` silences it. That
+/// covers narration only: `printDiag`/`printDiags` and the failure line in
+/// `runOrReport` go out regardless, because a flag that hides errors is a trap,
+/// and so do reports the caller asked for by name (`--timing`,
+/// `--size-report`) — naming a report is asking for it.
+///
+/// It holds a pointer to the caller's `RunOptions`, which `runWith` keeps alive
+/// for the whole parse. Not a copy of the flag: `-q` is written into that object
+/// *during* the parse, after the registrar that captured it has run.
+class Narrator {
+  public:
+    explicit Narrator(const RunOptions &options) noexcept : options_{&options} {}
+
+    /// One line, formatted, to stderr — unless the caller asked for quiet.
+    template <typename... Args>
+    void operator()(std::format_string<Args...> fmt, Args &&...args) const {
+        if (options_->quiet) {
+            return;
+        }
+        std::println(stderr, fmt, std::forward<Args>(args)...);
+    }
+
+    /// Text that already carries its own newlines — a ladder explanation, a
+    /// block report — passed through rather than re-wrapped.
+    void block(std::string_view text) const {
+        if (options_->quiet) {
+            return;
+        }
+        std::print(stderr, "{}", text);
+    }
+
+    /// Whether anything would be printed, for a caller that would otherwise do
+    /// work only to hand it to a no-op.
+    [[nodiscard]] bool enabled() const noexcept { return !options_->quiet; }
+
+  private:
+    const RunOptions *options_;
+};
+
 /// Result of importFrom: the import result plus the format name.
 struct ImportWithFormat {
     ir::ImportResult result;

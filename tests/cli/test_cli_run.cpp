@@ -41,11 +41,14 @@
 #include <nodehammer/version.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 #ifdef _WIN32
@@ -121,28 +124,94 @@ TEST_CASE("the pager is off unless the caller asks", "[cli]") {
     CHECK(nodehammer::cli::RunOptions{}.pager == false);
 }
 
+namespace {
+
+/// A path in the temp directory that removes itself.
+///
+/// `convert` requires an `--output`, so a case about what it *says* still needs
+/// somewhere for it to put what it makes.
+struct ScratchFile {
+    ScratchFile(std::string_view stem, std::string_view ext)
+        : path{(std::filesystem::temp_directory_path() /
+                std::format("{}_{}{}", stem,
+                            std::chrono::steady_clock::now().time_since_epoch().count(), ext))
+                   .string()} {}
+    ~ScratchFile() {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+    }
+    ScratchFile(const ScratchFile &) = delete;
+    ScratchFile &operator=(const ScratchFile &) = delete;
+
+    std::string path;
+};
+
+} // namespace
+
+TEST_CASE("narration is off for a library caller and switchable from the arguments", "[cli]") {
+    // The mirror of the pager case above, and the reason both defaults sit in
+    // `RunOptions` rather than in the commands: the front door decides what
+    // kind of caller this is, once, and every command inherits the answer.
+    //
+    // `--synthetic-box` so the case needs no fixture and no importer backend;
+    // the summary line it prints is the commentary being switched.
+    CHECK(nodehammer::cli::RunOptions{}.quiet == true);
+
+    const ScratchFile target{"nh_run_quiet", ".nhb"};
+
+    const auto silent = runCaptured({"convert", "--synthetic-box", "--output", target.path});
+    CHECK(silent.code == 0);
+    CHECK(silent.err.find("Nodes:") == std::string::npos);
+    // Silent about the work, and silent on stdout in every posture: the answer
+    // is the file.
+    CHECK(silent.out.empty());
+
+    // `-v` reaches the same switch from the argument list, for a caller that
+    // does not own the `RunOptions` -- a harness, or somebody debugging one.
+    const auto asked = runCaptured({"-v", "convert", "--synthetic-box", "--output", target.path});
+    CHECK(asked.code == 0);
+    CHECK(asked.err.find("Nodes:") != std::string::npos);
+    CHECK(asked.out.empty());
+
+    // And after the subcommand as well as before it, which is where people
+    // actually type a global flag. CLI11 copies fallthrough into every
+    // subcommand it constructs, so this holds two levels down as well.
+    const auto trailing =
+        runCaptured({"convert", "--synthetic-box", "--output", target.path, "-v"});
+    CHECK(trailing.code == 0);
+    CHECK(trailing.err.find("Nodes:") != std::string::npos);
+}
+
+TEST_CASE("a diagnostic is not narration, and no switch hides one", "[cli]") {
+    // The line between the two, asserted: `-q` silences the account of work
+    // going well. A command that could not do its job still says so, on stderr,
+    // and still answers non-zero -- which is what makes the switch safe to
+    // leave on by default for every caller that is a program.
+    const auto outcome =
+        runCaptured({"convert", "--input", "no-such-file.gdml", "--output", "out.glb"});
+
+    CHECK(outcome.code != 0);
+    CHECK(outcome.err.find("no-such-file.gdml") != std::string::npos);
+}
+
 // Native-only: `project` is not registered under Emscripten (there is no host
 // to serve from), so over there this would be asserting on an unknown
 // subcommand rather than on an unreadable archive.
 #ifndef __EMSCRIPTEN__
 TEST_CASE("project info on a file that is not an archive reports, and returns", "[cli][project]") {
     // `ZipWorkingSet::openFromFile` throws `std::runtime_error`, which the
-    // command's reporting layer does not catch: this line used to abort the
+    // command's reporting layer does not catch: this line used to end the
     // process -- and with it this test binary -- on any regular file that is
-    // not a ZIP. The assertions after it are the point, as above.
-    const auto path = std::filesystem::temp_directory_path() /
-                      ("nh_not_an_archive_" +
-                       std::to_string(static_cast<long long>(currentProcessId())) + ".nhproj");
+    // not a ZIP. That it *returns* is the assertion, as in the first case in
+    // this file; what it says is the one after.
+    const ScratchFile target{"nh_not_an_archive", ".nhproj"};
     {
-        std::ofstream out(path, std::ios::binary);
+        std::ofstream out(target.path, std::ios::binary);
         out << "this is not a ZIP archive\n";
     }
 
-    const auto outcome = runCaptured({"project", "info", path.string()});
+    const auto outcome = runCaptured({"project", "info", target.path});
     CHECK(outcome.code != 0);
-    CHECK(outcome.mentions(path.filename().string()));
-
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
+    CHECK(outcome.err.find("archive") != std::string::npos);
 }
 #endif

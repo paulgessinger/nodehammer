@@ -33,6 +33,12 @@ int main(int argc, char **argv) {
     // process replaces its stdout and then blocks until somebody quits `less`.
     options.pager = true;
 
+    // And a person typed this, so the commentary is for them. The library
+    // default is on the other side (nodehammer/cli.hpp) for the same reason the
+    // pager's is: a caller of `cli::run` wants the exit code and the answer on
+    // stdout, not a running account of the work. `-q` turns it back off here.
+    options.quiet = false;
+
 #ifdef NH_WITH_VIEWER
     // No default subcommand. A bare `nodehammer` prints the help and returns 0,
     // here exactly as it does from `cli::run({})` and from the wheel's console
