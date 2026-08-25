@@ -80,7 +80,12 @@ struct RunOptions {
     /// code page, so a runtime under a directory with a non-ASCII name would
     /// arrive mangled. Callers that have the real encoding — nanobind's
     /// `stl/filesystem.h` caster above all — can hand it over intact.
-    std::filesystem::path webAssets;
+    ///
+    /// Braced rather than bare: every other member here carries a default, and
+    /// under `-Wmissing-field-initializers` a member without one makes
+    /// `{.quiet = false}` -- the natural way to set one field -- a warning at
+    /// each call site, which `-Werror` turns into a build failure.
+    std::filesystem::path webAssets{};
 };
 
 /// Run one command line. Returns the exit code the executable would have.

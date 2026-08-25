@@ -54,7 +54,10 @@ class TempDir {
 
 TEST_CASE("config flatten inlines a TOML include chain", "[cli][config]") {
     TempDir dir;
-    dir.write("base.toml", "hoist_orphans = true\n");
+    // The include resolves relative to the entry config, so the path this
+    // returns is of no use here -- and `write` is `[[nodiscard]]` for the calls
+    // where it is.
+    static_cast<void>(dir.write("base.toml", "hoist_orphans = true\n"));
     const auto entry = dir.write("scene.toml", "include = \"base.toml\"\n");
 
     const auto outcome = nhtest::runCaptured({"config", "flatten", "--config", entry});

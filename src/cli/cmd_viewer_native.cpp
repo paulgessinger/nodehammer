@@ -160,7 +160,11 @@ WindowOptions addWindowOptions(CLI::App &sub,
 
 namespace nodehammer::cli::detail {
 
-void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
+// `options` is unnamed: the native modes read every setting they need off the
+// parser, and the one front-door property that is not on the command line --
+// `webAssets` -- belongs to `serve`, which lives in the library half. The
+// parameter stays so both registrars are called the same way from `main`.
+void registerCmdViewerNative(CLI::App &app, const RunOptions & /*options*/) {
     // Fills in, does not create. `registerCmdViewer` in the library owns the
     // `viewer` subcommand, its shared options and `serve`, because those have to
     // exist in builds this file is not compiled into -- a wheel above all. It
@@ -222,10 +226,9 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
     // before it runs, and in nothing else -- the scene, the project and every
     // window option are resolved the same way whether a person is going to look
     // at the result or a file is.
-    const auto runNative = [viewer, &options, cfg, initialCamera, cameraYawDeg, cameraPitchDeg,
-                            cullModeStr, screenshot,
-                            benchScale](NativeMode mode, const WindowOptions &win,
-                                        const std::string &outPath) {
+    const auto runNative = [viewer, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeStr,
+                            screenshot, benchScale](NativeMode mode, const WindowOptions &win,
+                                                    const std::string &outPath) {
         // The only command that never had one. Every other `cmd_*.cpp` has run
         // its body through this since the error model landed; this one instead
         // validated by hand and called `std::exit`, which meant a
@@ -234,17 +237,17 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
         runOrReport("viewer", [&] {
             if (*win.cullModeOpt) {
                 using nodehammer::viewer::CullOverride;
-                CullOverride mode = CullOverride::Auto;
+                CullOverride cull = CullOverride::Auto;
                 if (*cullModeStr == "force-on") {
-                    mode = CullOverride::ForceCull;
+                    cull = CullOverride::ForceCull;
                 } else if (*cullModeStr == "force-off") {
-                    mode = CullOverride::ForceNoCull;
+                    cull = CullOverride::ForceNoCull;
                 } else if (*cullModeStr != "auto") {
                     throw CLI::ValidationError("--cull",
                                                "must be one of: auto, force-on, force-off");
                 }
-                cfg->cull = mode;
-                cfg->startup_overrides.cull = mode;
+                cfg->cull = cull;
+                cfg->startup_overrides.cull = cull;
             }
             if (*win.pauseWhenUnfocusedOpt) {
                 cfg->startup_overrides.pause_when_unfocused = cfg->pause_when_unfocused;
