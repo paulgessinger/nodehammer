@@ -62,8 +62,14 @@ def _await_url(lines: queue.Queue, seen: list[str]) -> str:
         if line is None:
             fail("the command exited before serving anything; output:\n" + "".join(seen))
         seen.append(line)
-        if line.startswith("serving "):
-            return line.split(None, 1)[1].strip()
+        # The URL arrives alone on stdout, with the banner around it on stderr:
+        # `viewer serve` puts it there precisely so a caller does not have to
+        # find it inside a sentence. This stream has both merged, so the URL is
+        # the line that *is* one -- matching a prefix would be matching the
+        # narration, which is the half free to be reworded.
+        candidate = line.strip()
+        if candidate.startswith(("http://", "https://")):
+            return candidate
 
 
 def _get(url: str) -> tuple[int, int]:
