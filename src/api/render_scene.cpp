@@ -16,26 +16,6 @@
 namespace nodehammer {
 namespace {
 
-constexpr std::string_view kNhr = "nhr";
-
-// @TODO: Potentially unify this with other occurrences
-[[nodiscard]] std::string lowerExtension(const std::filesystem::path &path) {
-    std::string ext = path.extension().string();
-    std::transform(ext.begin(), ext.end(), ext.begin(),
-                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return ext;
-}
-
-/// `.nhr` and `.nhr.zst`. The compound form needs the second extension checked
-/// explicitly, since `path.extension()` only ever reports the last one.
-[[nodiscard]] bool isNhrPath(const std::filesystem::path &path) {
-    const auto ext = lowerExtension(path);
-    if (ext == ".nhr") {
-        return true;
-    }
-    return ext == ".zst" && lowerExtension(path.stem()) == ".nhr";
-}
-
 void appendUnique(std::vector<std::string> &out, std::string_view name) {
     if (std::find(out.begin(), out.end(), name) == out.end()) {
         out.emplace_back(name);
@@ -66,9 +46,11 @@ RenderScene RenderScene::read(std::span<const std::byte> nhr) {
 
 std::span<const std::string_view> RenderScene::formats() {
     static const std::vector<std::string> owned = [] {
-        // `nhr` first because it is the only format this type can also *read*;
-        // the exporters follow in registration order.
-        std::vector<std::string> out{std::string{kNhr}};
+        // Straight off the registry, in registration order. `nhr` used to be
+        // prepended here by hand, because it was dispatched by `write` rather
+        // than registered -- which is exactly what made this list and the CLI's
+        // disagree. It is an exporter now, so there is one source.
+        std::vector<std::string> out;
         const auto registry = ir::RenderExporterRegistry::makeDefault();
         for (const auto &exp : registry.exporters()) {
             appendUnique(out, exp->formatName());
@@ -82,20 +64,6 @@ std::span<const std::string_view> RenderScene::formats() {
 void RenderScene::write(const std::filesystem::path &path, const OutputConfig &output,
                         const WriteOptions &options) const {
     const auto &scene = api::sceneOrThrow(*this, "RenderScene::write");
-
-    // The render IR's own format is not in the exporter registry — nothing in
-    // the CLI writes one — so it is dispatched here, ahead of the registry that
-    // would otherwise report it as unknown.
-    // @TODO: Change the above and include it in the registry, so the CLI can write it too.
-    if (options.format == kNhr || (options.format.empty() && isNhrPath(path))) {
-        try {
-            const auto bytes = ir::renderSceneToBytes(scene);
-            detail::zstd_io::writeBytesToFile(path, bytes);
-            return;
-        } catch (const std::exception &e) {
-            api::rethrowAsError(e, codes::kFatalExportWriteFailed, path.string());
-        }
-    }
 
     const auto registry = ir::RenderExporterRegistry::makeDefault();
     const auto *exporter = registry.resolve(path, options.format);

@@ -108,12 +108,13 @@ int main() {
     }
     std::cout << std::flush;
 
-    if (!listed(semanticFormats, "synthetic") || !listed(semanticFormats, "flatbuffer")) {
+    if (!listed(semanticFormats, "synthetic") || !listed(semanticFormats, "nhb")) {
         std::cerr << "SemanticScene::formats() is missing a built-in format\n";
         return 1;
     }
     if (!listed(nodehammer::Config::formats(), "toml") ||
-        !listed(nodehammer::RenderScene::formats(), "gltf")) {
+        !listed(nodehammer::RenderScene::formats(), "gltf") ||
+        !listed(nodehammer::RenderScene::formats(), "nhr")) {
         std::cerr << "a built-in format is missing from formats()\n";
         return 1;
     }

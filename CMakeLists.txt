@@ -253,6 +253,7 @@ set(NH_CORE_SOURCES
     src/ir/gltf/render/exporter.cpp
     src/ir/obj/render/exporter.cpp
     src/ir/render/exporter_registry.cpp
+    src/ir/fb/render/exporter.cpp
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp

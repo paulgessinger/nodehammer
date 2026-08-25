@@ -199,7 +199,7 @@ TEST_CASE("Error carries a code, a context and its Diagnostic form", "[api][hand
 
 TEST_CASE("formats() is the runtime capability query", "[api][handles]") {
     const auto semantic = nh::SemanticScene::formats();
-    REQUIRE(std::ranges::find(semantic, "flatbuffer") != semantic.end());
+    REQUIRE(std::ranges::find(semantic, "nhb") != semantic.end());
     REQUIRE(std::ranges::find(semantic, "json") != semantic.end());
     REQUIRE(std::ranges::find(semantic, "synthetic") != semantic.end());
     // No duplicates: the importer and exporter registries overlap.

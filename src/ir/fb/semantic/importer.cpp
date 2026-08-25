@@ -9,7 +9,7 @@
 
 namespace nodehammer::ir {
 
-std::string_view FlatBufferImporter::formatName() const noexcept { return "flatbuffer"; }
+std::string_view FlatBufferImporter::formatName() const noexcept { return "nhb"; }
 
 std::vector<std::string> FlatBufferImporter::supportedExtensions() const {
     return {"nhb", "nhb.zst"};
