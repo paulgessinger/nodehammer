@@ -85,6 +85,28 @@ target_sources(nodehammer_tests PRIVATE
     cli/test_cli_convert_stages.cpp
 )
 
+# `skills` is registered only where it is compiled, and it is native-only: it
+# writes into directories the user keeps, which under Emscripten is a virtual
+# filesystem that vanishes with the tab. Adding the suite unconditionally would
+# assert on an unknown subcommand over there.
+if(NOT EMSCRIPTEN)
+    target_sources(nodehammer_tests PRIVATE cli/test_cli_skills.cpp)
+
+    # The generator, over a fixture rather than over `skills/`.
+    #
+    # Everything above tests the skill this build happens to carry. This tests
+    # the *next* one: the fixture holds a name that is not a valid C++
+    # identifier and a file nested below the skill directory, which is where the
+    # generator broke -- `kFiles_${name}` emitted `kFiles_with-dash`, and one
+    # skill with a plain name hid it completely.
+    add_test(NAME cmake_generate_skills_data
+             COMMAND ${CMAKE_COMMAND}
+                 -DNH_GENERATOR=${CMAKE_SOURCE_DIR}/cmake/GenerateSkillsData.cmake
+                 -DNH_FIXTURE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/skills
+                 -DNH_WORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/skills_fixture
+                 -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_skills_data_test.cmake)
+endif()
+
 # ── A bare invocation, over the built executable ──────────────────────────────
 #
 # The assertion neither in-process suite can make. `cli::run({})` has always

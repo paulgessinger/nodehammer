@@ -31,6 +31,8 @@
 //   NH0800–NH0899  public API boundary
 //   NH0900–NH0999  CLI usage
 //   NH1000–NH1099  web viewer runtime
+//   NH1100–NH1199  project archives
+//   NH1200–NH1299  agent skills
 
 namespace nodehammer::codes {
 
@@ -159,5 +161,14 @@ inline constexpr std::string_view kFatalWebStage = "NH1003";
 // builds on the fly -- three callers with nothing in common except that each
 // wants to know the archive could not be assembled, and why.
 inline constexpr std::string_view kFatalProjectPack = "NH1100";
+
+// ── Agent skills ──────────────────────────────────────────────────────────────
+// `skills install` writes into directories the user also edits by hand, so its
+// two failures are answered differently and must be told apart: a name this
+// build does not carry is a typo or a stale script, and the remedy is
+// `skills list`. A destination that is somebody else's is a refusal on purpose,
+// and the remedy is to look at what is there -- or to say `--force` and mean it.
+inline constexpr std::string_view kFatalSkillsUnknown = "NH1200";
+inline constexpr std::string_view kFatalSkillsInstall = "NH1201";
 
 } // namespace nodehammer::codes

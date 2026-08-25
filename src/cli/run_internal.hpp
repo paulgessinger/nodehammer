@@ -83,6 +83,12 @@ void registerCmdConfig(CLI::App &app, const RunOptions &options);
 // does not have. Registered beside `viewer` for the same reason.
 void registerCmdProject(CLI::App &app, const RunOptions &options);
 
+// Native-only for a different reason: every line of it writes to a filesystem
+// the user keeps, which under Emscripten is a virtual one that vanishes with the
+// tab. The skill bytes themselves are gated with it, so a wasm module carries
+// neither the command nor its payload.
+void registerCmdSkills(CLI::App &app, const RunOptions &options);
+
 // ── `viewer`, in two halves ───────────────────────────────────────────────────
 //
 // The library registers the subcommand and serves the browser; the executable

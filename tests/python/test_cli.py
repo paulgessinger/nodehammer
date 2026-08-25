@@ -21,6 +21,7 @@ commands print from C++ to file descriptors 1 and 2. ``capsys`` replaces
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 
@@ -334,3 +335,37 @@ def test_an_invalid_config_is_a_non_zero_code_and_not_only_a_word(tmp_path, capf
     captured = capfd.readouterr()
     assert "INVALID" in captured.out
     assert "INVALID" not in captured.err
+
+
+def test_the_wheel_carries_the_skill_and_can_install_it(tmp_path, capfd, monkeypatch):
+    """The one check that a Python install is not a second-class one.
+
+    The skill is compiled into libnodehammer rather than shipped as package data
+    precisely so that the wheel and the executable cannot carry different
+    payloads -- there is no ``force-include``, no editable-install trap and no
+    runtime locator to resolve to the wrong prefix. This asserts the payload
+    actually arrived on this side of the boundary, which is the failure that
+    would otherwise surface as a user reporting an empty directory.
+    """
+    assert nh.cli.run(["skills", "list", "--output-format", "json"]) == 0
+    listing = json.loads(capfd.readouterr().out)
+    names = [skill["name"] for skill in listing["skills"]]
+    assert "nodehammer" in names
+    # Bytes, not merely a name: an embedded file of length zero would satisfy
+    # every structural check and still be a broken build.
+    assert all(skill["bytes"] > 0 for skill in listing["skills"])
+
+    # And the install path, end to end. HOME is redirected rather than passing
+    # --dir, because the two destinations and the link between them are the part
+    # worth proving reaches Python at all.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".claude").mkdir()
+
+    assert nh.cli.run(["skills", "install"]) == 0
+
+    real = tmp_path / ".agents" / "skills" / "nodehammer"
+    link = tmp_path / ".claude" / "skills" / "nodehammer"
+    assert (real / "SKILL.md").is_file()
+    assert (real / "SKILL.md").stat().st_size > 0
+    assert link.is_symlink()
+    assert link.resolve() == real.resolve()

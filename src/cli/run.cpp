@@ -129,6 +129,7 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
 #ifndef __EMSCRIPTEN__
     registerCmdProject(app, effective);
     registerCmdViewer(app, effective);
+    registerCmdSkills(app, effective);
 #endif
     for (const auto registrar : extra) {
         registrar(app, effective);
