@@ -83,6 +83,10 @@ void registerCmdDumpSemantic(CLI::App &app, const RunOptions &options);
 void registerCmdDumpRender(CLI::App &app, const RunOptions &options);
 void registerCmdConfigLua(CLI::App &app, const RunOptions &options);
 
+// Native-only: packing mounts a `FilesystemProjectFs`, which the web build
+// does not have. Registered beside `viewer` for the same reason.
+void registerCmdProject(CLI::App &app, const RunOptions &options);
+
 // ── `viewer`, in two halves ───────────────────────────────────────────────────
 //
 // The library registers the subcommand and serves the browser; the executable

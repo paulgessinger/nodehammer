@@ -479,6 +479,10 @@ if(NOT EMSCRIPTEN)
         src/web/static_server.cpp
         src/web/stage.cpp
         src/web/open_browser.cpp
+        # Packing mounts a FilesystemProjectFs, so it is gated here rather than
+        # beside the ZipWorkingSet it builds -- that half *is* cross-platform.
+        src/project/pack.cpp
+        src/cli/cmd_project.cpp
         # `viewer --web` itself. Excluded here rather than #ifdef'd inside:
         # every line of it calls something in the three files above, so a wasm
         # build of this TU would be a shell around a refusal. `run.cpp` skips

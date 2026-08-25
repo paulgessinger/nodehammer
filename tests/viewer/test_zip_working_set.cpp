@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -178,4 +179,44 @@ TEST_CASE("ZipWorkingSet::clearDirty resets the flag without changing content",
 TEST_CASE("ZipWorkingSet rejects a non-ZIP blob", "[viewer][zip_working_set]") {
     auto garbage = asBytes("this is definitely not a zip archive");
     REQUIRE_THROWS_AS(ZipWorkingSet::openFromBytes(garbage), std::runtime_error);
+}
+
+// A ZIP's names are bytes, not paths: `/file` and `dir//file` are both legal and
+// both have an empty segment where a directory name should be. Turning one into
+// a directory key produces the prefix already being listed — a directory that
+// contains itself, which any depth-first walk follows forever. `project info`
+// did exactly that on an archive from anywhere.
+TEST_CASE("keys with empty path segments list as leaves, not as themselves",
+          "[viewer][zip][listing]") {
+    // Written as overrides rather than through `makeZip`: miniz's *writer*
+    // rejects these names, which is the whole reason they arrive from
+    // elsewhere. The listing has to survive them either way.
+    ZipWorkingSet ws = ZipWorkingSet::create();
+    ws.writeEntry("/leading.toml", asBytes("a"));
+    ws.writeEntry("dir//double.toml", asBytes("bb"));
+    ws.writeEntry("plain.toml", asBytes("ccc"));
+
+    SECTION("at the root") {
+        const auto entries = ws.listAtPrefix("");
+        // The malformed key is here, as a file, under its own key — present in
+        // the archive means present in a listing of it.
+        const auto leading = std::ranges::find_if(
+            entries, [](const ZipDirEntry &e) { return e.key == "/leading.toml"; });
+        REQUIRE(leading != entries.end());
+        CHECK_FALSE(leading->is_directory);
+
+        // And nothing here is a directory whose key is the prefix it came from.
+        for (const auto &e : entries) {
+            CHECK_FALSE((e.is_directory && e.key.empty()));
+        }
+    }
+
+    SECTION("one level down") {
+        const auto entries = ws.listAtPrefix("dir");
+        REQUIRE(entries.size() == 1);
+        CHECK(entries.front().key == "dir//double.toml");
+        CHECK_FALSE(entries.front().is_directory);
+        // "dir/" again would be the loop.
+        CHECK_FALSE((entries.front().is_directory && entries.front().key == "dir/"));
+    }
 }
