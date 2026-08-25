@@ -51,11 +51,17 @@ void runViewer(nodehammer::viewer::App::Handle &application) {
     }
 }
 
-bool isZipPath(const std::filesystem::path &path) {
+/// Does this path name an archive project?
+///
+/// `.nhproj` is the extension `project pack` writes and the one the drop
+/// handler recognises; `.zip` is what the container actually is, and predates
+/// the name. Both open the same `ArchiveProjectFs`, so both are accepted here
+/// rather than making the CLI the one place that refuses its own format.
+bool isArchivePath(const std::filesystem::path &path) {
     auto ext = path.extension().string();
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return ext == ".zip";
+    return ext == ".nhproj" || ext == ".zip";
 }
 
 /// Which of the three window-backed modes is running.
@@ -347,13 +353,14 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
                     application->setProject(
                         std::make_unique<nodehammer::viewer::WatchedFilesystemProjectFs>(
                             std::make_unique<nodehammer::viewer::FilesystemProjectFs>(path_abs)));
-                } else if (isZipPath(path_abs)) {
+                } else if (isArchivePath(path_abs)) {
                     application->setProject(
                         std::make_unique<nodehammer::viewer::ArchiveProjectFs>(path_abs));
                 } else {
                     throw nodehammer::Error{
                         nodehammer::codes::kFatalCliUsage,
-                        std::format("positional path must be a .zip archive or directory: {}",
+                        std::format("positional path must be a .nhproj archive or a "
+                                    "directory: {}",
                                     projectPath),
                         projectPath};
                 }
