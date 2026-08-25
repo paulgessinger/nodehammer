@@ -24,6 +24,12 @@
 /// this since long before this API existed.
 class TGeoManager;
 
+/// Declared unconditionally, defined only in a build with DD4hep (#41 §5), same
+/// as `TGeoManager` above.
+namespace dd4hep {
+class Detector;
+}
+
 namespace nodehammer {
 
 struct SemanticResult;
@@ -82,6 +88,15 @@ class SemanticScene {
     /// the argument's type, and the struct's only field selects a format. A
     /// knob with one legal value is not a knob.
     [[nodiscard]] NH_API static SemanticResult read(TGeoManager &manager);
+
+    /// Traverse a caller-owned `dd4hep::Detector` — already loaded via
+    /// `fromCompact` or built programmatically, live TGeo tree and DetElement
+    /// hierarchy included. The in-memory counterpart to reading a compact XML
+    /// path: no file is written or reread.
+    ///
+    /// Declared in every build; defined only where DD4hep is present, same
+    /// contract as the `TGeoManager` overload above.
+    [[nodiscard]] NH_API static SemanticResult read(dd4hep::Detector &detector);
 
     /// Format names this build can read or write, in registration order and
     /// without duplicates. The runtime capability query for the optional
