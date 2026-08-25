@@ -24,7 +24,7 @@ the data layer can keep treating "one project per process" as a hard
 invariant.
 
 Scope: only the **`viewer` subcommand** is restricted. `convert`,
-`inspect`, `validate-config`, `dump-semantic`, `dump-render` and any
+`inspect`, `config validate`, `convert` and any
 other non-window subcommand keep running freely — they're stateless
 and parallel-safe.
 

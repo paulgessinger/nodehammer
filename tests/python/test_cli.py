@@ -100,15 +100,13 @@ def test_args_default_to_sys_argv(monkeypatch, capfd):
         # library. The point of the sweep is less the individual codes than the
         # fact that a run of them in a row cannot end this process.
         (["convert", "--input", "no-such-file.gdml", "--output", "out.glb"], "NH0101"),
-        (["config-lua", "--config", "no-such-script.lua"], "NH0902"),
-        (["config-flatten", "--config", "no-such-config.toml"], "NH0100"),
+        (["config", "flatten", "--config", "no-such-script.lua"], "NH0902"),
+        (["config", "flatten", "--config", "no-such-config.toml"], "NH0100"),
         # `inspect` requires a nested subcommand of its own, so the sweep says
         # so -- a bare `inspect --input ...` fails for that reason instead and
         # would assert nothing about the import path.
         (["inspect", "--input", "no-such-file.gdml", "summary"], "NH0101"),
-        (["dump-semantic", "--input", "no-such-file.gdml"], "NH0101"),
-        (["dump-render", "--input", "no-such-file.gdml"], "NH0101"),
-        (["validate-config", "--config", "no-such-config.toml"], "NH0100"),
+        (["config", "validate", "--config", "no-such-config.toml"], "NH0100"),
     ],
 )
 def test_converted_exit_sites_report_and_return(args, code_in_output, capfd):
@@ -129,7 +127,7 @@ def test_a_diagnosis_is_printed_once_not_twice(capfd):
     # `throwIfErrors` puts the whole collected list on the exception and the
     # command's handler prints it, so an eager `printDiags` before the throw
     # said everything twice. `reportOrThrow` made the halves exclusive.
-    assert nh.cli.run(["config-flatten", "--config", "no-such-config.toml"]) != 0
+    assert nh.cli.run(["config", "flatten", "--config", "no-such-config.toml"]) != 0
 
     err = capfd.readouterr().err
     assert err.count("NH0100") <= 1 or err.count("no-such-config.toml") <= 2
@@ -190,7 +188,7 @@ def test_a_failing_command_gives_the_shell_a_nonzero_status():
 
 # ── the web runtime, and the rung this package fills ─────────────────────────
 #
-# `viewer --web` serves a directory of Emscripten output that no native build
+# `viewer serve` serves a directory of Emscripten output that no native build
 # produces, so the wheel gets it from a sibling distribution, `nodehammer-web`.
 # C++ cannot find that directory on its own: under a wheel the running
 # executable is the interpreter, and in a virtualenv the platform call behind
@@ -224,7 +222,7 @@ def test_the_runtime_directory_reaches_the_library(monkeypatch, tmp_path, capfd)
     monkeypatch.setattr(nh.cli, "_web_runtime_dir", lambda: str(pretend))
     monkeypatch.delenv("NODEHAMMER_WEB_ASSETS", raising=False)
 
-    code = nh.cli.run(["viewer", "--web", "--no-browser"])
+    code = nh.cli.run(["viewer", "serve", "--no-browser"])
 
     assert code != 0
     err = capfd.readouterr().err
@@ -236,13 +234,13 @@ def test_the_runtime_directory_reaches_the_library(monkeypatch, tmp_path, capfd)
 
 def test_the_failure_names_the_package_that_supplies_a_runtime(monkeypatch, capfd):
     # The message a person actually hits: `pip install nodehammer`, no
-    # `nodehammer-web`, `nodehammer viewer --web`. Naming the package is the
+    # `nodehammer-web`, `nodehammer viewer serve`. Naming the package is the
     # whole remedy, and it is the one thing the ladder's explanation cannot
     # derive from what it found -- it has to say it.
     monkeypatch.setattr(nh.cli, "_web_runtime_dir", lambda: "")
     monkeypatch.delenv("NODEHAMMER_WEB_ASSETS", raising=False)
 
-    code = nh.cli.run(["viewer", "--web", "--no-browser"])
+    code = nh.cli.run(["viewer", "serve", "--no-browser"])
 
     assert code != 0
     assert "nodehammer-web" in capfd.readouterr().err
@@ -252,5 +250,87 @@ def test_cli_run_takes_the_runtime_directory_as_an_argument():
     # The binding's signature, asserted directly: the wrapper is what fills this
     # in, and a default of "" is what makes the sibling package optional rather
     # than the wrapper needing to know whether the argument exists.
-    assert nh._nodehammer.cli_run(["--version"], False, "") == 0
-    assert nh._nodehammer.cli_run(["--version"], pager=False, web_assets="") == 0
+    assert nh._nodehammer.cli_run(["--version"], False, True, "") == 0
+    assert nh._nodehammer.cli_run(["--version"], pager=False, quiet=True, web_assets="") == 0
+    # Every argument past the first is optional, which is what lets the wrapper
+    # add one without every caller of the binding learning about it.
+    assert nh._nodehammer.cli_run(["--version"]) == 0
+
+
+def test_narration_is_off_for_a_caller_and_on_for_the_console_script(tmp_path, capfd):
+    """The whole point of ``quiet``: same command, two front doors, two answers.
+
+    The commentary is written for somebody watching a conversion happen. Called
+    as a function there is nobody watching, so it is off; reached through the
+    console script a person typed the command, so it is on.
+    """
+    out = tmp_path / "out.glb"
+
+    assert nh.cli.run(["convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)]) == 0
+    captured = capfd.readouterr()
+    assert "Writing" not in captured.err
+    # Not silence: a diagnostic is not narration, and no switch hides one.
+    assert "NH0510" in captured.err
+
+    assert (
+        nh.cli.run(
+            ["convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)], quiet=False
+        )
+        == 0
+    )
+    assert "Writing" in capfd.readouterr().err
+
+
+def test_the_arguments_can_turn_narration_back_on(tmp_path, capfd):
+    # For a caller that does not own the call -- a harness, a notebook cell
+    # being debugged -- `-v` reaches the same switch from the argument list.
+    out = tmp_path / "out.glb"
+
+    code = nh.cli.run(["-v", "convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)])
+
+    assert code == 0
+    assert "Writing" in capfd.readouterr().err
+
+
+def test_progress_never_lands_on_the_stream_a_caller_parses(tmp_path, capfd):
+    """stdout is the answer, and for ``convert`` the answer is a file.
+
+    This is the regression that motivated the contract: ``convert`` wrote
+    ``Writing ...`` and a node/mesh summary to *stdout*, which is the one stream
+    a caller reads. Nothing it says about its own progress belongs there, so with
+    an ``--output`` given it says nothing there at all.
+    """
+    out = tmp_path / "out.glb"
+
+    code = nh.cli.run(
+        ["convert", "-i", "x", "--input-format", "synthetic", "-o", str(out)], quiet=False
+    )
+
+    assert code == 0
+    assert out.is_file()
+    captured = capfd.readouterr()
+    assert captured.out == ""
+    assert "Writing" in captured.err
+
+
+def test_an_invalid_config_is_a_non_zero_code_and_not_only_a_word(tmp_path, capfd):
+    """A verdict a caller can act on without reading text.
+
+    ``config validate`` reports rather than fails -- an invalid document is its
+    answer, not its error -- but it used to report by printing ``INVALID`` and
+    then answering 0, so the only way to learn the verdict from Python was to
+    scrape a stream. Both now say the same thing, and the word is on stdout for
+    valid and invalid alike rather than switching streams with the answer.
+    """
+    good = tmp_path / "ok.toml"
+    good.write_text("hoist_orphans = true\n")
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[[rules]]\nmatch = "*"\nmax_segments_circle = -1\n')
+
+    assert nh.cli.run(["config", "validate", "-c", str(good)]) == 0
+    assert "config: OK" in capfd.readouterr().out
+
+    assert nh.cli.run(["config", "validate", "-c", str(bad)]) != 0
+    captured = capfd.readouterr()
+    assert "INVALID" in captured.out
+    assert "INVALID" not in captured.err

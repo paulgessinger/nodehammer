@@ -524,6 +524,12 @@ NB_MODULE(_nodehammer, m) {
     // minutes in a tessellation, and it may also block in a pager waiting for a
     // human to press q.
     //
+    // `quiet` is the narration switch, and it defaults on here for the same
+    // reason `pager` defaults off: reaching this function means a program
+    // called it. The commentary a command writes to stderr -- what it wrote,
+    // what it merged -- is for somebody watching, and there is nobody watching.
+    // Diagnostics are unaffected; see nodehammer/cli.hpp.
+    //
     // `web_assets` is a path the *wrapper* supplies, not the user: it is where
     // the `nodehammer-web` package put the wasm runtime, which C++ cannot find
     // on its own because under a wheel the running executable is the interpreter
@@ -536,7 +542,7 @@ NB_MODULE(_nodehammer, m) {
     // and a site-packages directory under a user's name is exactly that.
     m.def(
         "cli_run",
-        [](const std::vector<std::string> &args, bool pager,
+        [](const std::vector<std::string> &args, bool pager, bool quiet,
            const std::filesystem::path &webAssets) {
             std::vector<std::string_view> views;
             views.reserve(args.size());
@@ -545,12 +551,13 @@ NB_MODULE(_nodehammer, m) {
             }
             nh::cli::RunOptions options;
             options.pager = pager;
+            options.quiet = quiet;
             options.webAssets = webAssets;
 
             nb::gil_scoped_release unlocked;
             return nh::cli::run(views, options);
         },
-        "args"_a, "pager"_a = false, "web_assets"_a = std::filesystem::path{});
+        "args"_a, "pager"_a = false, "quiet"_a = true, "web_assets"_a = std::filesystem::path{});
 
     // ── version ─────────────────────────────────────────────────────────────
     // `version()` is a symbol in the library; VERSION is a constant in the

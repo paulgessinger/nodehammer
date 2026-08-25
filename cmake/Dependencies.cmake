@@ -60,7 +60,7 @@ FetchContent_Declare(nlohmann_json
 FetchContent_MakeAvailable(nlohmann_json)
 
 # ── cpp-httplib ───────────────────────────────────────────────────────────────
-# The static server behind `viewer --web`. Native only: the wasm build has no
+# The static server behind `viewer serve`. Native only: the wasm build has no
 # sockets, and the module it would serve is the thing being served.
 #
 # Chosen over the ~370 hand-rolled lines it replaces because it is *less* code
@@ -215,7 +215,7 @@ if(TARGET flatbuffers)
 endif()
 
 # ── Lua config front-end (lua + sol2) ────────────────────────────────────────
-# Powers the `config-lua` CLI command and `Config::read`'s `.lua` branch — an
+# Powers the `config flatten` CLI command and `Config::read`'s `.lua` branch — an
 # unconditional source in nodehammer_lib on every platform, Emscripten included.
 # Both come from Conan (lua has no clean upstream CMake — it ships a Makefile —
 # so, like imgui/implot below, we resolve via find_package rather than a git

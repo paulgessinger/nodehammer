@@ -9,7 +9,7 @@
 // directory somebody pointed at is the one it was built against.
 //
 // Which is why the answer is a ladder and a check rather than a path. Every
-// front door walks the same ladder: `nodehammer viewer --web`, the Python
+// front door walks the same ladder: `nodehammer viewer serve`, the Python
 // binding, and whatever else wants to serve the viewer. See
 // docs/cli-and-web-viewer-plan.md Part 1.
 

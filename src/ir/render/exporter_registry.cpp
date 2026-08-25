@@ -2,6 +2,7 @@
 #include <ir/gltf/render/exporter.hpp>
 #include <ir/obj/render/exporter.hpp>
 #include <ir/render/exporter.hpp>
+#include <ir/render/json_exporter.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -79,6 +80,7 @@ RenderExporterRegistry RenderExporterRegistry::makeDefault() {
     reg.registerExporter(std::make_unique<GltfExporter>());
     reg.registerExporter(std::make_unique<ObjExporter>());
     reg.registerExporter(std::make_unique<RenderFlatbufferExporter>());
+    reg.registerExporter(std::make_unique<RenderJsonExporter>());
     return reg;
 }
 

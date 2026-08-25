@@ -41,9 +41,29 @@ struct RunOptions {
     /// cannot tell those apart: an interactive interpreter has one.
     bool pager = false;
 
+    /// Suppress the running commentary commands write to stderr.
+    ///
+    /// On by default, and the mirror image of `pager` above: what a person
+    /// watching a conversion wants — what was written, what was merged, where a
+    /// root landed — is noise to a program that called a function and will read
+    /// the exit code. `src/cli/main.cpp` clears it, so somebody who typed the
+    /// command still gets the commentary; an embedder gets silence without
+    /// having to discover the member.
+    ///
+    /// It silences *narration only*. Diagnostics and the line a failing command
+    /// prints before it answers non-zero are not narration and are never
+    /// affected — a switch that hides errors is a trap rather than a setting.
+    /// Neither are reports the caller asked for by name (`--timing`,
+    /// `--size-report`): naming a report is asking for it.
+    ///
+    /// Nothing that a caller might *parse* is on that channel to begin with.
+    /// stdout carries the answer — the flattened document, the JSON, the path
+    /// to the archive — and this flag cannot turn any of it off.
+    bool quiet = true;
+
     /// Where the wasm viewer runtime is, for callers that know.
     ///
-    /// `viewer --web` needs a directory of Emscripten output that this library
+    /// `viewer serve` needs a directory of Emscripten output that this library
     /// cannot build and, in an embedded process, cannot find: under the Python
     /// wheel the running executable is the interpreter, so the install-tree
     /// guess resolves to the wrong prefix entirely. The `nodehammer-web` package
@@ -60,7 +80,12 @@ struct RunOptions {
     /// code page, so a runtime under a directory with a non-ASCII name would
     /// arrive mangled. Callers that have the real encoding — nanobind's
     /// `stl/filesystem.h` caster above all — can hand it over intact.
-    std::filesystem::path webAssets;
+    ///
+    /// Braced rather than bare: every other member here carries a default, and
+    /// under `-Wmissing-field-initializers` a member without one makes
+    /// `{.quiet = false}` -- the natural way to set one field -- a warning at
+    /// each call site, which `-Werror` turns into a build failure.
+    std::filesystem::path webAssets{};
 };
 
 /// Run one command line. Returns the exit code the executable would have.

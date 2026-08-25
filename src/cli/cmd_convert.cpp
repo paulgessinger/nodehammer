@@ -2,6 +2,7 @@
 #include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
+#include <algorithm>
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <detail/timing.hpp>
@@ -9,8 +10,11 @@
 #include <export_resolve.hpp>
 #include <filesystem>
 #include <format>
+#include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/render/exporter.hpp>
+#include <ir/semantic/exporter.hpp>
 #include <ir/semantic/importer.hpp>
+#include <ir/synthetic/semantic/importer.hpp>
 #include <print>
 #include <selection/selector.hpp>
 #include <string>
@@ -49,7 +53,13 @@ convertOutputArtifacts(const std::filesystem::path &primary,
     return paths;
 }
 
-void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidates) {
+void printWrittenOutputSizes(const nodehammer::cli::Narrator &say,
+                             const std::vector<std::filesystem::path> &candidates) {
+    if (!say.enabled()) {
+        // Every line below is a `stat` per candidate, for a line nobody will
+        // read. The one place `enabled()` earns its keep.
+        return;
+    }
     std::string msg = "  Output:";
     bool any = false;
     for (const auto &p : candidates) {
@@ -68,7 +78,7 @@ void printWrittenOutputSizes(const std::vector<std::filesystem::path> &candidate
         any = true;
     }
     if (any) {
-        std::println("{}", msg);
+        say("{}", msg);
     }
 }
 
@@ -91,31 +101,51 @@ struct Strictness {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdConvert(CLI::App &app, const RunOptions &) {
-    auto *sub = app.add_subcommand("convert", "Convert a geometry file to a render format");
+void registerCmdConvert(CLI::App &app, const RunOptions &options) {
+    // What this command says about its progress is narration, and it was on
+    // stdout until now — the one stream a caller parses. See cli_common.hpp for
+    // the contract; `Narrator` is where it is enforced.
+    const Narrator say{options};
 
-    auto *inputOpt = sub->add_option("-i,--input", "Input geometry file")->required();
+    auto *sub = app.add_subcommand(
+        "convert", "Import geometry, apply a config, and write it out. The output format "
+                   "decides how far the pipeline runs: .nhb stops at the semantic scene, "
+                   ".glb/.obj/.nhr tessellate first.");
+
+    // Not `->required()` any more: `--synthetic-box` supplies its own scene, and
+    // a required option would make the flag unreachable. Checked below instead,
+    // where the alternative can be named in the message.
+    auto *inputOpt = sub->add_option("-i,--input", "Input geometry file");
     auto *fmtInOpt =
         sub->add_option("--input-format", "Input format (auto-detected from extension if omitted)");
-    auto *configOpt = sub->add_option("-c,--config", "TOML config file");
+    auto *configOpt = sub->add_option("-c,--config", "Config file (.toml / .lua)");
     auto *outputOpt = sub->add_option("-o,--output", "Output file(s) -- one per format")
                           ->required()
                           ->expected(1, -1);
     auto *fmtOutOpt = sub->add_option(
         "--output-format",
-        "Output format (auto-detected from extension if omitted; applies to all outputs)");
+        "Output format (auto-detected from extension if omitted; applies to all outputs). "
+        "Semantic: json, nhb. Render: gltf, obj, nhr, render-json.");
     auto *strictOpt = sub->add_flag("--strict", "Treat warnings as errors");
     auto *timingOpt = sub->add_flag("--timing", "Print per-step wall-clock timings");
+    auto *sizeReportOpt =
+        sub->add_flag("--size-report", "Print estimated FlatBuffer payload breakdown to stderr");
+    auto *syntheticBoxOpt =
+        sub->add_flag("--synthetic-box", "Use a synthetic single-box scene instead of --input");
 
-    auto *angleCutOpt =
-        sub->add_option("--angle-cut",
+    // `--wedge-cut`, not `--angle-cut`: the viewer has an `--angle-cut` too and
+    // it is a different operation -- a shader effect on the view, where this
+    // rebuilds the geometry through a Manifold boolean. The help text already
+    // called this one a wedge cut.
+    auto *wedgeCutOpt =
+        sub->add_option("--wedge-cut",
                         "Apply a precise azimuthal wedge cut (Manifold boolean): removes the "
                         "sector from START to END degrees (from +x, CCW)")
             ->expected(2)
             ->type_name("START END");
-    auto *acMarginOpt =
-        sub->add_option("--angle-cut-margin", "Cutting-solid oversize factor (default 2.0)")
-            ->needs(angleCutOpt);
+    auto *wcMarginOpt =
+        sub->add_option("--wedge-cut-margin", "Cutting-solid oversize factor (default 2.0)")
+            ->needs(wedgeCutOpt);
 
     sub->callback([=] {
         runOrReport("convert", [&] {
@@ -129,6 +159,45 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
             const bool showTiming = timingOpt->count() > 0;
 
             nodehammer::detail::TimingReport timings;
+
+            // ── Decide how far to run ──────────────────────────────────────────────
+            //
+            // The outputs say it. A `.nhb` wants the semantic scene and no
+            // tessellation; a `.glb` wants the mesh. Asking for both in one run
+            // is not two runs -- the pipeline goes as deep as the deepest output
+            // needs and writes each on the way past.
+            //
+            // The semantic registry is consulted first, which is what settles
+            // `.json`: both scenes have a JSON form and both claim the
+            // extension, so the bare spelling means the shallower one and the
+            // render form is reached by naming it (`--output-format
+            // render-json`).
+            const auto semRegistry = nodehammer::ir::SemanticExporterRegistry::makeDefault();
+            const auto renderRegistry = nodehammer::ir::RenderExporterRegistry::makeDefault();
+
+            struct Target {
+                std::string path;
+                const nodehammer::ir::ISemanticExporter *semantic = nullptr;
+                const nodehammer::ir::IRenderExporter *render = nullptr;
+            };
+            std::vector<Target> targets;
+            targets.reserve(outputPaths.size());
+            for (const auto &outputPath : outputPaths) {
+                Target target{outputPath};
+                target.semantic = semRegistry.resolve(outputPath, outputFmt);
+                if (target.semantic == nullptr) {
+                    target.render = renderRegistry.resolve(outputPath, outputFmt);
+                }
+                if (target.semantic == nullptr && target.render == nullptr) {
+                    throw nodehammer::Error{
+                        nodehammer::codes::kFatalExportWriteFailed,
+                        std::format("cannot determine output format for '{}'", outputPath),
+                        outputPath};
+                }
+                targets.push_back(target);
+            }
+            const bool needsTessellation =
+                std::ranges::any_of(targets, [](const Target &t) { return t.render != nullptr; });
 
             // ── Load config ────────────────────────────────────────────────────────
             nodehammer::config::NHConfig cfg;
@@ -146,11 +215,24 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
             }
 
             // ── Import ─────────────────────────────────────────────────────────────
-            nodehammer::detail::Timer importTimer;
-            auto [importResult, importFmt] = importFrom(inputOpt, fmtInOpt);
-            timings.record("import", importTimer.elapsed());
-            printDiags(importResult.diags);
-            demandClean(importResult.diags, "import");
+            nodehammer::ir::ImportResult importResult;
+            std::string importFmt;
+            if (syntheticBoxOpt->count() > 0) {
+                importResult.scene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
+                importFmt = "synthetic";
+            } else if (*inputOpt) {
+                nodehammer::detail::Timer importTimer;
+                auto imported = importFrom(inputOpt, fmtInOpt);
+                timings.record("import", importTimer.elapsed());
+                importResult = std::move(imported.result);
+                importFmt = std::move(imported.formatName);
+                printDiags(importResult.diags);
+                demandClean(importResult.diags, "import");
+            } else {
+                throw nodehammer::Error{nodehammer::codes::kFatalCliUsage,
+                                        "convert needs --input, or --synthetic-box"};
+            }
+            (void)importFmt;
 
             // ── Select ─────────────────────────────────────────────────────────────
             if (!cfg.selection.empty()) {
@@ -168,35 +250,67 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
                 const auto shapesRemoved = importResult.scene.deduplicateShapes();
                 const auto logVolsRemoved = importResult.scene.deduplicateLogVols();
                 if (shapesRemoved > 0 || logVolsRemoved > 0 || matsRemoved > 0) {
-                    std::println(stderr,
-                                 "Dedup: {} shapes, {} logVols, {} materials merged ({} shapes, {} "
-                                 "logVols, {} materials unique)",
-                                 shapesRemoved, logVolsRemoved, matsRemoved,
-                                 importResult.scene.shapes.size(),
-                                 importResult.scene.logVols.size(),
-                                 importResult.scene.materials.size());
+                    say("Dedup: {} shapes, {} logVols, {} materials merged ({} shapes, {} "
+                        "logVols, {} materials unique)",
+                        shapesRemoved, logVolsRemoved, matsRemoved,
+                        importResult.scene.shapes.size(), importResult.scene.logVols.size(),
+                        importResult.scene.materials.size());
                 }
             }
 
             // ── Wedge cut (optional) ────────────────────────────────────────────────
-            if (angleCutOpt->count() > 0) {
+            //
+            // Before the semantic outputs are written, not after: the cut
+            // rebuilds the geometry, so an archive or a blob written from this
+            // run should carry it.
+            if (wedgeCutOpt->count() > 0) {
                 auto _t = timings.scope("wedgecut");
                 std::vector<double> angles;
-                angleCutOpt->results(angles); // exactly 2 (enforced by expected(2))
+                wedgeCutOpt->results(angles); // exactly 2 (enforced by expected(2))
                 nodehammer::tessellation::WedgeCutParams wcp;
                 wcp.startDeg = angles[0];
                 wcp.endDeg = angles[1];
-                if (*acMarginOpt) {
-                    wcp.margin = acMarginOpt->as<double>();
+                if (*wcMarginOpt) {
+                    wcp.margin = wcMarginOpt->as<double>();
                 }
                 const auto wcStats =
                     nodehammer::tessellation::applyWedgeCut(importResult.scene, wcp);
-                std::println(
-                    stderr,
-                    "Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} kept, "
-                    "{} skipped, {} pruned",
+                say("Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} "
+                    "kept, {} skipped, {} pruned",
                     wcp.startDeg, wcp.endDeg, wcStats.cut, wcStats.cutUnique, wcStats.emptied,
                     wcStats.kept, wcStats.skipped, wcStats.pruned);
+            }
+
+            // Not narration: the caller named `--size-report`, and naming a
+            // report is asking for it. `-q` silences the running commentary, not
+            // the thing somebody typed an option to get.
+            if (sizeReportOpt->count() > 0) {
+                const auto report =
+                    nodehammer::ir::semanticFlatbufferSizeReport(importResult.scene);
+                std::print(stderr, "{}",
+                           nodehammer::ir::formatSemanticFlatbufferSizeReport(report));
+            }
+
+            // ── Write whatever stops here ──────────────────────────────────────────
+            for (const auto &target : targets) {
+                if (target.semantic == nullptr) {
+                    continue;
+                }
+                say("Writing {} ...", target.path);
+                nodehammer::detail::Timer expTimer;
+                target.semantic->write(importResult.scene, target.path,
+                                       nodehammer::ir::SemanticExportConfig{});
+                timings.record(std::format("export[{}]", target.path), expTimer.elapsed());
+                say("  Nodes: {}  Shapes: {}  Materials: {}", importResult.scene.nodes.size(),
+                    importResult.scene.shapes.size(), importResult.scene.materials.size());
+                printWrittenOutputSizes(say, {std::filesystem::path{target.path}});
+            }
+
+            if (!needsTessellation) {
+                if (showTiming) {
+                    timings.print(stderr, "Timings");
+                }
+                return;
             }
 
             // ── Tessellate ─────────────────────────────────────────────────────────
@@ -210,28 +324,18 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
             // judges that a scene missing geometry is not worth writing.
             demandClean(tessResult.diags, "tessellation");
 
-            // ── Export (one pass per output path) ─────────────────────────────────
-            const auto expRegistry = nodehammer::ir::RenderExporterRegistry::makeDefault();
-
-            for (const auto &outputPath : outputPaths) {
-                const auto *exp = expRegistry.resolve(outputPath, outputFmt);
-                if (!exp) {
-                    // Was a hand-rolled `[error] NH0600 ...` line followed by
-                    // `exit`, which is the shape `printDiag` exists to produce —
-                    // and the code it named was already the right one.
-                    throw nodehammer::Error{
-                        nodehammer::codes::kFatalExportWriteFailed,
-                        std::format("cannot determine output format for '{}'", outputPath),
-                        outputPath};
+            // ── Export (one pass per render output) ────────────────────────────────
+            for (const auto &target : targets) {
+                if (target.render == nullptr) {
+                    continue;
                 }
-
                 const auto ecfg =
-                    nodehammer::pipeline::resolveExportConfig(cfg, outputPath, outputFmt);
+                    nodehammer::pipeline::resolveExportConfig(cfg, target.path, outputFmt);
 
-                std::println("Writing {} ...", outputPath);
+                say("Writing {} ...", target.path);
                 nodehammer::detail::Timer expTimer;
-                exp->write(tessResult.scene, outputPath, ecfg);
-                timings.record(std::format("export[{}]", outputPath), expTimer.elapsed());
+                target.render->write(tessResult.scene, target.path, ecfg);
+                timings.record(std::format("export[{}]", target.path), expTimer.elapsed());
 
                 int warnings = 0, errors = 0;
                 for (const auto *dl : {&importResult.diags, &tessResult.diags}) {
@@ -247,11 +351,12 @@ void registerCmdConvert(CLI::App &app, const RunOptions &) {
                 for (const auto &[id, ma] : tessResult.scene.meshAssets) {
                     totalTris += ma.indices.size() / 3;
                 }
-                std::println("  Nodes: {}  Meshes: {}  Triangles: {}  Materials: {}  "
-                             "Warnings: {}  Errors: {}",
-                             tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(),
-                             totalTris, tessResult.scene.materials.size(), warnings, errors);
-                printWrittenOutputSizes(convertOutputArtifacts(outputPath, ecfg.format));
+                say("  Nodes: {}  Meshes: {}  Triangles: {}  Materials: {}  "
+                    "Warnings: {}  Errors: {}",
+                    tessResult.scene.nodes.size(), tessResult.scene.meshAssets.size(), totalTris,
+                    tessResult.scene.materials.size(), warnings, errors);
+                printWrittenOutputSizes(
+                    say, convertOutputArtifacts(std::filesystem::path{target.path}, ecfg.format));
             }
 
             if (showTiming) {

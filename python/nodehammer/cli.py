@@ -14,6 +14,13 @@ here::
     if code != 0:
         ...
 
+Two streams, and the split is what makes this callable rather than only
+typeable. **stdout is the answer** -- the flattened config, the JSON, the path
+to the archive that was written. **stderr is everything about producing it** --
+diagnostics, and the running commentary a person watching would want. ``quiet``
+silences the commentary and defaults to on here, because reaching this function
+means a program called it. Diagnostics are never silenced.
+
 Output goes to the process's stdout and stderr at the file-descriptor level,
 not through ``sys.stdout`` -- the commands print from C++. In a notebook that
 means it lands in the terminal the kernel was started from rather than in the
@@ -36,7 +43,7 @@ __all__ = ["run"]
 def _web_runtime_dir() -> str:
     """Where the ``nodehammer-web`` package put the wasm viewer runtime.
 
-    ``viewer --web`` needs a directory of Emscripten output that this wheel does
+    ``viewer serve`` needs a directory of Emscripten output that this wheel does
     not carry -- it is a separate ``py3-none-any`` distribution, so a headless
     install can drop it and a GUI one can have it without either being a
     different build. C++ cannot find it: under a wheel the running executable is
@@ -72,7 +79,7 @@ def _web_runtime_dir() -> str:
         return ""
 
 
-def run(args: Sequence[str] | None = None, *, pager: bool = False) -> int:
+def run(args: Sequence[str] | None = None, *, pager: bool = False, quiet: bool = True) -> int:
     """Run one command line and return the exit code the executable would give.
 
     :param args: the arguments *after* the program name, as
@@ -87,15 +94,32 @@ def run(args: Sequence[str] | None = None, *, pager: bool = False) -> int:
         replaces this process's file descriptor 1 and then blocks until someone
         quits ``less``. The console script turns it on, because there a person
         really did type the command.
+    :param quiet: suppress the progress and summary lines commands write to
+        stderr -- ``Writing odd.glb ...``, ``root <dir>``, ``wrote flat.toml``.
+        On by default, and off in the console script, for exactly the reason
+        ``pager`` is the other way round: that commentary is for a person
+        watching the work, and a caller of this function is not one.
+
+        It hides narration only. Diagnostics and the line a failing command
+        prints before it answers non-zero always come through, because a switch
+        that hides errors is a trap; so do reports asked for by name
+        (``--timing``, ``--size-report``). Nothing a caller might *parse* is on
+        that stream in the first place.
+
+        ``["-v", "convert", ...]`` turns the commentary back on from the
+        arguments, which is the form to reach for when the caller does not own
+        this call -- a test harness, a notebook cell being debugged.
 
     :returns: 0 on success, non-zero otherwise. A command that could not do its
         job reports the reason on stderr and answers with a code, exactly as the
-        executable does -- it does not raise.
+        executable does -- it does not raise. ``config validate`` answers this
+        way too: an invalid document is a report on stdout *and* a non-zero
+        code, so a caller never has to scrape a stream to learn the verdict.
 
     :raises nodehammer.Error: only for a failure that escaped a command body,
         which is a defect rather than a diagnosis.
 
-    ``viewer --web`` is told where the wasm runtime is, if the ``nodehammer-web``
+    ``viewer serve`` is told where the wasm runtime is, if the ``nodehammer-web``
     package is installed alongside this one -- see :func:`_web_runtime_dir`. That
     is a default and not an override: ``--web-assets`` and
     ``NODEHAMMER_WEB_ASSETS`` still win, so a locally built runtime can be tried
@@ -107,4 +131,4 @@ def run(args: Sequence[str] | None = None, *, pager: bool = False) -> int:
     """
     if args is None:
         args = sys.argv[1:]
-    return _nodehammer.cli_run([str(a) for a in args], pager, _web_runtime_dir())
+    return _nodehammer.cli_run([str(a) for a in args], pager, quiet, _web_runtime_dir())

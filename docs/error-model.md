@@ -120,7 +120,7 @@ diagnostics-collecting core and exposes two faces over it:
   all.
 
 This is not a hole in the doctrine, it is the doctrine: two promises, two
-channels, one implementation. `nodehammer validate-config` needs the second, and
+channels, one implementation. `nodehammer config validate` needs the second, and
 without it the public API could not express a command the CLI already ships.
 
 `Config::check(path)` and `Config::checkString(toml, baseDir)` are the public

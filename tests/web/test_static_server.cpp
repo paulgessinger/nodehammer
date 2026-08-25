@@ -1,4 +1,4 @@
-// The server behind `viewer --web`.
+// The server behind `viewer serve`.
 //
 // The claim worth testing is not "HTTP works" -- cpp-httplib's own suite covers
 // that -- but that *this* configuration serves *this* payload correctly. Three

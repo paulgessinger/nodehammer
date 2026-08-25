@@ -58,8 +58,7 @@ versus what's on the roadmap.
 - **Analytical geometry surgery**: semantic-level azimuthal wedge cuts and
   boolean operations via [manifold](https://github.com/elalish/manifold),
   correct on non-manifold swept primitives, cooperative with UI progress.
-- **CLI**: `convert`, `inspect`, `validate-config`, `config-flatten`,
-  `dump-semantic`, `dump-render`, `viewer`.
+- **CLI**: `convert`, `inspect`, `config`, `project`, `viewer`.
 - **Viewer rendering pipeline**, live today:
   - Full offscreen HDR pipeline with ACES / Reinhard / AgX tonemapping and
     exposure control
@@ -71,7 +70,7 @@ versus what's on the roadmap.
     profile — renders on demand and caps the idle frame rate
   - Live ImPlot performance graphs in the debug panel
   - High-resolution, supersampled PNG screenshot export
-    (`nodehammer viewer --screenshot out.png ...`) — **verified on Metal**;
+    (`nodehammer viewer shot -o out.png ...`) — **verified on Metal**;
     the WebGL2/GLES3 and WebGPU readback paths compile and link but are not
     yet verified in-browser
 - **Builds on macOS, Linux, and Windows** natively (Metal, GLCORE, and D3D11
@@ -143,18 +142,27 @@ Full design of record, including backend mapping and mode transitions:
 ## CLI
 
 ```
-nodehammer convert         # geometry → glTF / OBJ / render IR
-nodehammer inspect         # explore a semantic scene
-nodehammer validate-config # lint a TOML config before running it
-nodehammer config-flatten  # resolve config includes/overrides
-nodehammer dump-semantic   # dump the semantic scene as JSON
-nodehammer dump-render     # dump the render IR as JSON
-nodehammer viewer          # launch the interactive viewer
+nodehammer convert   # geometry in, anything out — the pipeline
+nodehammer inspect   # summary | tree | tags — ask about a scene
+nodehammer config    # validate | flatten — TOML and Lua configs
+nodehammer project   # pack | publish | info — .nhproj archives
+nodehammer viewer    # open | serve | shot | bench — the app
 ```
 
-Running the executable with no arguments at all (e.g. double-clicking
-`nodehammer.exe` in a file manager) also launches the viewer, in builds with
-`NODEHAMMER_WITH_VIEWER` enabled.
+Four nouns and one verb. The design of record, including the vocabulary and why
+each old name went, is [docs/cli-design.md](docs/cli-design.md).
+
+`convert` spans the whole pipeline, and **the output format decides how far it
+runs**: `-o scene.nhb` stops at the semantic scene, `-o scene.glb` tessellates
+first, and asking for both in one command is one pass rather than two.
+Tessellation is lossy by construction — solids become triangles — so `.nhb` is
+the faithful stop and `.glb` is a one-way door.
+
+```bash
+nodehammer project pack -c scene.toml -i odd.xml -o odd.nhproj
+nodehammer viewer odd.nhproj serve          # open it in a browser
+nodehammer project publish odd.nhproj -o site/
+```
 
 ## Building
 
@@ -216,7 +224,7 @@ The repo ships a real detector fixture — the Open Data Detector — ready to c
 
 ```bash
 just odd    # full ODD → glb (see the Justfile for single-stave recipes too)
-build/RelWithDebInfo/nodehammer viewer
+build/RelWithDebInfo/nodehammer viewer open
 ```
 
 ### …in a browser

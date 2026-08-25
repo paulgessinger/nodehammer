@@ -6,7 +6,7 @@ serving it is the library's job, and this only answers the question the library
 cannot answer for itself.
 
 That question is worth spelling out, because it is the whole reason this package
-exists as a separate distribution. ``nodehammer viewer --web`` needs a directory
+exists as a separate distribution. ``nodehammer viewer serve`` needs a directory
 of Emscripten output, and it finds one by walking a ladder --- ``--web-assets``,
 then ``NODEHAMMER_WEB_ASSETS``, then whatever the calling program supplies, then
 ``<executable>/../share/nodehammer/web``. Under a wheel the last rung is wrong:

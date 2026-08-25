@@ -178,7 +178,7 @@ TEST_CASE("ConfigWriter: rule with tessellation round-trip", "[config][writer]")
 
 TEST_CASE("ConfigWriter: defaults.tessellation round-trip", "[config][writer]") {
     // Regression: configToToml previously emitted nothing for
-    // cfg.tessellationDefaults, so config-flatten of a TOML with
+    // cfg.tessellationDefaults, so `config flatten` of a TOML with
     // [defaults.tessellation] produced a file that loaded with the loader's
     // hard-coded defaults — visibly ~3.5x more triangles for the ODD scene
     // because max_segments_circle defaulted instead of being 10.

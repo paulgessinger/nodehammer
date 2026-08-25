@@ -136,7 +136,7 @@ include(GNUInstallDirs)
 
 # ── The web runtime's contract ───────────────────────────────────────────────
 # The wasm viewer is delivered as a directory, not a program: a shell, a worker
-# script, three bundles and the stamp below. `nodehammer viewer --web` locates
+# script, three bundles and the stamp below. `nodehammer viewer serve` locates
 # one through a ladder of candidate directories (a flag, an environment
 # variable, this install path, later a download cache), which means it can be
 # handed a directory that nobody validated — an old checkout's build tree is
@@ -254,6 +254,7 @@ set(NH_CORE_SOURCES
     src/ir/obj/render/exporter.cpp
     src/ir/render/exporter_registry.cpp
     src/ir/fb/render/exporter.cpp
+    src/ir/render/json_exporter.cpp
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
@@ -299,11 +300,7 @@ set(NH_CORE_SOURCES
     src/cli/pager.cpp
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
-    src/cli/cmd_validate_config.cpp
-    src/cli/cmd_config_flatten.cpp
-    src/cli/cmd_dump_semantic.cpp
-    src/cli/cmd_dump_render.cpp
-    src/cli/cmd_config_lua.cpp
+    src/cli/cmd_config.cpp
 )
 
 # ── Application sources ───────────────────────────────────────────────────────
@@ -483,7 +480,7 @@ if(NOT EMSCRIPTEN)
         # beside the ZipWorkingSet it builds -- that half *is* cross-platform.
         src/project/pack.cpp
         src/cli/cmd_project.cpp
-        # `viewer --web` itself. Excluded here rather than #ifdef'd inside:
+        # `viewer serve` itself. Excluded here rather than #ifdef'd inside:
         # every line of it calls something in the three files above, so a wasm
         # build of this TU would be a shell around a refusal. `run.cpp` skips
         # the registration to match, and a wasm module simply has no `viewer`
@@ -873,7 +870,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         src/scene_build.cpp
         src/selection/selector.cpp
         src/cli/cmd_convert.cpp
-        src/cli/cmd_dump_semantic.cpp
         PROPERTIES COMPILE_OPTIONS "-Wno-maybe-uninitialized"
     )
 endif()
@@ -917,7 +913,7 @@ if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
     # share/nodehammer/web is also the rung the asset ladder looks for relative
     # to the executable (docs/cli-and-web-viewer-plan.md Part 1), which is why
     # it is a datadir path and not an opaque one: a native install tree and a
-    # wasm install tree merge into one directory that `nodehammer viewer --web`
+    # wasm install tree merge into one directory that `nodehammer viewer serve`
     # can resolve without being told where anything is.
     install(TARGETS nodehammer-gles3 nodehammer-wgpu nodehammer-compute
         RUNTIME DESTINATION "${NH_WEB_RUNTIME_DIR}"
@@ -947,7 +943,7 @@ if(EMSCRIPTEN AND NODEHAMMER_WITH_VIEWER)
 
     # The stamp, written beside the bundles in the build tree so that a build
     # directory and an install tree are the same shape — `just wasm-serve` and
-    # `just pages-site` stage straight out of the former, and `viewer --web
+    # `just pages-site` stage straight out of the former, and `viewer serve
     # --web-assets build/emscripten/Release` is the first thing any developer
     # reaches for.
     file(GENERATE

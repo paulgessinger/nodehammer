@@ -1,7 +1,7 @@
 -- Kitchen-sink scripted config. Demonstrates the whole surface: top-level
 -- flags, per-format export overrides, include() of side-effect fragments (which
 -- in turn use() a shared constants module), literal keep/rule tails, and global
--- defaults. `config-lua -c fixtures/configs/lua/kitchen_sink.lua` emits
+-- defaults. `config flatten -c fixtures/configs/lua/kitchen_sink.lua` emits
 -- flattened TOML that round-trips through ConfigLoader.
 --
 -- The predicates name ODD geometry because that is the detector on hand, but

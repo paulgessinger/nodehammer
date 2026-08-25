@@ -2,8 +2,8 @@
 --
 -- This is a faithful translation, not a demonstration: it builds the same
 -- scene as `fixtures/configs/odd.toml`, so the two can be compared directly.
--- `config-lua -c fixtures/configs/lua/odd.lua` and
--- `config-flatten -c fixtures/configs/odd.toml` emit equivalent TOML.
+-- `config flatten -c fixtures/configs/lua/odd.lua` and
+-- `config flatten -c fixtures/configs/odd.toml` emit equivalent TOML.
 --
 -- For a tour of the scripting surface itself, see kitchen_sink.lua.
 --

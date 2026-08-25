@@ -16,7 +16,7 @@ You do not normally call that. Installing this package alongside `nodehammer` is
 what makes
 
 ```console
-$ nodehammer viewer --web
+$ nodehammer viewer serve
 ```
 
 open the viewer in a browser: the command stages a servable directory from this

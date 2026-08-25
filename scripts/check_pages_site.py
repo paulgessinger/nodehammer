@@ -7,7 +7,7 @@ parts a static check *can* see:
   - every posture directory carries the shell, the worker script and both
     backend runtimes (a missing bundle is a blank canvas at runtime);
   - each one is self-describing: an `nh_runtime.json` naming the schema id the
-    bundles were built against, which is what `nodehammer viewer --web` checks
+    bundles were built against, which is what `nodehammer viewer serve` checks
     before serving a directory it was merely pointed at;
   - the application posture has no sidecar — that absence *is* what selects
     application mode in `index.html`;

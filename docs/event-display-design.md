@@ -76,7 +76,7 @@ constraints dominate every decision:
   `makeDefault()`) resolves adapters by format/extension; heavy backends
   (`NH_WITH_TGEO`, `NH_WITH_DD4HEP`, Geant4/GDML) are compile-gated.
 - **Selection** (`SelectionEngine::prune()`) runs `[[selection_rules]]` *before*
-  tessellation. Config is TOML → `NHConfig`, validated by `validate-config`,
+  tessellation. Config is TOML → `NHConfig`, validated by `config validate`,
   with a predicate-expression grammar (`docs/predicate-expressions.md`).
 - **GeoModel support is greenfield** — the old `NODEHAMMER_WITH_GEOMODEL` flag
   was a no-op and was removed. There is no GeoModel importer.
@@ -400,7 +400,7 @@ tessellation. Crucially, this is **a text file the experiment authors itself**:
   "true"`). No software to add.
 - Transport it like geometry: `POST /config`. The viewer's `BuildSession`
   already resolves a root config key + geometry key and chases includes.
-- **`validate-config` already exists** — experiments iterate on the filter file
+- **`config validate` already exists** — experiments iterate on the filter file
   in CI without launching the viewer.
 - Presentation (per-collection colors, default visibility, hit size) is a natural
   sibling `[event_display]` / `[[collection_style]]` section in the *same*
@@ -482,7 +482,7 @@ amalgamation silently rots while the modular build stays green.
 ### 10.4 Conformance kit (adoption multiplier)
 
 Publish `event.fbs` + example JSON payloads + a `validate-event` command
-(mirroring `validate-config`). Because JSON is validated against the schema
+(mirroring `config validate`). Because JSON is validated against the schema
 (§3.2), an experiment answers "does my event conform?" in isolation, in CI,
 without installing the viewer. Worth more for adoption than any transport feature.
 
@@ -495,7 +495,7 @@ without installing the viewer. Worth more for adoption than any transport featur
 
 ### 10.6 End-to-end smoke
 
-Extend `test.sh` (currently ODD `dump-semantic`/`convert`): start `serve`, POST
+Extend `test.sh` (currently ODD `convert`): start `serve`, POST
 the ODD geometry + a hand-authored example event JSON, assert the pipeline builds
 a render scene. For the client path, a small program using the amalgamated header
 against the ODD DD4hep compact, POSTing `.nhb`, driven by the blocking loop.

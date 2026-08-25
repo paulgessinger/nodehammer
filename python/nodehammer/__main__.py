@@ -25,8 +25,14 @@ def main() -> int:
     is the whole reason the option exists: reaching this function means a person
     typed a command at a shell, which is the one situation where taking over
     their terminal until they press q is the helpful thing to do.
+
+    ``quiet`` is inverted for the same reason and points the same way. The
+    progress a command reports on stderr is written for somebody watching it
+    happen, and here somebody is. ``-q`` still turns it off, exactly as it does
+    for the compiled executable -- which sets both of these identically
+    (``src/cli/main.cpp``), so the two front doors behave the same.
     """
-    return run(sys.argv[1:], pager=True)
+    return run(sys.argv[1:], pager=True, quiet=False)
 
 
 if __name__ == "__main__":

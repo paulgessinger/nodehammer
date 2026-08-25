@@ -51,170 +51,235 @@ void runViewer(nodehammer::viewer::App::Handle &application) {
     }
 }
 
-bool isZipPath(const std::filesystem::path &path) {
+/// Does this path name an archive project?
+///
+/// `.nhproj` is the extension `project pack` writes and the one the drop
+/// handler recognises; `.zip` is what the container actually is, and predates
+/// the name. Both open the same `ArchiveProjectFs`, so both are accepted here
+/// rather than making the CLI the one place that refuses its own format.
+bool isArchivePath(const std::filesystem::path &path) {
     auto ext = path.extension().string();
     std::ranges::transform(ext, ext.begin(),
                            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-    return ext == ".zip";
+    return ext == ".nhproj" || ext == ".zip";
+}
+
+/// Which of the three window-backed modes is running.
+///
+/// They were flags on one command: `--screenshot PATH` turned "open a window"
+/// into "render and quit", and `--bench PATH` into "measure and quit". A flag
+/// that changes what the command *is* reads as an option on the thing it
+/// replaces, so they are modes now, and this is what tells the shared body which
+/// one it is serving.
+enum class NativeMode { Open, Shot, Bench };
+
+/// The window options, and the handles needed to tell whether each was given.
+///
+/// Declared per mode rather than on `viewer` itself. On the parent they would
+/// also parse under `serve`, where a window option means nothing -- which is the
+/// state `refuseNativeOnlyOptions` used to paper over with a hand-maintained
+/// allowlist. Registering them only where they apply lets the parser refuse
+/// them, and the parser cannot fall out of step with the list.
+struct WindowOptions {
+    CLI::Option *cullModeOpt = nullptr;
+    CLI::Option *pauseWhenUnfocusedOpt = nullptr;
+    CLI::Option *autoOrbitOpt = nullptr;
+    CLI::Option *orbitSpeedOpt = nullptr;
+    CLI::Option *angleCutOpt = nullptr;
+    CLI::Option *shaderAngleCutOpt = nullptr;
+    CLI::Option *cutStartOpt = nullptr;
+    CLI::Option *cutEndOpt = nullptr;
+    CLI::Option *pbrOpt = nullptr;
+    CLI::Option *cameraTargetXOpt = nullptr;
+    CLI::Option *cameraTargetYOpt = nullptr;
+    CLI::Option *cameraTargetZOpt = nullptr;
+    CLI::Option *cameraDistanceOpt = nullptr;
+    CLI::Option *cameraYawOpt = nullptr;
+    CLI::Option *cameraPitchOpt = nullptr;
+};
+
+/// Add the window and camera options to one mode.
+///
+/// The bound `cfg`/`camera` are shared across all three, which is safe because
+/// exactly one mode ever runs: CLI11 parses at most one subcommand here, so only
+/// that mode's options were ever written.
+WindowOptions addWindowOptions(CLI::App &sub,
+                               const std::shared_ptr<nodehammer::viewer::Config> &cfg,
+                               const std::shared_ptr<nodehammer::viewer::Camera> &camera,
+                               const std::shared_ptr<float> &yawDeg,
+                               const std::shared_ptr<float> &pitchDeg,
+                               const std::shared_ptr<std::string> &cullModeStr) {
+    WindowOptions win;
+    sub.add_option("--width", cfg->width, "Initial window width in pixels")->capture_default_str();
+    sub.add_option("--height", cfg->height, "Initial window height in pixels")
+        ->capture_default_str();
+    sub.add_flag("!--no-vsync", cfg->vsync, "Disable vsync (default: vsync on)");
+    win.cullModeOpt =
+        sub.add_option("--cull", *cullModeStr,
+                       "Backface cull override: auto (per material), force-on, force-off")
+            ->capture_default_str();
+    win.pauseWhenUnfocusedOpt =
+        sub.add_flag("!--no-pause-when-unfocused", cfg->pause_when_unfocused,
+                     "Keep rendering when the viewer is unfocused")
+            ->capture_default_str();
+    win.autoOrbitOpt =
+        sub.add_flag("--auto-orbit", cfg->auto_orbit, "Start with camera auto-orbit enabled")
+            ->capture_default_str();
+    win.orbitSpeedOpt =
+        sub.add_option("--orbit-speed", cfg->auto_orbit_speed_deg, "Auto-orbit speed in degrees/s")
+            ->capture_default_str();
+    // `--angle-cut` here is the shader effect on the view. `convert` has a
+    // wedge cut, which rebuilds geometry; they used to share this name.
+    win.angleCutOpt = sub.add_flag("--angle-cut", cfg->angle_cut, "Start with angle cut enabled")
+                          ->capture_default_str();
+    win.shaderAngleCutOpt = sub.add_flag("!--no-shader-angle-cut", cfg->shader_angle_cut,
+                                         "Disable shader-side angle cut")
+                                ->capture_default_str();
+    win.cutStartOpt =
+        sub.add_option("--cut-start", cfg->angle_cut_start_deg, "Angle cut start in degrees")
+            ->capture_default_str();
+    win.cutEndOpt = sub.add_option("--cut-end", cfg->angle_cut_end_deg, "Angle cut end in degrees")
+                        ->capture_default_str();
+    win.pbrOpt = sub.add_flag("!--no-pbr", cfg->enable_pbr, "Disable PBR/IBL shading")
+                     ->capture_default_str();
+    win.cameraTargetXOpt =
+        sub.add_option("--camera-target-x", camera->target.x, "Initial camera target X coordinate");
+    win.cameraTargetYOpt =
+        sub.add_option("--camera-target-y", camera->target.y, "Initial camera target Y coordinate");
+    win.cameraTargetZOpt =
+        sub.add_option("--camera-target-z", camera->target.z, "Initial camera target Z coordinate");
+    win.cameraDistanceOpt =
+        sub.add_option("--camera-distance", camera->distance, "Initial camera orbit distance");
+    win.cameraYawOpt = sub.add_option("--camera-yaw", *yawDeg, "Initial camera yaw in degrees");
+    win.cameraPitchOpt =
+        sub.add_option("--camera-pitch", *pitchDeg, "Initial camera pitch in degrees");
+    return win;
 }
 
 } // namespace
 
 namespace nodehammer::cli::detail {
 
-void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
-    // Extends, does not create. `registerCmdViewer` in the library owns the
-    // subcommand and its shared options, because `viewer --web` has to exist in
-    // builds this file is not compiled into -- a wheel above all. What is left
-    // here is the window: its options, and the run path plain `viewer` takes.
-    CLI::App *sub = app.get_subcommand("viewer");
+// `options` is unnamed: the native modes read every setting they need off the
+// parser, and the one front-door property that is not on the command line --
+// `webAssets` -- belongs to `serve`, which lives in the library half. The
+// parameter stays so both registrars are called the same way from `main`.
+void registerCmdViewerNative(CLI::App &app, const RunOptions & /*options*/) {
+    // Fills in, does not create. `registerCmdViewer` in the library owns the
+    // `viewer` subcommand, its shared options and `serve`, because those have to
+    // exist in builds this file is not compiled into -- a wheel above all. It
+    // also declares `open`, `shot` and `bench` as stubs that refuse, so that a
+    // wheel answers them with a message naming `serve` instead of CLI11's
+    // "unexpected argument". What is left here is the window: the options only a
+    // window has, and the bodies that replace those refusals.
+    CLI::App *viewer = app.get_subcommand("viewer");
+    CLI::App *openSub = viewer->get_subcommand("open");
+    CLI::App *shotSub = viewer->get_subcommand("shot");
+    CLI::App *benchSub = viewer->get_subcommand("bench");
 
     auto cfg = std::make_shared<nodehammer::viewer::Config>();
     auto initialCamera = std::make_shared<nodehammer::viewer::Camera>();
     auto cameraYawDeg = std::make_shared<float>(0.f);
     auto cameraPitchDeg = std::make_shared<float>(0.f);
-    sub->add_option("--width", cfg->width, "Initial window width in pixels")->capture_default_str();
-    sub->add_option("--height", cfg->height, "Initial window height in pixels")
-        ->capture_default_str();
-    sub->add_flag("!--no-vsync", cfg->vsync, "Disable vsync (default: vsync on)");
     auto cullModeStr = std::make_shared<std::string>("auto");
-    auto *cullModeOpt =
-        sub->add_option("--cull", *cullModeStr,
-                        "Backface cull override: auto (per material), force-on, force-off")
-            ->capture_default_str();
-    auto *pauseWhenUnfocusedOpt =
-        sub->add_flag("!--no-pause-when-unfocused", cfg->pause_when_unfocused,
-                      "Keep rendering when the viewer is unfocused")
-            ->capture_default_str();
-    auto *autoOrbitOpt =
-        sub->add_flag("--auto-orbit", cfg->auto_orbit, "Start with camera auto-orbit enabled")
-            ->capture_default_str();
-    auto *orbitSpeedOpt =
-        sub->add_option("--orbit-speed", cfg->auto_orbit_speed_deg, "Auto-orbit speed in degrees/s")
-            ->capture_default_str();
-    auto *angleCutOpt = sub->add_flag("--angle-cut", cfg->angle_cut, "Start with angle cut enabled")
-                            ->capture_default_str();
-    auto *shaderAngleCutOpt = sub->add_flag("!--no-shader-angle-cut", cfg->shader_angle_cut,
-                                            "Disable shader-side angle cut")
-                                  ->capture_default_str();
-    auto *cutStartOpt =
-        sub->add_option("--cut-start", cfg->angle_cut_start_deg, "Angle cut start in degrees")
-            ->capture_default_str();
-    auto *cutEndOpt =
-        sub->add_option("--cut-end", cfg->angle_cut_end_deg, "Angle cut end in degrees")
-            ->capture_default_str();
-    auto *pbrOpt = sub->add_flag("!--no-pbr", cfg->enable_pbr, "Disable PBR/IBL shading")
-                       ->capture_default_str();
-    auto *cameraTargetXOpt = sub->add_option("--camera-target-x", initialCamera->target.x,
-                                             "Initial camera target X coordinate");
-    auto *cameraTargetYOpt = sub->add_option("--camera-target-y", initialCamera->target.y,
-                                             "Initial camera target Y coordinate");
-    auto *cameraTargetZOpt = sub->add_option("--camera-target-z", initialCamera->target.z,
-                                             "Initial camera target Z coordinate");
-    auto *cameraDistanceOpt = sub->add_option("--camera-distance", initialCamera->distance,
-                                              "Initial camera orbit distance");
-    auto *cameraYawOpt =
-        sub->add_option("--camera-yaw", *cameraYawDeg, "Initial camera yaw in degrees");
-    auto *cameraPitchOpt =
-        sub->add_option("--camera-pitch", *cameraPitchDeg, "Initial camera pitch in degrees");
 
-    // -i/--input, -c/--config, `path` and --title belong to the library's half
-    // of this command and are read off the subcommand below. A .nhproj path opens
-    // as an ArchiveProjectFs; a directory
-    // opens as a live FilesystemProjectFs. When `path` is set, --config /
-    // --input (if given) name the root keys *inside* the project; otherwise it
-    // opens and the user picks roots from the project panel.
+    const auto openWin =
+        addWindowOptions(*openSub, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeStr);
+    const auto shotWin =
+        addWindowOptions(*shotSub, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeStr);
+    const auto benchWin =
+        addWindowOptions(*benchSub, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeStr);
 
-    // Headless screenshot mode: render one high-res PNG (all quality maxed) once
-    // the scene settles, then quit. Useful for CI thumbnails / automated renders.
+    // ── shot ─────────────────────────────────────────────────────────────────
+    //
+    // Renders one high-res PNG once the scene settles, then quits. `-o` rather
+    // than the old `--screenshot PATH`: the destination is this mode's output,
+    // and every other command in the tree spells that `-o`.
     auto screenshot = std::make_shared<nodehammer::viewer::PngExportSettings>();
-    auto *screenshotOpt =
-        sub->add_option("--screenshot", "Render a PNG to this path on startup, then quit");
-    sub->add_option("--screenshot-width", screenshot->out_width, "Screenshot output width")
+    auto *shotOutOpt =
+        shotSub->add_option("-o,--output", "PNG to write")->required()->type_name("FILE");
+    shotSub->add_option("--shot-width", screenshot->out_width, "Screenshot output width")
         ->capture_default_str();
-    sub->add_option("--screenshot-height", screenshot->out_height, "Screenshot output height")
+    shotSub->add_option("--shot-height", screenshot->out_height, "Screenshot output height")
         ->capture_default_str();
-    sub->add_option("--screenshot-supersample", screenshot->supersample,
-                    "Screenshot supersampling factor (1-4)")
+    shotSub
+        ->add_option("--supersample", screenshot->supersample,
+                     "Screenshot supersampling factor (1-4)")
         ->capture_default_str();
 
-    // Headless benchmark mode: drive a fixed camera/state sequence (cut-on
-    // hold/orbit/zoom, then cut-off), measure per-pass GPU time over each window,
-    // grab a screenshot per segment, write the results JSON to this path (and
-    // stdout), then quit. D3D11 only for the GPU timings.
-    auto *benchOpt =
-        sub->add_option("--bench", "Run the headless GPU benchmark, write results JSON here, quit");
+    // ── bench ────────────────────────────────────────────────────────────────
+    //
+    // Drives a fixed camera/state sequence (cut-on hold/orbit/zoom, then
+    // cut-off), measures per-pass GPU time over each window, grabs a screenshot
+    // per segment, writes the results JSON, then quits. D3D11 only for the GPU
+    // timings.
+    auto *benchOutOpt =
+        benchSub->add_option("-o,--output", "Results JSON to write")->required()->type_name("FILE");
     auto benchScale = std::make_shared<float>(1.0f);
-    sub->add_option("--bench-scale", *benchScale,
-                    "Bench SSAA on the scene/AO passes (render_scale, 0.25-4). >1 pushes the GPU "
-                    "past the refresh so total/composite timings aren't present-paced")
+    benchSub
+        ->add_option("--scale", *benchScale,
+                     "Bench SSAA on the scene/AO passes (render_scale, 0.25-4). >1 pushes the "
+                     "GPU past the refresh so total/composite timings aren't present-paced")
         ->capture_default_str();
 
-    // Replaces the library's callback rather than filling a slot it left: with a
-    // window in the build, *this* file is the one that has to choose between the
-    // two modes, and one dispatch per binary beats a callback pointer handed
-    // across a library boundary.
-    sub->callback([sub, &options, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeOpt,
-                   cullModeStr, screenshot, screenshotOpt, pauseWhenUnfocusedOpt, autoOrbitOpt,
-                   orbitSpeedOpt, angleCutOpt, shaderAngleCutOpt, cutStartOpt, cutEndOpt, pbrOpt,
-                   cameraTargetXOpt, cameraTargetYOpt, cameraTargetZOpt, cameraDistanceOpt,
-                   cameraYawOpt, cameraPitchOpt, benchOpt, benchScale]() {
-        if (viewerWebRequested(*sub)) {
-            runViewerWeb(*sub, options);
-            return;
-        }
-
+    // The one body all three share. They differ in what they ask the App for
+    // before it runs, and in nothing else -- the scene, the project and every
+    // window option are resolved the same way whether a person is going to look
+    // at the result or a file is.
+    const auto runNative = [viewer, cfg, initialCamera, cameraYawDeg, cameraPitchDeg, cullModeStr,
+                            screenshot, benchScale](NativeMode mode, const WindowOptions &win,
+                                                    const std::string &outPath) {
         // The only command that never had one. Every other `cmd_*.cpp` has run
         // its body through this since the error model landed; this one instead
         // validated by hand and called `std::exit`, which meant a
         // `file_io::readFile` throw below had no handler at all and reached
         // `std::terminate`.
         runOrReport("viewer", [&] {
-            if (*cullModeOpt) {
+            if (*win.cullModeOpt) {
                 using nodehammer::viewer::CullOverride;
-                CullOverride mode = CullOverride::Auto;
+                CullOverride cull = CullOverride::Auto;
                 if (*cullModeStr == "force-on") {
-                    mode = CullOverride::ForceCull;
+                    cull = CullOverride::ForceCull;
                 } else if (*cullModeStr == "force-off") {
-                    mode = CullOverride::ForceNoCull;
+                    cull = CullOverride::ForceNoCull;
                 } else if (*cullModeStr != "auto") {
                     throw CLI::ValidationError("--cull",
                                                "must be one of: auto, force-on, force-off");
                 }
-                cfg->cull = mode;
-                cfg->startup_overrides.cull = mode;
+                cfg->cull = cull;
+                cfg->startup_overrides.cull = cull;
             }
-            if (*pauseWhenUnfocusedOpt) {
+            if (*win.pauseWhenUnfocusedOpt) {
                 cfg->startup_overrides.pause_when_unfocused = cfg->pause_when_unfocused;
             }
-            if (*autoOrbitOpt) {
+            if (*win.autoOrbitOpt) {
                 cfg->startup_overrides.auto_orbit = cfg->auto_orbit;
             }
-            if (*orbitSpeedOpt) {
+            if (*win.orbitSpeedOpt) {
                 cfg->startup_overrides.auto_orbit_speed_deg = cfg->auto_orbit_speed_deg;
             }
-            if (*angleCutOpt) {
+            if (*win.angleCutOpt) {
                 cfg->startup_overrides.angle_cut = cfg->angle_cut;
             }
-            if (*shaderAngleCutOpt) {
+            if (*win.shaderAngleCutOpt) {
                 cfg->startup_overrides.shader_angle_cut = cfg->shader_angle_cut;
             }
-            if (*cutStartOpt) {
+            if (*win.cutStartOpt) {
                 cfg->startup_overrides.angle_cut_start_deg = cfg->angle_cut_start_deg;
             }
-            if (*cutEndOpt) {
+            if (*win.cutEndOpt) {
                 cfg->startup_overrides.angle_cut_end_deg = cfg->angle_cut_end_deg;
             }
-            if (*pbrOpt) {
+            if (*win.pbrOpt) {
                 cfg->startup_overrides.enable_pbr = cfg->enable_pbr;
             }
 
-            const bool hasCameraOption = *cameraTargetXOpt || *cameraTargetYOpt ||
-                                         *cameraTargetZOpt || *cameraDistanceOpt || *cameraYawOpt ||
-                                         *cameraPitchOpt;
-            const bool hasAllCameraOptions = *cameraTargetXOpt && *cameraTargetYOpt &&
-                                             *cameraTargetZOpt && *cameraDistanceOpt &&
-                                             *cameraYawOpt && *cameraPitchOpt;
+            const bool hasCameraOption = *win.cameraTargetXOpt || *win.cameraTargetYOpt ||
+                                         *win.cameraTargetZOpt || *win.cameraDistanceOpt ||
+                                         *win.cameraYawOpt || *win.cameraPitchOpt;
+            const bool hasAllCameraOptions = *win.cameraTargetXOpt && *win.cameraTargetYOpt &&
+                                             *win.cameraTargetZOpt && *win.cameraDistanceOpt &&
+                                             *win.cameraYawOpt && *win.cameraPitchOpt;
             if (hasCameraOption && !hasAllCameraOptions) {
                 throw nodehammer::Error{
                     nodehammer::codes::kFatalCliUsage,
@@ -233,8 +298,8 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
 
             // Read off the subcommand rather than from Options this file owns:
             // the library declared them, and the parser is where the values are.
-            const auto text = [sub](const char *name) {
-                const CLI::Option *opt = sub->get_option(name);
+            const auto text = [viewer](const char *name) {
+                const CLI::Option *opt = viewer->get_option(name);
                 return opt->count() > 0 ? opt->as<std::string>() : std::string{};
             };
             const std::string inputPath = text("--input");
@@ -244,22 +309,13 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
                 cfg->title = title;
             }
 
-            std::string screenshotPath;
-            if (*screenshotOpt) {
-                screenshotOpt->results(screenshotPath);
-                if (inputPath.empty()) {
-                    throw nodehammer::Error{nodehammer::codes::kFatalCliUsage,
-                                            "--screenshot requires --input (no scene to render)"};
-                }
-            }
-
-            std::string benchPath;
-            if (*benchOpt) {
-                benchOpt->results(benchPath);
-                if (inputPath.empty()) {
-                    throw nodehammer::Error{nodehammer::codes::kFatalCliUsage,
-                                            "--bench requires --input (no scene to render)"};
-                }
+            // A mode that renders and quits has nothing to show if there is no
+            // scene, and no window in which to say so afterwards.
+            if (mode != NativeMode::Open && inputPath.empty()) {
+                throw nodehammer::Error{
+                    nodehammer::codes::kFatalCliUsage,
+                    std::format("`viewer {}` needs --input: there is no scene to render",
+                                mode == NativeMode::Shot ? "shot" : "bench")};
             }
 
             // With no positional path and no --input, open the current working
@@ -277,11 +333,10 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
             }
 
             nodehammer::viewer::App::Handle application(*cfg);
-            if (!screenshotPath.empty()) {
-                application->requestScreenshot(screenshotPath, *screenshot);
-            }
-            if (!benchPath.empty()) {
-                application->requestBench(benchPath, inputPath, *benchScale);
+            if (mode == NativeMode::Shot) {
+                application->requestScreenshot(outPath, *screenshot);
+            } else if (mode == NativeMode::Bench) {
+                application->requestBench(outPath, inputPath, *benchScale);
             }
 
             // Positional project mode. A directory opens as a live
@@ -301,13 +356,14 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
                     application->setProject(
                         std::make_unique<nodehammer::viewer::WatchedFilesystemProjectFs>(
                             std::make_unique<nodehammer::viewer::FilesystemProjectFs>(path_abs)));
-                } else if (isZipPath(path_abs)) {
+                } else if (isArchivePath(path_abs)) {
                     application->setProject(
                         std::make_unique<nodehammer::viewer::ArchiveProjectFs>(path_abs));
                 } else {
                     throw nodehammer::Error{
                         nodehammer::codes::kFatalCliUsage,
-                        std::format("positional path must be a .zip archive or directory: {}",
+                        std::format("positional path must be a .nhproj archive or a "
+                                    "directory: {}",
                                     projectPath),
                         projectPath};
                 }
@@ -415,6 +471,27 @@ void registerCmdViewerNative(CLI::App &app, const RunOptions &options) {
 
             runViewer(application);
         });
+    };
+
+    openSub->callback([=] { runNative(NativeMode::Open, openWin, {}); });
+    shotSub->callback([=] {
+        std::string out;
+        shotOutOpt->results(out);
+        runNative(NativeMode::Shot, shotWin, out);
+    });
+    benchSub->callback([=] {
+        std::string out;
+        benchOutOpt->results(out);
+        runNative(NativeMode::Bench, benchWin, out);
+    });
+
+    // A bare `nodehammer viewer` opens a window, which is what a .desktop
+    // `Exec=` or an installer shortcut invokes (#74). It replaces the library's
+    // refusal rather than adding to it.
+    viewer->callback([=] {
+        if (viewer->get_subcommands().empty()) {
+            runNative(NativeMode::Open, openWin, {});
+        }
     });
 }
 
