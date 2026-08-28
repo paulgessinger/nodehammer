@@ -266,7 +266,7 @@ TEST_CASE("TGeoImporter: root worldTransform is identity", "[import][tgeo]") {
     nodehammer::ir::TGeoImporter imp;
     auto result = imp.import(gGeoManager);
     const auto &root = result.scene.nodes.at(result.scene.rootId);
-    REQUIRE(root.worldTransform == glm::dmat4{1.0});
+    REQUIRE(root.worldTransform == nodehammer::ir::Mat4{});
 }
 
 TEST_CASE("TGeoImporter: sourceSystem is tgeo", "[import][tgeo]") {

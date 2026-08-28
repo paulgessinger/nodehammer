@@ -7,8 +7,8 @@
 // A single-TU test cannot see that, which is the whole reason this file exists.
 //
 // It also stands for the cost claim: including this header for declarations
-// pulls in none of the vendored glm, nlohmann, unordered_dense or flatbuffers,
-// because all of it sits behind the NH_IMPLEMENTATION guard.
+// pulls in none of the vendored unordered_dense or flatbuffers, because all of
+// it sits behind the NH_IMPLEMENTATION guard.
 
 #include "nodehammer_connect.h"
 

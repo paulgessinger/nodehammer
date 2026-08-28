@@ -9,6 +9,7 @@
 #include <tessellation/boolean_tessellator.hpp>
 
 #include <glm/gtc/matrix_inverse.hpp>
+#include <ir/glm_interop.hpp>
 
 #include <ankerl/unordered_dense.h>
 
@@ -187,7 +188,7 @@ bool collectPrototypeLeafDescendants(const ir::semantic::Scene &scene,
 
     std::queue<std::pair<ir::semantic::LogVolId, glm::dmat4>> q;
     for (const auto &daughter : root.daughters) {
-        q.push({daughter.logVolId, daughter.localTransform});
+        q.push({daughter.logVolId, ir::toGlm(daughter.localTransform)});
     }
 
     while (!q.empty()) {
@@ -201,7 +202,7 @@ bool collectPrototypeLeafDescendants(const ir::semantic::Scene &scene,
             out.push_back({lv.shapeId, lv.materialId, toRootLocal});
         } else {
             for (const auto &daughter : lv.daughters) {
-                q.push({daughter.logVolId, toRootLocal * daughter.localTransform});
+                q.push({daughter.logVolId, toRootLocal * ir::toGlm(daughter.localTransform)});
             }
         }
     }
@@ -635,7 +636,7 @@ TessellationOutput makeBBoxProxy(const ir::semantic::ShapeVariant &shapeData,
         using T = std::decay_t<decltype(s)>;
         if constexpr (ir::semantic::is_boolean_shape_v<T>) {
             q.push({s.left, glm::dmat4{1.0}});
-            q.push({s.right, s.rightTransform});
+            q.push({s.right, ir::toGlm(s.rightTransform)});
         }
     };
     std::visit(enqueue, shapeData);
@@ -652,7 +653,7 @@ TessellationOutput makeBBoxProxy(const ir::semantic::ShapeVariant &shapeData,
                 using T = std::decay_t<decltype(s)>;
                 if constexpr (ir::semantic::is_boolean_shape_v<T>) {
                     q.push({s.left, xform});
-                    q.push({s.right, xform * s.rightTransform});
+                    q.push({s.right, xform * ir::toGlm(s.rightTransform)});
                     return true;
                 }
                 return false;
@@ -923,8 +924,8 @@ bool TessellationJob::Impl::stepOneNode() {
     ir::render::Node rn;
     rn.id = rnId;
     rn.name = semNode.name;
-    rn.localTransform = glm::mat4(semNode.localTransform);
-    rn.worldTransform = glm::mat4(semNode.worldTransform);
+    rn.localTransform = glm::mat4(ir::toGlm(semNode.localTransform));
+    rn.worldTransform = glm::mat4(ir::toGlm(semNode.worldTransform));
     rn.semanticNodeId = semId;
 
     if (semNode.parentId.has_value() && nodeMap.contains(*semNode.parentId)) {
@@ -1007,7 +1008,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::semantic::Node 
     std::queue<MergeDescendant> collectQ;
     for (const auto childId : semNode.children) {
         if (scene->nodes.contains(childId)) {
-            collectQ.push({childId, scene->nodes.at(childId).localTransform});
+            collectQ.push({childId, ir::toGlm(scene->nodes.at(childId).localTransform)});
         }
     }
     while (!collectQ.empty()) {
@@ -1021,8 +1022,8 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::semantic::Node 
 
         for (const auto gcId : descNode.children) {
             if (scene->nodes.contains(gcId)) {
-                collectQ.push(
-                    {gcId, mergeDesc.toMergeLocal * scene->nodes.at(gcId).localTransform});
+                collectQ.push({gcId, mergeDesc.toMergeLocal *
+                                         ir::toGlm(scene->nodes.at(gcId).localTransform)});
             }
         }
 

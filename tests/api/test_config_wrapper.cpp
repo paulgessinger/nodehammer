@@ -15,7 +15,8 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <config/config_writer.hpp>

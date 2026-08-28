@@ -53,8 +53,8 @@ semantic::MaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
     // Color from the volume's line color (ROOT color index)
     const int colorIdx = vol->GetLineColor();
     if (const TColor *col = gROOT->GetColor(colorIdx)) {
-        sm.color = glm::vec3{static_cast<float>(col->GetRed()), static_cast<float>(col->GetGreen()),
-                             static_cast<float>(col->GetBlue())};
+        sm.color = Color3{static_cast<float>(col->GetRed()), static_cast<float>(col->GetGreen()),
+                          static_cast<float>(col->GetBlue())};
     }
 
     st.scene.materials[id] = sm;
@@ -91,7 +91,7 @@ semantic::LogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
         }
         daughters.push_back(semantic::DaughterPlacement{daughter->GetName(),
                                                         importLogVol(daughter->GetVolume(), st),
-                                                        tgeoMatrixToGlm(daughter->GetMatrix())});
+                                                        tgeoMatrixToMat4(daughter->GetMatrix())});
     }
     st.scene.logVols.at(id).daughters = std::move(daughters);
     return id;
@@ -106,7 +106,7 @@ semantic::NodeId importNode(const TGeoNode *node, std::optional<semantic::NodeId
     sn.id = id;
     sn.name = node->GetName();
     sn.logVolId = importLogVol(node->GetVolume(), st);
-    sn.localTransform = tgeoMatrixToGlm(node->GetMatrix());
+    sn.localTransform = tgeoMatrixToMat4(node->GetMatrix());
     sn.parentId = parentId;
     sn.sourceSystem = "tgeo";
 
@@ -131,7 +131,7 @@ TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile
     TGeoNode *topNode = mgr->GetTopNode();
     const semantic::NodeId rootId = importNode(topNode, std::nullopt, st);
     tr.result.scene.rootId = rootId;
-    tr.result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
+    tr.result.scene.nodes[rootId].localTransform = Mat4{}; // top node is at origin
 
     tr.result.scene.computeWorldTransforms();
     tr.result.scene.computeOriginalPaths();

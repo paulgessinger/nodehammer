@@ -29,7 +29,7 @@ semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, semantic::Scene &sce
         const TGeoBoolNode *bn = comp->GetBoolNode();
         const semantic::ShapeId leftId = dispatchTGeoShape(bn->GetLeftShape(), scene, diags);
         const semantic::ShapeId rightId = dispatchTGeoShape(bn->GetRightShape(), scene, diags);
-        const glm::dmat4 rightTransform = tgeoMatrixToGlm(bn->GetRightMatrix());
+        const Mat4 rightTransform = tgeoMatrixToMat4(bn->GetRightMatrix());
 
         if (dynamic_cast<const TGeoUnion *>(bn) != nullptr) {
             variant = semantic::BooleanUnion{leftId, rightId, rightTransform};
@@ -50,7 +50,7 @@ semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, semantic::Scene &sce
             semantic::TessellatedShape::Triangle tri{};
             for (int v = 0; v < 3; ++v) {
                 const auto &pt = tess->GetVertex(f[v]);
-                tri.vertices[static_cast<std::size_t>(v)] = glm::dvec3{pt.x(), pt.y(), pt.z()};
+                tri.vertices[static_cast<std::size_t>(v)] = Vec3{pt.x(), pt.y(), pt.z()};
             }
             ts.triangles.push_back(tri);
         }

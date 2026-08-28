@@ -50,7 +50,7 @@ TEST_CASE("StrongId: different Tag types are incompatible at compile time", "[ir
 TEST_CASE("semantic::Scene: computeWorldTransforms BFS", "[ir][semantic]") {
     nodehammer::ir::semantic::Scene scene;
 
-    auto makeNode = [&](std::string name, glm::dmat4 local,
+    auto makeNode = [&](std::string name, nodehammer::ir::Mat4 local,
                         std::optional<nodehammer::ir::semantic::NodeId> parent) {
         // Dummy shape + logvol per node (minimal)
         auto shapeId = scene.nextShapeId();
@@ -71,11 +71,11 @@ TEST_CASE("semantic::Scene: computeWorldTransforms BFS", "[ir][semantic]") {
         return id;
     };
 
-    auto rootId = makeNode("root", glm::dmat4{1.0}, std::nullopt);
+    auto rootId = makeNode("root", nodehammer::ir::Mat4{}, std::nullopt);
     scene.rootId = rootId;
 
-    glm::dmat4 childLocal{1.0};
-    childLocal[3] = glm::dvec4{0.0, 0.0, 100.0, 1.0}; // translate z+100
+    nodehammer::ir::Mat4 childLocal;
+    childLocal[3] = nodehammer::ir::Vec4{0.0, 0.0, 100.0, 1.0}; // translate z+100
 
     auto childId = makeNode("child", childLocal, rootId);
     scene.nodes[rootId].children.push_back(childId);
@@ -83,7 +83,7 @@ TEST_CASE("semantic::Scene: computeWorldTransforms BFS", "[ir][semantic]") {
     scene.computeWorldTransforms();
 
     // Root worldTransform == its localTransform (identity)
-    REQUIRE(scene.nodes.at(rootId).worldTransform == glm::dmat4{1.0});
+    REQUIRE(scene.nodes.at(rootId).worldTransform == nodehammer::ir::Mat4{});
 
     // Child worldTransform accumulates parent transform
     const auto &childWorld = scene.nodes.at(childId).worldTransform;
@@ -104,10 +104,10 @@ TEST_CASE("semantic::Scene: logical-volume dedup respects source daughter placem
     auto childLv = scene.nextLogVolId();
     scene.logVols[childLv] = {childLv, "child", shapeId, matId};
 
-    glm::dmat4 plus{1.0};
-    plus[3] = glm::dvec4{0.0, 0.0, 1.0, 1.0};
-    glm::dmat4 minus{1.0};
-    minus[3] = glm::dvec4{0.0, 0.0, -1.0, 1.0};
+    nodehammer::ir::Mat4 plus;
+    plus[3] = nodehammer::ir::Vec4{0.0, 0.0, 1.0, 1.0};
+    nodehammer::ir::Mat4 minus;
+    minus[3] = nodehammer::ir::Vec4{0.0, 0.0, -1.0, 1.0};
 
     auto parentA = scene.nextLogVolId();
     scene.logVols[parentA] = {parentA, "parentA", shapeId, matId, {{"child", childLv, plus}}};
@@ -132,8 +132,8 @@ TEST_CASE("semantic::Scene: logical-volume dedup canonicalizes daughter referenc
     auto childB = scene.nextLogVolId();
     scene.logVols[childB] = {childB, "childB", shapeId, matId};
 
-    glm::dmat4 childPlacement{1.0};
-    childPlacement[3] = glm::dvec4{0.0, 0.0, 1.0, 1.0};
+    nodehammer::ir::Mat4 childPlacement;
+    childPlacement[3] = nodehammer::ir::Vec4{0.0, 0.0, 1.0, 1.0};
 
     auto parentA = scene.nextLogVolId();
     scene.logVols[parentA] = {

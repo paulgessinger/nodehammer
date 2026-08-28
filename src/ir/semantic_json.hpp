@@ -9,7 +9,7 @@
 // ADL; the templated StrongId codecs live here inline, the rest are defined in
 // semantic_json.cpp.
 
-#include <detail/glm_json.hpp>
+#include <ir/math_json.hpp>
 #include <ir/semantic.hpp>
 
 #include <nlohmann/json.hpp>

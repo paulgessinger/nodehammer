@@ -4,6 +4,7 @@
 
 #include <ankerl/unordered_dense.h>
 #include <glm/glm.hpp>
+#include <ir/glm_interop.hpp>
 
 #include <algorithm>
 #include <array>
@@ -216,11 +217,11 @@ Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::Scen
                 for (const auto &tri : s.triangles) {
                     for (const auto &v : tri.vertices) {
                         if (!out.valid) {
-                            out.lo = out.hi = v;
+                            out.lo = out.hi = ir::toGlm(v);
                             out.valid = true;
                         } else {
-                            out.lo = glm::min(out.lo, v);
-                            out.hi = glm::max(out.hi, v);
+                            out.lo = glm::min(out.lo, ir::toGlm(v));
+                            out.hi = glm::max(out.hi, ir::toGlm(v));
                         }
                     }
                 }
@@ -228,8 +229,8 @@ Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::Scen
             },
             [&](const ir::semantic::BooleanUnion &s) {
                 const Aabb l = localAabbById(s.left, scene, depth + 1);
-                const Aabb r =
-                    transformAabb(localAabbById(s.right, scene, depth + 1), s.rightTransform);
+                const Aabb r = transformAabb(localAabbById(s.right, scene, depth + 1),
+                                             ir::toGlm(s.rightTransform));
                 return mergeAabb(l, r);
             },
             // result ⊆ left for both subtraction and intersection
@@ -361,8 +362,8 @@ struct WedgeCutJob::Impl {
         if (lvIt == scene->logVols.end()) {
             return;
         }
-        const Aabb world =
-            transformAabb(localAabbById(lvIt->second.shapeId, *scene, 0), node.worldTransform);
+        const Aabb world = transformAabb(localAabbById(lvIt->second.shapeId, *scene, 0),
+                                         ir::toGlm(node.worldTransform));
         if (!world.valid) {
             return;
         }
@@ -434,7 +435,7 @@ struct WedgeCutJob::Impl {
             hasOwnGeom[id] = false; // unbounded shapes produce no tessellatable mesh
             return;
         }
-        const Aabb world = transformAabb(local, node.worldTransform);
+        const Aabb world = transformAabb(local, ir::toGlm(node.worldTransform));
 
         if (aabbArcInsideRemoved(world.lo, world.hi, startRad, removedWidth)) {
             // Fully inside the removed sector → render nothing.
@@ -450,8 +451,9 @@ struct WedgeCutJob::Impl {
             // cut shape when this placement's (shape, local-frame wedge) matches
             // one already created, so instanced copies needing the same cut stay
             // instanced; otherwise create a fresh cut shape in this local frame.
-            const CutKey key{origShapeId.value, planeSignature(planeStart, node.worldTransform),
-                             planeSignature(planeEnd, node.worldTransform)};
+            const CutKey key{origShapeId.value,
+                             planeSignature(planeStart, ir::toGlm(node.worldTransform)),
+                             planeSignature(planeEnd, ir::toGlm(node.worldTransform))};
             ++stats.cut;
             if (auto it = cutCache.find(key); it != cutCache.end()) {
                 node.logVolId = it->second;
@@ -459,7 +461,8 @@ struct WedgeCutJob::Impl {
                 const ir::semantic::ShapeId cutShapeId = scene->nextShapeId();
                 scene->shapes[cutShapeId] = ir::semantic::Shape{
                     cutShapeId, ir::semantic::BooleanSubtraction{
-                                    origShapeId, wedgeId, glm::inverse(node.worldTransform)}};
+                                    origShapeId, wedgeId,
+                                    ir::fromGlm(glm::inverse(ir::toGlm(node.worldTransform)))}};
                 const ir::semantic::LogVolId cutLvId = scene->nextLogVolId();
                 scene->logVols[cutLvId] =
                     ir::semantic::LogicalVolume{cutLvId, lvName + "_wedgecut", cutShapeId, origMat};

@@ -45,7 +45,7 @@ nodehammer::ir::semantic::Scene makeBox() {
     n.id = node;
     n.name = "world";
     n.logVolId = lv;
-    n.localTransform = glm::dmat4{1.0};
+    n.localTransform = nodehammer::ir::Mat4{}; // identity
     n.sourceSystem = "smoke";
     scene.nodes[node] = n;
     scene.rootId = node;

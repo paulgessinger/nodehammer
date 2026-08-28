@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <ir/glm_interop.hpp>
 
 #include <config/config_ast.hpp>
 #include <diagnostics.hpp>
@@ -59,14 +60,14 @@ TestScene makeScene() {
         n.id = id;
         n.name = name;
         n.logVolId = lv;
-        n.localTransform = glm::translate(glm::dmat4{1.0}, pos);
+        n.localTransform = nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, pos));
         scene.nodes[id] = std::move(n);
         return id;
     };
 
     ts.root = addNode("world", worldLv, {0, 0, 0});
     scene.rootId = ts.root;
-    scene.nodes[ts.root].localTransform = glm::dmat4{1.0};
+    scene.nodes[ts.root].localTransform = nodehammer::ir::Mat4{};
 
     ts.a = addNode("A", boxLv, {-10, -10, 0});
     ts.b = addNode("B", boxLv, {-12, -8, 0});
@@ -204,7 +205,8 @@ TEST_CASE("wedge cut: a narrow sector inside a wide AABB still cuts", "[tessella
     n.id = root;
     n.name = "wide";
     n.logVolId = lv;
-    n.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0});
+    n.localTransform =
+        nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0}));
     scene.nodes[root] = std::move(n);
     scene.rootId = root;
     scene.computeWorldTransforms();
@@ -268,7 +270,7 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
         n.id = id;
         n.name = name;
         n.logVolId = lv;
-        n.localTransform = glm::translate(glm::dmat4{1.0}, pos);
+        n.localTransform = nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, pos));
         n.parentId = parent;
         scene.nodes[id] = n;
         return id;
@@ -278,7 +280,7 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     // quadrant (absolute positions; root is at the origin so no inherited offset).
     const ir::semantic::NodeId root = add("root", {0, 0, 0}, std::nullopt);
     scene.rootId = root;
-    scene.nodes[root].localTransform = glm::dmat4{1.0};
+    scene.nodes[root].localTransform = nodehammer::ir::Mat4{};
     const ir::semantic::NodeId stave = add("stave", {30, 30, 0}, root);
     const ir::semantic::NodeId m0 = add("mod0", {31, 30, 0}, stave);
     const ir::semantic::NodeId m1 = add("mod1", {29, 30, 0}, stave);
@@ -286,8 +288,10 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     scene.nodes[stave].children = {m0, m1};
     // mod positions are relative to the stave at (30,30); offset back so their
     // world positions are (31,30) and (29,30).
-    scene.nodes[m0].localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{1, 0, 0});
-    scene.nodes[m1].localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{-1, 0, 0});
+    scene.nodes[m0].localTransform =
+        nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{1, 0, 0}));
+    scene.nodes[m1].localTransform =
+        nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{-1, 0, 0}));
     scene.computeWorldTransforms();
 
     const auto stats = applyWedgeCut(scene, {0.0, 90.0});
@@ -330,7 +334,7 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
         n.id = id;
         n.name = name;
         n.logVolId = vol;
-        n.localTransform = glm::translate(glm::dmat4{1.0}, pos);
+        n.localTransform = nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, pos));
         n.parentId = parent;
         scene.nodes[id] = n;
         return id;
@@ -383,7 +387,8 @@ TEST_CASE("wedge cut: allocates fresh IDs without overwriting existing shapes",
     n.id = node;
     n.name = "straddle";
     n.logVolId = lv;
-    n.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0});
+    n.localTransform =
+        nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0}));
     scene.nodes[node] = n;
     scene.rootId = node;
     scene.computeWorldTransforms();
@@ -416,8 +421,8 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     const auto bigShape = scene.nextShapeId();
     scene.shapes[bigShape] = {bigShape, ir::semantic::BoxShape{5, 5, 5}};
     const auto emptiedShape = scene.nextShapeId();
-    scene.shapes[emptiedShape] = {
-        emptiedShape, ir::semantic::BooleanSubtraction{smallShape, bigShape, glm::dmat4{1.0}}};
+    scene.shapes[emptiedShape] = {emptiedShape, ir::semantic::BooleanSubtraction{
+                                                    smallShape, bigShape, nodehammer::ir::Mat4{}}};
 
     // An ordinary box sibling so the merge group still produces geometry.
     const auto keepShape = scene.nextShapeId();
@@ -439,7 +444,7 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
         n.id = id;
         n.name = name;
         n.logVolId = lv;
-        n.localTransform = glm::translate(glm::dmat4{1.0}, pos);
+        n.localTransform = nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, pos));
         n.parentId = parent;
         scene.nodes[id] = n;
         return id;

@@ -35,7 +35,7 @@ ir::semantic::Scene makeMinimalScene() {
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
 
     auto matId = scene.nextMaterialId();
-    scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
+    scene.materials[matId] = {matId, "iron", nodehammer::ir::Color3{0.5f, 0.5f, 0.5f}, 7.87};
 
     auto lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};

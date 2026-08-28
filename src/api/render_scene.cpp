@@ -1,4 +1,5 @@
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 
 #include <detail/zstd_io.hpp>
 #include <diagnostic_codes.hpp>

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <ir/glm_interop.hpp>
 #include <ir/semantic.hpp>
 #include <tessellation/primitive_tessellator.hpp>
 
@@ -138,8 +139,10 @@ TEST_CASE("PrimitiveTessellator: TessellatedShape passes through triangles",
           "[tessellation][tessellated]") {
     PrimitiveTessellator t;
     ir::semantic::TessellatedShape s;
-    s.triangles.push_back({glm::dvec3{0, 0, 0}, glm::dvec3{1, 0, 0}, glm::dvec3{0, 1, 0}});
-    s.triangles.push_back({glm::dvec3{0, 0, 0}, glm::dvec3{0, 1, 0}, glm::dvec3{0, 0, 1}});
+    s.triangles.push_back({nodehammer::ir::Vec3{0, 0, 0}, nodehammer::ir::Vec3{1, 0, 0},
+                           nodehammer::ir::Vec3{0, 1, 0}});
+    s.triangles.push_back({nodehammer::ir::Vec3{0, 0, 0}, nodehammer::ir::Vec3{0, 1, 0},
+                           nodehammer::ir::Vec3{0, 0, 1}});
 
     auto out = t.tessellate(s, kDefault);
     REQUIRE(out.vertices.size() == 6);

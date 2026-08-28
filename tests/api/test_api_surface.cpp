@@ -5,7 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 #include <detail/file_io.hpp>
 #include <diagnostic_codes.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>

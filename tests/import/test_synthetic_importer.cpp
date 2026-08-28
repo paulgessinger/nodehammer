@@ -120,7 +120,7 @@ TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes -- root has identity worldTra
     auto scene = nodehammer::ir::SyntheticSceneBuilder::buildNestedBoxes();
 
     const auto &root = scene.nodes.at(scene.rootId);
-    const glm::dmat4 identity{1.0};
+    const nodehammer::ir::Mat4 identity;
     REQUIRE(root.worldTransform == identity);
 }
 

@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/glm_interop.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 #include <selection/selector.hpp>
 
@@ -258,8 +259,8 @@ TEST_CASE("SelectionEngine: prune keeps source daughter logVol closure", "[selec
     const auto trackerLv = scene.nodes.at(trackerId).logVolId;
     const auto sensorLv = scene.nodes.at(sensorId).logVolId;
 
-    scene.logVols.at(worldLv).daughters.push_back({"tracker", trackerLv, glm::dmat4{1.0}});
-    scene.logVols.at(trackerLv).daughters.push_back({"sensor", sensorLv, glm::dmat4{1.0}});
+    scene.logVols.at(worldLv).daughters.push_back({"tracker", trackerLv, nodehammer::ir::Mat4{}});
+    scene.logVols.at(trackerLv).daughters.push_back({"sensor", sensorLv, nodehammer::ir::Mat4{}});
 
     // Drop tracker — sensor is force-dropped via descendant invariant.
     SelectionRule dropTracker;
@@ -443,7 +444,8 @@ makeLinearScene(const std::vector<std::string> &names,
         node.id = id;
         node.name = names[i];
         node.logVolId = lvId;
-        node.localTransform = glm::translate(glm::dmat4(1.0), translations[i]);
+        node.localTransform =
+            nodehammer::ir::fromGlm(glm::translate(glm::dmat4(1.0), translations[i]));
         if (i > 0) {
             node.parentId = ids[i - 1];
             scene.nodes.at(ids[i - 1]).children.push_back(id);
@@ -501,7 +503,7 @@ TEST_CASE("SelectionEngine hoist: orphan re-parented to nearest kept ancestor",
     REQUIRE_FALSE(scene.nodes.at(aId).children.empty());
 
     // C's new localTransform should translate by (8,0,0) relative to A's world
-    const glm::dvec3 t = glm::dvec3(scene.nodes.at(cId).localTransform[3]);
+    const glm::dvec3 t = glm::dvec3(nodehammer::ir::toGlm(scene.nodes.at(cId).localTransform)[3]);
     REQUIRE(t.x == Catch::Approx(8.0));
     REQUIRE(t.y == Catch::Approx(0.0));
     REQUIRE(t.z == Catch::Approx(0.0));
@@ -539,7 +541,7 @@ TEST_CASE("SelectionEngine hoist: no kept ancestor falls back to root",
 
     REQUIRE(scene.nodes.at(bId).parentId == rootId);
 
-    const glm::dvec3 t = glm::dvec3(scene.nodes.at(bId).localTransform[3]);
+    const glm::dvec3 t = glm::dvec3(nodehammer::ir::toGlm(scene.nodes.at(bId).localTransform)[3]);
     REQUIRE(t.x == Catch::Approx(8.0));
     REQUIRE(t.y == Catch::Approx(0.0));
     REQUIRE(t.z == Catch::Approx(0.0));
@@ -586,7 +588,7 @@ TEST_CASE("SelectionEngine hoist: subtree of hoisted node is preserved",
     REQUIRE(scene.nodes.at(bId).parentId == rootId);
     // C is still a child of B with its original local translation of (2,0,0)
     REQUIRE(scene.nodes.at(cId).parentId == bId);
-    const glm::dvec3 tc = glm::dvec3(scene.nodes.at(cId).localTransform[3]);
+    const glm::dvec3 tc = glm::dvec3(nodehammer::ir::toGlm(scene.nodes.at(cId).localTransform)[3]);
     REQUIRE(tc.x == Catch::Approx(2.0));
 }
 
