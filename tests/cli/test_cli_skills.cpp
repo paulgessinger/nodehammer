@@ -13,8 +13,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <format>
+#include <fstream>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -205,8 +205,7 @@ TEST_CASE("skills install --dry-run leaves an existing install alone", "[cli][sk
     CHECK(fs::is_symlink(home.claude()));
 }
 
-TEST_CASE("skills install --dry-run refuses without touching what it refused",
-          "[cli][skills]") {
+TEST_CASE("skills install --dry-run refuses without touching what it refused", "[cli][skills]") {
     // The other half: a dry run still reports the refusal -- that is most of
     // what it is for -- and `--force` on a dry run stays a plan rather than
     // becoming the deletion it describes.

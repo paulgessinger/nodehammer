@@ -2,45 +2,18 @@
 
 #include "diagnostic_codes.hpp"
 
+#include <detail/env.hpp>
+
 #include <nodehammer/diagnostics.hpp>
 
 #include <nlohmann/json.hpp>
 
-#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <system_error>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 namespace nodehammer::web {
 namespace {
-
-#ifdef _WIN32
-std::string getEnv(const char *name) {
-    // GetEnvironmentVariableA rather than std::getenv, for the reasons
-    // src/cli/pager.cpp gives: no deprecation warning, correct sizing, and
-    // thread-safe.
-    DWORD needed = GetEnvironmentVariableA(name, nullptr, 0);
-    if (needed == 0) {
-        return {};
-    }
-    std::string buf(needed, '\0');
-    DWORD written = GetEnvironmentVariableA(name, buf.data(), needed);
-    if (written == 0 || written >= needed) {
-        return {};
-    }
-    buf.resize(written);
-    return buf;
-}
-#else
-std::string getEnv(const char *name) {
-    const char *val = std::getenv(name);
-    return (val != nullptr && val[0] != '\0') ? val : std::string{};
-}
-#endif
 
 constexpr std::string_view kEnvVar = "NODEHAMMER_WEB_ASSETS";
 constexpr std::string_view kStampFile = "nh_runtime.json";
@@ -180,7 +153,7 @@ std::vector<RuntimeCandidate> walkLadder(const LadderInputs &inputs) {
         return ladder;
     }
 
-    const std::string env = getEnv(std::string{kEnvVar}.c_str());
+    const std::string env = nodehammer::detail::getEnv(std::string{kEnvVar}.c_str());
     if (!env.empty()) {
         consider(RuntimeRung::Environment, std::filesystem::path{env});
         return ladder;

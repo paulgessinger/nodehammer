@@ -258,6 +258,7 @@ set(NH_CORE_SOURCES
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
+    src/detail/env.cpp
     src/detail/markup.cpp
     # Host-side, despite the directory: locating and vetting the wasm runtime is
     # something the *serving* process does. src/web/'s other two TUs are the

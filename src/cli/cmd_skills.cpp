@@ -14,11 +14,12 @@
 #include "run_internal.hpp"
 #include "skills_data.hpp"
 
+#include <detail/env.hpp>
+
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <print>
@@ -78,7 +79,7 @@ std::string knownSkillNames() {
 /// relative to `$HOME` itself.
 fs::path homeRoot() {
     for (const char *var : {"HOME", "USERPROFILE"}) {
-        if (const char *value = std::getenv(var); value != nullptr && *value != '\0') {
+        if (const std::string value = nodehammer::detail::getEnv(var); !value.empty()) {
             return fs::path{value};
         }
     }
@@ -153,8 +154,7 @@ bool pointsAt(const fs::path &link, const fs::path &target) {
     if (ec) {
         return false;
     }
-    const fs::path absolute =
-        literal.is_absolute() ? literal : link.parent_path() / literal;
+    const fs::path absolute = literal.is_absolute() ? literal : link.parent_path() / literal;
     return absolute.lexically_normal() == target.lexically_normal();
 }
 
@@ -319,8 +319,8 @@ namespace nodehammer::cli::detail {
 void registerCmdSkills(CLI::App &app, const RunOptions &options) {
     const Narrator say{options};
 
-    auto *sub = app.add_subcommand("skills", "Agent skills bundled with this build")
-                    ->require_subcommand(1);
+    auto *sub =
+        app.add_subcommand("skills", "Agent skills bundled with this build")->require_subcommand(1);
 
     // ── list ─────────────────────────────────────────────────────────────────
     auto *listSub = sub->add_subcommand("list", "Show the skills carried in this binary");
@@ -340,9 +340,8 @@ void registerCmdSkills(CLI::App &app, const RunOptions &options) {
                         files.push_back({{"path", file.path}, {"bytes", file.bytes.size()}});
                         total += file.bytes.size();
                     }
-                    rows.push_back({{"name", skill.name},
-                                    {"files", std::move(files)},
-                                    {"bytes", total}});
+                    rows.push_back(
+                        {{"name", skill.name}, {"files", std::move(files)}, {"bytes", total}});
                 }
                 std::println("{}", nlohmann::json{{"schema", kJsonSchema},
                                                   {"kind", "skills"},
@@ -375,14 +374,13 @@ void registerCmdSkills(CLI::App &app, const RunOptions &options) {
     // ── install ──────────────────────────────────────────────────────────────
     auto *installSub =
         sub->add_subcommand("install", "Copy the skills where agents will read them");
-    auto *namesOpt =
-        installSub->add_option("names", "Skills to install (default: all of them)")
-            ->type_name("NAME");
+    auto *namesOpt = installSub->add_option("names", "Skills to install (default: all of them)")
+                         ->type_name("NAME");
     auto *scopeOpt = installSub->add_option("--scope", "Install under your home, or this project")
                          ->default_val("user")
                          ->check(CLI::IsMember({"user", "project"}));
-    auto *dirOpt = installSub->add_option("--dir", "Install into this directory instead")
-                       ->type_name("PATH");
+    auto *dirOpt =
+        installSub->add_option("--dir", "Install into this directory instead")->type_name("PATH");
     auto *forceOpt = installSub->add_flag("--force", "Replace something that is not ours");
     auto *dryRunOpt = installSub->add_flag("--dry-run", "Say what would be written, write nothing");
 
@@ -435,8 +433,7 @@ void registerCmdSkills(CLI::App &app, const RunOptions &options) {
 
             for (const EmbeddedSkill *skill : wanted) {
                 const std::string name{skill->name};
-                const fs::path real =
-                    explicitDir ? root / name : root / kAgentsSkills / name;
+                const fs::path real = explicitDir ? root / name : root / kAgentsSkills / name;
 
                 // Planned in both modes, so a run that would refuse says so
                 // here rather than at the write -- which is most of what a dry
@@ -449,10 +446,10 @@ void registerCmdSkills(CLI::App &app, const RunOptions &options) {
                     std::error_code ec;
                     fs::create_directories(real, ec);
                     if (ec) {
-                        throw Error{codes::kFatalSkillsInstall,
-                                    std::format("cannot create {}: {}", real.string(),
-                                                ec.message()),
-                                    real.string()};
+                        throw Error{
+                            codes::kFatalSkillsInstall,
+                            std::format("cannot create {}: {}", real.string(), ec.message()),
+                            real.string()};
                     }
                     writeSkill(*skill, real);
                     // stdout is the answer: where the skill now lives, one line
