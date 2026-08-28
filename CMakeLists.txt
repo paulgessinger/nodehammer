@@ -258,6 +258,7 @@ set(NH_CORE_SOURCES
     src/ir/json/semantic/exporter.cpp
     src/ir/fb/semantic/exporter.cpp
     src/ir/semantic/exporter_registry.cpp
+    src/detail/env.cpp
     src/detail/markup.cpp
     # Host-side, despite the directory: locating and vetting the wasm runtime is
     # something the *serving* process does. src/web/'s other two TUs are the
@@ -491,6 +492,37 @@ if(NOT EMSCRIPTEN)
     # least of all a header. Header-only, so the shared library gains no link
     # dependency and its package config gains no requirement.
     list(APPEND NH_CORE_PRIVATE_DEPS httplib::httplib)
+
+    # ── Agent skills, compiled in ─────────────────────────────────────────────
+    #
+    # `skills install` writes files into $HOME or a repo, which under Emscripten
+    # would mean a virtual filesystem that vanishes with the tab -- so the whole
+    # feature is native-only, and a wasm module carries none of the bytes.
+    #
+    # CONFIGURE_DEPENDS so that *adding* a skill re-globs on the next build
+    # rather than needing a manual configure; the explicit DEPENDS below is what
+    # makes *editing* one regenerate. Both are needed: the glob answers "which
+    # files", the dependency answers "have they changed".
+    file(GLOB_RECURSE NH_SKILL_FILES CONFIGURE_DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/skills/*)
+    set(NH_SKILLS_DATA ${CMAKE_CURRENT_BINARY_DIR}/generated/skills/skills_data.cpp)
+    add_custom_command(
+        OUTPUT ${NH_SKILLS_DATA}
+        COMMAND ${CMAKE_COMMAND}
+            -DNH_SKILLS_DIR=${CMAKE_CURRENT_SOURCE_DIR}/skills
+            "-DNH_SKILLS_FILES=${NH_SKILL_FILES}"
+            -DNH_SKILLS_OUT=${NH_SKILLS_DATA}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateSkillsData.cmake
+        DEPENDS
+            ${NH_SKILL_FILES}
+            ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateSkillsData.cmake
+        COMMENT "Embedding agent skills"
+        VERBATIM
+    )
+    list(APPEND NH_CORE_SOURCES
+        ${NH_SKILLS_DATA}
+        src/cli/cmd_skills.cpp
+    )
 endif()
 
 # WatchedFilesystemProjectFs (strategy doc step 4) decorates FilesystemProjectFs

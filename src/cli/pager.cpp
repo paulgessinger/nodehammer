@@ -1,12 +1,13 @@
 #include "pager.hpp"
 
+#include <detail/env.hpp>
+
 #include <cstdlib>
 #include <format>
 #include <string>
 
 #ifdef _WIN32
 #include <io.h>
-#include <windows.h>
 #else
 #include <unistd.h>
 #endif
@@ -14,31 +15,6 @@
 namespace nodehammer::cli {
 
 namespace {
-
-#ifdef _WIN32
-/// Thread-safe environment variable lookup on Windows.
-/// Returns empty string if the variable is not set or empty.
-std::string getEnv(const char *name) {
-    // Use GetEnvironmentVariableA: no deprecation warnings, correct size
-    // handling, and thread-safe on Windows.
-    DWORD needed = GetEnvironmentVariableA(name, nullptr, 0);
-    if (needed == 0) {
-        return {};
-    }
-    std::string buf(needed, '\0');
-    DWORD written = GetEnvironmentVariableA(name, buf.data(), needed);
-    if (written == 0 || written >= needed) {
-        return {};
-    }
-    buf.resize(written);
-    return buf;
-}
-#else
-std::string getEnv(const char *name) {
-    const char *val = std::getenv(name);
-    return (val != nullptr && val[0] != '\0') ? val : std::string{};
-}
-#endif
 
 #ifdef _WIN32
 /// Returns true if `exe` can be found on the system PATH.
@@ -57,7 +33,7 @@ struct PagerChoice {
 /// Pick the best available pager command.
 PagerChoice choosePager() {
     // 1. Honour the user's explicit choice.
-    std::string env = getEnv("PAGER");
+    std::string env = nodehammer::detail::getEnv("PAGER");
     if (!env.empty()) {
         // Heuristic: if the pager name contains "less" or "bat", assume ANSI
         // support.  For anything else, be conservative.

@@ -147,9 +147,10 @@ nodehammer inspect   # summary | tree | tags — ask about a scene
 nodehammer config    # validate | flatten — TOML and Lua configs
 nodehammer project   # pack | publish | info — .nhproj archives
 nodehammer viewer    # open | serve | shot | bench — the app
+nodehammer skills    # list | install — the agent skills shipped in the binary
 ```
 
-Four nouns and one verb. The design of record, including the vocabulary and why
+Five nouns and one verb. The design of record, including the vocabulary and why
 each old name went, is [docs/cli-design.md](docs/cli-design.md).
 
 `convert` spans the whole pipeline, and **the output format decides how far it
@@ -163,6 +164,38 @@ nodehammer project pack -c scene.toml -i odd.xml -o odd.nhproj
 nodehammer viewer odd.nhproj serve          # open it in a browser
 nodehammer project publish odd.nhproj -o site/
 ```
+
+### Agent skills
+
+`--help` says what the flags are. It does not say which command blocks until a
+human closes a window, which output is a stable contract and which is prose for
+a reader, or that a missing importer is a compile-time option rather than a
+broken file. [`skills/nodehammer/SKILL.md`](skills/nodehammer/SKILL.md) says
+those things, and it ships **inside the binary** — so installing nodehammer,
+by any route, is enough to have it:
+
+```bash
+nodehammer skills install                  # ~/.agents/skills, linked from ~/.claude
+nodehammer skills install --scope project  # this repository instead
+nodehammer skills list                     # what this build carries
+```
+
+The real copy goes to `.agents/skills/<name>/`, the cross-agent location read by
+Claude Code, Codex CLI, Gemini CLI, Copilot and Cursor alike. `.claude/skills/`
+gets a **symlink** to it — Claude Code reads only its own directory but follows a
+link out of it, so one copy serves both and they cannot drift. That link is
+created only if `.claude/` already exists; inventing a config directory for a
+tool you may not have is not this command's business.
+
+Because the bytes are compiled in, `uvx nodehammer skills install` works exactly
+the same way — the wheel's `nodehammer` command and the compiled executable are
+one implementation, so there is no packaging knob to get wrong and no way for a
+development install to carry a different skill than a released one.
+
+This repository links its own skill into `.agents/skills/` and `.claude/skills/`,
+so a checkout is already live. That also means `skills install --scope project`
+*here* refuses without `--force`, which is the point: those links go to the
+source file, and writing through one would edit the tree.
 
 ## Building
 
