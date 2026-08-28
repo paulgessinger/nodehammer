@@ -74,46 +74,43 @@ toml::table predicateToTable(const PredicateExpr &expr) {
         expr.data);
 }
 
-// ── JSON → toml::node ───────────────────────────────────────────────────────
+// ── ExtrasMap → toml::node ──────────────────────────────────────────────────
 
-toml::table jsonToTomlTable(const nlohmann::json &j);
-toml::array jsonToTomlArray(const nlohmann::json &j);
+toml::table extrasToTomlTable(const ExtrasMap &v);
+toml::array extrasToTomlArray(const ExtrasMap &v);
 
-toml::table jsonToTomlTable(const nlohmann::json &j) {
+/// Hand one extras value to `emit` as the toml type that fits it.
+///
+/// Null is dropped rather than emitted: TOML has no null, and the if-chain this
+/// replaced had no branch for it either.
+template <typename Emit> void emitExtras(const ExtrasMap &v, Emit &&emit) {
+    std::visit(overloaded{
+                   [&](std::monostate) {},
+                   [&](bool b) { emit(b); },
+                   [&](std::int64_t i) { emit(i); },
+                   [&](double d) { emit(d); },
+                   [&](const std::string &str) { emit(str); },
+                   [&](const ExtrasMap::Array &) { emit(extrasToTomlArray(v)); },
+                   [&](const ExtrasMap::Object &) { emit(extrasToTomlTable(v)); },
+               },
+               v.value());
+}
+
+toml::table extrasToTomlTable(const ExtrasMap &v) {
     toml::table tbl;
-    for (auto it = j.begin(); it != j.end(); ++it) {
-        if (it.value().is_object()) {
-            tbl.insert(it.key(), jsonToTomlTable(it.value()));
-        } else if (it.value().is_array()) {
-            tbl.insert(it.key(), jsonToTomlArray(it.value()));
-        } else if (it.value().is_string()) {
-            tbl.insert(it.key(), it.value().get<std::string>());
-        } else if (it.value().is_boolean()) {
-            tbl.insert(it.key(), it.value().get<bool>());
-        } else if (it.value().is_number_integer()) {
-            tbl.insert(it.key(), it.value().get<int64_t>());
-        } else if (it.value().is_number_float()) {
-            tbl.insert(it.key(), it.value().get<double>());
+    if (const auto *obj = v.asObject()) {
+        for (const auto &[key, val] : *obj) {
+            emitExtras(val, [&](auto &&x) { tbl.insert(key, std::forward<decltype(x)>(x)); });
         }
     }
     return tbl;
 }
 
-toml::array jsonToTomlArray(const nlohmann::json &j) {
+toml::array extrasToTomlArray(const ExtrasMap &v) {
     toml::array arr;
-    for (const auto &elem : j) {
-        if (elem.is_object()) {
-            arr.push_back(jsonToTomlTable(elem));
-        } else if (elem.is_array()) {
-            arr.push_back(jsonToTomlArray(elem));
-        } else if (elem.is_string()) {
-            arr.push_back(elem.get<std::string>());
-        } else if (elem.is_boolean()) {
-            arr.push_back(elem.get<bool>());
-        } else if (elem.is_number_integer()) {
-            arr.push_back(elem.get<int64_t>());
-        } else if (elem.is_number_float()) {
-            arr.push_back(elem.get<double>());
+    if (const auto *elems = v.asArray()) {
+        for (const auto &elem : *elems) {
+            emitExtras(elem, [&](auto &&x) { arr.push_back(std::forward<decltype(x)>(x)); });
         }
     }
     return arr;
@@ -248,7 +245,7 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
             tbl.insert("tessellation", std::move(tessTbl));
         }
         if (rule.extras) {
-            tbl.insert("extras", jsonToTomlTable(*rule.extras));
+            tbl.insert("extras", extrasToTomlTable(*rule.extras));
         }
         arr.push_back(std::move(tbl));
     }
@@ -287,7 +284,7 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
         out.insert("tessellation", std::move(tessTbl));
     }
     if (cfg.extrasDefaults) {
-        out.insert("extras", jsonToTomlTable(*cfg.extrasDefaults));
+        out.insert("extras", extrasToTomlTable(*cfg.extrasDefaults));
     }
     return out;
 }

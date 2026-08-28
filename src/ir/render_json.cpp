@@ -4,9 +4,45 @@
 // back-reference and Provenance (both from the Semantic IR's codec). Pulling these
 // in here — rather than in render.hpp — is exactly what keeps the header lean.
 #include <detail/glm_json.hpp>
+#include <detail/overloaded.hpp>
 #include <ir/semantic_json.hpp>
 
 namespace nodehammer::ir::render {
+
+namespace {
+
+/// ExtrasMap → nlohmann::json, for the `dump-render` output.
+///
+/// This is the one place the two still meet: extras stopped being nlohmann to
+/// keep it out of render.hpp (detail/json_value.hpp explains why), but the rest
+/// of this codec is nlohmann and there is no reason for it not to be — nothing
+/// includes render_json.hpp except the TUs that already serialize.
+nlohmann::json extrasToJson(const ExtrasMap &v) {
+    return std::visit(detail::overloaded{
+                          [](std::monostate) { return nlohmann::json{}; },
+                          [](bool b) { return nlohmann::json(b); },
+                          [](std::int64_t i) { return nlohmann::json(i); },
+                          [](double d) { return nlohmann::json(d); },
+                          [](const std::string &str) { return nlohmann::json(str); },
+                          [](const ExtrasMap::Array &elems) {
+                              auto arr = nlohmann::json::array();
+                              for (const auto &elem : elems) {
+                                  arr.push_back(extrasToJson(elem));
+                              }
+                              return arr;
+                          },
+                          [](const ExtrasMap::Object &members) {
+                              auto obj = nlohmann::json::object();
+                              for (const auto &[key, val] : members) {
+                                  obj[key] = extrasToJson(val);
+                              }
+                              return obj;
+                          },
+                      },
+                      v.value());
+}
+
+} // namespace
 
 void to_json(nlohmann::json &j, const Vertex &v) {
     j = {
@@ -53,8 +89,8 @@ void to_json(nlohmann::json &j, const Node &n) {
     };
     if (n.parentId)
         j["parentId"] = *n.parentId;
-    if (!n.extras.is_null() && !n.extras.empty())
-        j["extras"] = n.extras;
+    if (!n.extras.empty())
+        j["extras"] = extrasToJson(n.extras);
 }
 
 void to_json(nlohmann::json &j, const Scene &sc) {

@@ -20,6 +20,7 @@
 
 #include <ir/gltf/render/exporter.hpp>
 
+#include <detail/overloaded.hpp>
 #include <diagnostic_codes.hpp>
 #include <set>
 
@@ -37,39 +38,35 @@ namespace nodehammer::ir {
 
 namespace {
 
-/// Recursively convert nlohmann::json to tinygltf::Value.
-tinygltf::Value jsonToGltfValue(const nlohmann::json &j) {
-    if (j.is_boolean()) {
-        return tinygltf::Value(j.get<bool>());
-    }
-    if (j.is_number_integer()) {
-        return tinygltf::Value(static_cast<int>(j.get<int64_t>()));
-    }
-    if (j.is_number_float()) {
-        return tinygltf::Value(j.get<double>());
-    }
-    if (j.is_string()) {
-        return tinygltf::Value(j.get<std::string>());
-    }
-    if (j.is_array()) {
-        tinygltf::Value::Array arr;
-        for (const auto &elem : j) {
-            arr.push_back(jsonToGltfValue(elem));
-        }
-        return tinygltf::Value(std::move(arr));
-    }
-    if (j.is_object()) {
-        tinygltf::Value::Object obj;
-        for (const auto &[k, v] : j.items()) {
-            obj[k] = jsonToGltfValue(v);
-        }
-        return tinygltf::Value(std::move(obj));
-    }
-    return {};
+/// Recursively convert an ExtrasMap value to a tinygltf::Value.
+///
+/// Integer and double stay distinct here — tinygltf spells them as separate
+/// constructors, and collapsing them would change the emitted glTF.
+tinygltf::Value extrasToValue(const render::ExtrasMap &v) {
+    return std::visit(detail::overloaded{
+                          [](std::monostate) { return tinygltf::Value{}; },
+                          [](bool b) { return tinygltf::Value(b); },
+                          [](std::int64_t i) { return tinygltf::Value(static_cast<int>(i)); },
+                          [](double d) { return tinygltf::Value(d); },
+                          [](const std::string &str) { return tinygltf::Value(str); },
+                          [](const render::ExtrasMap::Array &elems) {
+                              tinygltf::Value::Array arr;
+                              arr.reserve(elems.size());
+                              for (const auto &elem : elems) {
+                                  arr.push_back(extrasToValue(elem));
+                              }
+                              return tinygltf::Value(std::move(arr));
+                          },
+                          [](const render::ExtrasMap::Object &members) {
+                              tinygltf::Value::Object obj;
+                              for (const auto &[key, val] : members) {
+                                  obj[key] = extrasToValue(val);
+                              }
+                              return tinygltf::Value(std::move(obj));
+                          },
+                      },
+                      v.value());
 }
-
-/// Convert render::ExtrasMap (nlohmann::json) to a tinygltf::Value for extras.
-tinygltf::Value extrasToValue(const render::ExtrasMap &extras) { return jsonToGltfValue(extras); }
 
 } // namespace
 
@@ -426,7 +423,7 @@ void GltfExporter::write(const render::Scene &scene, const std::filesystem::path
             }
         }
 
-        if (!rn.extras.is_null() && !rn.extras.empty()) {
+        if (!rn.extras.empty()) {
             gn.extras = extrasToValue(rn.extras);
         }
     }
@@ -532,7 +529,7 @@ void GltfExporter::write(const render::Scene &scene, const std::filesystem::path
             tinygltf::Scene gs;
             gs.name = namePaths.contains(rnId) ? namePaths.at(rnId) : rn.name;
             gs.nodes = {snIdx};
-            if (!rn.extras.is_null() && !rn.extras.empty()) {
+            if (!rn.extras.empty()) {
                 gs.extras = extrasToValue(rn.extras);
             }
             model.scenes.push_back(std::move(gs));

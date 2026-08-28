@@ -193,25 +193,25 @@ TEST_CASE("ConfigWriter: defaults.tessellation round-trip", "[config][writer]") 
 
 TEST_CASE("ConfigWriter: defaults.extras round-trip", "[config][writer]") {
     NHConfig cfg;
-    cfg.extrasDefaults = nlohmann::json{{"visible", true}, {"opacity", 1.0}};
+    cfg.extrasDefaults = ExtrasMap::makeObject({{"visible", true}, {"opacity", 1.0}});
 
     auto rt = roundTrip(cfg);
     REQUIRE(rt.extrasDefaults.has_value());
-    REQUIRE((*rt.extrasDefaults)["visible"] == true);
-    REQUIRE((*rt.extrasDefaults)["opacity"] == 1.0);
+    REQUIRE(rt.extrasDefaults->at("visible").boolValue() == true);
+    REQUIRE(rt.extrasDefaults->at("opacity").doubleValue() == 1.0);
 }
 
 TEST_CASE("ConfigWriter: rule with extras round-trip", "[config][writer]") {
     NHConfig cfg;
     Rule rule;
-    rule.extras = nlohmann::json{{"detector", "pixel"}, {"layer", 3}};
+    rule.extras = ExtrasMap::makeObject({{"detector", "pixel"}, {"layer", 3}});
     cfg.rules.push_back(rule);
 
     auto rt = roundTrip(cfg);
     REQUIRE(rt.rules.size() == 1);
     REQUIRE(rt.rules[0].extras.has_value());
-    REQUIRE((*rt.rules[0].extras)["detector"] == "pixel");
-    REQUIRE((*rt.rules[0].extras)["layer"] == 3);
+    REQUIRE(rt.rules[0].extras->at("detector").stringValue() == "pixel");
+    REQUIRE(rt.rules[0].extras->at("layer").intValue() == 3);
 }
 
 // ── Compound predicates ─────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
+#include <detail/json_value.hpp>
 
 #include <map>
 #include <memory>
@@ -121,8 +121,8 @@ struct SelectionRule {
 };
 
 /// Free-form extras for export metadata (e.g. glTF extras).
-/// Uses nlohmann::json as a recursive value type — maps directly to tinygltf::Value.
-using ExtrasMap = nlohmann::json;
+/// A recursive value type that maps directly onto tinygltf::Value and toml::node.
+using ExtrasMap = detail::JsonValue;
 
 /// Unified rule: optional material, tessellation, and/or extras on matched nodes.
 /// In TOML: [[rules]] with match predicate and sub-tables.
