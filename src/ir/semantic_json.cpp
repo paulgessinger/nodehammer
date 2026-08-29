@@ -1,5 +1,7 @@
 #include <ir/semantic_json.hpp>
 
+#include <ir/id_order.hpp>
+
 #include <numbers>
 
 namespace nodehammer::ir {
@@ -397,24 +399,29 @@ void from_json(const nlohmann::json &j, Scene &sc) {
 }
 
 void to_json(nlohmann::json &j, const Scene &sc) {
+    // By ID, not in map order. Pruning and deduplication both erase, and the
+    // IR's map erases by swapping the last element into the hole -- so without
+    // this the arrays come out ordered by *what was removed*, and two dumps
+    // taken either side of a one-node config change differ everywhere. See
+    // ir/id_order.hpp.
     auto nodes = nlohmann::json::array();
-    for (const auto &[id, n] : sc.nodes) {
-        nodes.push_back(n);
+    for (const auto *entry : entriesById(sc.nodes)) {
+        nodes.push_back(entry->second);
     }
 
     auto logVols = nlohmann::json::array();
-    for (const auto &[id, lv] : sc.logVols) {
-        logVols.push_back(lv);
+    for (const auto *entry : entriesById(sc.logVols)) {
+        logVols.push_back(entry->second);
     }
 
     auto shapes = nlohmann::json::array();
-    for (const auto &[id, s] : sc.shapes) {
-        shapes.push_back(s);
+    for (const auto *entry : entriesById(sc.shapes)) {
+        shapes.push_back(entry->second);
     }
 
     auto mats = nlohmann::json::array();
-    for (const auto &[id, m] : sc.materials) {
-        mats.push_back(m);
+    for (const auto *entry : entriesById(sc.materials)) {
+        mats.push_back(entry->second);
     }
 
     j = {
