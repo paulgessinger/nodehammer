@@ -5,6 +5,7 @@
 // in here — rather than in render.hpp — is exactly what keeps the header lean.
 #include <detail/glm_json.hpp>
 #include <detail/overloaded.hpp>
+#include <ir/id_order.hpp>
 #include <ir/semantic_json.hpp>
 
 namespace nodehammer::ir::render {
@@ -94,17 +95,18 @@ void to_json(nlohmann::json &j, const Node &n) {
 }
 
 void to_json(nlohmann::json &j, const Scene &sc) {
+    // By ID, not in map order: see ir/id_order.hpp.
     auto nodes = nlohmann::json::array();
-    for (const auto &[id, n] : sc.nodes)
-        nodes.push_back(n);
+    for (const auto *entry : entriesById(sc.nodes))
+        nodes.push_back(entry->second);
 
     auto meshes = nlohmann::json::array();
-    for (const auto &[id, m] : sc.meshAssets)
-        meshes.push_back(m);
+    for (const auto *entry : entriesById(sc.meshAssets))
+        meshes.push_back(entry->second);
 
     auto mats = nlohmann::json::array();
-    for (const auto &[id, m] : sc.materials)
-        mats.push_back(m);
+    for (const auto *entry : entriesById(sc.materials))
+        mats.push_back(entry->second);
 
     j = {
         {"rootId", sc.rootId},

@@ -22,6 +22,7 @@
 
 #include <detail/overloaded.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/id_order.hpp>
 #include <set>
 
 #include <glm/glm.hpp>
@@ -126,7 +127,8 @@ void GltfExporter::write(const render::Scene &scene, const std::filesystem::path
     // ── Materials ─────────────────────────────────────────────────────────────
 
     std::unordered_map<render::MaterialId, int> matIdx;
-    for (const auto &[id, mat] : scene.materials) {
+    for (const auto *entry : ir::entriesById(scene.materials)) {
+        const auto &[id, mat] = *entry;
         tinygltf::Material gm;
         gm.name = mat.name;
         gm.pbrMetallicRoughness.baseColorFactor = {
@@ -210,7 +212,8 @@ void GltfExporter::write(const render::Scene &scene, const std::filesystem::path
     const bool bake = config.bakeUnitScale;
     const auto s = static_cast<float>(config.unitScale);
 
-    for (const auto &[id, ma] : scene.meshAssets) {
+    for (const auto *entry : ir::entriesById(scene.meshAssets)) {
+        const auto &[id, ma] = *entry;
         if (ma.vertices.empty() || ma.indices.empty()) {
             continue;
         }
@@ -357,7 +360,8 @@ void GltfExporter::write(const render::Scene &scene, const std::filesystem::path
     }
 
     // Fill in node data now that all indices are known.
-    for (const auto &[rnId, rn] : scene.nodes) {
+    for (const auto *entry : ir::entriesById(scene.nodes)) {
+        const auto &[rnId, rn] = *entry;
         if (!nodeIdx.contains(rnId)) {
             continue;
         }
@@ -465,7 +469,8 @@ void GltfExporter::write(const render::Scene &scene, const std::filesystem::path
         }
 
         // Create one scene per mesh-bearing node.
-        for (const auto &[rnId, rn] : scene.nodes) {
+        for (const auto *entry : ir::entriesById(scene.nodes)) {
+            const auto &[rnId, rn] = *entry;
             if (rn.meshBindings.empty() || !nodeIdx.contains(rnId)) {
                 continue;
             }
