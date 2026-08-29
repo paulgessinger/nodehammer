@@ -3,8 +3,9 @@
 // JSON codec for the Render IR. Kept out of render.hpp so the many hot,
 // non-JSON includers of the data model (tessellator, scene renderer, viewer)
 // don't drag in the Semantic IR's JSON codec (semantic_json.hpp) or compile the
-// inline to_json bodies. (render.hpp still includes nlohmann/json itself, since
-// render::ExtrasMap aliases it.) Only TUs that serialize render types include this.
+// inline to_json bodies. render.hpp is nlohmann-free -- render::ExtrasMap is
+// detail::JsonValue -- so this header is the only thing that pulls the JSON
+// library in for the Render IR. Only TUs that serialize render types include it.
 
 #include <ir/render.hpp>
 

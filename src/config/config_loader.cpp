@@ -476,39 +476,42 @@ void parseSelectionRules(const toml::table &root, NHConfig &cfg, DiagnosticList 
     }
 }
 
-/// Recursively convert a TOML value to nlohmann::json.
-nlohmann::json tomlToJson(const toml::node &node) {
+/// Recursively convert a TOML value to an ExtrasMap value.
+///
+/// Dates and times are the one TOML kind with no JSON counterpart; they fall
+/// through to null, as they did when this produced nlohmann::json.
+ExtrasMap tomlToExtras(const toml::node &node) {
     if (node.is_boolean()) {
-        return node.as_boolean()->get();
+        return ExtrasMap{node.as_boolean()->get()};
     }
     if (node.is_integer()) {
-        return node.as_integer()->get();
+        return ExtrasMap{node.as_integer()->get()};
     }
     if (node.is_floating_point()) {
-        return node.as_floating_point()->get();
+        return ExtrasMap{node.as_floating_point()->get()};
     }
     if (node.is_string()) {
-        return std::string{node.as_string()->get()};
+        return ExtrasMap{std::string{node.as_string()->get()}};
     }
     if (node.is_array()) {
-        auto j = nlohmann::json::array();
+        ExtrasMap::Array elems;
         for (const auto &elem : *node.as_array()) {
-            j.push_back(tomlToJson(elem));
+            elems.push_back(tomlToExtras(elem));
         }
-        return j;
+        return ExtrasMap::makeArray(std::move(elems));
     }
     if (node.is_table()) {
-        auto j = nlohmann::json::object();
+        ExtrasMap::Object members;
         for (const auto &[key, val] : *node.as_table()) {
-            j[std::string{key.str()}] = tomlToJson(val);
+            members.emplace_back(std::string{key.str()}, tomlToExtras(val));
         }
-        return j;
+        return ExtrasMap::makeObject(std::move(members));
     }
-    return nullptr;
+    return ExtrasMap{};
 }
 
-/// Parse an extras sub-table into an ExtrasMap (nlohmann::json object).
-ExtrasMap parseExtras(const toml::table &tbl) { return tomlToJson(tbl); }
+/// Parse an extras sub-table into an ExtrasMap object.
+ExtrasMap parseExtras(const toml::table &tbl) { return tomlToExtras(tbl); }
 
 /// [[rules]] — unified rule with optional material, tessellation, and extras.
 void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {

@@ -151,12 +151,13 @@ config::Color colorFromArray(const sol::table &arr, config::Color base) {
     return base;
 }
 
-// ── Lua table → nlohmann::json (for `extras`) ────────────────────────────────
+// ── Lua table → ExtrasMap (for `extras`) ─────────────────────────────────────
 
-nlohmann::json jsonFromLua(const sol::object &o) {
+config::ExtrasMap extrasFromLua(const sol::object &o) {
+    using ExtrasMap = config::ExtrasMap;
     switch (o.get_type()) {
     case sol::type::boolean:
-        return o.as<bool>();
+        return ExtrasMap{o.as<bool>()};
     case sol::type::number: {
         // Preserve the Lua 5.4 integer/float distinction so extras round-trip
         // like the TOML loader's int/float handling. sol2's is<int64_t> accepts
@@ -167,12 +168,12 @@ nlohmann::json jsonFromLua(const sol::object &o) {
         const bool isInt = lua_isinteger(L, -1) != 0;
         lua_pop(L, 1);
         if (isInt) {
-            return nlohmann::json(o.as<std::int64_t>());
+            return ExtrasMap{o.as<std::int64_t>()};
         }
-        return nlohmann::json(o.as<double>());
+        return ExtrasMap{o.as<double>()};
     }
     case sol::type::string:
-        return o.as<std::string>();
+        return ExtrasMap{o.as<std::string>()};
     case sol::type::table: {
         const sol::table t = o.as<sol::table>();
         const std::size_t n = t.size();
@@ -182,13 +183,13 @@ nlohmann::json jsonFromLua(const sol::object &o) {
         }
         // Contiguous 1..n integer keys with no extras → JSON array.
         if (n > 0 && keyCount == n) {
-            nlohmann::json arr = nlohmann::json::array();
+            ExtrasMap::Array elems;
             for (std::size_t i = 1; i <= n; ++i) {
-                arr.push_back(jsonFromLua(t.get<sol::object>(i)));
+                elems.push_back(extrasFromLua(t.get<sol::object>(i)));
             }
-            return arr;
+            return ExtrasMap::makeArray(std::move(elems));
         }
-        nlohmann::json obj = nlohmann::json::object();
+        ExtrasMap::Object members;
         for (const auto &kv : t) {
             const sol::object k = kv.first;
             std::string key;
@@ -199,12 +200,12 @@ nlohmann::json jsonFromLua(const sol::object &o) {
             } else {
                 continue;
             }
-            obj[key] = jsonFromLua(kv.second);
+            members.emplace_back(std::move(key), extrasFromLua(kv.second));
         }
-        return obj;
+        return ExtrasMap::makeObject(std::move(members));
     }
     default:
-        return nullptr;
+        return ExtrasMap{};
     }
 }
 
@@ -564,7 +565,7 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view rootKe
             }
             if (const sol::object ex = t[config::keys::kExtras];
                 ex.get_type() == sol::type::table) {
-                rule.extras = jsonFromLua(ex);
+                rule.extras = extrasFromLua(ex);
             }
             cfg.rules.push_back(std::move(rule));
         });
@@ -579,7 +580,7 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view rootKe
             }
             if (const sol::object ex = t[config::keys::kExtras];
                 ex.get_type() == sol::type::table) {
-                cfg.extrasDefaults = jsonFromLua(ex);
+                cfg.extrasDefaults = extrasFromLua(ex);
             }
         });
 

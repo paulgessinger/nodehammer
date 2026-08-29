@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ankerl/unordered_dense.h>
+#include <detail/json_value.hpp> // ExtrasMap is an alias for detail::JsonValue
 #include <glm/glm.hpp>
 #include <ir/provenance.hpp>
-#include <ir/semantic.hpp>   // StrongId, semantic::NodeId
-#include <nlohmann/json.hpp> // ExtrasMap is an alias for nlohmann::json
+#include <ir/semantic.hpp> // StrongId, semantic::NodeId
 
 // The JSON codec for these types lives in render_json.hpp / render_json.cpp so
 // this header stays free of the Semantic IR's codec and cheap to include.
@@ -100,7 +100,7 @@ struct MeshBinding {
 // ── Extras ────────────────────────────────────────────────────────────────────
 
 /// Free-form metadata for export, emitted as glTF extras or similar.
-using ExtrasMap = nlohmann::json;
+using ExtrasMap = detail::JsonValue;
 
 // ── Render node ───────────────────────────────────────────────────────────────
 

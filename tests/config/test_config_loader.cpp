@@ -108,7 +108,7 @@ TEST_CASE("ConfigLoader: full_example.toml parses all rule types", "[config][loa
     REQUIRE(cfg.rules.at(2).tessellation.has_value());
     REQUIRE(cfg.rules.at(2).tessellation->maxSegmentsCircle == std::optional{32});
     REQUIRE(cfg.rules.at(2).extras.has_value());
-    REQUIRE(cfg.rules.at(2).extras->at("visible").get<bool>() == true);
+    REQUIRE(cfg.rules.at(2).extras->at("visible").boolValue() == true);
 
     // Rule 3: fallback tessellation (no match → matches everything)
     REQUIRE(cfg.rules.at(3).tessellation.has_value());

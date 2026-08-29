@@ -71,7 +71,7 @@ TEST_CASE("to_json: render::Node extras", "[ir][json]") {
     node.semanticNodeId = nodehammer::ir::semantic::NodeId{9};
 
     SECTION("populated extras are emitted") {
-        node.extras = {{"detector", "tracker"}};
+        node.extras = nodehammer::ir::render::ExtrasMap::makeObject({{"detector", "tracker"}});
         nlohmann::json j = node;
         REQUIRE(j["extras"]["detector"] == "tracker");
     }
