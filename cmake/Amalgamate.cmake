@@ -202,3 +202,49 @@ if(NH_AMALGAM_HAVE_CONNECT)
         add_test(NAME amalgamation_connect_smoke COMMAND nodehammer_amalgam_connect_smoke)
     endif()
 endif()
+
+# ── Golden equivalence: the same input, the same bytes out ───────────────────
+#
+# The smoke tests prove the generated header compiles, links and runs. They do
+# not prove it computes the same answer as the library it was cut from, and
+# nothing did until this: a header that silently absorbed a source wrongly, or
+# lost an `#if`, would pass every check above while producing a different scene.
+# docs/event-display-design.md §10.2 asks for exactly this.
+#
+# Two programs, one geometry, one shared body — they differ only in how they
+# reach `nodehammer::`. One links the amalgamated header and nothing else; the
+# other links nodehammer_lib. A driver script runs both and compares the files,
+# because the claim is about the pair and ctest runs one command per test.
+#
+# Only where the connector is buildable, for the reason the connector smoke test
+# gives: this compares the shipped variant, which needs ROOT and DD4hep.
+if(NH_AMALGAM_HAVE_CONNECT AND NODEHAMMER_BUILD_TESTS)
+    add_executable(nodehammer_amalgam_golden
+        ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/golden_amalgam.cpp
+    )
+    add_dependencies(nodehammer_amalgam_golden nodehammer_amalgam_connect)
+    target_include_directories(nodehammer_amalgam_golden PRIVATE
+        ${NH_AMALGAM_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation
+    )
+    target_compile_features(nodehammer_amalgam_golden PRIVATE cxx_std_23)
+    # The environment's backends only -- same rule as the connector smoke test.
+    target_link_libraries(nodehammer_amalgam_golden PRIVATE ROOT::Geom DD4hep::DDCore)
+
+    add_executable(nodehammer_modular_golden
+        ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/golden_modular.cpp
+    )
+    target_include_directories(nodehammer_modular_golden PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation
+    )
+    target_compile_features(nodehammer_modular_golden PRIVATE cxx_std_23)
+    target_link_libraries(nodehammer_modular_golden PRIVATE nodehammer_lib ROOT::Geom)
+
+    add_test(NAME amalgamation_golden_equivalence
+        COMMAND ${CMAKE_COMMAND}
+            -DAMALGAM=$<TARGET_FILE:nodehammer_amalgam_golden>
+            -DMODULAR=$<TARGET_FILE:nodehammer_modular_golden>
+            -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/amalgamation/golden
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/cmake/amalgam_golden_test.cmake
+    )
+endif()
