@@ -1,4 +1,5 @@
 #include <diagnostic_codes.hpp>
+#include <ir/tgeo/semantic/matrix.hpp>
 #include <ir/tgeo/semantic/shape_dispatch.hpp>
 
 #include <TGeoBBox.h>
@@ -18,21 +19,6 @@
 #include <format>
 
 namespace nodehammer::ir {
-
-namespace {
-
-glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
-    const Double_t *r = m->GetRotationMatrix(); // 3×3 row-major
-    const Double_t *t = m->GetTranslation();
-    return glm::dmat4{
-        glm::dvec4{r[0], r[3], r[6], 0.0}, // col 0
-        glm::dvec4{r[1], r[4], r[7], 0.0}, // col 1
-        glm::dvec4{r[2], r[5], r[8], 0.0}, // col 2
-        glm::dvec4{t[0], t[1], t[2], 1.0}, // col 3
-    };
-}
-
-} // namespace
 
 semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, semantic::Scene &scene,
                                     DiagnosticList &diags) {

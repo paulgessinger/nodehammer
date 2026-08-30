@@ -394,15 +394,18 @@ if(NODEHAMMER_BUILD_SHARED)
         target_link_libraries(nodehammer_public_tests PRIVATE ROOT::Geom)
     endif()
 
-    # DD4hep is the other shape of conditional backend, and needs neither of the
-    # things TGeo needed: no DD4hep headers, because there is no
-    # `read(dd4hep::Detector &)` to call, and no DD4hep link, because the only way
-    # in is a format name and a path. What it does need is a compact file — the
-    # backend has no in-memory entry point, so the suite's usual "every input
-    # comes from the synthetic importer" cannot reach it, and this is the single
-    # exception to that.
+    # DD4hep now needs exactly what TGeo needs, and for the same reason: since
+    # `SemanticScene::read(dd4hep::Detector &)` exists, this suite builds a
+    # `Detector` in-process and hands over a reference, so it includes
+    # <DD4hep/Detector.h> and calls into DDCore. Linking it here is what the real
+    # call site looks like — a caller holding a Detector necessarily has DD4hep.
+    #
+    # It still needs a compact file too: unlike TGeo there is no cheap way to
+    # build a Detector from nothing, so the suite's usual "every input comes from
+    # the synthetic importer" cannot reach it, and this is the single exception.
     if(NODEHAMMER_WITH_DD4HEP)
         target_sources(nodehammer_public_tests PRIVATE public/test_public_dd4hep.cpp)
+        target_link_libraries(nodehammer_public_tests PRIVATE DD4hep::DDCore)
         target_compile_definitions(nodehammer_public_tests PRIVATE
             NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
         )

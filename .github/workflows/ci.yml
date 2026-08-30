@@ -1133,7 +1133,18 @@ jobs:
             uv tool install conan
             conan profile detect --force
             ci/build.sh conan-install native
-            ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
+            # NODEHAMMER_BUILD_AMALGAMATED belongs to this job and no other.
+            # The single-header connector leaves ROOT and DD4hep as real
+            # #includes -- the experiment it ships to already has them -- so
+            # this is the only leg that can compile the variant that is
+            # actually shipped, rather than the reduced one that runs
+            # everywhere. It is also the anti-drift measure
+            # docs/event-display-design.md §10.3 asks for: a source change that
+            # the modular build accepts and the amalgamation cannot (a second
+            # anonymous-namespace helper, a new dependency that is not
+            # vendored) fails here and nowhere else.
+            ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON \
+              -DNODEHAMMER_BUILD_AMALGAMATED=ON
             ci/build.sh build native
             ci/build.sh test native -j4
             # The only environment where the backends are *shared* libraries

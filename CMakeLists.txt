@@ -93,6 +93,7 @@ option(NODEHAMMER_PROFILING     "Preserve symbols and frame pointers for samplin
 option(NODEHAMMER_SHADER_STRICT "Validate cross-compiled HLSL/WGSL shaders at build time (consumed in cmake/Sokol.cmake)" ON)
 option(NODEHAMMER_PIC_CHECK     "Link a probe shared module against the static library to prove every object is position-independent (consumed in cmake/PicProbe.cmake)" OFF)
 option(NODEHAMMER_BUILD_SHARED  "Also build and install the shared library + public headers + CMake package config" OFF)
+option(NODEHAMMER_BUILD_AMALGAMATED "Assemble the single-header distributions (cmake/Amalgamate.cmake) and compile the smoke test" OFF)
 option(NODEHAMMER_BUILD_PYTHON  "Build the nanobind Python extension module (the wheel payload)" OFF)
 
 # DD4hep's importer *is* a TGeo importer with extra passes: it calls
@@ -272,7 +273,11 @@ set(NH_CORE_SOURCES
     # handle and its internals (src/api/handles.hpp is where the seam lives).
     # Core, not app — these *are* what the installed library publishes.
     src/api/diagnostics.cpp
+    # Two halves of one class: the direct entry points, and the ones that
+    # dispatch through a format registry. Split so the amalgamated connector
+    # header can take the first without the second, which reaches zstd.
     src/api/semantic_scene.cpp
+    src/api/semantic_scene_formats.cpp
     src/api/config.cpp
     src/api/render_scene.cpp
     src/api/build.cpp
@@ -1137,3 +1142,8 @@ endif()
 # THIRD-PARTY-NOTICES.txt at configure time, and installs it + the staged
 # per-dep folders. Silent no-op when no manifest is present (non-Conan path).
 include(cmake/ThirdPartyLicenses.cmake)
+
+# The single-header distributions. Last, because it reads include directories
+# off targets every block above has finished defining. Returns immediately
+# unless NODEHAMMER_BUILD_AMALGAMATED is on.
+include(cmake/Amalgamate.cmake)
