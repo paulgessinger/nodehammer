@@ -2,7 +2,7 @@
 #include <ir/provenance.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 
-#include <glm/glm.hpp>
+#include <ir/math.hpp>
 
 namespace nodehammer::ir {
 
@@ -11,7 +11,7 @@ namespace {
 /// Add a shape+material+logvol to the scene and return the logvol ID.
 semantic::LogVolId addVolume(semantic::Scene &scene, std::string_view lvName,
                              semantic::ShapeVariant shapeData, std::string_view matName,
-                             glm::vec3 color = {0.75f, 0.75f, 0.85f}, double density = 0.0) {
+                             Color3 color = {0.75f, 0.75f, 0.85f}, double density = 0.0) {
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = semantic::Shape{shapeId, std::move(shapeData)};
 
@@ -32,7 +32,7 @@ semantic::LogVolId addVolume(semantic::Scene &scene, std::string_view lvName,
 /// Add a node to the scene, wire up the parent link, and return its ID.
 semantic::NodeId addNode(semantic::Scene &scene, std::string_view name, semantic::LogVolId lvId,
                          std::optional<semantic::NodeId> parentId = std::nullopt,
-                         glm::dmat4 localTransform = glm::dmat4{1.0}) {
+                         Mat4 localTransform = Mat4{}) {
     auto nodeId = scene.nextNodeId();
     semantic::Node node;
     node.id = nodeId;
@@ -76,8 +76,8 @@ semantic::Scene SyntheticSceneBuilder::buildNestedBoxes() {
     auto rootId = addNode(scene, "world", outerLv);
     scene.rootId = rootId;
 
-    glm::dmat4 childTransform{1.0};
-    childTransform[3] = glm::dvec4{0.0, 0.0, 100.0, 1.0}; // translate 100 mm along Z
+    Mat4 childTransform;
+    childTransform[3] = Vec4{0.0, 0.0, 100.0, 1.0}; // translate 100 mm along Z
     addNode(scene, "inner", innerLv, rootId, childTransform);
 
     scene.computeWorldTransforms();
@@ -123,7 +123,7 @@ semantic::Scene SyntheticSceneBuilder::buildBooleanSubtraction() {
     semantic::SourceMaterial mat;
     mat.id = matId;
     mat.name = "aluminum";
-    mat.color = glm::vec3{0.75f, 0.75f, 0.85f};
+    mat.color = Color3{0.75f, 0.75f, 0.85f};
     mat.density = 2.7;
     scene.materials[matId] = mat;
 
@@ -148,7 +148,7 @@ ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     semantic::SourceMaterial mat;
     mat.id = matId;
     mat.name = "aluminum";
-    mat.color = glm::vec3{0.75f, 0.75f, 0.85f};
+    mat.color = Color3{0.75f, 0.75f, 0.85f};
     mat.density = 2.7;
     scene.materials[matId] = mat;
 

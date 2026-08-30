@@ -3,6 +3,7 @@
 #include <selection/selector.hpp>
 
 #include <glm/gtc/matrix_inverse.hpp>
+#include <ir/glm_interop.hpp>
 
 #include <format>
 #include <queue>
@@ -261,9 +262,10 @@ DiagnosticList SelectionEngine::prune(ir::semantic::Scene &scene) const {
             }
 
             // Rebase localTransform to the new parent's world frame.
-            const glm::dmat4 &worldNode = scene.nodes.at(id).worldTransform;
-            const glm::dmat4 &worldParent = scene.nodes.at(newParent).worldTransform;
-            scene.nodes.at(id).localTransform = glm::affineInverse(worldParent) * worldNode;
+            const glm::dmat4 worldNode = ir::toGlm(scene.nodes.at(id).worldTransform);
+            const glm::dmat4 worldParent = ir::toGlm(scene.nodes.at(newParent).worldTransform);
+            scene.nodes.at(id).localTransform =
+                ir::fromGlm(glm::affineInverse(worldParent) * worldNode);
             scene.nodes.at(id).parentId = newParent;
             // Register with the new parent; the old parent will be pruned away.
             scene.nodes.at(newParent).children.push_back(id);

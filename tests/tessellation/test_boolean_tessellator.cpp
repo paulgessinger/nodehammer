@@ -76,8 +76,8 @@ TEST_CASE("boolean tessellator: partial tube subtraction clears the named sector
     // rMin=0, rMax oversized to fully clear the box corner, sector [0°,90°].
     scene.shapes[wedgeId] = {wedgeId, ir::semantic::TubeShape{0.0, 20.0, 5.0, 0.0, kPi / 2.0}};
     const ir::semantic::ShapeId cutId = scene.nextShapeId();
-    scene.shapes[cutId] = {cutId,
-                           ir::semantic::BooleanSubtraction{boxId, wedgeId, glm::dmat4{1.0}}};
+    scene.shapes[cutId] = {
+        cutId, ir::semantic::BooleanSubtraction{boxId, wedgeId, nodehammer::ir::Mat4{}}};
 
     PrimitiveTessellator tess;
     auto out = tessellateBooleanShape(scene.shapes.at(cutId).data, scene, tess, kDefault);

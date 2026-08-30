@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <ir/glm_interop.hpp>
 
 #include <scene_build.hpp>
 
@@ -44,7 +45,8 @@ ir::semantic::Scene makeStraddlingScene() {
     boxNode.id = box;
     boxNode.name = "straddle";
     boxNode.logVolId = boxLv;
-    boxNode.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0});
+    boxNode.localTransform =
+        nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0}));
     boxNode.parentId = root;
     scene.nodes[box] = boxNode;
     scene.nodes[root].children = {box};

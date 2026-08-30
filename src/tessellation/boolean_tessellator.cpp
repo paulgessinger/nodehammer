@@ -4,6 +4,7 @@
 #include <manifold/manifold.h>
 
 #include <detail/overloaded.hpp>
+#include <ir/glm_interop.hpp>
 
 #include <cstring>
 #include <format>
@@ -302,8 +303,8 @@ std::optional<manifold::Manifold> resolveAndTessellate(ir::semantic::ShapeId sha
         }
 
         // Apply right operand transform
-        if (boolShape.rightTransform != glm::dmat4{1.0}) {
-            *right = right->Transform(toManifoldTransform(boolShape.rightTransform));
+        if (boolShape.rightTransform != ir::Mat4{}) {
+            *right = right->Transform(toManifoldTransform(ir::toGlm(boolShape.rightTransform)));
         }
 
         using T = std::decay_t<decltype(boolShape)>;
@@ -389,8 +390,8 @@ TessellationOutput tessellateBooleanShape(const ir::semantic::ShapeVariant &shap
             return out;
         }
 
-        if (boolShape.rightTransform != glm::dmat4{1.0}) {
-            *right = right->Transform(toManifoldTransform(boolShape.rightTransform));
+        if (boolShape.rightTransform != ir::Mat4{}) {
+            *right = right->Transform(toManifoldTransform(ir::toGlm(boolShape.rightTransform)));
         }
 
         try {

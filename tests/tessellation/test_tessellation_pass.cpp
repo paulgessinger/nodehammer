@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/glm_interop.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 #include <tessellation/primitive_tessellator.hpp>
 #include <tessellation/tessellation_pass.hpp>
@@ -125,7 +126,8 @@ TEST_CASE("TessellationPass: single box preserves transform", "[tessellation][pa
 
     const auto &rn = result.scene.nodes.at(result.scene.rootId);
     // Root has identity world transform
-    REQUIRE(glm::mat4(scene.nodes.at(scene.rootId).worldTransform) == rn.worldTransform);
+    REQUIRE(glm::mat4(nodehammer::ir::toGlm(scene.nodes.at(scene.rootId).worldTransform)) ==
+            rn.worldTransform);
 }
 
 TEST_CASE("TessellationPass: single box has meshBinding", "[tessellation][pass]") {
@@ -196,7 +198,8 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
         node.name = std::move(name);
         node.logVolId = lv;
         node.parentId = parent;
-        node.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z});
+        node.localTransform =
+            nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z}));
         scene.nodes[id] = node;
         if (parent.has_value()) {
             scene.nodes.at(*parent).children.push_back(id);
@@ -316,7 +319,8 @@ TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identi
         node.name = std::move(name);
         node.logVolId = lv;
         node.parentId = parent;
-        node.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z});
+        node.localTransform =
+            nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z}));
         scene.nodes[id] = node;
         if (parent.has_value()) {
             scene.nodes.at(*parent).children.push_back(id);
@@ -395,8 +399,10 @@ TEST_CASE("TessellationPass: merge_descendants cache can use source daughter pro
     const auto kaptonLv = scene.nextLogVolId();
     scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
 
-    glm::dmat4 siliconPlacement = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, 0.1});
-    glm::dmat4 kaptonPlacement = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, -0.1});
+    const auto siliconPlacement =
+        nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, 0.1}));
+    const auto kaptonPlacement =
+        nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, -0.1}));
     const auto diskLv = scene.nextLogVolId();
     scene.logVols[diskLv] = {
         diskLv,
@@ -413,7 +419,8 @@ TEST_CASE("TessellationPass: merge_descendants cache can use source daughter pro
         node.name = std::move(name);
         node.logVolId = lv;
         node.parentId = parent;
-        node.localTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z});
+        node.localTransform =
+            nodehammer::ir::fromGlm(glm::translate(glm::dmat4{1.0}, glm::dvec3{0.0, 0.0, z}));
         scene.nodes[id] = node;
         if (parent.has_value()) {
             scene.nodes.at(*parent).children.push_back(id);

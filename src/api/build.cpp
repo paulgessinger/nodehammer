@@ -1,4 +1,5 @@
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 
 #include <diagnostic_codes.hpp>
 #include <selection/selector.hpp>

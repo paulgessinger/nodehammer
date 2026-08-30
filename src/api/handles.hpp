@@ -1,7 +1,16 @@
 #pragma once
 
-// Where a public handle's `Impl` is defined, and the small helpers that build
-// and read one.
+// Where the *semantic* handle's `Impl` is defined, and the small helpers that
+// build and read one. The render and config handles live in handles_render.hpp
+// and handles_config.hpp.
+//
+// Split by which internal type each handle wraps, because the include is what
+// costs: `RenderScene::Impl` names `ir::render::Scene`, which reaches glm, and
+// the config Impls reach the whole config AST. A TU converting a TGeo geometry
+// to `.nhb` needs neither, and the amalgamated connector
+// (docs/event-display-design.md §7) inlines whatever it reaches -- so a header
+// that hands every TU all five Impls put ~28k lines of glm into an artifact
+// that never calls it. One header per group, and each TU takes what it uses.
 //
 // This is also where the members that *mention* an `Impl` are defined — each
 // handle's adopting constructor and its `impl()` getter. They have to live in a
@@ -16,16 +25,12 @@
 // finds no symbol behind them, which is correct: they have no `Impl` to pass in
 // and could do nothing with one handed back.
 
-#include <config/config_ast.hpp>
 #include <diagnostic_codes.hpp>
 #include <diagnostics.hpp>
-#include <ir/render.hpp>
 #include <ir/semantic.hpp>
 
 #include <nodehammer/build.hpp>
-#include <nodehammer/config.hpp>
 #include <nodehammer/diagnostics.hpp>
-#include <nodehammer/render_scene.hpp>
 #include <nodehammer/semantic_scene.hpp>
 
 #include <exception>
@@ -42,27 +47,6 @@ struct SemanticScene::Impl {
     ir::semantic::Scene scene;
 };
 
-struct RenderScene::Impl {
-    ir::render::Scene scene;
-};
-
-struct Config::Impl {
-    config::NHConfig cfg;
-};
-
-// The two slices hold the parsed document, not a copy of the fields they cover:
-// slicing is about which half of the API may *read* what, and duplicating the
-// AST to express that would put the two halves out of sync the moment one is
-// rebuilt. `Config::scene()` hands over an aliasing pointer, so a slice keeps
-// its document alive on its own.
-struct SceneConfig::Impl {
-    std::shared_ptr<const config::NHConfig> cfg;
-};
-
-struct OutputConfig::Impl {
-    std::shared_ptr<const config::NHConfig> cfg;
-};
-
 // ── The members that mention an Impl ─────────────────────────────────────────
 //
 // Each getter throws rather than dereferencing a null pointer, so "the handle
@@ -76,45 +60,6 @@ inline SemanticScene::SemanticScene(std::shared_ptr<const Impl> impl) noexcept
 inline const SemanticScene::Impl &SemanticScene::impl() const {
     if (!impl_) {
         throw Error{codes::kFatalApiInvalidHandle, "the semantic scene handle refers to nothing"};
-    }
-    return *impl_;
-}
-
-inline RenderScene::RenderScene(std::shared_ptr<const Impl> impl) noexcept
-    : impl_(std::move(impl)) {}
-
-inline const RenderScene::Impl &RenderScene::impl() const {
-    if (!impl_) {
-        throw Error{codes::kFatalApiInvalidHandle, "the render scene handle refers to nothing"};
-    }
-    return *impl_;
-}
-
-inline Config::Config(std::shared_ptr<const Impl> impl) noexcept : impl_(std::move(impl)) {}
-
-inline const Config::Impl &Config::impl() const {
-    if (!impl_) {
-        throw Error{codes::kFatalApiInvalidHandle, "the config handle refers to nothing"};
-    }
-    return *impl_;
-}
-
-inline SceneConfig::SceneConfig(std::shared_ptr<const Impl> impl) noexcept
-    : impl_(std::move(impl)) {}
-
-inline const SceneConfig::Impl &SceneConfig::impl() const {
-    if (!impl_) {
-        throw Error{codes::kFatalApiInvalidHandle, "the scene config slice refers to nothing"};
-    }
-    return *impl_;
-}
-
-inline OutputConfig::OutputConfig(std::shared_ptr<const Impl> impl) noexcept
-    : impl_(std::move(impl)) {}
-
-inline const OutputConfig::Impl &OutputConfig::impl() const {
-    if (!impl_) {
-        throw Error{codes::kFatalApiInvalidHandle, "the output config slice refers to nothing"};
     }
     return *impl_;
 }
@@ -164,50 +109,12 @@ namespace api {
     return handle.impl().scene;
 }
 
-[[nodiscard]] inline RenderScene asHandle(ir::render::Scene scene) {
-    return RenderScene{
-        std::make_shared<const RenderScene::Impl>(RenderScene::Impl{std::move(scene)})};
-}
-
-[[nodiscard]] inline const ir::render::Scene &sceneOrThrow(const RenderScene &handle,
-                                                           std::string_view verb) {
-    if (!handle.valid()) {
-        throw Error{codes::kFatalApiInvalidHandle, "the render scene handle refers to nothing",
-                    verb};
-    }
-    return handle.impl().scene;
-}
-
 /// Rethrow whatever escaped an internal call as the one type that crosses this
 /// API. Internal code throws `std::runtime_error` from the codecs and the file
 /// helpers; none of those types is part of the contract.
 [[noreturn]] inline void rethrowAsError(const std::exception &e, std::string_view code,
                                         std::string_view context = {}) {
     throw Error{code, e.what(), context};
-}
-
-// ── Configs ──────────────────────────────────────────────────────────────────
-
-[[nodiscard]] inline Config asHandle(config::NHConfig cfg) {
-    return Config{std::make_shared<const Config::Impl>(Config::Impl{std::move(cfg)})};
-}
-
-/// The document a slice was cut from. `…Of` rather than `…OrThrow` because a
-/// slice with no document legitimately means "no config file", which is the
-/// default-constructed AST, and every consumer of a slice already treats that
-/// as valid input.
-///
-/// A slice is the one state here that something other than its own members
-/// reads — the verbs in build.cpp and `RenderScene::write` — which is why these
-/// two are free functions at all.
-[[nodiscard]] inline const config::NHConfig &documentOf(const SceneConfig &slice) noexcept {
-    static const config::NHConfig kDefaults{};
-    return slice.valid() ? *slice.impl().cfg : kDefaults;
-}
-
-[[nodiscard]] inline const config::NHConfig &documentOf(const OutputConfig &slice) noexcept {
-    static const config::NHConfig kDefaults{};
-    return slice.valid() ? *slice.impl().cfg : kDefaults;
 }
 
 } // namespace api

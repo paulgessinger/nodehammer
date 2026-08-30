@@ -36,7 +36,7 @@ inline std::size_t hashInt(int i) { return std::hash<int>{}(i); }
 
 inline std::size_t hashId(ShapeId id) { return std::hash<uint64_t>{}(id.value); }
 
-inline std::size_t hashMat(const glm::dmat4 &m) {
+inline std::size_t hashMat(const Mat4 &m) {
     std::size_t h = 0;
     for (int c = 0; c < 4; ++c) {
         for (int r = 0; r < 4; ++r) {
@@ -46,8 +46,8 @@ inline std::size_t hashMat(const glm::dmat4 &m) {
     return h;
 }
 
-inline bool matEqual(const glm::dmat4 &a, const glm::dmat4 &b) {
-    return std::memcmp(&a, &b, sizeof(glm::dmat4)) == 0;
+inline bool matEqual(const Mat4 &a, const Mat4 &b) {
+    return std::memcmp(&a, &b, sizeof(Mat4)) == 0;
 }
 
 inline std::size_t hashSections(const auto &sections) {
@@ -351,7 +351,7 @@ std::size_t Scene::deduplicateLogVols() {
     // different prototype subtrees.
     struct DaughterKey {
         uint64_t logVol;
-        glm::dmat4 localTransform;
+        Mat4 localTransform;
 
         bool operator==(const DaughterKey &o) const {
             return logVol == o.logVol && matEqual(localTransform, o.localTransform);

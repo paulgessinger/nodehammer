@@ -44,7 +44,7 @@ nodehammer::ir::semantic::Scene makeTaggedScene() {
     const auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, semantic::BoxShape{1.0, 2.0, 3.0}};
     const auto matId = scene.nextMaterialId();
-    scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
+    scene.materials[matId] = {matId, "iron", nodehammer::ir::Color3{0.5f, 0.5f, 0.5f}, 7.87};
     const auto lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "box", shapeId, matId};
 

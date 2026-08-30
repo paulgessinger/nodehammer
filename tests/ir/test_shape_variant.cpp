@@ -79,8 +79,9 @@ TEST_CASE("semantic::ShapeVariant: holds TorusShape", "[ir][variant]") {
 
 TEST_CASE("semantic::ShapeVariant: holds TessellatedShape", "[ir][variant]") {
     nodehammer::ir::semantic::TessellatedShape ts;
-    ts.triangles.push_back(
-        {std::array<glm::dvec3, 3>{glm::dvec3{0, 0, 0}, glm::dvec3{1, 0, 0}, glm::dvec3{0, 1, 0}}});
+    ts.triangles.push_back({std::array<nodehammer::ir::Vec3, 3>{nodehammer::ir::Vec3{0, 0, 0},
+                                                                nodehammer::ir::Vec3{1, 0, 0},
+                                                                nodehammer::ir::Vec3{0, 1, 0}}});
     nodehammer::ir::semantic::ShapeVariant v = ts;
     REQUIRE(std::holds_alternative<nodehammer::ir::semantic::TessellatedShape>(v));
     REQUIRE(std::get<nodehammer::ir::semantic::TessellatedShape>(v).triangles.size() == 1);

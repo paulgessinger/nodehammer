@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ankerl/unordered_dense.h>
-#include <glm/glm.hpp>
+#include <ir/math.hpp>
 #include <ir/provenance.hpp>
 
 #include <array>
@@ -132,7 +132,7 @@ struct TorusShape {
 
 struct TessellatedShape {
     struct Triangle {
-        std::array<glm::dvec3, 3> vertices;
+        std::array<Vec3, 3> vertices;
     };
     std::vector<Triangle> triangles;
 };
@@ -145,19 +145,19 @@ struct UnknownShape {
 struct BooleanUnion {
     ShapeId left;
     ShapeId right;
-    glm::dmat4 rightTransform{1.0}; ///< Transform applied to right operand
+    Mat4 rightTransform{}; ///< Transform applied to right operand
 };
 
 struct BooleanIntersection {
     ShapeId left;
     ShapeId right;
-    glm::dmat4 rightTransform{1.0};
+    Mat4 rightTransform{};
 };
 
 struct BooleanSubtraction {
     ShapeId left;
     ShapeId right;
-    glm::dmat4 rightTransform{1.0};
+    Mat4 rightTransform{};
 };
 
 using ShapeVariant = std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape,
@@ -189,8 +189,8 @@ struct Shape {
 struct SourceMaterial {
     MaterialId id;
     std::string name;
-    std::optional<glm::vec3> color; ///< Linear RGB, [0,1]; optional
-    double density{0};              ///< g/cm³
+    std::optional<Color3> color; ///< Linear RGB, [0,1]; optional
+    double density{0};           ///< g/cm³
 };
 
 // ── Logical Volume ────────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ struct SourceMaterial {
 struct DaughterPlacement {
     std::string name;
     LogVolId logVolId;
-    glm::dmat4 localTransform{1.0};
+    Mat4 localTransform{};
 };
 
 struct LogicalVolume {
@@ -225,8 +225,8 @@ struct Node {
     std::string name;
     LogVolId logVolId;
 
-    glm::dmat4 localTransform{1.0}; ///< Relative to parent
-    glm::dmat4 worldTransform{1.0}; ///< Set by computeWorldTransforms()
+    Mat4 localTransform{}; ///< Relative to parent
+    Mat4 worldTransform{}; ///< Set by computeWorldTransforms()
 
     std::optional<NodeId> parentId;
     std::vector<NodeId> children;

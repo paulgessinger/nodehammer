@@ -27,7 +27,7 @@ ir::semantic::Scene makeMinimalScene() {
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
 
     auto matId = scene.nextMaterialId();
-    scene.materials[matId] = {matId, "iron", glm::vec3{0.5f, 0.5f, 0.5f}, 7.87};
+    scene.materials[matId] = {matId, "iron", nodehammer::ir::Color3{0.5f, 0.5f, 0.5f}, 7.87};
 
     auto lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
@@ -85,7 +85,7 @@ TEST_CASE("FlatBuffer roundtrip: minimal scene", "[ir][flatbuffer]") {
     REQUIRE(resMat.name == origMat.name);
     REQUIRE(resMat.density == Approx(origMat.density));
     REQUIRE(resMat.color.has_value());
-    REQUIRE(resMat.color->x == Approx(origMat.color->x));
+    REQUIRE(resMat.color->r == Approx(origMat.color->r));
 }
 
 TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
@@ -133,11 +133,11 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
     // Boolean shapes: need two operand shapes first
     auto leftId = addShape(ir::semantic::BoxShape{1.0, 1.0, 1.0});
     auto rightId = addShape(ir::semantic::BoxShape{0.5, 0.5, 0.5});
-    glm::dmat4 boolTransform{1.0};
-    boolTransform[3] = glm::dvec4{1.0, 2.0, 3.0, 1.0};
+    nodehammer::ir::Mat4 boolTransform;
+    boolTransform[3] = nodehammer::ir::Vec4{1.0, 2.0, 3.0, 1.0};
 
     addShape(ir::semantic::BooleanUnion{leftId, rightId, boolTransform});
-    addShape(ir::semantic::BooleanIntersection{leftId, rightId, glm::dmat4{1.0}});
+    addShape(ir::semantic::BooleanIntersection{leftId, rightId, nodehammer::ir::Mat4{}});
     addShape(ir::semantic::BooleanSubtraction{leftId, rightId, boolTransform});
 
     addShape(ir::semantic::UnknownShape{"TGeoArb8"});
@@ -234,8 +234,8 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
     scene.rootId = rootId;
 
     // Child with non-identity transform
-    glm::dmat4 childTransform{1.0};
-    childTransform[3] = glm::dvec4{100.0, 200.0, 300.0, 1.0};
+    nodehammer::ir::Mat4 childTransform;
+    childTransform[3] = nodehammer::ir::Vec4{100.0, 200.0, 300.0, 1.0};
     // Add a rotation component too
     double angle = 0.5; // radians
     childTransform[0][0] = std::cos(angle);
@@ -348,13 +348,13 @@ TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffe
                              ir::semantic::TubeShape{0.0, 5.0, 10.0, 0.0, 2.0 * std::numbers::pi}};
 
     auto matId = scene.nextMaterialId();
-    scene.materials[matId] = {matId, "silicon", glm::vec3{0.3f, 0.3f, 0.8f}, 2.33};
+    scene.materials[matId] = {matId, "silicon", nodehammer::ir::Color3{0.3f, 0.3f, 0.8f}, 2.33};
 
     auto childLvId = scene.nextLogVolId();
     scene.logVols[childLvId] = {childLvId, "sensorLV", shapeId, matId};
 
-    glm::dmat4 placement{1.0};
-    placement[3] = glm::dvec4{0.0, 0.0, 50.0, 1.0};
+    nodehammer::ir::Mat4 placement;
+    placement[3] = nodehammer::ir::Vec4{0.0, 0.0, 50.0, 1.0};
 
     auto parentLvId = scene.nextLogVolId();
     scene.logVols[parentLvId] = {

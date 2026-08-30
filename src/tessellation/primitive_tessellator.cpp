@@ -3,6 +3,7 @@
 #include <tessellation/primitive_tessellator.hpp>
 
 #include <glm/glm.hpp>
+#include <ir/glm_interop.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -948,9 +949,9 @@ TessellationOutput tessellateTessellated(const ir::semantic::TessellatedShape &s
     out.vertices.reserve(s.triangles.size() * 3);
     out.indices.reserve(s.triangles.size() * 3);
     for (const auto &tri : s.triangles) {
-        const glm::vec3 v0 = glm::vec3(tri.vertices[0]);
-        const glm::vec3 v1 = glm::vec3(tri.vertices[1]);
-        const glm::vec3 v2 = glm::vec3(tri.vertices[2]);
+        const glm::vec3 v0 = glm::vec3(ir::toGlm(tri.vertices[0]));
+        const glm::vec3 v1 = glm::vec3(ir::toGlm(tri.vertices[1]));
+        const glm::vec3 v2 = glm::vec3(ir::toGlm(tri.vertices[2]));
         const glm::vec3 n = glm::normalize(glm::cross(v1 - v0, v2 - v0));
         appendTriangle(out, {v0, n}, {v1, n}, {v2, n});
     }

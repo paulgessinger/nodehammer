@@ -41,7 +41,7 @@ using RotationKey = std::array<uint64_t, 9>;
 using TranslationKey = std::array<uint64_t, 3>;
 using TransformKey = std::array<uint32_t, 2>;
 
-RotationKey rotationKey(const glm::dmat4 &m) {
+RotationKey rotationKey(const Mat4 &m) {
     RotationKey key{};
     for (int col = 0; col < 3; ++col) {
         for (int row = 0; row < 3; ++row) {
@@ -51,7 +51,7 @@ RotationKey rotationKey(const glm::dmat4 &m) {
     return key;
 }
 
-TranslationKey translationKey(const glm::dmat4 &m) {
+TranslationKey translationKey(const Mat4 &m) {
     return {
         std::bit_cast<uint64_t>(m[3][0]),
         std::bit_cast<uint64_t>(m[3][1]),
@@ -90,7 +90,7 @@ struct TransformPoolBuild {
         tfDedup.emplace(TransformKey{0, 0}, 0);
     }
 
-    uint32_t internRotation(const glm::dmat4 &m) {
+    uint32_t internRotation(const Mat4 &m) {
         const auto key = rotationKey(m);
         auto [it, inserted] =
             rotDedup.try_emplace(key, static_cast<uint32_t>(rotations.size() / 9));
@@ -104,7 +104,7 @@ struct TransformPoolBuild {
         return it->second;
     }
 
-    uint32_t internTranslation(const glm::dmat4 &m) {
+    uint32_t internTranslation(const Mat4 &m) {
         const auto key = translationKey(m);
         auto [it, inserted] =
             trlDedup.try_emplace(key, static_cast<uint32_t>(translations.size() / 3));
@@ -116,7 +116,7 @@ struct TransformPoolBuild {
         return it->second;
     }
 
-    uint32_t internTransform(const glm::dmat4 &m) {
+    uint32_t internTransform(const Mat4 &m) {
         const uint32_t r = internRotation(m);
         const uint32_t t = internTranslation(m);
         auto [it, inserted] = tfDedup.try_emplace(
@@ -129,11 +129,11 @@ struct TransformPoolBuild {
     }
 };
 
-glm::dmat4 decodeTransform(const flatbuffers::Vector<double> *rots,
-                           const flatbuffers::Vector<double> *trls,
-                           const flatbuffers::Vector<uint32_t> *tfRotIdx,
-                           const flatbuffers::Vector<uint32_t> *tfTrlIdx, uint32_t tfIndex) {
-    glm::dmat4 m{1.0};
+Mat4 decodeTransform(const flatbuffers::Vector<double> *rots,
+                     const flatbuffers::Vector<double> *trls,
+                     const flatbuffers::Vector<uint32_t> *tfRotIdx,
+                     const flatbuffers::Vector<uint32_t> *tfTrlIdx, uint32_t tfIndex) {
+    Mat4 m;
     if (!rots || !trls || !tfRotIdx || !tfTrlIdx || tfIndex >= tfRotIdx->size() ||
         tfIndex >= tfTrlIdx->size()) {
         return m;
@@ -473,7 +473,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semanti
         fbs::Vec3f color{0.0f, 0.0f, 0.0f};
         bool hasColor = mat.color.has_value();
         if (hasColor) {
-            color = fbs::Vec3f{mat.color->x, mat.color->y, mat.color->z};
+            color = fbs::Vec3f{mat.color->r, mat.color->g, mat.color->b};
         }
         auto o = fbs::CreateMaterial(builder, toU32Checked(mat.id.value, "material id"), nameOff,
                                      hasColor, &color, mat.density);
@@ -882,7 +882,7 @@ semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
             mat.density = fbMat->density();
             if (fbMat->has_color()) {
                 const auto *c = fbMat->color();
-                mat.color = glm::vec3{c->x(), c->y(), c->z()};
+                mat.color = Color3{c->x(), c->y(), c->z()};
             }
             scene.materials[mat.id] = std::move(mat);
         }
@@ -990,7 +990,7 @@ semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                 }
                 node.logVolId = semantic::LogVolId{logVolId};
 
-                node.localTransform = glm::dmat4{1.0};
+                node.localTransform = Mat4{};
                 uint32_t transformIndex = 0;
                 if (transformIndexWidth == fbs::IndexWidth_U16) {
                     if (transformIndicesU16 && i < transformIndicesU16->size()) {

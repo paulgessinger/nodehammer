@@ -132,15 +132,15 @@ void to_json(nlohmann::json &j, const UnknownShape &s) {
 }
 void to_json(nlohmann::json &j, const BooleanUnion &s) {
     j = {{"type", "union"}, {"left", s.left}, {"right", s.right}};
-    dmat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
+    mat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
 }
 void to_json(nlohmann::json &j, const BooleanIntersection &s) {
     j = {{"type", "intersection"}, {"left", s.left}, {"right", s.right}};
-    dmat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
+    mat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
 }
 void to_json(nlohmann::json &j, const BooleanSubtraction &s) {
     j = {{"type", "subtraction"}, {"left", s.left}, {"right", s.right}};
-    dmat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
+    mat4ToJson(j, "rightRot", "rightTrl", s.rightTransform);
 }
 
 void to_json(nlohmann::json &j, const Shape &s) {
@@ -258,21 +258,21 @@ ShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
         BooleanUnion s;
         j.at("left").get_to(s.left);
         j.at("right").get_to(s.right);
-        dmat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
+        mat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
         return s;
     }
     if (type == "intersection") {
         BooleanIntersection s;
         j.at("left").get_to(s.left);
         j.at("right").get_to(s.right);
-        dmat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
+        mat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
         return s;
     }
     if (type == "subtraction") {
         BooleanSubtraction s;
         j.at("left").get_to(s.left);
         j.at("right").get_to(s.right);
-        dmat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
+        mat4FromJson(j, "rightRot", "rightTrl", s.rightTransform);
         return s;
     }
     return UnknownShape{type};
@@ -297,19 +297,19 @@ void from_json(const nlohmann::json &j, SourceMaterial &m) {
     j.at("name").get_to(m.name);
     j.at("density").get_to(m.density);
     if (j.contains("color")) {
-        m.color = j.at("color").get<glm::vec3>();
+        m.color = j.at("color").get<Color3>();
     }
 }
 
 void to_json(nlohmann::json &j, const DaughterPlacement &d) {
     j = {{"name", d.name}, {"logVolId", d.logVolId}};
-    dmat4ToJson(j, "locRot", "locTrl", d.localTransform);
+    mat4ToJson(j, "locRot", "locTrl", d.localTransform);
 }
 
 void from_json(const nlohmann::json &j, DaughterPlacement &d) {
     j.at("name").get_to(d.name);
     j.at("logVolId").get_to(d.logVolId);
-    dmat4FromJson(j, "locRot", "locTrl", d.localTransform);
+    mat4FromJson(j, "locRot", "locTrl", d.localTransform);
 }
 
 void to_json(nlohmann::json &j, const LogicalVolume &lv) {
@@ -331,7 +331,7 @@ void from_json(const nlohmann::json &j, LogicalVolume &lv) {
 
 void to_json(nlohmann::json &j, const Node &n) {
     j = {{"id", n.id}, {"name", n.name}, {"logVolId", n.logVolId}};
-    dmat4ToJson(j, "locRot", "locTrl", n.localTransform);
+    mat4ToJson(j, "locRot", "locTrl", n.localTransform);
     if (!n.children.empty()) {
         j["children"] = n.children;
     }
@@ -353,7 +353,7 @@ void from_json(const nlohmann::json &j, Node &n) {
     j.at("id").get_to(n.id);
     j.at("name").get_to(n.name);
     j.at("logVolId").get_to(n.logVolId);
-    dmat4FromJson(j, "locRot", "locTrl", n.localTransform);
+    mat4FromJson(j, "locRot", "locTrl", n.localTransform);
     if (j.contains("children")) {
         j.at("children").get_to(n.children);
     }
