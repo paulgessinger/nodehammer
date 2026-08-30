@@ -10,7 +10,7 @@
 // pulls in none of the vendored glm, nlohmann, unordered_dense or flatbuffers,
 // because all of it sits behind the NH_IMPLEMENTATION guard.
 
-#include "nodehammer_core.h"
+#include "nodehammer_connect.h"
 
 #include <cstddef>
 #include <vector>

@@ -5,15 +5,16 @@
 // generated header: the public handles, the internal scene it is built from,
 // and the FlatBuffer serializer under both.
 //
-// Built against nodehammer_core.h rather than the connector proper, because
-// this has to run somewhere with no ROOT and no DD4hep -- an ordinary CI job,
-// or a laptop. What it exercises is the amalgamation, not the importers: that
-// definitions survive the concatenation, that `#pragma once` giving way to
-// first-seen-wins did not drop anything, and that nothing needed a second
-// translation unit or a link line.
+// Built with NH_WITH_TGEO=0 and NH_WITH_DD4HEP=0, set by the target rather
+// than here, because this has to run somewhere with no ROOT and no DD4hep --
+// an ordinary CI job, or a laptop. Same shipped header as the connector smoke
+// test; the two differ only in that answer. What this one exercises is the
+// amalgamation, not the importers: that definitions survive the concatenation,
+// that `#pragma once` giving way to first-seen-wins did not drop anything, and
+// that nothing needed a second translation unit or a link line.
 
 #define NH_IMPLEMENTATION
-#include "nodehammer_core.h"
+#include "nodehammer_connect.h"
 
 #include <cstdlib>
 #include <iostream>

@@ -130,17 +130,19 @@ function(nh_amalgamate stem)
     set(NH_AMALGAM_${stem}_HEADER ${output} PARENT_SCOPE)
 endfunction()
 
-# The connector proper: importers included, so it needs ROOT and DD4hep headers
-# to compile and can only be built where they are.
+# One header, always generated. Generating it needs no backend: the importers'
+# `#include <TGeoManager.h>` does not resolve inside any --inline-dir, so it is
+# left as a real include for whoever compiles the result, exactly like <vector>.
+# Only *compiling* with the backends on needs ROOT and DD4hep.
+nh_amalgamate(connect)
+
+# Whether this tree can compile the configuration that carries the importers.
+# The other configuration -- NH_WITH_TGEO=0, NH_WITH_DD4HEP=0 -- compiles
+# anywhere, which is what the smoke test below uses.
 set(NH_AMALGAM_HAVE_CONNECT OFF)
 if(NODEHAMMER_WITH_TGEO AND NODEHAMMER_WITH_DD4HEP)
-    nh_amalgamate(connect)
     set(NH_AMALGAM_HAVE_CONNECT ON)
 endif()
-
-# The same assembly minus the two importers, which is what makes it buildable
-# and runnable anywhere. This is the variant the smoke test uses.
-nh_amalgamate(core)
 
 # ── The smoke test ───────────────────────────────────────────────────────────
 #
@@ -153,7 +155,13 @@ add_executable(nodehammer_amalgam_smoke
     ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/smoke.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/amalgamation/smoke_second_tu.cpp
 )
-add_dependencies(nodehammer_amalgam_smoke nodehammer_amalgam_core)
+add_dependencies(nodehammer_amalgam_smoke nodehammer_amalgam_connect)
+
+# The backend-free configuration. The defines the header emits for itself are
+# `#ifndef`-guarded precisely so a consumer can answer differently, and this is
+# that consumer: the same shipped header, with the importers compiled out, so
+# it needs neither ROOT nor DD4hep and builds on every platform in the matrix.
+target_compile_definitions(nodehammer_amalgam_smoke PRIVATE NH_WITH_TGEO=0 NH_WITH_DD4HEP=0)
 
 # The generated header's directory, and nothing else. Not linking
 # nodehammer_lib, and not reaching src/ or include/ -- if any of it were needed

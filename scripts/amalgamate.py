@@ -162,23 +162,50 @@ def main() -> int:
 
     amal = Amalgamator(inline_dirs, search_dirs)
 
-    def roots(key: str) -> list[Path]:
+    def roots(key: str) -> list[tuple[Path, str | None]]:
+        """Manifest entries, each with the macro that gates it, if any.
+
+        A plain string is ungated. `{"path": ..., "gate": "NH_WITH_TGEO"}` wraps
+        that one source in `#if NH_WITH_TGEO`, which is what lets a single
+        header carry the importers and still compile where their backends do
+        not exist.
+
+        The modular build gets this for free: CMake simply does not compile
+        ir/tgeo/semantic/importer.cpp when NODEHAMMER_WITH_TGEO is off, so the
+        file never needs to say anything about its own condition. A header has
+        no such option -- every source it absorbed is in the translation unit
+        whether the consumer wants it or not -- so the condition CMake applied
+        from outside has to be written into the text.
+        """
         found = []
-        for name in manifest.get(key, []):
+        for entry in manifest.get(key, []):
+            name = entry["path"] if isinstance(entry, dict) else entry
+            gate = entry.get("gate") if isinstance(entry, dict) else None
             p = amal.resolve(name, args.output)
             if p is None:
                 print(f"amalgamate: {key} entry not found: {name}", file=sys.stderr)
                 raise SystemExit(1)
-            found.append(p)
+            found.append((p, gate))
         return found
 
+    # A gate wraps the manifest root only. Whatever that root includes is
+    # pasted inside the same `#if` by construction, and anything reached from
+    # two roots lands under the first one that got there -- which is why the
+    # gates have to agree with the `#if NH_WITH_*` the sources already carry
+    # rather than being a second, independent opinion.
+    def emit(key: str, body: list[str]) -> None:
+        for root, gate in roots(key):
+            if gate:
+                body.append(f"#if {gate}")
+            amal.process(root, body)
+            if gate:
+                body.append(f"#endif // {gate}")
+
     interface_body: list[str] = []
-    for root in roots("interface"):
-        amal.process(root, interface_body)
+    emit("interface", interface_body)
 
     implementation_body: list[str] = []
-    for root in roots("implementation"):
-        amal.process(root, implementation_body)
+    emit("implementation", implementation_body)
 
     name = manifest.get("name", args.output.name)
     out: list[str] = []

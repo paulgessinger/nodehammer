@@ -17,23 +17,29 @@
     "in this slice that is a compiled library rather than headers. Bytes are the",
     "more useful primitive here anyway -- the destination is a socket."
   ],
-
   "defines": [
     "NH_WITH_TGEO=1",
     "NH_WITH_DD4HEP=1"
   ],
-
   "interface": [
     "nodehammer/semantic_scene.hpp"
   ],
-
   "implementation": [
     "api/semantic_scene.cpp",
     "api/diagnostics.cpp",
     "ir/semantic.cpp",
     "ir/fb/semantic/flatbuffer.cpp",
-    "ir/tgeo/semantic/importer.cpp",
-    "ir/tgeo/semantic/shape_dispatch.cpp",
-    "ir/dd4hep/semantic/importer.cpp"
+    {
+      "path": "ir/tgeo/semantic/importer.cpp",
+      "gate": "NH_WITH_TGEO"
+    },
+    {
+      "path": "ir/tgeo/semantic/shape_dispatch.cpp",
+      "gate": "NH_WITH_TGEO"
+    },
+    {
+      "path": "ir/dd4hep/semantic/importer.cpp",
+      "gate": "NH_WITH_DD4HEP"
+    }
   ]
 }
