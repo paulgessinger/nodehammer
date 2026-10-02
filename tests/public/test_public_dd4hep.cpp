@@ -1,11 +1,19 @@
 // The DD4hep backend, through the shared library.
 //
-// A different question from test_public_tgeo.cpp's, because DD4hep reaches the
-// public surface differently: there is no `read(dd4hep::Detector &)` overload,
-// so nothing here is a conditionally-exported symbol and there is no NH_API to
-// lose. Every entry point this file touches — `read(path, options)`,
-// `formats()` — is exported by every build and already covered.
+// `SemanticScene::read(dd4hep::Detector &)` is declared in every build and
+// defined only where DD4hep is present (#41 §5) — the same contract as
+// `read(TGeoManager &)` in test_public_tgeo.cpp, and so a second
+// conditionally-exported symbol with the same risk of a missing NH_API going
+// unnoticed.
 //
+// Unlike TGeo, there is no cheap way to build a `Detector` in-process: DD4hep's
+// only construction path is `fromCompact`, so both the file-based and the
+// in-memory cases below load the same checked-in fixture — the in-memory case
+// just keeps the `Detector` alive and hands a reference to `read` instead of
+// a path.
+//
+// The other entry points this file touches — `read(path, options)`,
+// `formats()` — are exported by every build and already covered elsewhere.
 // What is *not* covered anywhere else is whether the backend behind them is
 // actually present and loadable in the shared object. DD4hep and ROOT stay
 // DT_NEEDED rather than being absorbed the way the static Conan dependencies
@@ -19,12 +27,18 @@
 
 #include "public_fixture.hpp"
 
+#include <nodehammer/build.hpp>
+#include <nodehammer/config.hpp>
 #include <nodehammer/diagnostics.hpp>
+#include <nodehammer/render_scene.hpp>
 #include <nodehammer/semantic_scene.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <DD4hep/Detector.h>
+
 #include <cstddef>
+#include <filesystem>
 #include <span>
 #include <string>
 
@@ -96,4 +110,64 @@ TEST_CASE("a DD4hep-imported scene is an ordinary SemanticScene", "[public][dd4h
     const auto reread = nh::SemanticScene::read(std::span<const std::byte>{nhb});
     REQUIRE(reread.scene.nodeCount() == scene.nodeCount());
     REQUIRE(reread.scene.materialCount() == scene.materialCount());
+}
+
+TEST_CASE("SemanticScene::read traverses a caller-owned dd4hep::Detector", "[public][dd4hep]") {
+    // The in-memory entry point: no path crosses this call at all, which is the
+    // whole point for a live/aligned geometry an experiment never wrote to disk.
+    auto detector = dd4hep::Detector::make_unique("");
+    detector->fromCompact(kSimpleBox);
+
+    const auto result = nh::SemanticScene::read(*detector);
+    REQUIRE(result.scene.valid());
+    REQUIRE_FALSE(result.diags.hasErrors());
+
+    // Same fixture, same counts as the path-based case above.
+    REQUIRE(result.scene.nodeCount() == 2);
+    REQUIRE(result.scene.logVolCount() == 2);
+    REQUIRE(result.scene.shapeCount() == 2);
+    REQUIRE(result.scene.materialCount() == 2);
+
+    REQUIRE_FALSE(nhtest::anyFatal(result.diags));
+}
+
+TEST_CASE("a Detector-imported scene is an ordinary SemanticScene", "[public][dd4hep]") {
+    auto detector = dd4hep::Detector::make_unique("");
+    detector->fromCompact(kSimpleBox);
+
+    const auto scene = nh::SemanticScene::read(*detector).scene;
+    const auto nhb = scene.toNhb();
+    REQUIRE_FALSE(nhb.empty());
+
+    const auto reread = nh::SemanticScene::read(std::span<const std::byte>{nhb});
+    REQUIRE(reread.scene.nodeCount() == scene.nodeCount());
+    REQUIRE(reread.scene.materialCount() == scene.materialCount());
+}
+
+TEST_CASE("in-memory Detector -> build -> write is the whole handoff", "[public][dd4hep]") {
+    // The actual use case this backend exists for: an experiment hands over a
+    // live Detector it already built, gets a scene back with the usual config
+    // applied, and does something with it. No path in, and nothing read back
+    // from `.nhb` first — this is the direct in-process route.
+    auto detector = dd4hep::Detector::make_unique("");
+    detector->fromCompact(kSimpleBox);
+
+    const auto imported = nh::SemanticScene::read(*detector);
+    REQUIRE(imported.scene.valid());
+    REQUIRE_FALSE(imported.diags.hasErrors());
+
+    const auto built = nh::build(imported.scene, nh::SceneConfig{});
+    REQUIRE(built.scene.valid());
+    REQUIRE(built.scene.triangleCount() > 0);
+
+    // "Doing something with it" is a file today; the wire is the same
+    // `RenderScene` handed to a transport instead of a writer.
+    nhtest::TempDir dir{"dd4hep_handoff"};
+    const auto out = dir / "detector.nhr";
+    built.scene.write(out);
+    REQUIRE(std::filesystem::exists(out));
+
+    const auto reread = nh::RenderScene::read(out);
+    REQUIRE(reread.nodeCount() == built.scene.nodeCount());
+    REQUIRE(reread.triangleCount() == built.scene.triangleCount());
 }

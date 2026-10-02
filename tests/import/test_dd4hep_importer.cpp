@@ -2,6 +2,8 @@
 #include <ir/dd4hep/semantic/importer.hpp>
 #include <ir/semantic.hpp>
 
+#include <DD4hep/Detector.h>
+
 #include <string>
 #include <unordered_set>
 
@@ -87,4 +89,27 @@ TEST_CASE("DD4hepImporter: all nodes reachable from root via BFS", "[import][dd4
     std::unordered_set<nodehammer::ir::semantic::NodeId> visited;
     result.scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == result.scene.nodes.size());
+}
+
+TEST_CASE("DD4hepImporter: import(Detector&) matches import(path) for simple_box.xml",
+          "[import][dd4hep]") {
+    nodehammer::ir::DD4hepImporter imp;
+    auto byPath = imp.import(kSimpleBox);
+
+    // The in-memory entry point: a Detector the caller already built, handed by
+    // reference. fromCompact is still how it got built — DD4hep offers no
+    // cheaper way to construct one — but the importer never touches the path
+    // after this point, only the live Detector.
+    auto detector = dd4hep::Detector::make_unique("");
+    detector->fromCompact(kSimpleBox);
+    auto byDetector = imp.import(*detector);
+
+    REQUIRE_FALSE(byDetector.diags.hasErrors());
+    REQUIRE(byDetector.scene.nodes.size() == byPath.scene.nodes.size());
+    REQUIRE(byDetector.scene.logVols.size() == byPath.scene.logVols.size());
+    REQUIRE(byDetector.scene.shapes.size() == byPath.scene.shapes.size());
+    REQUIRE(byDetector.scene.materials.size() == byPath.scene.materials.size());
+
+    const auto &root = byDetector.scene.nodes.at(byDetector.scene.rootId);
+    REQUIRE(root.sourceSystem == "dd4hep");
 }
