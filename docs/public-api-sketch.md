@@ -20,7 +20,9 @@ counts; conversion and file operations are free functions.
 | `tgeo.hpp` | `fromTGeo(TGeoManager&)` |
 | `dd4hep.hpp` | `fromDD4hep(dd4hep::Detector&)` |
 
-Backend headers are exposed only when that backend is enabled. Inputs remain
+Backend headers always exist. When a backend is disabled, including its header
+produces an `#error` explaining which nodehammer build option and existing
+backend installation are required. Inputs remain
 caller-owned; imported scenes own their representation independently. NHB/NHR
 readers accept raw or zstd-compressed bytes. Semantic imports return
 `SemanticResult`; NHR decoding returns `RenderScene` directly.
