@@ -1,0 +1,13 @@
+# Only enabled backend adapters are exposed to source and installed consumers.
+foreach(_nh_backend tgeo dd4hep)
+    string(TOUPPER "${_nh_backend}" _nh_backend_upper)
+    set(_nh_header "${CMAKE_CURRENT_BINARY_DIR}/include/nodehammer/${_nh_backend}.hpp")
+    if(NODEHAMMER_WITH_${_nh_backend_upper})
+        configure_file("src/api/public/${_nh_backend}.hpp" "${_nh_header}" COPYONLY)
+        if(NODEHAMMER_BUILD_SHARED)
+            install(FILES "${_nh_header}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/nodehammer" COMPONENT Development)
+        endif()
+    else()
+        file(REMOVE "${_nh_header}")
+    endif()
+endforeach()

@@ -20,7 +20,8 @@ void SemanticFlatbufferExporter::write(const semantic::Scene &scene,
                                        [[maybe_unused]] const SemanticExportConfig &config) const {
     try {
         auto bytes = semanticSceneToBytes(scene);
-        detail::zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}));
+        detail::zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}),
+                                          config.compressionLevel);
     } catch (const Error &) {
         throw;
     } catch (const std::exception &ex) {

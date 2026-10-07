@@ -116,12 +116,12 @@ TEST_CASE("the pager is off unless the caller asks", "[cli]") {
     // Not observable directly -- the pager only engages on a TTY, and a test
     // runner has none. What is asserted is the shape: the option exists, both
     // values are accepted, and neither changes the answer.
-    nodehammer::cli::RunOptions paged;
+    nodehammer::CliOptions paged;
     paged.pager = true;
 
     CHECK(runCaptured({"--version"}, paged).code == 0);
     CHECK(runCaptured({"--version"}).code == 0);
-    CHECK(nodehammer::cli::RunOptions{}.pager == false);
+    CHECK(nodehammer::CliOptions{}.pager == false);
 }
 
 namespace {
@@ -150,12 +150,12 @@ struct ScratchFile {
 
 TEST_CASE("narration is off for a library caller and switchable from the arguments", "[cli]") {
     // The mirror of the pager case above, and the reason both defaults sit in
-    // `RunOptions` rather than in the commands: the front door decides what
+    // `CliOptions` rather than in the commands: the front door decides what
     // kind of caller this is, once, and every command inherits the answer.
     //
     // `--synthetic-box` so the case needs no fixture and no importer backend;
     // the summary line it prints is the commentary being switched.
-    CHECK(nodehammer::cli::RunOptions{}.quiet == true);
+    CHECK(nodehammer::CliOptions{}.quiet == true);
 
     const ScratchFile target{"nh_run_quiet", ".nhb"};
 
@@ -167,7 +167,7 @@ TEST_CASE("narration is off for a library caller and switchable from the argumen
     CHECK(silent.out.empty());
 
     // `-v` reaches the same switch from the argument list, for a caller that
-    // does not own the `RunOptions` -- a harness, or somebody debugging one.
+    // does not own the `CliOptions` -- a harness, or somebody debugging one.
     const auto asked = runCaptured({"-v", "convert", "--synthetic-box", "--output", target.path});
     CHECK(asked.code == 0);
     CHECK(asked.err.find("Nodes:") != std::string::npos);

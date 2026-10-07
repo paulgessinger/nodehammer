@@ -403,7 +403,7 @@ void emitJson(const nlohmann::json &doc) { std::println("{}", doc.dump(2)); }
 
 namespace nodehammer::cli::detail {
 
-void registerCmdInspect(CLI::App &app, const RunOptions &options) {
+void registerCmdInspect(CLI::App &app, const CliOptions &options) {
     auto *sub = app.add_subcommand("inspect", "Inspect a geometry file")->require_subcommand(1);
 
     // Shared options on the parent.

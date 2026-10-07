@@ -1,4 +1,5 @@
 #include "project/pack.hpp"
+#include <nodehammer/nhb.hpp>
 
 #include "diagnostic_codes.hpp"
 #include "viewer/archive_export.hpp"
@@ -9,7 +10,7 @@
 #include <detail/file_io.hpp>
 #include <detail/zstd_io.hpp>
 #include <nodehammer/diagnostics.hpp>
-#include <nodehammer/semantic_scene.hpp>
+#include <nodehammer/io.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -197,8 +198,8 @@ PackResult pack(const PackOptions &options) {
                         std::format("cannot read the input: {}", ex.what()), geometryAbs.string()};
         }
     } else {
-        const SemanticResult imported = SemanticScene::read(geometryAbs);
-        const std::vector<std::byte> nhb = imported.scene.toNhb();
+        const SemanticResult imported = readSemantic(geometryAbs);
+        const std::vector<std::byte> nhb = toNhb(imported.scene);
         ws.writeEntry(geometryKey, detail::zstd_io::compress(nhb));
     }
 

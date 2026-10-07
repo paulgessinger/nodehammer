@@ -29,7 +29,7 @@ void RenderFlatbufferExporter::write(const render::Scene &scene, const std::file
     // `Error` and nothing else, so the translation happens here rather than at
     // each of them, as the other FlatBuffer exporter does.
     try {
-        detail::zstd_io::writeBytesToFile(path, renderSceneToBytes(scene));
+        detail::zstd_io::writeBytesToFile(path, renderSceneToBytes(scene), config.compressionLevel);
     } catch (const Error &) {
         throw;
     } catch (const std::exception &ex) {

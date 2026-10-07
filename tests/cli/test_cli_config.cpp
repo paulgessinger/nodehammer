@@ -100,7 +100,7 @@ TEST_CASE("config flatten writes to a path when given one", "[cli][config]") {
 
 TEST_CASE("the receipt for a written document is narration, and can be silenced",
           "[cli][config][streams]") {
-    // The default `RunOptions` is the *library* posture, which is the one a
+    // The default `CliOptions` is the *library* posture, which is the one a
     // Python caller gets: the document went where it was asked to go, and there
     // is nobody watching to be told so.
     TempDir dir;

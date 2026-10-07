@@ -1,3 +1,4 @@
+#include <nodehammer/io.hpp>
 // Does the Lua config front end work in a browser?
 //
 // `nodehammer_tests` already covers the front end itself, and under Emscripten
@@ -11,7 +12,7 @@
 // into it first, which is also true of any project front end that will
 // eventually stage a config out of a .nhproj.
 //
-// It goes through the public `Config::read` rather than `evalLuaConfig`, because
+// It goes through the public `readConfig` rather than `evalLuaConfig`, because
 // the extension dispatch is part of what is being claimed to work, and because a
 // browser caller has no other door. Catch2 is deliberately absent: this is one
 // link configuration proving one property, and it is driven by ctest via node.
@@ -56,7 +57,7 @@ struct ReadOutcome {
 
 ReadOutcome read(const std::filesystem::path &path) {
     try {
-        const auto result = nh::Config::read(path);
+        const auto result = nh::readConfig(path);
         return {result.config.valid(), {}};
     } catch (const nh::Error &e) {
         return {false, std::string{e.code()}};
@@ -71,7 +72,7 @@ int main() {
     // 1. The capability query answers the same thing here as on a desktop. This
     //    is the regression the old build gate produced: same source tree, two
     //    different public answers depending on the target.
-    const auto formats = nh::Config::formats();
+    const auto formats = nh::configFormats();
     check(std::ranges::find(formats, "lua") != formats.end(), "formats() lists lua in wasm");
 
     // 2. A script that uses the parts of Lua a config is written in Lua *for* —
@@ -88,7 +89,7 @@ end
 )LUA");
 
     const auto sound = read(root / "main.lua");
-    check(sound.ok, "Config::read evaluates a .lua staged in MEMFS");
+    check(sound.ok, "readConfig evaluates a .lua staged in MEMFS");
 
     // 3. That it parsed proves nothing about whether what it produced arrives.
     //    A selection rule dropping everything is observable through a public
@@ -99,11 +100,11 @@ end
 drop { 'path ~= "**"' }
 )LUA");
     const auto dropping = read(root / "drop_all.lua");
-    check(dropping.ok, "Config::read accepts a selection script");
+    check(dropping.ok, "readConfig accepts a selection script");
 
     if (dropping.ok) {
-        const auto scene = nh::SemanticScene::read("", nh::SemanticScene::ReadOptions{"synthetic"});
-        const auto config = nh::Config::read(root / "drop_all.lua");
+        const auto scene = nh::readSemantic("", nh::SemanticReadOptions{"synthetic"});
+        const auto config = nh::readConfig(root / "drop_all.lua");
         std::string thrown;
         try {
             (void)nh::applySelection(scene.scene, config.config.scene());

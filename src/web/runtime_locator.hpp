@@ -27,7 +27,7 @@ enum class RuntimeRung {
     /// `NODEHAMMER_WEB_ASSETS`.
     Environment,
     /// A directory the calling program supplied because it knows where its own
-    /// runtime is — `RunOptions::webAssets`. The Python wheel is the case this
+    /// runtime is — `CliOptions::webAssets`. The Python wheel is the case this
     /// exists for: `nodehammer-web` installs the runtime into site-packages,
     /// which no rung below could guess, and `nodehammer.cli.run` hands the path
     /// down rather than the library going looking for an interpreter.

@@ -18,7 +18,7 @@ namespace nodehammer::cli {
 /// human is reading; for `cli::run` called as an API it is evidence of nothing —
 /// an interactive interpreter has a TTY too, and paging there replaces the
 /// caller's fd 1 with a pipe and then blocks in `pclose` until somebody quits
-/// `less`. So the caller says, and `RunOptions::pager` is where they say it.
+/// `less`. So the caller says, and `CliOptions::pager` is where they say it.
 class Pager {
   public:
     explicit Pager(bool enabled);

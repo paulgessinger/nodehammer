@@ -43,10 +43,10 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
     ImportResult result;
 
     try {
-        // `.zst` suffix on the filename signals zstd-compressed input —
-        // same convention as the path-based reader, just decided from
-        // the filename rather than the path.
-        const bool zst = detail::zstd_io::hasZstdExtension(std::filesystem::path{filename});
+        // Byte callers need no filename hint; retain the extension hint so
+        // malformed inputs explicitly named .zst still report a zstd error.
+        const bool zst = detail::zstd_io::isCompressed(bytes) ||
+                         detail::zstd_io::hasZstdExtension(std::filesystem::path{filename});
         std::vector<std::byte> decompressed;
         std::span<const std::byte> raw = bytes;
         if (zst) {

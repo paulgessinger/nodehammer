@@ -2,7 +2,7 @@
 
 // The command line, as a function.
 //
-// `nodehammer convert ...` and `cli::run({"convert", ...})` are the same code
+// `nodehammer convert ...` and `runCli({"convert", ...})` are the same code
 // reached two ways: the executable is a shim over this, and this is what a
 // consumer of the installed library — the Python extension above all — calls
 // when it wants the CLI without spawning one. There is no second dispatcher and
@@ -24,7 +24,7 @@
 #include <span>
 #include <string_view>
 
-namespace nodehammer::cli {
+namespace nodehammer {
 
 /// What the caller is, beyond the arguments.
 ///
@@ -32,7 +32,7 @@ namespace nodehammer::cli {
 /// is why the defaults are the conservative ones rather than the executable's.
 /// `src/cli/main.cpp` opts in; an embedder gets the quiet behaviour without
 /// having to know the option exists.
-struct RunOptions {
+struct CliOptions {
     /// Page long output through `$PAGER` when stdout is a terminal.
     ///
     /// Off by default. The pager replaces file descriptor 1 for the duration
@@ -103,7 +103,7 @@ struct RunOptions {
 ///
 /// Not thread-safe with respect to itself: commands write to stdout/stderr and
 /// may read the current working directory.
-[[nodiscard]] NH_API int run(std::span<const std::string_view> args,
-                             const RunOptions &options = {});
+[[nodiscard]] NH_API int runCli(std::span<const std::string_view> args,
+                                const CliOptions &options = {});
 
-} // namespace nodehammer::cli
+} // namespace nodehammer

@@ -4,7 +4,7 @@
 //
 // Free functions rather than members because each one spans two types and
 // belongs to neither, and because making `tessellate` a member of SemanticScene
-// would put SceneConfig and RenderScene into the connector header (#41 §4).
+// would put SceneConfig and RenderScene into the scene header (#41 §4).
 
 #include <nodehammer/config.hpp>
 #include <nodehammer/render_scene.hpp>

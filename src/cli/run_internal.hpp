@@ -54,11 +54,11 @@ struct CommandFailure {
 
 /// How a subcommand joins the parser.
 ///
-/// `RunOptions` rides along because some commands need to know what kind of
+/// `CliOptions` rides along because some commands need to know what kind of
 /// caller they have before they do anything — `inspect` asks
 /// it whether they may page. It is a reference to the caller's object, which
 /// outlives the parse.
-using Registrar = void (*)(CLI::App &, const RunOptions &);
+using Registrar = void (*)(CLI::App &, const CliOptions &);
 
 /// `run`, plus subcommands the library cannot register for itself.
 ///
@@ -66,7 +66,7 @@ using Registrar = void (*)(CLI::App &, const RunOptions &);
 /// cannot be compiled into a shared library that must resolve every symbol
 /// (`--no-undefined`) without dragging a window system in behind it. It is
 /// compiled into the executable instead and handed in here.
-int runWith(std::span<const std::string_view> args, const RunOptions &options,
+int runWith(std::span<const std::string_view> args, const CliOptions &options,
             std::span<const Registrar> extra);
 
 // The built-in commands. Global scope until now, which is tolerable in an
@@ -75,19 +75,19 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
 // visibility ever slipped, `ci/check_shared_exports.py` would report it as an
 // *unqualified* symbol and point the reader at --exclude-libs, which is not the
 // line at fault.
-void registerCmdConvert(CLI::App &app, const RunOptions &options);
-void registerCmdInspect(CLI::App &app, const RunOptions &options);
-void registerCmdConfig(CLI::App &app, const RunOptions &options);
+void registerCmdConvert(CLI::App &app, const CliOptions &options);
+void registerCmdInspect(CLI::App &app, const CliOptions &options);
+void registerCmdConfig(CLI::App &app, const CliOptions &options);
 
 // Native-only: packing mounts a `FilesystemProjectFs`, which the web build
 // does not have. Registered beside `viewer` for the same reason.
-void registerCmdProject(CLI::App &app, const RunOptions &options);
+void registerCmdProject(CLI::App &app, const CliOptions &options);
 
 // Native-only for a different reason: every line of it writes to a filesystem
 // the user keeps, which under Emscripten is a virtual one that vanishes with the
 // tab. The skill bytes themselves are gated with it, so a wasm module carries
 // neither the command nor its payload.
-void registerCmdSkills(CLI::App &app, const RunOptions &options);
+void registerCmdSkills(CLI::App &app, const CliOptions &options);
 
 // ── `viewer`, in two halves ───────────────────────────────────────────────────
 //
@@ -122,11 +122,11 @@ void addViewerServeOptions(CLI::App &sub);
 /// `options` rides along for `webAssets`: the runtime's location is a property
 /// of the front door rather than of the command line, so it arrives with the
 /// other front-door properties instead of through an option nobody typed.
-void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options);
+void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options);
 
 /// Registers `viewer` with the shared and web options, and a callback that
 /// serves or explains. The native half replaces that callback.
-void registerCmdViewer(CLI::App &app, const RunOptions &options);
+void registerCmdViewer(CLI::App &app, const CliOptions &options);
 
 /// Extends the `viewer` subcommand with the native window: its options, and the
 /// run path plain `viewer` takes.
@@ -135,6 +135,6 @@ void registerCmdViewer(CLI::App &app, const RunOptions &options);
 /// `viewer::App`, which `--no-undefined` on the shared library would turn into a
 /// link error rather than a missing feature. Declared here so main.cpp can name
 /// it without a second forward declaration going stale.
-void registerCmdViewerNative(CLI::App &app, const RunOptions &options);
+void registerCmdViewerNative(CLI::App &app, const CliOptions &options);
 
 } // namespace nodehammer::cli::detail

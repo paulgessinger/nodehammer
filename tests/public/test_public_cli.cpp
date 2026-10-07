@@ -25,7 +25,7 @@
 
 TEST_CASE("the command line is reachable through the shared library", "[public][cli]") {
     const std::vector<std::string_view> version{"--version"};
-    CHECK(nodehammer::cli::run(version) == 0);
+    CHECK(nodehammer::runCli(version) == 0);
 
     // A failing command, and then a line after it. Through the archive that
     // pairing is a regression test; through the shared library it is the
@@ -33,17 +33,17 @@ TEST_CASE("the command line is reachable through the shared library", "[public][
     // take the interpreter with it, and no Python-side care could prevent that.
     const std::vector<std::string_view> failing{"convert", "--input", "no-such-file.gdml",
                                                 "--output", "out.glb"};
-    CHECK(nodehammer::cli::run(failing) != 0);
+    CHECK(nodehammer::runCli(failing) != 0);
 
-    CHECK(nodehammer::cli::run(version) == 0);
+    CHECK(nodehammer::runCli(version) == 0);
 }
 
 TEST_CASE("the run options are part of the published surface", "[public][cli]") {
-    // Defaults are API: an embedder that constructs `RunOptions{}` and gets a
+    // Defaults are API: an embedder that constructs `CliOptions{}` and gets a
     // pager has been handed a surprise it cannot see in its own code.
-    const nodehammer::cli::RunOptions options;
+    const nodehammer::CliOptions options;
     CHECK(options.pager == false);
 
     const std::vector<std::string_view> version{"--version"};
-    CHECK(nodehammer::cli::run(version, options) == 0);
+    CHECK(nodehammer::runCli(version, options) == 0);
 }

@@ -37,7 +37,7 @@ namespace nodehammer::lua {
 /// reported through `diags` rather than thrown, because naming every problem in
 /// a script is the job. The config may be only partially built when they are
 /// present. A caller that promised a config rather than a report runs
-/// `diagnostics::throwIfErrors` over the result — which is what `Config::read`
+/// `diagnostics::throwIfErrors` over the result — which is what `readConfig`
 /// does (docs/error-model.md).
 ///
 /// This is the Option-A core of the scripting front-end: the `config flatten` CLI

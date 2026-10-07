@@ -11,7 +11,9 @@
 
 namespace nodehammer::ir {
 
-struct SemanticExportConfig {};
+struct SemanticExportConfig {
+    int compressionLevel = 3;
+};
 
 /// Pure interface for semantic scene exporters (JSON/NHB/...).
 class ISemanticExporter {

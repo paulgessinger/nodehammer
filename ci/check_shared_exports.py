@@ -295,9 +295,9 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     # tree: src/cli/ registers subcommands, include/nodehammer/cli.hpp publishes
     # `run`. The public declaration decides, and the seam beneath it does not
     # inherit that — which is what these four pin down, in both directions.
-    ("nodehammer::cli::run(std::span<std::basic_string_view<char> const, 18446744073709551615ul>, "
-     "nodehammer::cli::RunOptions const&)", "public"),
-    ("nodehammer::cli::detail::runWith(nodehammer::cli::RunOptions const&)", "leak"),
+    ("nodehammer::runCli(std::span<std::basic_string_view<char> const, 18446744073709551615ul>, "
+     "nodehammer::CliOptions const&)", "public"),
+    ("nodehammer::cli::detail::runWith(nodehammer::CliOptions const&)", "leak"),
     ("typeinfo for nodehammer::cli::detail::CommandFailure", "leak"),
     ("nodehammer::cli::detail::registerCmdConvert(CLI::App&)", "leak"),
     ("nodehammer::detail::zstd_io::compress(std::span<std::byte const>)", "leak"),

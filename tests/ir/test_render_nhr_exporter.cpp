@@ -1,8 +1,9 @@
+#include <nodehammer/io.hpp>
 // `.nhr` as a registered exporter rather than a special case above the registry.
 //
 // The bug this closes was not that `.nhr` could not be written — the API had
 // always written it — but that it was written by a branch inside
-// `RenderScene::write` that ran *ahead* of the registry. So the registry did not
+// `write` that ran *ahead* of the registry. So the registry did not
 // know the format existed, `convert` resolved its outputs through the registry,
 // and `nodehammer convert -o scene.nhr` failed while
 // `nh.RenderScene.write("scene.nhr")` succeeded. Two front doors onto one object
@@ -72,10 +73,10 @@ TEST_CASE("the registry resolves .nhr, by extension and by name", "[ir][render][
 
 TEST_CASE("what the registry reports and what the API reports are one list", "[ir][render][nhr]") {
     // The disagreement this file exists to prevent, asserted directly:
-    // `RenderScene::formats()` used to prepend "nhr" by hand because the
+    // `renderWriteFormats()` used to prepend "nhr" by hand because the
     // registry had never heard of it.
     const auto reg = RenderExporterRegistry::makeDefault();
-    const auto api = nodehammer::RenderScene::formats();
+    const auto api = nodehammer::renderWriteFormats();
 
     for (const auto &exp : reg.exporters()) {
         const auto name = exp->formatName();

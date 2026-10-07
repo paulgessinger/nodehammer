@@ -185,7 +185,7 @@ void addViewerServeOptions(CLI::App &sub) {
     sub.add_option("--web-assets", "Directory holding the built wasm runtime");
 }
 
-void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options) {
+void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options) {
     const Narrator say{options};
     runOrReport("viewer serve", [&] {
         web::LadderInputs inputs{};
@@ -283,7 +283,7 @@ void runViewerServe(CLI::App &viewer, CLI::App &serve, const RunOptions &options
                     mode)};
 }
 
-void registerCmdViewer(CLI::App &app, const RunOptions &options) {
+void registerCmdViewer(CLI::App &app, const CliOptions &options) {
     // (0, 1) rather than (1): a bare `nodehammer viewer` still opens a window,
     // which is what a .desktop `Exec=` or an installer shortcut invokes (#74).
     // The native half turns that into `open`; here it is the refusal below.

@@ -24,9 +24,7 @@
 // propagates unchanged, because no NH code would be true of it and because
 // constructing an `Error` allocates.
 //
-// Tier A + Tier B: this header and semantic_scene.hpp are the whole of the
-// amalgamated connector surface, so it deliberately pulls in nothing but the
-// visibility macro and the standard library.
+// Shared by scene ingestion and the full processing API.
 
 #include <nodehammer/visibility.hpp>
 
@@ -41,9 +39,7 @@
 
 namespace nodehammer {
 
-/// One thing the pipeline has to say. A value type on purpose: the connector
-/// tier (#41 §3) carries this definition verbatim, and there is nothing here
-/// worth hiding behind an accessor.
+/// One observation about a result, with a stable code and human-readable detail.
 struct Diagnostic {
     /// Nested rather than a free `DiagnosticSeverity`, because it never appears
     /// in a signature without its enclosing type (#41 §4).

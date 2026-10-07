@@ -83,7 +83,7 @@ std::vector<viewer::ZipDirEntry> allFiles(const viewer::ZipWorkingSet &ws) {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdProject(CLI::App &app, const RunOptions &options) {
+void registerCmdProject(CLI::App &app, const CliOptions &options) {
     // Copied into each callback below rather than reached through `options`:
     // it is a pointer to the caller's object, so copying it costs nothing and
     // it still sees a `-q` written during the parse.

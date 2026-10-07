@@ -64,7 +64,7 @@ struct Outcome {
 /// rather than a C++ stream object. Restoring in every path matters -- a failed
 /// assertion here would otherwise take the rest of the suite's output with it.
 inline Outcome runCaptured(std::vector<std::string_view> args,
-                           const nodehammer::cli::RunOptions &options = {}) {
+                           const nodehammer::CliOptions &options = {}) {
     // Named per process, not per suite: catch_discover_tests registers every
     // TEST_CASE as its own ctest entry, so `ctest -j` runs several of these
     // binaries at once and a fixed name would have them truncating each other's
@@ -87,7 +87,7 @@ inline Outcome runCaptured(std::vector<std::string_view> args,
     duplicateTo(fileNo(errFile), fileNo(stderr));
 
     Outcome outcome;
-    outcome.code = nodehammer::cli::run(args, options);
+    outcome.code = nodehammer::runCli(args, options);
 
     std::fflush(stdout);
     std::fflush(stderr);

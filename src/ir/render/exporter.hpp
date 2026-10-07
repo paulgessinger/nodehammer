@@ -21,6 +21,7 @@ struct GltfExportOptions {
 };
 
 struct ExportConfig {
+    int compressionLevel = 3;
     enum class Format { GLB, GLTF, OBJ } format{Format::GLB};
     double unitScale{1.0};     ///< Scale factor applied to the root node (e.g. 0.01 for cm→m)
     bool bakeUnitScale{false}; ///< If true, scale vertices & translations instead of root matrix
@@ -125,7 +126,7 @@ class RenderExporterRegistry {
 
     /// All registered exporters, in registration order. The sibling registries
     /// (`ImporterRegistry`, `SemanticExporterRegistry`) have always had this;
-    /// its absence here was an oversight, and `RenderScene::formats()` is the
+    /// its absence here was an oversight, and `renderWriteFormats()` is the
     /// first caller that has to enumerate rather than look up.
     [[nodiscard]] std::span<const std::unique_ptr<IRenderExporter>> exporters() const noexcept;
 

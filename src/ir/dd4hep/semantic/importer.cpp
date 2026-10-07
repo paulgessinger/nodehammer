@@ -87,40 +87,38 @@ void tagSensitiveVolumes(semantic::Scene &scene,
     }
 }
 
-} // namespace
+/// Suppresses ROOT and DD4hep console noise for the scope, restoring the saved
+/// levels on exit — including via exception, unlike the save/restore pair this
+/// replaced, which left the levels clobbered if the traversal itself threw.
+struct QuietGuard {
+    int savedRootLevel = gErrorIgnoreLevel;
+    dd4hep::PrintLevel savedDd4hepLevel = dd4hep::printLevel();
 
-std::string_view DD4hepImporter::formatName() const noexcept { return "dd4hep"; }
+    QuietGuard(const QuietGuard &) = delete;
+    QuietGuard &operator=(const QuietGuard &) = delete;
 
-std::vector<std::string> DD4hepImporter::supportedExtensions() const { return {}; }
-
-ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
-    // Suppress ROOT and DD4hep noise so stdout stays clean for JSON piping.
-    const int savedRootLevel = gErrorIgnoreLevel;
-    const dd4hep::PrintLevel savedDd4hepLevel = dd4hep::printLevel();
-    gErrorIgnoreLevel = kError;
-    dd4hep::setPrintLevel(dd4hep::ERROR);
-
-    std::unique_ptr<dd4hep::Detector> detOwner;
-    try {
-        detOwner = dd4hep::Detector::make_unique("");
-        detOwner->fromCompact(path.string());
-    } catch (const std::exception &ex) {
+    QuietGuard() {
+        gErrorIgnoreLevel = kError;
+        dd4hep::setPrintLevel(dd4hep::ERROR);
+    }
+    ~QuietGuard() {
         gErrorIgnoreLevel = savedRootLevel;
         dd4hep::setPrintLevel(savedDd4hepLevel);
-        throw Error{codes::kFatalTgeoOpenFailed,
-                    std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()),
-                    path.string()};
     }
+};
 
+/// The three traversal passes shared by both entry points: TGeo tree walk,
+/// DD4hep sensitivity tagging, DD4hep DetElement annotation.
+ImportResult importFromDetector(dd4hep::Detector &detector, std::string sourceFile) {
     // Pass 1: full TGeo tree traversal — every node gets a semantic::Node.
-    auto tr = traverseTGeoManager(&detOwner->manager(), path.string());
+    auto tr = traverseTGeoManager(&detector.manager(), std::move(sourceFile));
 
     // Pass 2: tag sensitivity on all volumes using DD4hep metadata.
     tagSensitiveVolumes(tr.result.scene, tr.lvMap);
 
     // Pass 3: walk the DD4hep DetElement tree and annotate nodes with richer
     // names, provenance, and metadata tags (subdetector type, etc.).
-    const dd4hep::DetElement world = detOwner->world();
+    const dd4hep::DetElement world = detector.world();
     annotateDetElement(world, tr.result.scene, tr.result.diags, tr.nodeMap);
 
     // Update sourceSystem for nodes not touched by annotateDetElement.
@@ -141,9 +139,34 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
                                       tr.result.scene.materials.size()),
                           "dd4hep");
 
-    gErrorIgnoreLevel = savedRootLevel;
-    dd4hep::setPrintLevel(savedDd4hepLevel);
     return std::move(tr.result);
+}
+
+} // namespace
+
+std::string_view DD4hepImporter::formatName() const noexcept { return "dd4hep"; }
+
+std::vector<std::string> DD4hepImporter::supportedExtensions() const { return {}; }
+
+ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
+    QuietGuard quiet;
+
+    std::unique_ptr<dd4hep::Detector> detOwner;
+    try {
+        detOwner = dd4hep::Detector::make_unique("");
+        detOwner->fromCompact(path.string());
+    } catch (const std::exception &ex) {
+        throw Error{codes::kFatalTgeoOpenFailed,
+                    std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()),
+                    path.string()};
+    }
+
+    return importFromDetector(*detOwner, path.string());
+}
+
+ImportResult DD4hepImporter::import(dd4hep::Detector &detector) const {
+    QuietGuard quiet;
+    return importFromDetector(detector, detector.manager().GetName());
 }
 
 } // namespace nodehammer::ir
