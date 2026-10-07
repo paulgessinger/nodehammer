@@ -18,6 +18,8 @@
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <fstream>
+#include <iterator>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -145,4 +147,52 @@ TEST_CASE("the dump commands are gone", "[cli][convert]") {
         INFO("subcommand: " << name);
         CHECK(outcome.code != 0);
     }
+}
+
+TEST_CASE("convert evaluates Lua configs and their relative includes", "[cli][convert][lua]") {
+    TempDir dir;
+    const auto script = dir.at("scene.LUA");
+    const auto fragment = dir.at("export.lua");
+    const auto toml = dir.at("scene.toml");
+    std::ofstream{script} << "-- ODD-style Lua config\ninclude(\"export.lua\")\n";
+    std::ofstream{fragment} << "export(\"gltf\", { unit_scale = 2.0, bake_unit_scale = true })\n";
+    std::ofstream{toml} << "[export.gltf]\nunit_scale = 2.0\nbake_unit_scale = true\n";
+
+    const auto luaTarget = dir.at("lua.glb");
+    const auto tomlTarget = dir.at("toml.glb");
+    const auto defaultTarget = dir.at("default.glb");
+    for (const auto &[config, target] :
+         {std::pair{script, luaTarget}, std::pair{toml, tomlTarget}}) {
+        const auto outcome = nhtest::runCaptured(
+            {"convert", "--synthetic-box", "-c", config, "-o", target, "--wedge-cut", "0", "90"});
+        INFO("stderr was: " << outcome.err);
+        REQUIRE(outcome.code == 0);
+        REQUIRE(fs::is_regular_file(target));
+    }
+    const auto baseline = nhtest::runCaptured(
+        {"convert", "--synthetic-box", "-o", defaultTarget, "--wedge-cut", "0", "90"});
+    INFO("stderr was: " << baseline.err);
+    REQUIRE(baseline.code == 0);
+
+    const auto bytes = [](const std::string &path) {
+        std::ifstream input{path, std::ios::binary};
+        return std::string{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+    };
+    CHECK(bytes(luaTarget) == bytes(tomlTarget));
+    CHECK(bytes(luaTarget) != bytes(defaultTarget));
+}
+
+TEST_CASE("convert refuses an invalid Lua config before writing output", "[cli][convert][lua]") {
+    TempDir dir;
+    const auto script = dir.at("broken.lua");
+    const auto target = dir.at("scene.glb");
+    std::ofstream{script} << "config { hoist_orphans = }\n";
+
+    const auto outcome =
+        nhtest::runCaptured({"convert", "--synthetic-box", "-c", script, "-o", target});
+    INFO("stderr was: " << outcome.err);
+    CHECK(outcome.code != 0);
+    CHECK(outcome.mentions("NH0001"));
+    CHECK(outcome.mentions("unexpected symbol"));
+    CHECK_FALSE(fs::exists(target));
 }
