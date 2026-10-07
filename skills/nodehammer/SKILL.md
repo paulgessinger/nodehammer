@@ -1,6 +1,6 @@
 ---
 name: nodehammer
-description: Drive the nodehammer CLI — convert HEP detector geometry (DD4hep XML, ROOT TGeo, .nhb) to glTF/OBJ/JSON, inspect a scene as JSON, validate and flatten TOML/Lua scene configs, pack and publish .nhproj project archives, and render or serve the 3D viewer. Use for nodehammer, nhb, nhr, .nhproj, nodehammer.toml, "convert geometry", "tessellate", "detector geometry", "wedge cut", NH#### diagnostic codes, or `uvx nodehammer`.
+description: Drive the nodehammer CLI and author detector-specific TOML/Lua scene configs for geometry selection, materials, tessellation, and export. Convert and inspect HEP geometry (DD4hep XML, ROOT TGeo, .nhb), validate configs, package .nhproj archives, and render the viewer. Use for nodehammer, its config format, nhb, nhr, .nhproj, nodehammer.toml, detector geometry conversion, wedge cuts, NH#### diagnostics, or `uvx nodehammer`.
 ---
 
 # nodehammer
@@ -63,10 +63,16 @@ Option spellings are consistent across the tree: `-i/--input`, `-c/--config`,
 | `viewer serve` | starts an HTTP server, **opens a browser, and blocks** | `viewer serve --no-browser` in a background job, or `project publish` for static output |
 | `viewer bench` | runs a GPU benchmark; needs a display | only when the user asked for numbers |
 
-To *see* what a scene looks like, `nodehammer viewer shot <project> -o shot.png
---shot-width 1920` renders one PNG once the scene settles and quits. That is the
-agent-appropriate way to check a geometry visually. It still needs a working GPU
-context, so it will fail on a headless machine with no display.
+To *see* what a scene looks like, `nodehammer viewer shot -i det.nhb -c
+scene.toml -o shot.png --shot-width 1920` renders one PNG once the scene settles
+and quits. That is the agent-appropriate way to check a geometry visually. It
+still needs a working GPU context, so it will fail on a headless machine with no
+display.
+
+`shot` and `bench` render from **`-i` geometry plus an optional `-c` config**, not
+from a project: they reject a call without `--input` (`NH0900 … needs --input`)
+even when a `.nhproj` positional is given. To screenshot an archive, pass the
+config and geometry it was packed from.
 
 Everything else in the tree runs to completion and exits.
 
@@ -139,6 +145,20 @@ nodehammer config flatten  -c scene.toml -o flat.toml   # -o optional; stdout ot
 *actually* says: it resolves the include tree (or runs the script) and emits one
 self-contained TOML that needs no companion files. Its output is round-trippable.
 
+For **writing or editing a config**, read
+[the config format](references/config-format.md): TOML structure, predicates,
+selection, rule precedence, materials, tessellation, exports, and includes.
+For Lua, also read [the Lua builder](references/lua-config.md), including its
+composition rules and a runnable equivalent of the TOML example.
+
+For **a config for a particular detector**, start with
+[the detector authoring workflow](references/detector-config.md). Inspect the
+actual geometry before choosing paths or tags; a valid config can match nothing.
+Use TOML for direct declarations and Lua when repetition benefits from loops or
+helpers, preserving an existing format or the user's preference.
+
+`convert -c` takes either spelling too, so a Lua config needs no flattening first.
+
 ### project — `.nhproj` archives
 
 A `.nhproj` is a ZIP holding a config, the geometry it names, and a manifest.
@@ -201,6 +221,7 @@ something was assumed).
 |---|---|---|
 | `NH0101 cannot determine input format for '…'` | extension unknown **or backend not compiled in** | check the limitations above before anything else |
 | `NH0900 positional path must be a .nhproj archive or a directory` | `viewer <path>` got something else | pass a `.nhproj` or a directory |
+| ``NH0900 `viewer shot` needs --input`` | `shot`/`bench` were given a project, or nothing | pass `-i` geometry (and `-c` config) |
 | `NH0901 path not found` / `input file not found` | a typo, before any window opens | — |
 | `NH1000` | wasm runtime missing | `pip install nodehammer-web`, or `--web-assets DIR` |
 | `NH1001` | runtime and library disagree | rebuild both halves together |
@@ -214,13 +235,17 @@ something was assumed).
 **"What does this config actually do?"** → `nodehammer config flatten -c FILE`
 (resolves includes and Lua), then read the TOML.
 
-**"Show me the geometry."** → `nodehammer viewer shot FILE -o /tmp/shot.png
---shot-width 1920`, then look at the PNG. Never `viewer open`.
+**"Show me the geometry."** → `nodehammer viewer shot -i FILE [-c CONFIG] -o
+/tmp/shot.png --shot-width 1920`, then look at the PNG. Never `viewer open`.
 
 **"Make something I can share."** → `project pack` then `project publish -o site/`.
 
 **"Is this config valid?"** → `nodehammer config validate -c FILE`; exit code is
-the verdict, the report is on stderr.
+the verdict, diagnostics are on stderr, and the verdict text is on stdout.
+
+**"Write a config for this detector."** → follow
+[detector config authoring](references/detector-config.md), then validate,
+flatten, and check the selected geometry and rendered output.
 
 **"Convert for a web page."** → `-o out.glb` (glTF binary), not `.obj`.
 
