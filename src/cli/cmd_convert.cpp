@@ -1,9 +1,9 @@
 #include "cli_common.hpp"
+#include "config_input.hpp"
 #include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
 #include <algorithm>
-#include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <detail/timing.hpp>
 #include <diagnostic_codes.hpp>
@@ -205,8 +205,8 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
                 auto _t = timings.scope("config");
                 std::string cfgPath;
                 configOpt->results(cfgPath);
-                auto loaded = nodehammer::config::ConfigLoader::loadFromFile(cfgPath);
-                printDiags(loaded.diags);
+                auto loaded = loadConfigFromFile(cfgPath);
+                reportOrThrow(loaded.diags, cfgPath);
                 cfg = std::move(loaded.config);
 
                 auto validDiags = nodehammer::config::ConfigValidator::validate(cfg);
