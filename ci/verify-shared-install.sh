@@ -91,4 +91,14 @@ consumer_exe="$consumer_build/consumer"
 [ -x "$consumer_exe" ] || consumer_exe="$consumer_build/consumer.exe"
 PATH="$prefix/bin:$PATH" "$consumer_exe"
 
+cmake -DPREFIX="$prefix" -DBUILD_DIR="$consumer_build/components" -DHAS_SHARED=ON \
+    -P "$here/ci/verify-package-components.cmake"
+
+# The same full SDK must also support a consumer linking only its ingestion
+# shared library, without resolving backend development packages.
+cmake -S ci/ingest_consumer -B "$consumer_build/ingest" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$consumer_build_type" -DCMAKE_PREFIX_PATH="$prefix"
+cmake --build "$consumer_build/ingest"
+PATH="$prefix/bin:$PATH" ctest --test-dir "$consumer_build/ingest" --output-on-failure
+
 echo "== ok =="

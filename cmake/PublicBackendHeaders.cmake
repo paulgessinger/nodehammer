@@ -10,7 +10,7 @@ foreach(_nh_backend tgeo dd4hep)
     endif()
     configure_file("${CMAKE_CURRENT_LIST_DIR}/../src/api/public/${_nh_adapter}"
         "${_nh_header}" COPYONLY)
-    if(NODEHAMMER_BUILD_SHARED)
+    if(NODEHAMMER_BUILD_SHARED OR NODEHAMMER_INGEST_ONLY)
         install(FILES "${_nh_header}" DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/nodehammer" COMPONENT Development)
     endif()
 endforeach()

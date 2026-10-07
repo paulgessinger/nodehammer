@@ -225,14 +225,14 @@ Key CMake options:
 | `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | 🚧 links Geant4 only, no importer yet |
 | `NODEHAMMER_WITH_GEOMODEL` | GeoModel importer | 🚧 declared only |
 | `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary | ✅ |
-| `NODEHAMMER_BUILD_SHARED` | Also build and install `libnodehammer` + the public headers + a CMake package config | 🚧 packaging works; the API it exposes is still being written |
+| `NODEHAMMER_BUILD_SHARED` | Also build and install `libnodehammer` and `libnodehammer_ingest` + the public headers + a CMake package config | 🚧 packaging works; the API it exposes is still being written |
 
-With `NODEHAMMER_BUILD_SHARED=ON`, `cmake --install` adds the shared library,
+With `NODEHAMMER_BUILD_SHARED=ON`, `cmake --install` adds both shared libraries,
 `include/nodehammer/`, and a package config, so a consumer needs only:
 
 ```cmake
-find_package(nodehammer REQUIRED)
-target_link_libraries(app PRIVATE nodehammer::nodehammer)
+find_package(nodehammer CONFIG REQUIRED COMPONENTS Shared)
+target_link_libraries(app PRIVATE nodehammer::shared)
 ```
 
 No `find_dependency` for zstd, flatbuffers, manifold or the rest — the shared
@@ -295,3 +295,9 @@ web/           browser viewer entry point
 
 MIT © Paul Gessinger — see [LICENSE](LICENSE). Third-party license texts
 for vendored/bundled assets live under [LICENSES/](LICENSES).
+
+### Embedding geometry ingestion
+
+For experiment integration without the processing/viewer dependency stack, see
+[the C++20 ingestion library](docs/ingestion-library.md). It reuses existing ROOT
+and DD4hep installations and provides `nodehammer::ingest`.

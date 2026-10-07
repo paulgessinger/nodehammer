@@ -1,33 +1,5 @@
 include(FetchContent)
-
-# ── zstd ──────────────────────────────────────────────────────────────────────
-FetchContent_Declare(zstd
-    SYSTEM
-    GIT_REPOSITORY https://github.com/facebook/zstd.git
-    GIT_TAG        v1.5.7
-    SOURCE_SUBDIR  build/cmake
-    FIND_PACKAGE_ARGS 1.5.7
-)
-set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
-set(ZSTD_BUILD_STATIC ON  CACHE BOOL "" FORCE)
-set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
-set(ZSTD_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(zstd)
-
-# FetchContent creates libzstd_static; normalize to the namespaced target
-# that find_package provides.
-if(TARGET libzstd_static AND NOT TARGET zstd::libzstd_static)
-    add_library(zstd::libzstd_static ALIAS libzstd_static)
-endif()
-
-# Suppress warnings in third-party zstd build
-if(TARGET libzstd_static)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(libzstd_static PRIVATE -w)
-    elseif(MSVC)
-        target_compile_options(libzstd_static PRIVATE /W0)
-    endif()
-endif()
+include(${CMAKE_CURRENT_LIST_DIR}/IngestionDependencies.cmake)
 
 # ── Catch2 v3 ─────────────────────────────────────────────────────────────────
 FetchContent_Declare(Catch2
@@ -79,19 +51,6 @@ if(NOT EMSCRIPTEN)
     )
     FetchContent_MakeAvailable(httplib)
 endif()
-
-# ── GLM ───────────────────────────────────────────────────────────────────────
-FetchContent_Declare(glm
-    SYSTEM
-    GIT_REPOSITORY https://github.com/g-truc/glm.git
-    GIT_TAG        1.0.3
-    FIND_PACKAGE_ARGS 1.0.3
-)
-# GLM 1.x uses the global BUILD_SHARED_LIBS to decide shared vs static.
-# This is set before MakeAvailable; if other deps later need the opposite,
-# save/restore the value around this block.
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(glm)
 
 # ── toml++ ────────────────────────────────────────────────────────────────────
 FetchContent_Declare(tomlplusplus
@@ -167,52 +126,6 @@ FetchContent_Declare(manifold
             target_compile_options(Clipper2 PRIVATE /W0)
         endif()
     endif()
-
-# ── ankerl::unordered_dense ───────────────────────────────────────────────────
-# Open-addressed hash map — drop-in faster replacement for std::unordered_map
-# on the hot scene lookups (scene.nodes etc.). Header-only.
-FetchContent_Declare(unordered_dense
-    SYSTEM
-    GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
-    GIT_TAG        v4.8.1
-    FIND_PACKAGE_ARGS 4.8.1
-)
-FetchContent_MakeAvailable(unordered_dense)
-
-# ── FlatBuffers ──────────────────────────────────────────────────────────────
-FetchContent_Declare(flatbuffers
-    SYSTEM
-    GIT_REPOSITORY https://github.com/google/flatbuffers.git
-    GIT_TAG        v25.12.19
-    FIND_PACKAGE_ARGS 25.12.19
-)
-set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-# flatc is a host tool (runs at build time, not on the target). When cross-
-# compiling (e.g. emscripten) we cannot build it here — expect one on PATH
-# and resolve via find_program() in the main CMakeLists.
-if(CMAKE_CROSSCOMPILING)
-    set(FLATBUFFERS_BUILD_FLATC OFF CACHE BOOL "" FORCE)
-else()
-    set(FLATBUFFERS_BUILD_FLATC ON  CACHE BOOL "" FORCE)
-endif()
-set(FLATBUFFERS_BUILD_FLATHASH OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(flatbuffers)
-
-# Canonical target is flatbuffers::flatbuffers (provided by Conan).
-# FetchContent only creates plain flatbuffers; alias to the namespaced name.
-if(TARGET flatbuffers AND NOT TARGET flatbuffers::flatbuffers)
-    add_library(flatbuffers::flatbuffers ALIAS flatbuffers)
-endif()
-
-# Silence warnings from the FetchContent-built flatbuffers (the Conan binary
-# was built elsewhere, so its flags are already fixed).
-if(TARGET flatbuffers)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        target_compile_options(flatbuffers PRIVATE -w)
-    elseif(MSVC)
-        target_compile_options(flatbuffers PRIVATE /W0)
-    endif()
-endif()
 
 # ── Lua config front-end (lua + sol2) ────────────────────────────────────────
 # Powers the `config flatten` CLI command and `Config::read`'s `.lua` branch — an

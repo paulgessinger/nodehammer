@@ -10,6 +10,14 @@ project(nodehammer
     LANGUAGES C CXX
 )
 
+# This branch returns before discovering or configuring any processing,
+# application, Python, or viewer dependencies.
+option(NODEHAMMER_INGEST_ONLY "Build only the C++20 geometry ingestion library" OFF)
+if(NODEHAMMER_INGEST_ONLY)
+    include(cmake/IngestionOnly.cmake)
+    return()
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -134,6 +142,23 @@ include(cmake/CompilerOptions.cmake)
 # into the shared target's INSTALL_INTERFACE include path.
 include(GNUInstallDirs)
 include(cmake/PublicBackendHeaders.cmake)
+# Profiling flags are additive on top of any build type (Release, RelWithDebInfo,
+# Debug). Same interface across native and wasm; the flags differ per toolchain:
+# Clang/GCC get -g + frame pointers; MSVC gets /Zi + /Oy-; emscripten gets
+# --profiling-funcs on top so wasm function names survive the linker.
+if(NODEHAMMER_PROFILING)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+        add_compile_options(-g -fno-omit-frame-pointer)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+        add_compile_options(/Zi /Oy-)
+        add_link_options(/DEBUG)
+    endif()
+    if(EMSCRIPTEN)
+        add_link_options(--profiling-funcs)
+    endif()
+endif()
+
+include(cmake/Ingestion.cmake)
 
 # ── The web runtime's contract ───────────────────────────────────────────────
 # The wasm viewer is delivered as a directory, not a program: a shell, a worker
@@ -163,21 +188,12 @@ set(NH_WEB_RUNTIME_DIR "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/web")
 
 # ── FlatBuffers code generation ──────────────────────────────────────────────
 set(NH_FBS_SCHEMAS
-    ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs
     ${CMAKE_CURRENT_SOURCE_DIR}/schemas/render.fbs
 )
 set(NH_FBS_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated/flatbuffers)
 
-# Conan tool_requires exposes flatbuffers::flatc; FetchContent builds a plain
-# flatc target; a system install is on PATH. Resolve to whichever is present.
-if(TARGET flatbuffers::flatc)
-    set(NH_FLATC flatbuffers::flatc)
-elseif(TARGET flatc)
-    set(NH_FLATC flatc)
-else()
-    find_program(NH_FLATC_EXE flatc REQUIRED)
-    set(NH_FLATC "${NH_FLATC_EXE}")
-endif()
+# Use the same host schema compiler as the ingestion module.
+set(NH_FLATC ${NH_INGEST_FLATC})
 
 set(NH_FBS_GENERATED_HEADERS "")
 foreach(schema ${NH_FBS_SCHEMAS})
@@ -193,22 +209,7 @@ foreach(schema ${NH_FBS_SCHEMAS})
     list(APPEND NH_FBS_GENERATED_HEADERS ${out})
 endforeach()
 add_custom_target(flatbuffers_generate DEPENDS ${NH_FBS_GENERATED_HEADERS})
-
-# Profiling flags are additive on top of any build type (Release, RelWithDebInfo,
-# Debug). Same interface across native and wasm; the flags differ per toolchain:
-# Clang/GCC get -g + frame pointers; MSVC gets /Zi + /Oy-; emscripten gets
-# --profiling-funcs on top so wasm function names survive the linker.
-if(NODEHAMMER_PROFILING)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-        add_compile_options(-g -fno-omit-frame-pointer)
-    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-        add_compile_options(/Zi /Oy-)
-        add_link_options(/DEBUG)
-    endif()
-    if(EMSCRIPTEN)
-        add_link_options(--profiling-funcs)
-    endif()
-endif()
+add_dependencies(flatbuffers_generate nodehammer_semantic_generate)
 
 # ── Core library configuration ────────────────────────────────────────────────
 # Pipeline core: IR + config + selection + tessellation + importers/exporters
@@ -229,9 +230,9 @@ endif()
 # packaging build describes the core once and builds it twice: the static
 # archive every in-tree target links, and the installed shared library. Anything
 # appended to *this* list reaches both — that is where the "describe once"
-# guarantee lives. NH_APP_SOURCES below is the deliberate exception.
+# guarantee lives. Ingestion sources are defined in Ingestion.cmake and reused
+# as objects; NH_APP_SOURCES below is the executable-only exception.
 set(NH_CORE_SOURCES
-    src/ir/semantic.cpp
     src/ir/semantic_json.cpp
     src/ir/render_json.cpp
     src/config/config_loader.cpp
@@ -242,8 +243,6 @@ set(NH_CORE_SOURCES
     src/ir/synthetic/semantic/importer.cpp
     src/ir/semantic/importer_registry.cpp
     src/ir/json/semantic/importer.cpp
-    src/ir/fb/semantic/importer.cpp
-    src/ir/fb/semantic/flatbuffer.cpp
     src/ir/fb/render/flatbuffer.cpp
     src/selection/predicate.cpp
     src/selection/selector.cpp
@@ -268,13 +267,10 @@ set(NH_CORE_SOURCES
     src/web/executable_path.cpp
     src/scene_build.cpp
     src/export_resolve.cpp
-    src/version.cpp
     # The public API bridge: the only translation units that see both a public
     # handle and its internals (src/api/handles_semantic.hpp is where the seam lives).
     # Core, not app — these *are* what the installed library publishes.
-    src/api/diagnostics.cpp
     src/api/semantic_scene_formats.cpp
-    src/api/semantic_scene.cpp
     src/api/config.cpp
     src/api/render_scene.cpp
     src/api/build.cpp
@@ -332,12 +328,6 @@ set(NH_APP_SOURCES
 # Appended to below, alongside their sources.
 set(NH_APP_DEPS "")
 set(NH_APP_DEFINES "")
-
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include/nodehammer/version.hpp.in
-    ${CMAKE_CURRENT_BINARY_DIR}/include/nodehammer/version.hpp
-    @ONLY
-)
 
 # PUBLIC on the archive, because an internal header names the dependency where an
 # out-of-core target sees it. Each entry cites the header that justifies it;
@@ -420,23 +410,9 @@ list(APPEND NH_CORE_SOURCES src/lua/lua_config.cpp)
 # binding stay inside the core's implementation.
 list(APPEND NH_CORE_PRIVATE_DEPS lua::lua sol2::sol2)
 
-if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
-    find_package(ROOT REQUIRED COMPONENTS Geom)
-    list(APPEND NH_CORE_SOURCES src/ir/tgeo/semantic/shape_dispatch.cpp)
-    list(APPEND NH_CORE_DEPS ROOT::Geom)
-    list(APPEND NH_CORE_DEFINES NH_WITH_TGEO=1)
-endif()
-
-if(NODEHAMMER_WITH_TGEO)
-    list(APPEND NH_CORE_SOURCES src/ir/tgeo/semantic/importer.cpp)
-endif()
-
-if(NODEHAMMER_WITH_DD4HEP)
-    find_package(DD4hep REQUIRED)
-    list(APPEND NH_CORE_SOURCES src/ir/dd4hep/semantic/importer.cpp)
-    list(APPEND NH_CORE_DEPS DD4hep::DDCore)
-    list(APPEND NH_CORE_DEFINES NH_WITH_DD4HEP=1)
-endif()
+# The ingestion module resolves the enabled experiment backends once.
+list(APPEND NH_CORE_DEPS ${NH_INGEST_BACKEND_DEPS})
+list(APPEND NH_CORE_DEFINES ${NH_INGEST_DEFINES})
 
 if(NODEHAMMER_WITH_GEANT4)
     find_package(Geant4 REQUIRED)
@@ -637,7 +613,8 @@ endif()
 # What every in-tree target links — CLI, viewer, tests, benchmarks. Core + app
 # sources. Never installed, so its dependencies are PUBLIC: in-tree targets reach
 # toml++, glm and nlohmann through this link.
-add_library(nodehammer_lib STATIC ${NH_CORE_INPUT} ${NH_APP_SOURCES})
+add_library(nodehammer_lib STATIC ${NH_CORE_INPUT} ${NH_APP_SOURCES}
+    $<TARGET_OBJECTS:nodehammer_ingest_objs>)
 nh_core_common(nodehammer_lib)
 
 target_link_libraries(nodehammer_lib PUBLIC ${NH_CORE_DEPS} ${NH_APP_DEPS})
@@ -677,7 +654,10 @@ if(NODEHAMMER_BUILD_SHARED)
 
     # Core only — no NH_APP_SOURCES. NH_CORE_INPUT is either the sources or the
     # shared objects, per the OBJECT block above.
-    add_library(nodehammer_shared SHARED ${NH_CORE_INPUT})
+    add_library(nodehammer_shared SHARED ${NH_CORE_INPUT}
+        $<TARGET_OBJECTS:${NH_INGEST_SHARED_OBJECTS}>)
+    add_library(nodehammer::shared ALIAS nodehammer_shared)
+    add_library(nodehammer::nodehammer ALIAS nodehammer_shared)
     nh_core_common(nodehammer_shared)
 
     # Plain PRIVATE is enough to keep the generated export empty, so a consumer
@@ -731,11 +711,10 @@ if(NODEHAMMER_BUILD_SHARED)
     # library itself; PRIVATE, since a consumer must see dllimport instead.
     target_compile_definitions(nodehammer_shared PRIVATE NH_EXPORTS)
 
-    # The exported name is `nodehammer`; the target cannot be, because the CLI
-    # executable already owns that target name.
+    # A consistent component target name in source and installed consumers.
     set_target_properties(nodehammer_shared PROPERTIES
         OUTPUT_NAME nodehammer
-        EXPORT_NAME nodehammer
+        EXPORT_NAME shared
     )
 
     # Version the library only when it is going to be installed as a system
@@ -912,6 +891,7 @@ endif()
 if(NODEHAMMER_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+    add_subdirectory(tests/ingest)
 endif()
 
 # ── Python extension ───────────────────────────────────────────────────────────
@@ -1042,7 +1022,7 @@ if(NODEHAMMER_BUILD_SHARED)
     # linker resolving -lnodehammer reads it). Windows has no namelink; its
     # equivalent is .dll against .lib, stated by RUNTIME and ARCHIVE below.
     install(TARGETS nodehammer_shared
-        EXPORT nodehammer-targets
+        EXPORT nodehammer-shared-targets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
                 COMPONENT Runtime
                 NAMELINK_COMPONENT Development
@@ -1080,56 +1060,9 @@ if(NODEHAMMER_BUILD_SHARED)
         COMPONENT Development
     )
 
-    install(EXPORT nodehammer-targets
-        FILE nodehammer-targets.cmake
+    install(EXPORT nodehammer-shared-targets
+        FILE nodehammer-shared-targets.cmake
         NAMESPACE nodehammer::
-        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
-        COMPONENT Development
-    )
-
-    # Baked into the package config so a consumer's mismatched C runtime fails at
-    # configure time rather than as a segmentation fault on the first call that
-    # returns a container (see cmake/nodehammer-config.cmake.in).
-    #
-    # Evaluated by CMake rather than parsed by us. `CMAKE_MSVC_RUNTIME_LIBRARY`
-    # is normally a generator expression, and its shape varies by who set it —
-    # CMake's own default is "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL" while
-    # Conan writes "$<$<CONFIG:Release>:MultiThreadedDLL>". A hand-rolled
-    # substitution for one of those spellings reported the other as a mismatch
-    # and blocked a legitimate build, which is worse than the failure it exists
-    # to catch. `file(GENERATE)` resolves whatever is there, exactly.
-    #
-    # The full runtime name, not a debug flag: /MT and /MD are different heaps
-    # even when neither is a debug runtime, so a static-CRT library and a
-    # dynamic-CRT consumer must not pass.
-    if(MSVC)
-        set(_nh_runtime_stamp "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-msvc-runtime.txt")
-        file(GENERATE OUTPUT "${_nh_runtime_stamp}"
-             CONTENT "$<TARGET_PROPERTY:nodehammer_shared,MSVC_RUNTIME_LIBRARY>")
-        install(FILES "${_nh_runtime_stamp}"
-            DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
-            COMPONENT Development
-        )
-    endif()
-
-    include(CMakePackageConfigHelpers)
-    configure_package_config_file(
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/nodehammer-config.cmake.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config.cmake"
-        INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
-    )
-    # SameMinorVersion, not the usual SameMajorVersion: pre-1.0, the major
-    # version conveys nothing, and treating every 0.x as interchangeable would
-    # promise compatibility across exactly the releases where the API is
-    # expected to move. Revisit at 1.0.
-    write_basic_package_version_file(
-        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config-version.cmake"
-        VERSION ${PROJECT_VERSION}
-        COMPATIBILITY SameMinorVersion
-    )
-    install(FILES
-        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config.cmake"
-        "${CMAKE_CURRENT_BINARY_DIR}/nodehammer-config-version.cmake"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/nodehammer"
         COMPONENT Development
     )
