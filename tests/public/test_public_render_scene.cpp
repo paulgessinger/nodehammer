@@ -209,6 +209,7 @@ TEST_CASE("render compression follows the filename and rejects unsupported forma
     REQUIRE(nh::toNhr(nh::readRender(path)) == nh::toNhr(scene));
     std::ifstream input(path, std::ios::binary);
     const std::vector<char> bytes{std::istreambuf_iterator<char>{input}, {}};
+    input.close();
     REQUIRE(nh::toNhr(nh::fromNhr(std::as_bytes(std::span{bytes}))) == nh::toNhr(scene));
     REQUIRE_THROWS_AS(nh::write(scene, dir / "scene.glb.zst", {}, {.format = "gltf"}), nh::Error);
     REQUIRE(nh::renderReadFormats().size() == 1);
