@@ -1,3 +1,6 @@
+#include <nodehammer/io.hpp>
+#include <nodehammer/nhb.hpp>
+#include <nodehammer/nhr.hpp>
 // The Python mirror of the public API.
 //
 // Every declaration here comes from include/nodehammer/. Nothing from src/
@@ -77,82 +80,14 @@ std::filesystem::path baseDirOrNone(const std::optional<std::filesystem::path> &
     return baseDir ? *baseDir : std::filesystem::path{};
 }
 
-/// One rule for what a config source *is*, stated once and applied by every
-/// entry point that takes one.
-///
-/// `Config` is the only place in this API where a bare `str` is genuinely
-/// ambiguous — it could be a filename or a document — so it is the only place
-/// that needs a rule. A scene's content form is `bytes`, so `SemanticScene.read`
-/// has nothing to confuse a string with and keeps taking one as a path.
-///
-/// The rule is decided by **type**, never by asking the filesystem. Dispatching
-/// on whether a file happens to exist would make the meaning of an argument
-/// depend on the state of the disk — the same defect as a base directory that
-/// silently means the working directory — and would turn a mistyped path from a
-/// clean "file not found" into a parse error about a document nobody wrote.
-///
-/// This lives here rather than in a Python helper beside the module because a
-/// second implementation is a second convention waiting to disagree with this
-/// one.
-struct ConfigSource {
-    bool isPath = false;
-    std::filesystem::path path;
-    std::string text;
-};
-
-/// A one-line string ending in a config extension: almost certainly a path
-/// someone meant to open. Used only to improve a failure message, never to
-/// decide anything — a heuristic that steers dispatch is the thing this design
-/// exists to avoid.
-bool looksLikeAFilename(std::string_view src) {
-    if (src.find('\n') != std::string_view::npos) {
-        return false;
-    }
-    return src.ends_with(".toml") || src.ends_with(".lua");
-}
-
-ConfigSource configSource(nb::handle src) {
-    if (nb::isinstance<nb::str>(src)) {
-        return {false, {}, nb::cast<std::string>(src)};
-    }
-
-    // A dict is serialized and parsed, so it lands in the same validator as a
-    // file the CLI reads and produces the same diagnostic codes. tomli-w is
-    // imported at the call rather than at module load: it is the only thing the
-    // package needs at runtime, and only for this one shape of argument.
-    if (nb::isinstance<nb::dict>(src)) {
-        nb::object dumps;
-        try {
-            dumps = nb::module_::import_("tomli_w").attr("dumps");
-        } catch (const nb::python_error &) {
-            throw nb::import_error("a dict config needs tomli-w; install nodehammer[dict], or pass "
-                                   "TOML text or a Path instead.");
-        }
-        return {false, {}, nb::cast<std::string>(dumps(src))};
-    }
-
+std::string configSource(nb::dict dict) {
+    nb::object dumps;
     try {
-        return {true, nb::cast<std::filesystem::path>(src), {}};
-    } catch (const nb::cast_error &) {
-        throw nb::type_error("config source must be a str (TOML text), a dict, or a path");
+        dumps = nb::module_::import_("tomli_w").attr("dumps");
+    } catch (const nb::python_error &) {
+        throw nb::import_error("a dict config needs tomli-w; install nodehammer[dict]");
     }
-}
-
-/// Run `text` through `parse`, and if it fails on something that looks like a
-/// filename, say so. The check is in the error path only, so it cannot change
-/// what a successful call does.
-template <typename Fn> auto withFilenameHint(const std::string &text, Fn &&fn) {
-    try {
-        return fn();
-    } catch (const nh::Error &e) {
-        if (looksLikeAFilename(text)) {
-            throw nh::Error(e.code(),
-                            std::string{e.what()} + " -- a str is read as TOML text; pass Path(\"" +
-                                text + "\") to read it as a file",
-                            e.context());
-        }
-        throw;
-    }
+    return nb::cast<std::string>(dumps(dict));
 }
 
 /// The Python `nodehammer.Error`, created once at module init and held for the
@@ -263,74 +198,44 @@ NB_MODULE(_nodehammer, m) {
         .def(nb::init<>())
         .def_prop_ro("valid", &nh::OutputConfig::valid);
 
-    // Named for the binding rather than the type: the pipeline verbs below take a
-    // parameter called `config`, and GCC's -Wshadow flags a lambda parameter that
-    // shadows an enclosing local even when nothing captures it. Clang does not,
-    // unless asked with -Wshadow-uncaptured-local, so this only failed in CI.
-    nb::class_<nh::Config> configClass(m, "Config");
-    configClass.def(nb::init<>())
-        .def_static(
-            "read",
-            [](nb::handle src, const std::optional<std::filesystem::path> &baseDir) {
-                const auto source = configSource(src);
-                const auto base = baseDirOrNone(baseDir);
-                if (source.isPath) {
-                    nb::gil_scoped_release unlocked;
-                    return nh::Config::read(source.path);
-                }
-                return withFilenameHint(source.text, [&] {
-                    nb::gil_scoped_release unlocked;
-                    return nh::Config::parse(source.text, base);
-                });
-            },
-            "src"_a, "base_dir"_a = nb::none(),
-            nb::sig("def read(src: str | os.PathLike | dict, base_dir: str | os.PathLike | "
-                    "None = None) -> ConfigResult"),
-            "Load a config. A Path is a file (.toml or .lua, by extension), a str is "
-            "TOML text, a dict is serialized and parsed. `base_dir` roots any include; "
-            "None means the content has no location, so includes resolve to nothing.")
-        .def_static(
-            "parse",
-            [](std::string_view toml, const std::optional<std::filesystem::path> &baseDir) {
-                const auto base = baseDirOrNone(baseDir);
-                nb::gil_scoped_release unlocked;
-                return nh::Config::parse(toml, base);
-            },
-            "toml"_a, "base_dir"_a = nb::none(),
-            // An empty base_dir means "this content has no location", not the
-            // working directory — so an include resolves nothing rather than
-            // reaching into wherever the process happened to start (#52).
-            "Parse TOML text. `base_dir` roots any include=[]; unset means the "
-            "content has no location, so includes resolve to nothing.")
-        .def_static(
-            "check",
-            [](nb::handle src, const std::optional<std::filesystem::path> &baseDir) {
-                const auto source = configSource(src);
-                const auto base = baseDirOrNone(baseDir);
-                nb::gil_scoped_release unlocked;
-                return source.isPath ? nh::Config::check(source.path)
-                                     : nh::Config::checkString(source.text, base);
-            },
-            "src"_a, "base_dir"_a = nb::none(),
-            nb::sig("def check(src: str | os.PathLike | dict, base_dir: str | os.PathLike | "
-                    "None = None) -> DiagnosticList"),
-            "The reporting half of `read`: same sources, every problem returned rather "
-            "than the first one thrown.")
-        // Named rather than overloaded for the same reason as in C++: a string
-        // literal converts to both `path` and `string_view`, so `check("cfg")`
-        // would silently check a *filename* as though it were a document.
-        .def_static(
-            "check_string",
-            [](std::string_view toml, const std::optional<std::filesystem::path> &baseDir) {
-                const auto base = baseDirOrNone(baseDir);
-                nb::gil_scoped_release unlocked;
-                return nh::Config::checkString(toml, base);
-            },
-            "toml"_a, "base_dir"_a = nb::none())
-        .def_static("formats", [] { return toStringList(nh::Config::formats()); })
+    nb::class_<nh::Config>(m, "Config")
+        .def(nb::init<>())
         .def_prop_ro("scene", &nh::Config::scene)
         .def_prop_ro("output", &nh::Config::output)
         .def_prop_ro("valid", &nh::Config::valid);
+    m.def("read_config", &nh::readConfig, "path"_a, nb::call_guard<nb::gil_scoped_release>());
+    m.def(
+        "from_toml",
+        [](std::string_view toml, const std::optional<std::filesystem::path> &baseDir) {
+            nb::gil_scoped_release unlocked;
+            return nh::fromToml(toml, baseDirOrNone(baseDir));
+        },
+        "toml"_a, "base_dir"_a = nb::none());
+    m.def(
+        "from_dict",
+        [](nb::dict dict, const std::optional<std::filesystem::path> &baseDir) {
+            const auto source = configSource(dict);
+            nb::gil_scoped_release unlocked;
+            return nh::fromToml(source, baseDirOrNone(baseDir));
+        },
+        "config"_a, "base_dir"_a = nb::none());
+    m.def("check_config", &nh::checkConfig, "path"_a, nb::call_guard<nb::gil_scoped_release>());
+    m.def(
+        "check_config_string",
+        [](std::string_view toml, const std::optional<std::filesystem::path> &baseDir) {
+            nb::gil_scoped_release unlocked;
+            return nh::checkConfigString(toml, baseDirOrNone(baseDir));
+        },
+        "toml"_a, "base_dir"_a = nb::none());
+    m.def(
+        "check_config_dict",
+        [](nb::dict dict, const std::optional<std::filesystem::path> &baseDir) {
+            const auto source = configSource(dict);
+            nb::gil_scoped_release unlocked;
+            return nh::checkConfigString(source, baseDirOrNone(baseDir));
+        },
+        "config"_a, "base_dir"_a = nb::none());
+    m.def("config_formats", [] { return toStringList(nh::configFormats()); });
 
     nb::class_<nh::ConfigResult>(m, "ConfigResult")
         .def_ro("config", &nh::ConfigResult::config)
@@ -341,61 +246,60 @@ NB_MODULE(_nodehammer, m) {
              [](const nh::ConfigResult &r) { return nb::iter(nb::make_tuple(r.config, r.diags)); });
 
     // ── semantic scene ──────────────────────────────────────────────────────
-    nb::class_<nh::SemanticScene> semanticScene(m, "SemanticScene");
-    semanticScene
+    nb::class_<nh::SemanticScene>(m, "SemanticScene")
         .def(nb::init<>())
-        // Registered before the path overload on purpose: os.fspath accepts
-        // bytes paths, so a `bytes` argument would otherwise be a plausible
-        // match for the path form and dispatch would turn a .nhb payload into a
-        // filename.
-        .def_static(
-            "read",
-            [](const nb::bytes &nhb) {
-                const auto span = asByteSpan(nhb);
-                nb::gil_scoped_release unlocked;
-                return nh::SemanticScene::read(span);
-            },
-            "nhb"_a, "Read a scene from .nhb bytes.")
-        .def_static(
-            "read",
-            [](const std::filesystem::path &path, const std::string &format) {
-                nb::gil_scoped_release unlocked;
-                return nh::SemanticScene::read(path, nh::SemanticScene::ReadOptions{format});
-            },
-            "path"_a, "format"_a = "",
-            // ReadOptions exists in C++ to carry a defaulted trailing parameter.
-            // Python has keyword arguments, so the struct would be ceremony
-            // around one string.
-            "Read a scene. `format` selects a backend explicitly; empty infers "
-            "from the extension. See formats().")
-        .def_static("formats", [] { return toStringList(nh::SemanticScene::formats()); })
-        .def(
-            "write",
-            [](const nh::SemanticScene &self, const std::filesystem::path &path,
-               const std::string &format) {
-                nb::gil_scoped_release unlocked;
-                self.write(path, nh::SemanticScene::WriteOptions{format});
-            },
-            "path"_a, "format"_a = "")
-        .def("to_nhb",
-             [](const nh::SemanticScene &self) {
-                 std::vector<std::byte> data;
-                 {
-                     nb::gil_scoped_release unlocked;
-                     data = self.toNhb();
-                 }
-                 return toPyBytes(data);
-             })
-        // Reports whether there is something to look at — never success.
         .def_prop_ro("valid", &nh::SemanticScene::valid)
         .def_prop_ro("node_count", &nh::SemanticScene::nodeCount)
         .def_prop_ro("log_vol_count", &nh::SemanticScene::logVolCount)
         .def_prop_ro("shape_count", &nh::SemanticScene::shapeCount)
         .def_prop_ro("material_count", &nh::SemanticScene::materialCount);
-
-    // read(TGeoManager&) is deliberately absent: it is the one entry point whose
-    // *definition* is build-conditional, so binding it would make this module
-    // fail to link against a library built without ROOT.
+    m.def(
+        "from_nhb",
+        [](const nb::bytes &bytes) {
+            const auto span = asByteSpan(bytes);
+            nb::gil_scoped_release unlocked;
+            return nh::fromNhb(span);
+        },
+        "bytes"_a);
+    m.def(
+        "read_semantic",
+        [](const std::filesystem::path &path, const std::string &format) {
+            nb::gil_scoped_release unlocked;
+            return nh::readSemantic(path, {.format = format});
+        },
+        "path"_a, "format"_a = "");
+    m.def("semantic_read_formats", [] { return toStringList(nh::semanticReadFormats()); });
+    m.def("semantic_write_formats", [] { return toStringList(nh::semanticWriteFormats()); });
+    m.def(
+        "write",
+        [](const nh::SemanticScene &scene, const std::filesystem::path &path,
+           const std::string &format, int compressionLevel) {
+            nb::gil_scoped_release unlocked;
+            nh::write(scene, path, {.format = format, .compressionLevel = compressionLevel});
+        },
+        "scene"_a, "path"_a, "format"_a = "", "compression_level"_a = 3);
+    m.def(
+        "to_nhb",
+        [](const nh::SemanticScene &scene) {
+            std::vector<std::byte> bytes;
+            {
+                nb::gil_scoped_release unlocked;
+                bytes = nh::toNhb(scene);
+            }
+            return toPyBytes(bytes);
+        },
+        "scene"_a);
+    m.def(
+        "to_nhb_zstd",
+        [](const nh::SemanticScene &scene, int compressionLevel) {
+            std::vector<std::byte> bytes;
+            {
+                nb::gil_scoped_release unlocked;
+                bytes = nh::toNhbZstd(scene, compressionLevel);
+            }
+            return toPyBytes(bytes);
+        },
+        "scene"_a, "compression_level"_a = 3);
 
     nb::class_<nh::SemanticResult>(m, "SemanticResult")
         .def_ro("scene", &nh::SemanticResult::scene)
@@ -405,50 +309,45 @@ NB_MODULE(_nodehammer, m) {
         });
 
     // ── render scene ────────────────────────────────────────────────────────
-    nb::class_<nh::RenderScene> renderScene(m, "RenderScene");
-    renderScene.def(nb::init<>())
-        .def_static(
-            "read",
-            [](const nb::bytes &nhr) {
-                const auto span = asByteSpan(nhr);
-                nb::gil_scoped_release unlocked;
-                return nh::RenderScene::read(span);
-            },
-            "nhr"_a)
-        .def_static(
-            "read",
-            [](const std::filesystem::path &path) {
-                nb::gil_scoped_release unlocked;
-                return nh::RenderScene::read(path);
-            },
-            "path"_a)
-        .def_static("formats", [] { return toStringList(nh::RenderScene::formats()); })
-        .def(
-            "write",
-            [](const nh::RenderScene &self, const std::filesystem::path &path,
-               const nh::OutputConfig &output, const std::string &format) {
-                nb::gil_scoped_release unlocked;
-                self.write(path, output, nh::RenderScene::WriteOptions{format});
-            },
-            "path"_a, "output"_a = nh::OutputConfig{}, "format"_a = "",
-            "Write the scene. `output` carries the [export.*] tuning; `format` "
-            "selects the writer, empty infers from the extension.")
-        .def("to_nhr",
-             [](const nh::RenderScene &self) {
-                 std::vector<std::byte> data;
-                 {
-                     nb::gil_scoped_release unlocked;
-                     data = self.toNhr();
-                 }
-                 return toPyBytes(data);
-             })
+    nb::class_<nh::RenderScene>(m, "RenderScene")
+        .def(nb::init<>())
         .def_prop_ro("valid", &nh::RenderScene::valid)
         .def_prop_ro("node_count", &nh::RenderScene::nodeCount)
         .def_prop_ro("mesh_count", &nh::RenderScene::meshCount)
         .def_prop_ro("material_count", &nh::RenderScene::materialCount)
-        .def_prop_ro("triangle_count", &nh::RenderScene::triangleCount,
-                     "Total triangles across every mesh. The one count that is not a\n"
-                     "container size — it sums over mesh assets, so it is O(meshes).");
+        .def_prop_ro("triangle_count", &nh::RenderScene::triangleCount);
+    m.def(
+        "from_nhr",
+        [](const nb::bytes &bytes) {
+            const auto span = asByteSpan(bytes);
+            nb::gil_scoped_release unlocked;
+            return nh::fromNhr(span);
+        },
+        "bytes"_a);
+    m.def("read_render", &nh::readRender, "path"_a, nb::call_guard<nb::gil_scoped_release>());
+    m.def("render_read_formats", [] { return toStringList(nh::renderReadFormats()); });
+    m.def("render_write_formats", [] { return toStringList(nh::renderWriteFormats()); });
+    m.def(
+        "write",
+        [](const nh::RenderScene &scene, const std::filesystem::path &path,
+           const nh::OutputConfig &output, const std::string &format, int compressionLevel) {
+            nb::gil_scoped_release unlocked;
+            nh::write(scene, path, output,
+                      {.format = format, .compressionLevel = compressionLevel});
+        },
+        "scene"_a, "path"_a, "output"_a = nh::OutputConfig{}, "format"_a = "",
+        "compression_level"_a = 3);
+    m.def(
+        "to_nhr",
+        [](const nh::RenderScene &scene) {
+            std::vector<std::byte> bytes;
+            {
+                nb::gil_scoped_release unlocked;
+                bytes = nh::toNhr(scene);
+            }
+            return toPyBytes(bytes);
+        },
+        "scene"_a);
 
     nb::class_<nh::RenderResult>(m, "RenderResult")
         .def_ro("scene", &nh::RenderResult::scene)
@@ -549,13 +448,13 @@ NB_MODULE(_nodehammer, m) {
             for (const auto &arg : args) {
                 views.emplace_back(arg);
             }
-            nh::cli::RunOptions options;
+            nh::CliOptions options;
             options.pager = pager;
             options.quiet = quiet;
             options.webAssets = webAssets;
 
             nb::gil_scoped_release unlocked;
-            return nh::cli::run(views, options);
+            return nh::runCli(views, options);
         },
         "args"_a, "pager"_a = false, "quiet"_a = true, "web_assets"_a = std::filesystem::path{});
 

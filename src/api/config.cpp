@@ -1,4 +1,4 @@
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
 
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
@@ -107,22 +107,22 @@ template <typename Slice>
 
 } // namespace
 
-ConfigResult Config::read(const std::filesystem::path &path) {
+ConfigResult readConfig(const std::filesystem::path &path) {
     return demand(collect(path), path.string());
 }
 
-ConfigResult Config::parse(std::string_view toml, const std::filesystem::path &baseDir) {
+ConfigResult fromToml(std::string_view toml, const std::filesystem::path &baseDir) {
     return demand(config::ConfigLoader::collectFromString(toml, "<string>", baseDir), "<string>");
 }
 
-DiagnosticList Config::check(const std::filesystem::path &path) { return report(collect(path)); }
+DiagnosticList checkConfig(const std::filesystem::path &path) { return report(collect(path)); }
 
-DiagnosticList Config::checkString(std::string_view toml, const std::filesystem::path &baseDir) {
+DiagnosticList checkConfigString(std::string_view toml, const std::filesystem::path &baseDir) {
     return report(config::ConfigLoader::collectFromString(toml, "<string>", baseDir));
 }
 
-std::span<const std::string_view> Config::formats() {
-    // Constant across every build this project produces. `SemanticScene::formats`
+std::span<const std::string_view> configFormats() {
+    // Constant across every build this project produces. `semanticReadFormats`
     // genuinely varies — ROOT and DD4hep are absent from most configurations —
     // but both config front ends are compiled in unconditionally, so the honest
     // answer here never changes. It stays a runtime query because it is the same

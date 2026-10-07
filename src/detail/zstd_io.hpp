@@ -20,6 +20,12 @@ inline bool hasZstdExtension(const std::filesystem::path &path) {
     return ext == ".zst" || ext == ".ZST";
 }
 
+/// Detect the standard zstd frame magic without reading past short inputs.
+inline bool isCompressed(std::span<const std::byte> input) noexcept {
+    return input.size() >= 4 && input[0] == std::byte{0x28} && input[1] == std::byte{0xb5} &&
+           input[2] == std::byte{0x2f} && input[3] == std::byte{0xfd};
+}
+
 /// Compress a byte buffer with zstd at the given level (default 3).
 inline std::vector<std::byte> compress(std::span<const std::byte> input, int level = 3) {
     const std::size_t bound = ZSTD_compressBound(input.size());
@@ -71,10 +77,11 @@ inline std::vector<std::byte> readBytesFromFile(const std::filesystem::path &pat
 }
 
 /// Write JSON string to a file, compressing with zstd if the path ends in .zst.
-inline void writeJsonToFile(const std::filesystem::path &path, const std::string &json) {
+inline void writeJsonToFile(const std::filesystem::path &path, const std::string &json,
+                            int level = 3) {
     auto asBytes = std::as_bytes(std::span{json});
     if (hasZstdExtension(path)) {
-        writeBytesToFile(path, asBytes);
+        writeBytesToFile(path, asBytes, level);
     } else {
         // Plain text: append newline
         std::ofstream f{path};

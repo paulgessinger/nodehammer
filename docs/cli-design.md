@@ -49,7 +49,7 @@ twice.** Same `--depth`, `--filter`, `--color` in both (`cmd_inspect.cpp:278`,
 `RenderScene::formats()` returns `nhr, gltf, obj` (`api/render_scene.cpp:67`) and
 `RenderScene::write` special-cases `.nhr`/`.nhr.zst` *before* consulting the
 registry (`:29`). `convert` bypasses `RenderScene::write` and goes straight to the
-registry, so `convert -o x.nhr` fails while `nh.RenderScene.write("x.nhr")`
+registry, so `convert -o x.nhr` fails while `nh.write(scene, "x.nhr")`
 succeeds. One object, two front doors, different answers about what exists.
 
 **F6 — `nhb` has two names depending on direction.** Exporter `formatName() ==
@@ -353,7 +353,7 @@ mind cheaply; the point of doing this now is not to have to be gentle about it.
 | `--input-format flatbuffer` | `--input-format nhb` |
 
 Four test surfaces move together, and each exists for a reason the others cannot
-serve: `tests/cli/test_cli_run.cpp` (in-process `cli::run`),
+serve: `tests/cli/test_cli_run.cpp` (in-process `runCli`),
 `tests/CMakeLists.txt`'s ctest entries over the built executable (the only place
 the native `viewer` half is reachable), `tests/python/test_cli.py`, and
 `tests/public/test_public_cli.cpp` (the installed shared library).
@@ -399,7 +399,7 @@ Independently valuable; makes the CLI and the Python API agree.
    `RenderExporterRegistry` directly, so `-o x.nhr` works and `--output-format`
    matches `RenderScene::formats()`.
 2. Rename the semantic importer's `formatName()` from `flatbuffer` to `nhb`.
-3. Tests: `convert -o x.nhr` round-trips; `nh.RenderScene.formats()` and
+3. Tests: `convert -o x.nhr` round-trips; `nh.render_write_formats()` and
    `convert --help` list the same set.
 
 ### Phase 3 — `inspect --output-format json`
@@ -420,7 +420,7 @@ Additive; no renames.
    `src/cli/cmd_config.cpp` with `validate` and `flatten`; `flatten` dispatches on
    the input extension.
 2. Delete `cmd_validate_config.cpp` and the two old registrations.
-3. Tests: the new spellings work; the old ones are gone, which `cli::run` reports
+3. Tests: the new spellings work; the old ones are gone, which `runCli` reports
    as an unknown subcommand rather than silently.
 
 ### Phase 5 — `convert` absorbs the dumps
@@ -481,7 +481,7 @@ one costs a major version instead of a note in the changelog.
 ## 10. Two streams, one contract
 
 Everything above is about what the commands are *called*. This is about what
-they *say*, and it is the half that only became load-bearing once `cli::run`
+they *say*, and it is the half that only became load-bearing once `runCli`
 moved into the library (PR #72): `nodehammer convert ...` typed at a shell and
 `nh.cli.run(["convert", ...])` are now the same code, so every line a command
 prints is a line some caller has to live with. Two of them had no policy at all
@@ -526,7 +526,7 @@ arriving through a door that did not exist when it was written.
 
 ### 10.3 The switch
 
-`RunOptions::quiet`, beside `RunOptions::pager` and defaulted the opposite way
+`CliOptions::quiet`, beside `CliOptions::pager` and defaulted the opposite way
 for the same reason: the front door knows what kind of caller it has, decides
 once, and every command inherits the answer.
 
@@ -534,7 +534,7 @@ once, and every command inherits the answer.
 |---|---|---|
 | `nodehammer` executable (`src/cli/main.cpp`) | on | off |
 | `nodehammer` console script (`python/nodehammer/__main__.py`) | on | off |
-| `cli::run` / `nh.cli.run` | off | **on** |
+| `runCli` / `nh.cli.run` | off | **on** |
 | `-q` / `-v` on the command line | — | either, and it wins |
 
 It silences narration only. Diagnostics and the line a failing command prints

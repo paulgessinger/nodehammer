@@ -19,7 +19,7 @@ void RenderJsonExporter::write(const render::Scene &scene, const std::filesystem
     // stands, which is the whole point of the format.
     (void)config;
     const nlohmann::json doc = scene;
-    detail::zstd_io::writeJsonToFile(path, doc.dump(2));
+    detail::zstd_io::writeJsonToFile(path, doc.dump(2), config.compressionLevel);
 }
 
 } // namespace nodehammer::ir

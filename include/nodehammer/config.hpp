@@ -3,8 +3,7 @@
 // One parsed configuration document, and the two slices the verbs actually
 // take.
 //
-// Tier A only — the connector tier has no config surface at all, which is why
-// the Lua front end needs no carve-out here (#41 §6).
+// Configuration and its loaders belong to the full processing library.
 
 #include <nodehammer/diagnostics.hpp>
 #include <nodehammer/visibility.hpp>
@@ -52,7 +51,7 @@ class SceneConfig {
 
 /// The half that changes only how a final scene is *serialized*: the
 /// `[export.*]` tables — unit scale, bake, `multi_scene`, the scene-name
-/// separator. Nothing here can alter geometry, which is why `RenderScene::write`
+/// separator. Nothing here can alter geometry, which is why `write`
 /// takes this and not a whole `Config`.
 class OutputConfig {
   public:
@@ -85,63 +84,6 @@ class OutputConfig {
 /// resolution logic of their own (#41 §11).
 class Config {
   public:
-    /// Read a config file. `.lua` dispatches to the scripting front end;
-    /// anything else is TOML. Both front ends are in every build, so this is a
-    /// choice of parser rather than a capability question.
-    ///
-    /// `include = [...]` resolves against the file's own directory, and nested
-    /// includes against theirs.
-    ///
-    /// Throws `Error` if the document does not load or does not validate: unlike
-    /// a scene there is no half-built config worth returning, so the loader's
-    /// errors become the exception and only its warnings ride back in `diags`.
-    [[nodiscard]] NH_API static ConfigResult read(const std::filesystem::path &path);
-
-    /// Parse TOML held in memory. `include = [...]` resolves against `baseDir`.
-    ///
-    /// An empty `baseDir` means the content has no location, so its includes
-    /// resolve against nothing — and an unresolvable include is a load error,
-    /// so this throws. It does **not** mean the process's working directory:
-    /// deciding where "here" is belongs to the application, and a caller that
-    /// wants the working directory says so by passing it (#41 §11, amended
-    /// after step 5b).
-    [[nodiscard]] NH_API static ConfigResult parse(std::string_view toml,
-                                                   const std::filesystem::path &baseDir = {});
-
-    /// Report on a document instead of loading it.
-    ///
-    /// `read` promises a config, so a document that will not parse is fatal to
-    /// it. This promises a *report*, so the same document is simply its answer:
-    /// the returned list carries every problem the loader and the validator
-    /// found, at every severity, and an empty list means the document is sound.
-    /// It is the same work behind both — one collector, two promises
-    /// (docs/error-model.md).
-    ///
-    /// Still throws when there is no document to report on: a file that will not
-    /// open says nothing about a document's contents, which is what this
-    /// promised to describe.
-    ///
-    /// This is what `nodehammer config validate` does, available to a caller
-    /// that wants to check a config without committing to using it — an editor,
-    /// a CI step, a settings dialog.
-    [[nodiscard]] NH_API static DiagnosticList check(const std::filesystem::path &path);
-
-    /// The in-memory counterpart, as `parse` is to `read`.
-    ///
-    /// Named rather than overloaded because a string literal converts to both
-    /// `path` and `string_view`, so `check("cfg.toml")` would be ambiguous —
-    /// and a caller who guessed wrong would be checking a *filename* as though
-    /// it were a document. `read`/`parse` avoid this by being two verbs; this
-    /// pair cannot, so the text face says so in its name.
-    [[nodiscard]] NH_API static DiagnosticList
-    checkString(std::string_view toml, const std::filesystem::path &baseDir = {});
-
-    /// Config formats this build understands: "toml" and "lua". Constant, unlike
-    /// `SemanticScene::formats` — both front ends are compiled in
-    /// unconditionally, so it is a build-independent answer given by the same
-    /// query every type answers. A view over library-lifetime storage.
-    [[nodiscard]] NH_API static std::span<const std::string_view> formats();
-
     /// The scene-affecting slice. Shares the parsed document with this handle
     /// rather than copying it.
     [[nodiscard]] NH_API SceneConfig scene() const;
@@ -172,5 +114,16 @@ struct ConfigResult {
     Config config;
     DiagnosticList diags;
 };
+
+/// Read TOML or Lua from a file; includes resolve relative to that file.
+[[nodiscard]] NH_API ConfigResult readConfig(const std::filesystem::path &path);
+/// Parse TOML. Empty baseDir means no location, not the working directory.
+[[nodiscard]] NH_API ConfigResult fromToml(std::string_view toml,
+                                           const std::filesystem::path &baseDir = {});
+/// Return validation observations; throws if the file cannot be read.
+[[nodiscard]] NH_API DiagnosticList checkConfig(const std::filesystem::path &path);
+[[nodiscard]] NH_API DiagnosticList checkConfigString(std::string_view toml,
+                                                      const std::filesystem::path &baseDir = {});
+[[nodiscard]] NH_API std::span<const std::string_view> configFormats();
 
 } // namespace nodehammer

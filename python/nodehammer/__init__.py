@@ -5,14 +5,13 @@ reads the same way it does in C++::
 
     import nodehammer as nh
 
-    scene, d1 = nh.SemanticScene.read("odd.gdml")
-    cfg, d2 = nh.Config.read(Path("odd.toml"))
+    scene, d1 = nh.read_semantic("odd.gdml")
+    cfg, d2 = nh.read_config(Path("odd.toml"))
     rs, d3 = nh.build(scene, cfg.scene)
-    rs.write("odd.glb", cfg.output)
+    nh.write(rs, "odd.glb", cfg.output)
 
-A config source is decided by its type: a ``Path`` is a file, a ``str`` is TOML
-text, a ``dict`` is serialized and parsed. Never by asking the filesystem, so a
-mistyped path is a clean error rather than a document nobody wrote.
+Use ``read_config`` for files, ``from_toml`` for text, and ``from_dict`` for
+Python dictionaries. Names distinguish file IO from in-memory conversion.
 
 Failures are :class:`Error`, carrying the code, context and the diagnostics
 observed before the failure. A returned ``DiagnosticList`` describes the
@@ -42,6 +41,25 @@ from ._nodehammer import (
     SceneConfig,
     SemanticResult,
     SemanticScene,
+    read_config,
+    from_toml,
+    from_dict,
+    check_config,
+    check_config_string,
+    check_config_dict,
+    config_formats,
+    from_nhb,
+    to_nhb,
+    to_nhb_zstd,
+    from_nhr,
+    to_nhr,
+    read_semantic,
+    read_render,
+    semantic_read_formats,
+    semantic_write_formats,
+    render_read_formats,
+    render_write_formats,
+    write,
     apply_selection,
     build,
     deduplicate,
@@ -66,6 +84,25 @@ __all__ = [
     "SceneConfig",
     "SemanticResult",
     "SemanticScene",
+    "read_config",
+    "from_toml",
+    "from_dict",
+    "check_config",
+    "check_config_string",
+    "check_config_dict",
+    "config_formats",
+    "from_nhb",
+    "to_nhb",
+    "to_nhb_zstd",
+    "from_nhr",
+    "to_nhr",
+    "read_semantic",
+    "read_render",
+    "semantic_read_formats",
+    "semantic_write_formats",
+    "render_read_formats",
+    "render_write_formats",
+    "write",
     "apply_selection",
     "build",
     "deduplicate",

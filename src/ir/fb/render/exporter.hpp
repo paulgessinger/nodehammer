@@ -6,10 +6,10 @@ namespace nodehammer::ir {
 
 /// Writes a render::Scene as `.nhr` — the render IR's own FlatBuffer form.
 ///
-/// In the registry rather than special-cased above it. `RenderScene::write` used
+/// In the registry rather than special-cased above it. `write` used
 /// to dispatch `.nhr` itself, ahead of the registry that would have called it
 /// unknown, which left the two front doors disagreeing about what exists:
-/// `RenderScene::formats()` reported `nhr` and `convert -o x.nhr` failed. One
+/// `renderWriteFormats()` reported `nhr` and `convert -o x.nhr` failed. One
 /// exporter answers both.
 ///
 /// A `.zst` suffix compresses, the same convention the semantic side uses and

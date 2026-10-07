@@ -101,7 +101,7 @@ struct Strictness {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdConvert(CLI::App &app, const RunOptions &options) {
+void registerCmdConvert(CLI::App &app, const CliOptions &options) {
     // What this command says about its progress is narration, and it was on
     // stdout until now — the one stream a caller parses. See cli_common.hpp for
     // the contract; `Narrator` is where it is enforced.

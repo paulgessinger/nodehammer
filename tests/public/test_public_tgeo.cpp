@@ -1,18 +1,8 @@
-// `SemanticScene::read(TGeoManager &)`, through the shared library.
-//
-// The one entry point the rest of this suite cannot reach. It is declared in
-// every build and defined only where ROOT is present (#41 §5), so it is the
-// single member of the public surface whose export depends on a CMake option —
-// which makes it the one most likely to be missing an `NH_API` that nobody
-// notices, since the build that would notice is the one CI runs least.
-//
-// Compiled only under NODEHAMMER_WITH_TGEO, which in CI means the LCG job. That
-// job already builds the shared library, so this costs a file and no new
-// configuration.
-//
-// This suite links ROOT itself, and that is the point rather than a concession:
-// a consumer handing over a `TGeoManager` has ROOT on hand by construction, so
-// building the manager with it here is what the call site actually looks like.
+#include <nodehammer/io.hpp>
+#include <nodehammer/nhb.hpp>
+#include <nodehammer/tgeo.hpp>
+// Exercise fromTGeo through the shared library with caller-owned ROOT geometry.
+// This header and these tests are available only in TGeo-enabled builds.
 
 #include "public_fixture.hpp"
 
@@ -70,18 +60,18 @@ TGeoManager *makeGeometry(const char *name, int placements) {
 
 } // namespace
 
-TEST_CASE("SemanticScene::formats reports tgeo in a build that has ROOT", "[public][tgeo]") {
+TEST_CASE("semanticReadFormats reports tgeo in a build that has ROOT", "[public][tgeo]") {
     // The runtime half of the capability question. The compile-time half is
     // this file existing at all — and the two have to agree, because a consumer
     // that checks `formats()` before calling `read` is relying on exactly that.
-    REQUIRE(nhtest::listed(nh::SemanticScene::formats(), "tgeo"));
+    REQUIRE(nhtest::listed(nh::semanticReadFormats(), "tgeo"));
 }
 
-TEST_CASE("SemanticScene::read traverses a caller-owned TGeoManager", "[public][tgeo]") {
+TEST_CASE("fromTGeo traverses a caller-owned TGeoManager", "[public][tgeo]") {
     resetManager();
     auto *mgr = makeGeometry("public_tgeo_read", 2);
 
-    const auto result = nh::SemanticScene::read(*mgr);
+    const auto result = nh::fromTGeo(*mgr);
     REQUIRE(result.scene.valid());
     REQUIRE_FALSE(result.diags.hasErrors());
 
@@ -100,7 +90,7 @@ TEST_CASE("SemanticScene::read traverses a caller-owned TGeoManager", "[public][
     REQUIRE_FALSE(nhtest::anyFatal(result.diags));
 }
 
-TEST_CASE("SemanticScene::read never touches gGeoManager", "[public][tgeo]") {
+TEST_CASE("fromTGeo never touches gGeoManager", "[public][tgeo]") {
     // The header promises this, and it is the reason the overload takes a
     // reference rather than reading the global itself: a consumer with its own
     // manager — one of several, or one it never installed — needs to know which
@@ -122,7 +112,7 @@ TEST_CASE("SemanticScene::read never touches gGeoManager", "[public][tgeo]") {
     REQUIRE(gGeoManager == mine); // ROOT installed it on construction
 
     gGeoManager = nullptr;
-    const auto result = nh::SemanticScene::read(*mine);
+    const auto result = nh::fromTGeo(*mine);
 
     REQUIRE(gGeoManager == nullptr);        // nothing installed on the way out
     REQUIRE(result.scene.nodeCount() == 3); // and the argument was what it read
@@ -140,11 +130,11 @@ TEST_CASE("a TGeo-imported scene round-trips through .nhb", "[public][tgeo]") {
     resetManager();
     auto *mgr = makeGeometry("public_tgeo_roundtrip", 3);
 
-    const auto scene = nh::SemanticScene::read(*mgr).scene;
-    const auto nhb = scene.toNhb();
+    const auto scene = nh::fromTGeo(*mgr).scene;
+    const auto nhb = nh::toNhb(scene);
     REQUIRE_FALSE(nhb.empty());
 
-    const auto reread = nh::SemanticScene::read(std::span<const std::byte>{nhb});
+    const auto reread = nh::fromNhb(std::span<const std::byte>{nhb});
     REQUIRE(reread.scene.nodeCount() == scene.nodeCount());
     REQUIRE(reread.scene.logVolCount() == scene.logVolCount());
     REQUIRE(reread.scene.shapeCount() == scene.shapeCount());

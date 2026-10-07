@@ -1,4 +1,7 @@
-#include <api/handles.hpp>
+#include <nodehammer/build.hpp>
+
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 
 #include <diagnostic_codes.hpp>
 #include <selection/selector.hpp>

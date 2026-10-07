@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
         args.emplace_back(argv[i]);
     }
 
-    nodehammer::cli::RunOptions options;
+    nodehammer::CliOptions options;
 
     // A person typed this, so long output may page. The library default is off
     // (nodehammer/cli.hpp), because a TTY proves a terminal and not a reader:
@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
 
 #ifdef NH_WITH_VIEWER
     // No default subcommand. A bare `nodehammer` prints the help and returns 0,
-    // here exactly as it does from `cli::run({})` and from the wheel's console
+    // here exactly as it does from `runCli({})` and from the wheel's console
     // script — one answer, on every platform and from every front door.
     //
     // It used to open the viewer when `argc == 1`, for double-clicking in a file

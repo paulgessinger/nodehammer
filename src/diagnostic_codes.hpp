@@ -13,8 +13,8 @@
 //   kErr…     reported at Error severity — the result exists and part of it is
 //             missing or wrong. A `kErr…` code may *also* be thrown, by a call
 //             that promised the very result the error makes partial: the config
-//             family below is reported by `Config::check` and thrown by
-//             `Config::read`.
+//             family below is reported by `checkConfig` and thrown by
+//             `readConfig`.
 //   kWarn…    the result is complete; something was assumed or substituted.
 //   kInfo…    the result is exactly what was asked for; this is worth recording.
 //   kDebug…   trace.
@@ -40,8 +40,8 @@ namespace nodehammer::codes {
 //
 // The whole family is dual-channel. `ConfigLoader` collects rather than stops —
 // reporting every problem in a document is the point — so these reach a caller
-// as diagnostics through `Config::check`, and as a thrown `Error` through
-// `Config::read`, which promised a config rather than a report.
+// as diagnostics through `checkConfig`, and as a thrown `Error` through
+// `readConfig`, which promised a config rather than a report.
 inline constexpr std::string_view kErrConfigParse = "NH0001";
 inline constexpr std::string_view kErrUndefinedMaterialRef = "NH0002";
 inline constexpr std::string_view kErrNegativeTolerance = "NH0003";
@@ -120,7 +120,7 @@ inline constexpr std::string_view kFatalComputeWorker = "NH0700";
 // boundary: a verb handed a handle that refers to nothing.
 //
 // NH0801 ("this build has no such backend") used to sit here too, raised by
-// `Config::read` on a `.lua` path in a build without the interpreter. There is
+// `readConfig` on a `.lua` path in a build without the interpreter. There is
 // no such build any more, and no other site ever raised it: a format whose
 // backend is absent is simply not in its registry, so the string-dispatched
 // entry points already answer with their own unknown-format code (#41 §5). It

@@ -50,7 +50,7 @@ TEST_CASE("the verbs run against a default config", "[public][build]") {
 TEST_CASE("build is the three verbs in order", "[public][build]") {
     // #41 §8's claim, from outside: `build` is not a fourth implementation.
     const auto scene = nhtest::syntheticScene();
-    const auto config = nh::Config::parse("deduplicate_shapes = true\n");
+    const auto config = nh::fromToml("deduplicate_shapes = true\n");
     const auto sceneConfig = config.config.scene();
 
     const auto decomposed = nh::tessellate(
@@ -83,7 +83,7 @@ TEST_CASE("selection that drops the root is fatal", "[public][build]") {
     // `prune` declines to act, so the scene it would return is the one with the
     // rules *not* applied — not what the verb promised (docs/error-model.md).
     const auto scene = nhtest::syntheticScene();
-    const auto config = nh::Config::parse(R"(
+    const auto config = nh::fromToml(R"(
 [[selection_rules]]
 [selection_rules.drop_if]
 type = "name_glob"

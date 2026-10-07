@@ -9,7 +9,7 @@ import nodehammer as nh
 
 
 def synthetic():
-    return nh.SemanticScene.read("", format="synthetic").scene
+    return nh.read_semantic("", format="synthetic").scene
 
 
 def test_version_reports_what_is_linked_not_what_was_compiled_against():
@@ -46,7 +46,7 @@ def test_the_verbs_run_against_a_default_config():
 def test_build_is_the_three_verbs_in_order():
     # #41 §8's claim, from Python: `build` is not a fourth implementation.
     scene = synthetic()
-    config = nh.Config.parse("deduplicate_shapes = true\n").config.scene
+    config = nh.from_toml("deduplicate_shapes = true\n").config.scene
 
     decomposed = nh.tessellate(
         nh.deduplicate(nh.apply_selection(scene, config).scene, config).scene,
@@ -69,20 +69,20 @@ def test_the_verbs_reject_an_empty_scene():
 def test_render_scene_round_trips_through_nhr_bytes():
     built = nh.build(synthetic(), nh.SceneConfig()).scene
 
-    payload = built.to_nhr()
+    payload = nh.to_nhr(built)
     assert isinstance(payload, bytes)
 
-    restored = nh.RenderScene.read(payload)
+    restored = nh.from_nhr(payload)
     assert restored.valid
     assert restored.triangle_count == built.triangle_count
 
 
 def test_render_scene_writes_through_the_output_slice(tmp_path):
-    cfg = nh.Config.parse("[export.gltf]\nunit_scale = 0.01\n").config
+    cfg = nh.from_toml("[export.gltf]\nunit_scale = 0.01\n").config
     built = nh.build(synthetic(), cfg.scene).scene
 
     out = tmp_path / "scene.glb"
-    built.write(out, cfg.output)
+    nh.write(built, out, cfg.output)
 
     assert out.exists()
     assert out.stat().st_size > 0

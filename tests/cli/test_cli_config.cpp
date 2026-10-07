@@ -28,8 +28,17 @@ class TempDir {
   public:
     TempDir() {
         const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
-        path_ = fs::temp_directory_path() / std::format("nh_config_test_{}", tick);
-        fs::create_directories(path_);
+        // CTest runs cases in separate processes. A clock tick alone is not
+        // unique, and sharing a directory lets one case's destructor delete
+        // another case's output. Only own a directory we created exclusively.
+        for (unsigned attempt = 0;; ++attempt) {
+            path_ =
+                fs::temp_directory_path() /
+                std::format("nh_config_test_{}_{}_{}", nhtest::currentProcessId(), tick, attempt);
+            if (fs::create_directory(path_)) {
+                break;
+            }
+        }
     }
     ~TempDir() {
         std::error_code ec;
@@ -91,6 +100,7 @@ TEST_CASE("config flatten writes to a path when given one", "[cli][config]") {
     const auto outcome = nhtest::runCaptured(
         {"config", "flatten", "--config", entry, "--output", target}, {.quiet = false});
 
+    INFO("target: " << target << "; stdout: " << outcome.out << "; stderr: " << outcome.err);
     REQUIRE(outcome.code == 0);
     REQUIRE(fs::is_regular_file(target));
     // Nothing on stdout, so the report cannot be mistaken for the document.
@@ -100,7 +110,7 @@ TEST_CASE("config flatten writes to a path when given one", "[cli][config]") {
 
 TEST_CASE("the receipt for a written document is narration, and can be silenced",
           "[cli][config][streams]") {
-    // The default `RunOptions` is the *library* posture, which is the one a
+    // The default `CliOptions` is the *library* posture, which is the one a
     // Python caller gets: the document went where it was asked to go, and there
     // is nobody watching to be told so.
     TempDir dir;

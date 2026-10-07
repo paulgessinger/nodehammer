@@ -1,4 +1,4 @@
-// §11's rule, as a test: `Config::read` / `Config::parse` carry no loading
+// §11's rule, as a test: `readConfig` / `fromToml` carry no loading
 // logic of their own. They delegate to `ConfigLoader` and add only extension
 // dispatch, validation and the scene()/output() slicing.
 //
@@ -15,7 +15,8 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <config/config_writer.hpp>
@@ -61,7 +62,7 @@ bool listHasErrors(const nodehammer::DiagnosticList &diags) { return diags.hasEr
 
 } // namespace
 
-TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api][config]") {
+TEST_CASE("readConfig wraps ConfigLoader without altering the document", "[api][config]") {
     const auto configs = topLevelConfigs();
     REQUIRE_FALSE(configs.empty());
 
@@ -70,24 +71,24 @@ TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api
 
     // The collecting face is the reference: this test walks every fixture,
     // including the ones that do not parse, and needs the report rather than
-    // the throw to decide what `Config::read` should have done.
+    // the throw to decide what `readConfig` should have done.
     const auto reference = nodehammer::config::ConfigLoader::collectFromFile(path);
 
     // A document that will not load has no half-built form worth returning, so
     // the wrapper throws rather than handing back an empty `Config` nobody can
     // tell apart from a valid one.
     if (reference.diags.hasErrors()) {
-        REQUIRE_THROWS_AS(nodehammer::Config::read(path), nodehammer::Error);
+        REQUIRE_THROWS_AS(nodehammer::readConfig(path), nodehammer::Error);
         return;
     }
     // Same for a document that loads but does not validate.
     const auto validation = nodehammer::config::ConfigValidator::validate(reference.config);
     if (validation.hasErrors()) {
-        REQUIRE_THROWS_AS(nodehammer::Config::read(path), nodehammer::Error);
+        REQUIRE_THROWS_AS(nodehammer::readConfig(path), nodehammer::Error);
         return;
     }
 
-    const auto wrapped = nodehammer::Config::read(path);
+    const auto wrapped = nodehammer::readConfig(path);
 
     REQUIRE(wrapped.config.valid());
     const auto &parsed = wrapped.config.impl().cfg;
@@ -99,7 +100,7 @@ TEST_CASE("Config::read wraps ConfigLoader without altering the document", "[api
     REQUIRE_FALSE(listHasErrors(wrapped.diags));
 }
 
-TEST_CASE("Config::parse wraps loadFromString and roots includes at baseDir", "[api][config]") {
+TEST_CASE("fromToml wraps loadFromString and roots includes at baseDir", "[api][config]") {
     // include_nested.toml pulls in a fragment which pulls in another, so a
     // wrapper that resolved against the wrong directory — or not at all — would
     // come back with a different document rather than merely a warning.
@@ -109,7 +110,7 @@ TEST_CASE("Config::parse wraps loadFromString and roots includes at baseDir", "[
 
     const auto reference =
         nodehammer::config::ConfigLoader::loadFromString(text, "<string>", kConfigsDir);
-    const auto wrapped = nodehammer::Config::parse(text, kConfigsDir);
+    const auto wrapped = nodehammer::fromToml(text, kConfigsDir);
 
     REQUIRE_FALSE(reference.diags.hasErrors());
     REQUIRE_FALSE(listHasErrors(wrapped.diags));
@@ -118,12 +119,12 @@ TEST_CASE("Config::parse wraps loadFromString and roots includes at baseDir", "[
 
     // And the same content read straight off disk: `parse` + baseDir is
     // `read` minus the file read, which is what step 5b unified.
-    const auto fromFile = nodehammer::Config::read(path);
+    const auto fromFile = nodehammer::readConfig(path);
     REQUIRE(nodehammer::config::configToToml(wrapped.config.impl().cfg) ==
             nodehammer::config::configToToml(fromFile.config.impl().cfg));
 }
 
-TEST_CASE("Config::parse with no baseDir resolves no includes", "[api][config]") {
+TEST_CASE("fromToml with no baseDir resolves no includes", "[api][config]") {
     // The property step 5b established, restated at the public boundary: an
     // unnamed location is not the working directory. Planting the include
     // target where a working-directory default would find it is what makes the
@@ -135,14 +136,13 @@ TEST_CASE("Config::parse with no baseDir resolves no includes", "[api][config]")
         out << "hoist_orphans = true\n";
     }
 
-    REQUIRE_THROWS_AS(
-        nodehammer::Config::parse("include = \"nh_api_unrooted_include_probe.toml\"\n"),
-        nodehammer::Error);
+    REQUIRE_THROWS_AS(nodehammer::fromToml("include = \"nh_api_unrooted_include_probe.toml\"\n"),
+                      nodehammer::Error);
     fs::remove(planted);
 }
 
 TEST_CASE("Config slices share one document and default to the built-in config", "[api][config]") {
-    const auto loaded = nodehammer::Config::read(kConfigsDir / "full_example.toml");
+    const auto loaded = nodehammer::readConfig(kConfigsDir / "full_example.toml");
     REQUIRE(loaded.config.valid());
 
     const auto scene = loaded.config.scene();
@@ -157,7 +157,7 @@ TEST_CASE("Config slices share one document and default to the built-in config",
     // document, so this is not a dangling read.
     nodehammer::SceneConfig detached = loaded.config.scene();
     {
-        auto temporaryHandle = nodehammer::Config::read(kConfigsDir / "full_example.toml");
+        auto temporaryHandle = nodehammer::readConfig(kConfigsDir / "full_example.toml");
         detached = temporaryHandle.config.scene();
     }
     REQUIRE(detached.valid());
@@ -171,7 +171,7 @@ TEST_CASE("Config slices share one document and default to the built-in config",
             nodehammer::config::configToToml(defaults));
 }
 
-TEST_CASE("Config::check reports what Config::read throws", "[api][config]") {
+TEST_CASE("checkConfig reports what readConfig throws", "[api][config]") {
     // The pair the error model is built on: one collector, two promises. `read`
     // owes a config and so cannot return a broken one; `check` owes a report,
     // and a broken document is that report's content.
@@ -179,9 +179,9 @@ TEST_CASE("Config::check reports what Config::read throws", "[api][config]") {
 [[rules]]
 match = "!!! not an expression"
 )";
-    const auto report = nodehammer::Config::checkString(bad);
+    const auto report = nodehammer::checkConfigString(bad);
     REQUIRE(report.hasErrors());
-    REQUIRE_THROWS_AS(nodehammer::Config::parse(bad), nodehammer::Error);
+    REQUIRE_THROWS_AS(nodehammer::fromToml(bad), nodehammer::Error);
 
     // No Fatal in a returned list, ever — that severity belongs to the channel
     // this call deliberately did not use.
@@ -191,22 +191,22 @@ match = "!!! not an expression"
 
     // Validation failures are reported too, not just parse ones: `check` is the
     // whole of what `read` demands.
-    const auto undefinedMaterial = nodehammer::Config::checkString(R"(
+    const auto undefinedMaterial = nodehammer::checkConfigString(R"(
 [[rules]]
 material = "nope"
 )");
     REQUIRE(undefinedMaterial.hasErrors());
 
     // A sound document reports nothing to complain about.
-    const auto clean = nodehammer::Config::check(kConfigsDir / "full_example.toml");
+    const auto clean = nodehammer::checkConfig(kConfigsDir / "full_example.toml");
     REQUIRE_FALSE(clean.hasErrors());
 
     // And a file that is not there is not a document to report on.
-    REQUIRE_THROWS_AS(nodehammer::Config::check(kConfigsDir / "nope.toml"), nodehammer::Error);
+    REQUIRE_THROWS_AS(nodehammer::checkConfig(kConfigsDir / "nope.toml"), nodehammer::Error);
 }
 
-TEST_CASE("Config::formats reports what this build can read", "[api][config]") {
-    const auto formats = nodehammer::Config::formats();
+TEST_CASE("configFormats reports what this build can read", "[api][config]") {
+    const auto formats = nodehammer::configFormats();
     REQUIRE(std::ranges::find(formats, "toml") != formats.end());
     // No longer conditional: the interpreter is in every build, wasm included,
     // so a caller reading this list gets the same answer everywhere.
@@ -215,6 +215,6 @@ TEST_CASE("Config::formats reports what this build can read", "[api][config]") {
     // A `.lua` path that is not there fails as a missing *file*, which is the
     // distinction that made the old build-gated arm worth having: there is no
     // longer a way to be told "this build cannot read that" for a config.
-    REQUIRE_THROWS_AS(nodehammer::Config::read(kConfigsDir / "does_not_exist.lua"),
+    REQUIRE_THROWS_AS(nodehammer::readConfig(kConfigsDir / "does_not_exist.lua"),
                       nodehammer::Error);
 }

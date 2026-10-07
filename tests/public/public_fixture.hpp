@@ -1,3 +1,4 @@
+#include <nodehammer/io.hpp>
 #pragma once
 
 // Shared helpers for the public-API suite.
@@ -82,8 +83,7 @@ class TempDir {
 /// logical volume, one shape, one material, which is what lets the counts below
 /// be exact rather than merely non-zero.
 inline nodehammer::SemanticScene syntheticScene() {
-    return nodehammer::SemanticScene::read("", nodehammer::SemanticScene::ReadOptions{"synthetic"})
-        .scene;
+    return nodehammer::readSemantic("", nodehammer::SemanticReadOptions{"synthetic"}).scene;
 }
 
 inline bool listed(std::span<const std::string_view> names, std::string_view needle) {

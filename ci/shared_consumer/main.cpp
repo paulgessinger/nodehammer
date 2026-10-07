@@ -1,3 +1,6 @@
+#include <nodehammer/io.hpp>
+#include <nodehammer/nhb.hpp>
+#include <nodehammer/nhr.hpp>
 // Stand-in for an external consumer: the only place the API is exercised with
 // no access to the source tree, no dependency hints and no include paths beyond
 // nodehammer's own install prefix.
@@ -101,20 +104,20 @@ int main() {
     // Dumped before it is judged: if an owning container does not survive the
     // boundary, what came back is the evidence, and reporting only "missing a
     // format" hides whether the vector was short, empty, or garbage.
-    const auto semanticFormats = nodehammer::SemanticScene::formats();
-    std::cout << "SemanticScene::formats() -> " << semanticFormats.size() << " entries\n";
+    const auto semanticFormats = nodehammer::semanticReadFormats();
+    std::cout << "semanticReadFormats() -> " << semanticFormats.size() << " entries\n";
     for (const auto &f : semanticFormats) {
         std::cout << "  '" << f << "' (len " << f.size() << ")\n";
     }
     std::cout << std::flush;
 
     if (!listed(semanticFormats, "synthetic") || !listed(semanticFormats, "nhb")) {
-        std::cerr << "SemanticScene::formats() is missing a built-in format\n";
+        std::cerr << "semanticReadFormats() is missing a built-in format\n";
         return 1;
     }
-    if (!listed(nodehammer::Config::formats(), "toml") ||
-        !listed(nodehammer::RenderScene::formats(), "gltf") ||
-        !listed(nodehammer::RenderScene::formats(), "nhr")) {
+    if (!listed(nodehammer::configFormats(), "toml") ||
+        !listed(nodehammer::renderWriteFormats(), "gltf") ||
+        !listed(nodehammer::renderWriteFormats(), "nhr")) {
         std::cerr << "a built-in format is missing from formats()\n";
         return 1;
     }
@@ -122,27 +125,26 @@ int main() {
     // A config parsed from a string with no location, so its (absent) includes
     // would resolve against nothing rather than against this process's working
     // directory.
-    const auto config = nodehammer::Config::parse("deduplicate_shapes = true\n"
-                                                  "[export.glb]\n"
-                                                  "unit_scale = 1.0\n");
+    const auto config = nodehammer::fromToml("deduplicate_shapes = true\n"
+                                             "[export.glb]\n"
+                                             "unit_scale = 1.0\n");
     if (config.diags.hasErrors() || !config.config.valid()) {
-        return fail("Config::parse failed", config.diags);
+        return fail("fromToml failed", config.diags);
     }
 
     // The other promise over the same collector: a document that `parse` would
     // have thrown about is `checkString`'s ordinary answer. Both are exported,
     // so both are called here — that is what this consumer is for.
-    if (!nodehammer::Config::checkString("deduplicate_shapes = true\n").empty()) {
-        std::cerr << "Config::checkString reported something about a sound document\n";
+    if (!nodehammer::checkConfigString("deduplicate_shapes = true\n").empty()) {
+        std::cerr << "checkConfigString reported something about a sound document\n";
         return 1;
     }
-    const auto report = nodehammer::Config::checkString("[[rules]]\nmatch = \"!!!\"\n");
+    const auto report = nodehammer::checkConfigString("[[rules]]\nmatch = \"!!!\"\n");
     if (!report.hasErrors()) {
-        std::cerr << "Config::checkString did not report a broken document\n";
+        std::cerr << "checkConfigString did not report a broken document\n";
         return 1;
     }
-    std::cout << "Config::checkString reported " << report.size()
-              << " problem(s) without throwing\n";
+    std::cout << "checkConfigString reported " << report.size() << " problem(s) without throwing\n";
 
     // The file-taking face is a separate exported entry point from the string
     // one, so calling only `checkString` would leave it annotated on trust.
@@ -154,8 +156,8 @@ int main() {
         std::ofstream out{checkPath};
         out << "deduplicate_shapes = true\n";
     }
-    if (!nodehammer::Config::check(checkPath).empty()) {
-        std::cerr << "Config::check reported something about a sound document\n";
+    if (!nodehammer::checkConfig(checkPath).empty()) {
+        std::cerr << "checkConfig reported something about a sound document\n";
         return 1;
     }
     std::filesystem::remove_all(checkDir, checkEc);
@@ -163,9 +165,9 @@ int main() {
     // The synthetic importer ignores its path, so the whole pipeline runs
     // without the consumer needing a geometry file to point at.
     const auto imported =
-        nodehammer::SemanticScene::read("", nodehammer::SemanticScene::ReadOptions{"synthetic"});
+        nodehammer::readSemantic("", nodehammer::SemanticReadOptions{"synthetic"});
     if (imported.diags.hasErrors() || !imported.scene.valid()) {
-        return fail("SemanticScene::read failed", imported.diags);
+        return fail("readSemantic failed", imported.diags);
     }
 
     const auto rendered = nodehammer::build(imported.scene, config.config.scene());
@@ -179,8 +181,8 @@ int main() {
 
     // Round-trip through the wire form — the path that reaches flatbuffers, one
     // of the private static dependencies the shared library must have absorbed.
-    const std::vector<std::byte> bytes = rendered.scene.toNhr();
-    const auto reread = nodehammer::RenderScene::read(bytes);
+    const std::vector<std::byte> bytes = nodehammer::toNhr(rendered.scene);
+    const auto reread = nodehammer::fromNhr(bytes);
     if (reread.triangleCount() != rendered.scene.triangleCount()) {
         std::cerr << "RenderScene byte round-trip failed\n";
         return 1;
@@ -204,7 +206,7 @@ int main() {
         return 1;
     }
 
-    const std::vector<std::byte> nhb = imported.scene.toNhb();
+    const std::vector<std::byte> nhb = nodehammer::toNhb(imported.scene);
     if (nhb.empty()) {
         std::cerr << "toNhb() produced nothing\n";
         return 1;
@@ -213,9 +215,9 @@ int main() {
     // The bytes-taking read, which is a separate exported symbol from the
     // path-taking one — an overload set is only as covered as its least-called
     // member.
-    const auto fromBytes = nodehammer::SemanticScene::read(std::span<const std::byte>{nhb});
+    const auto fromBytes = nodehammer::fromNhb(std::span<const std::byte>{nhb});
     if (fromBytes.scene.nodeCount() != imported.scene.nodeCount()) {
-        std::cerr << "SemanticScene::read(bytes) disagreed with the path overload\n";
+        std::cerr << "readSemantic(bytes) disagreed with the path overload\n";
         return 1;
     }
 
@@ -241,20 +243,20 @@ int main() {
     const auto renderOut = outDir / "scene.glb";
     // Neither returns anything: they wrote the file or they threw, so the file
     // existing afterwards is the whole check.
-    imported.scene.write(semanticOut);
-    rendered.scene.write(renderOut, config.config.output());
+    nodehammer::write(imported.scene, semanticOut);
+    nodehammer::write(rendered.scene, renderOut, config.config.output());
     if (!std::filesystem::exists(semanticOut) || !std::filesystem::exists(renderOut)) {
         std::cerr << "a write returned without producing a file\n";
         return 1;
     }
 
-    // And the render IR's own format, so `RenderScene::read`'s path overload is
+    // And the render IR's own format, so `readRender`'s path overload is
     // reached as well as its span one.
     const auto nhrOut = outDir / "scene.nhr";
-    rendered.scene.write(nhrOut);
-    const auto fromFile = nodehammer::RenderScene::read(nhrOut);
+    nodehammer::write(rendered.scene, nhrOut);
+    const auto fromFile = nodehammer::readRender(nhrOut);
     if (fromFile.triangleCount() != rendered.scene.triangleCount()) {
-        std::cerr << "RenderScene::read(path) disagreed with the scene it was written from\n";
+        std::cerr << "readRender(path) disagreed with the scene it was written from\n";
         return 1;
     }
     std::filesystem::remove_all(outDir, ec);
@@ -265,7 +267,7 @@ int main() {
     // two sides' runtimes to agree.
     bool threw = false;
     try {
-        (void)nodehammer::SemanticScene::read("/nodehammer/definitely/not/here.nhb");
+        (void)nodehammer::readSemantic("/nodehammer/definitely/not/here.nhb");
     } catch (const nodehammer::Error &e) {
         threw = true;
         // Every accessor, not just the two that make a nice message: on Windows
@@ -302,14 +304,14 @@ int main() {
     // own, and whether it still refuses to end the process it is called from.
     const std::string_view versionArg{"--version"};
     const std::span<const std::string_view> versionArgs{&versionArg, 1};
-    if (nodehammer::cli::run(versionArgs) != 0) {
-        std::cerr << "cli::run(--version) did not succeed\n";
+    if (nodehammer::runCli(versionArgs) != 0) {
+        std::cerr << "runCli(--version) did not succeed\n";
         return 1;
     }
 
     const std::array<std::string_view, 5> failingArgs{"convert", "--input", "no-such-file.gdml",
                                                       "--output", "out.glb"};
-    if (nodehammer::cli::run(failingArgs) == 0) {
+    if (nodehammer::runCli(failingArgs) == 0) {
         std::cerr << "a failing command reported success\n";
         return 1;
     }

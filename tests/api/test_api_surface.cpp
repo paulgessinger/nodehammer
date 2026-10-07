@@ -1,3 +1,6 @@
+#include <nodehammer/io.hpp>
+#include <nodehammer/nhb.hpp>
+#include <nodehammer/nhr.hpp>
 // The contract the handles themselves make, independent of what the pipeline
 // computes: opacity, the value semantics of a shared read-only handle, the
 // diagnostics range, and — the one that matters most — that no entry point
@@ -5,7 +8,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 #include <detail/file_io.hpp>
 #include <diagnostic_codes.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
@@ -43,7 +47,7 @@ nh::SemanticScene boxScene() {
     const auto nhb = dir / "box.nhb";
     nh::detail::file_io::writeFile(
         nhb, nh::ir::semanticSceneToBytes(nh::ir::SyntheticSceneBuilder::buildSingleBox()));
-    auto result = nh::SemanticScene::read(nhb);
+    auto result = nh::readSemantic(nhb);
     REQUIRE(result.scene.valid());
     return std::move(result.scene);
 }
@@ -69,7 +73,7 @@ TEST_CASE("Handles are copyable values that share one immutable scene", "[api][h
     const auto copy = scene;
     REQUIRE(copy.valid());
     REQUIRE(copy.nodeCount() == scene.nodeCount());
-    REQUIRE(copy.toNhb() == scene.toNhb());
+    REQUIRE(nh::toNhb(copy) == nh::toNhb(scene));
 
     const nh::RenderScene emptyRender;
     REQUIRE_FALSE(emptyRender.valid());
@@ -99,7 +103,7 @@ TEST_CASE("The state getter throws rather than binding a null reference", "[api]
     REQUIRE_THROWS_AS(slice.impl(), nh::Error);
 
     // And a slice of a real document does have one.
-    const auto real = nh::Config::parse("").config.scene();
+    const auto real = nh::fromToml("").config.scene();
     REQUIRE(real.valid());
     REQUIRE(real.impl().cfg != nullptr);
 }
@@ -108,7 +112,7 @@ TEST_CASE("DiagnosticList is an ordered range that survives being moved from", "
     // A scene that tessellates with something to say: the unknown shape reports
     // NH0500 and the node comes back unmeshed, which is the case the diagnostic
     // channel exists for — a result *and* a complaint about it.
-    const auto imported = nh::SemanticScene::read("", nh::SemanticScene::ReadOptions{"synthetic"});
+    const auto imported = nh::readSemantic("", nh::SemanticReadOptions{"synthetic"});
     const auto rendered = nh::build(imported.scene, {});
     REQUIRE(rendered.scene.valid());
     REQUIRE_FALSE(rendered.diags.empty());
@@ -145,27 +149,26 @@ TEST_CASE("Input the API cannot act on throws Error", "[api][handles]") {
 
     // A format no backend claims. Necessarily a run-time failure rather than a
     // link-time one: the format is a value, so nothing earlier could know.
-    REQUIRE_THROWS_AS(
-        nh::SemanticScene::read(dir / "x.nhb", nh::SemanticScene::ReadOptions{"not-a-format"}),
-        nh::Error);
-    REQUIRE_THROWS_AS(nh::SemanticScene::read(dir / "x.wat"), nh::Error);
+    REQUIRE_THROWS_AS(nh::readSemantic(dir / "x.nhb", nh::SemanticReadOptions{"not-a-format"}),
+                      nh::Error);
+    REQUIRE_THROWS_AS(nh::readSemantic(dir / "x.wat"), nh::Error);
 
     // A file that will not open.
-    REQUIRE_THROWS_AS(nh::SemanticScene::read(dir / "nope.nhb"), nh::Error);
+    REQUIRE_THROWS_AS(nh::readSemantic(dir / "nope.nhb"), nh::Error);
 
     // Bytes that are not a scene: the FlatBuffers verifier throws internally,
     // and only `Error` may reach the caller.
     const std::vector<std::byte> garbage(64, std::byte{0x7f});
-    REQUIRE_THROWS_AS(nh::SemanticScene::read(std::span{garbage}), nh::Error);
-    REQUIRE_THROWS_AS(nh::RenderScene::read(std::span{garbage}), nh::Error);
+    REQUIRE_THROWS_AS(nh::fromNhb(std::span{garbage}), nh::Error);
+    REQUIRE_THROWS_AS(nh::fromNhr(std::span{garbage}), nh::Error);
 
     // A handle that refers to nothing, on every entry point that takes one.
     const nh::RenderScene emptyRender;
     const nh::SemanticScene emptySemantic;
-    REQUIRE_THROWS_AS(emptyRender.write(dir / "out.glb"), nh::Error);
-    REQUIRE_THROWS_AS(emptySemantic.write(dir / "out.nhb"), nh::Error);
-    REQUIRE_THROWS_AS(emptySemantic.toNhb(), nh::Error);
-    REQUIRE_THROWS_AS(emptyRender.toNhr(), nh::Error);
+    REQUIRE_THROWS_AS(nh::write(emptyRender, dir / "out.glb"), nh::Error);
+    REQUIRE_THROWS_AS(nh::write(emptySemantic, dir / "out.nhb"), nh::Error);
+    REQUIRE_THROWS_AS(nh::toNhb(emptySemantic), nh::Error);
+    REQUIRE_THROWS_AS(nh::toNhr(emptyRender), nh::Error);
     REQUIRE_THROWS_AS(nh::applySelection(emptySemantic, {}), nh::Error);
     REQUIRE_THROWS_AS(nh::deduplicate(emptySemantic, {}), nh::Error);
     REQUIRE_THROWS_AS(nh::tessellate(emptySemantic, {}), nh::Error);
@@ -173,13 +176,13 @@ TEST_CASE("Input the API cannot act on throws Error", "[api][handles]") {
 
     // An unwritable destination.
     const auto scene = boxScene();
-    REQUIRE_THROWS_AS(scene.write(fs::path{"/definitely/not/here/out.nhb"}), nh::Error);
+    REQUIRE_THROWS_AS(nh::write(scene, fs::path{"/definitely/not/here/out.nhb"}), nh::Error);
 }
 
 TEST_CASE("Error carries a code, a context and its Diagnostic form", "[api][handles]") {
     const auto dir = caseDir("error_payload");
     try {
-        (void)nh::SemanticScene::read(dir / "nope.nhb");
+        (void)nh::readSemantic(dir / "nope.nhb");
         FAIL("expected a throw");
     } catch (const nh::Error &e) {
         REQUIRE(e.code() == nh::codes::kFatalImportFileNotFound);
@@ -194,11 +197,11 @@ TEST_CASE("Error carries a code, a context and its Diagnostic form", "[api][hand
 
     // Catchable as a plain std::exception, so a caller that wants one handler
     // for everything gets the message without knowing this type.
-    REQUIRE_THROWS_AS(nh::SemanticScene::read(dir / "nope.nhb"), std::exception);
+    REQUIRE_THROWS_AS(nh::readSemantic(dir / "nope.nhb"), std::exception);
 }
 
 TEST_CASE("formats() is the runtime capability query", "[api][handles]") {
-    const auto semantic = nh::SemanticScene::formats();
+    const auto semantic = nh::semanticReadFormats();
     REQUIRE(std::ranges::find(semantic, "nhb") != semantic.end());
     REQUIRE(std::ranges::find(semantic, "json") != semantic.end());
     REQUIRE(std::ranges::find(semantic, "synthetic") != semantic.end());
@@ -213,23 +216,23 @@ TEST_CASE("formats() is the runtime capability query", "[api][handles]") {
     REQUIRE(std::ranges::find(semantic, "tgeo") == semantic.end());
 #endif
 
-    const auto render = nh::RenderScene::formats();
+    const auto render = nh::renderWriteFormats();
     for (const auto *name : {"nhr", "gltf", "obj"}) {
         REQUIRE(std::ranges::find(render, name) != render.end());
     }
 
     // A view over library-lifetime storage, so two calls see the same bytes
     // rather than two freshly-built containers.
-    REQUIRE(nh::RenderScene::formats().data() == render.data());
+    REQUIRE(nh::renderWriteFormats().data() == render.data());
 }
 
 TEST_CASE("The scene handles round-trip through their own byte forms", "[api][handles]") {
     const auto dir = caseDir("roundtrip");
     const auto scene = boxScene();
 
-    const auto bytes = scene.toNhb();
+    const auto bytes = nh::toNhb(scene);
     REQUIRE_FALSE(bytes.empty());
-    const auto reread = nh::SemanticScene::read(std::span{bytes});
+    const auto reread = nh::fromNhb(std::span{bytes});
     REQUIRE_FALSE(reread.diags.hasErrors());
     REQUIRE(reread.scene.nodeCount() == scene.nodeCount());
     REQUIRE(reread.scene.shapeCount() == scene.shapeCount());
@@ -237,9 +240,9 @@ TEST_CASE("The scene handles round-trip through their own byte forms", "[api][ha
     // ... and through a file, in both formats the semantic exporters claim.
     for (const auto *ext : {".nhb", ".json"}) {
         const auto path = dir / ("scene" + std::string{ext});
-        scene.write(path);
+        nh::write(scene, path);
         REQUIRE(fs::exists(path));
-        const auto loaded = nh::SemanticScene::read(path);
+        const auto loaded = nh::readSemantic(path);
         REQUIRE_FALSE(loaded.diags.hasErrors());
         REQUIRE(loaded.scene.nodeCount() == scene.nodeCount());
     }
@@ -249,18 +252,18 @@ TEST_CASE("The scene handles round-trip through their own byte forms", "[api][ha
     REQUIRE(rendered.scene.triangleCount() > 0);
 
     const auto nhr = dir / "scene.nhr";
-    rendered.scene.write(nhr);
-    const auto reloaded = nh::RenderScene::read(nhr);
+    nh::write(rendered.scene, nhr);
+    const auto reloaded = nh::readRender(nhr);
     REQUIRE(reloaded.triangleCount() == rendered.scene.triangleCount());
-    REQUIRE(reloaded.toNhr() == rendered.scene.toNhr());
+    REQUIRE(nh::toNhr(reloaded) == nh::toNhr(rendered.scene));
 
     // The compressed spelling is the same format, so the extension check has to
     // see through the `.zst` suffix rather than only the last extension.
     const auto compressed = dir / "scene.nhr.zst";
-    rendered.scene.write(compressed);
+    nh::write(rendered.scene, compressed);
     REQUIRE(fs::file_size(compressed) > 0);
-    const auto fromZst = nh::RenderScene::read(compressed);
-    REQUIRE(fromZst.toNhr() == rendered.scene.toNhr());
+    const auto fromZst = nh::readRender(compressed);
+    REQUIRE(nh::toNhr(fromZst) == nh::toNhr(rendered.scene));
 }
 
 TEST_CASE("version() reports the linked library, not just the header", "[api][handles]") {

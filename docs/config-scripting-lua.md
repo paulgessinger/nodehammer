@@ -2,7 +2,7 @@
 
 **Status:** Option A implemented — the `config flatten` CLI command (backed by
 `src/lua/lua_config.cpp`, compiled into `nodehammer_lib`) evaluates a Lua script
-into an `NHConfig` and emits flattened TOML, and `Config::read` dispatches `.lua`
+into an `NHConfig` and emits flattened TOML, and `readConfig` dispatches `.lua`
 by extension.
 
 **Option B is implemented.** The engine ships in every build, wasm included;
@@ -152,7 +152,7 @@ are unconditional in `nodehammer_lib` on every platform.
 
 `tests/wasm_lua_smoke.cpp` is the standing check: the same library linked
 *without* `-sNODERAWFS`, so the only filesystem is MEMFS as in a real tab,
-driving `Config::read` on scripts it stages itself. `nodehammer_tests` cannot
+driving `readConfig` on scripts it stages itself. `nodehammer_tests` cannot
 answer that question, because it links NODERAWFS and therefore reads the host's
 files.
 

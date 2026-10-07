@@ -112,18 +112,18 @@ template <typename Body> void runOrReport(std::string_view command, Body &&body)
 ///   summary of what got merged. A person watching wants all of it; a program
 ///   that will read the exit code wants none of it.
 ///
-/// This narrates the second channel, and `RunOptions::quiet` silences it. That
+/// This narrates the second channel, and `CliOptions::quiet` silences it. That
 /// covers narration only: `printDiag`/`printDiags` and the failure line in
 /// `runOrReport` go out regardless, because a flag that hides errors is a trap,
 /// and so do reports the caller asked for by name (`--timing`,
 /// `--size-report`) — naming a report is asking for it.
 ///
-/// It holds a pointer to the caller's `RunOptions`, which `runWith` keeps alive
+/// It holds a pointer to the caller's `CliOptions`, which `runWith` keeps alive
 /// for the whole parse. Not a copy of the flag: `-q` is written into that object
 /// *during* the parse, after the registrar that captured it has run.
 class Narrator {
   public:
-    explicit Narrator(const RunOptions &options) noexcept : options_{&options} {}
+    explicit Narrator(const CliOptions &options) noexcept : options_{&options} {}
 
     /// One line, formatted, to stderr — unless the caller asked for quiet.
     template <typename... Args>
@@ -148,7 +148,7 @@ class Narrator {
     [[nodiscard]] bool enabled() const noexcept { return !options_->quiet; }
 
   private:
-    const RunOptions *options_;
+    const CliOptions *options_;
 };
 
 /// Result of importFrom: the import result plus the format name.

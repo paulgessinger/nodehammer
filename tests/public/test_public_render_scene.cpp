@@ -1,3 +1,7 @@
+#include <fstream>
+#include <iterator>
+#include <nodehammer/io.hpp>
+#include <nodehammer/nhr.hpp>
 // `RenderScene`, through the shared library.
 //
 // Triangle counts are compared against each other rather than pinned to a
@@ -46,23 +50,23 @@ TEST_CASE("a tessellated scene reports consistent counts", "[public][render]") {
     REQUIRE(scene.nodeCount() == 1); // one box in, one node out
 }
 
-TEST_CASE("RenderScene::formats reports what this build can read and write", "[public][render]") {
-    const auto formats = nh::RenderScene::formats();
+TEST_CASE("renderWriteFormats reports what this build can read and write", "[public][render]") {
+    const auto formats = nh::renderWriteFormats();
     REQUIRE_FALSE(formats.empty());
     REQUIRE(nhtest::listed(formats, "nhr"));
     REQUIRE(nhtest::listed(formats, "gltf"));
     REQUIRE(nhtest::listed(formats, "obj"));
 
-    REQUIRE(nh::RenderScene::formats().data() == formats.data());
+    REQUIRE(nh::renderWriteFormats().data() == formats.data());
 }
 
 TEST_CASE("RenderScene round-trips through .nhr bytes", "[public][render]") {
     const auto scene = rendered();
 
-    const std::vector<std::byte> nhr = scene.toNhr();
+    const std::vector<std::byte> nhr = nh::toNhr(scene);
     REQUIRE_FALSE(nhr.empty());
 
-    const auto reread = nh::RenderScene::read(std::span<const std::byte>{nhr});
+    const auto reread = nh::fromNhr(std::span<const std::byte>{nhr});
     REQUIRE(reread.valid());
     REQUIRE(reread.nodeCount() == scene.nodeCount());
     REQUIRE(reread.meshCount() == scene.meshCount());
@@ -75,17 +79,17 @@ TEST_CASE("RenderScene round-trips through a file", "[public][render]") {
     const auto scene = rendered();
 
     const auto path = dir / "scene.nhr";
-    scene.write(path);
+    nh::write(scene, path);
     REQUIRE(std::filesystem::file_size(path) > 0);
 
-    const auto reread = nh::RenderScene::read(path);
+    const auto reread = nh::readRender(path);
     REQUIRE(reread.triangleCount() == scene.triangleCount());
 
     // And through the compressed suffix, which reaches zstd.
     const auto zstPath = dir / "scene.nhr.zst";
-    scene.write(zstPath);
+    nh::write(scene, zstPath);
     REQUIRE(std::filesystem::file_size(zstPath) > 0);
-    REQUIRE(nh::RenderScene::read(zstPath).triangleCount() == scene.triangleCount());
+    REQUIRE(nh::readRender(zstPath).triangleCount() == scene.triangleCount());
 }
 
 TEST_CASE("every render exporter is reachable", "[public][render]") {
@@ -100,43 +104,43 @@ TEST_CASE("every render exporter is reachable", "[public][render]") {
 
     for (const char *leaf : {"scene.gltf", "scene.glb", "scene.obj", "scene.nhr"}) {
         const auto path = dir / leaf;
-        scene.write(path);
+        nh::write(scene, path);
         INFO("wrote " << path.string());
         REQUIRE(std::filesystem::exists(path));
         REQUIRE(std::filesystem::file_size(path) > 0);
     }
 }
 
-TEST_CASE("RenderScene::write takes its tuning from an OutputConfig", "[public][render]") {
+TEST_CASE("write takes its tuning from an OutputConfig", "[public][render]") {
     // `OutputConfig` reaches `write` and nowhere else, so this is the only
     // place the slice is exercised as an argument rather than as a value.
     const nhtest::TempDir dir{"render_output_config"};
     const auto scene = rendered();
-    const auto config = nh::Config::parse("[export.gltf]\nunit_scale = 0.1\n");
+    const auto config = nh::fromToml("[export.gltf]\nunit_scale = 0.1\n");
     REQUIRE(config.config.output().valid());
 
     const auto tuned = dir / "tuned.gltf";
-    scene.write(tuned, config.config.output());
+    nh::write(scene, tuned, config.config.output());
     REQUIRE(std::filesystem::file_size(tuned) > 0);
 
     // A default-constructed slice means each format's built-in defaults, so the
     // same call with no config has to work too.
     const auto plain = dir / "plain.gltf";
-    scene.write(plain, nh::OutputConfig{});
+    nh::write(scene, plain, nh::OutputConfig{});
     REQUIRE(std::filesystem::file_size(plain) > 0);
 
     // And the explicit-format option, against an extension no writer claims.
     const auto forced = dir / "forced.bin";
-    scene.write(forced, nh::OutputConfig{}, nh::RenderScene::WriteOptions{"nhr"});
-    REQUIRE(nh::RenderScene::read(forced).triangleCount() == scene.triangleCount());
+    nh::write(scene, forced, nh::OutputConfig{}, nh::RenderWriteOptions{"nhr"});
+    REQUIRE(nh::readRender(forced).triangleCount() == scene.triangleCount());
 }
 
-TEST_CASE("RenderScene::write rejects a format this build does not have", "[public][render]") {
+TEST_CASE("write rejects a format this build does not have", "[public][render]") {
     const nhtest::TempDir dir{"render_bad_format"};
     bool caught = false;
     try {
-        rendered().write(dir / "scene.nhr", nh::OutputConfig{},
-                         nh::RenderScene::WriteOptions{"no-such-format"});
+        nh::write(rendered(), dir / "scene.nhr", nh::OutputConfig{},
+                  nh::RenderWriteOptions{"no-such-format"});
     } catch (const nh::Error &e) {
         caught = true;
         REQUIRE(e.code() == "NH0600");
@@ -144,10 +148,10 @@ TEST_CASE("RenderScene::write rejects a format this build does not have", "[publ
     REQUIRE(caught);
 }
 
-TEST_CASE("RenderScene::read throws on a file that will not open", "[public][render]") {
+TEST_CASE("readRender throws on a file that will not open", "[public][render]") {
     bool caught = false;
     try {
-        (void)nh::RenderScene::read("/nodehammer/definitely/not/here.nhr");
+        (void)nh::readRender("/nodehammer/definitely/not/here.nhr");
     } catch (const nh::Error &e) {
         caught = true;
         REQUIRE(e.code() == "NH0100");
@@ -155,11 +159,11 @@ TEST_CASE("RenderScene::read throws on a file that will not open", "[public][ren
     REQUIRE(caught);
 }
 
-TEST_CASE("RenderScene::read rejects bytes that are not a render scene", "[public][render]") {
+TEST_CASE("readRender rejects bytes that are not a render scene", "[public][render]") {
     const std::vector<std::byte> garbage(64, std::byte{0x7f});
     bool caught = false;
     try {
-        (void)nh::RenderScene::read(std::span<const std::byte>{garbage});
+        (void)nh::fromNhr(std::span<const std::byte>{garbage});
     } catch (const nh::Error &e) {
         caught = true;
         REQUIRE(e.code() == "NH0100");
@@ -178,7 +182,7 @@ TEST_CASE("an empty RenderScene answers, and throws where it would dereference",
 
     bool caughtWrite = false;
     try {
-        empty.write("unused.nhr");
+        nh::write(empty, "unused.nhr");
     } catch (const nh::Error &e) {
         caughtWrite = true;
         REQUIRE(e.code() == "NH0800");
@@ -187,10 +191,29 @@ TEST_CASE("an empty RenderScene answers, and throws where it would dereference",
 
     bool caughtBytes = false;
     try {
-        (void)empty.toNhr();
+        (void)nh::toNhr(empty);
     } catch (const nh::Error &e) {
         caughtBytes = true;
         REQUIRE(e.code() == "NH0800");
     }
     REQUIRE(caughtBytes);
+}
+
+TEST_CASE("render compression follows the filename and rejects unsupported formats",
+          "[public][render]") {
+    const auto scene = rendered();
+    const auto dir = std::filesystem::temp_directory_path() / "nh_render_compression";
+    std::filesystem::create_directories(dir);
+    const auto path = dir / "scene.nhr.zst";
+    nh::write(scene, path, {}, {.compressionLevel = 9});
+    REQUIRE(nh::toNhr(nh::readRender(path)) == nh::toNhr(scene));
+    std::ifstream input(path, std::ios::binary);
+    const std::vector<char> bytes{std::istreambuf_iterator<char>{input}, {}};
+    input.close();
+    REQUIRE(nh::toNhr(nh::fromNhr(std::as_bytes(std::span{bytes}))) == nh::toNhr(scene));
+    REQUIRE_THROWS_AS(nh::write(scene, dir / "scene.glb.zst", {}, {.format = "gltf"}), nh::Error);
+    REQUIRE(nh::renderReadFormats().size() == 1);
+    REQUIRE(nh::renderReadFormats()[0] == "nhr");
+    REQUIRE_FALSE(nhtest::listed(nh::renderReadFormats(), "gltf"));
+    std::filesystem::remove_all(dir);
 }

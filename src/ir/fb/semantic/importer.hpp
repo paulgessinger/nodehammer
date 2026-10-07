@@ -18,8 +18,8 @@ class FlatBufferImporter final : public ISemanticImporter {
     [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
 
     /// Bytes-only entry point. `filename` is used purely for diagnostics
-    /// (and to detect the `.zst` suffix that signals zstd compression);
-    /// the actual data comes from `bytes`. Used by the viewer build
+    /// (and as a `.zst` hint); zstd frames are also detected from their magic.
+    /// The actual data comes from `bytes`. Used by the viewer build
     /// pipeline so geometry can flow straight from a project's resolved
     /// bytes into a semantic::Scene without a filesystem round-trip.
     [[nodiscard]] static ImportResult importFromBytes(std::string_view filename,

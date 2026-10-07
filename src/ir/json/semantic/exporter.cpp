@@ -21,7 +21,7 @@ void SemanticJsonExporter::write(const semantic::Scene &scene, const std::filesy
     try {
         nlohmann::json j = scene;
         const std::string jsonStr = j.dump(-1);
-        detail::zstd_io::writeJsonToFile(path, jsonStr);
+        detail::zstd_io::writeJsonToFile(path, jsonStr, config.compressionLevel);
     } catch (const Error &) {
         throw;
     } catch (const std::exception &ex) {

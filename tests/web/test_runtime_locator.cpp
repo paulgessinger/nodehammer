@@ -278,7 +278,7 @@ TEST_CASE("the environment variable is a rung, below an explicit path", "[web][r
 TEST_CASE("the embedder rung sits between the environment and the install tree", "[web][runtime]") {
     // The rung a wheel fills: `nodehammer-web` installs the runtime into
     // site-packages, which nothing below could guess, and `nodehammer.cli.run`
-    // hands the path down through RunOptions rather than the library going
+    // hands the path down through CliOptions rather than the library going
     // looking for an interpreter.
     //
     // Its *position* is the whole design and is what is asserted here. It is an

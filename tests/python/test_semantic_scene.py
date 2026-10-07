@@ -15,7 +15,7 @@ import nodehammer as nh
 
 
 def test_read_imports_through_the_synthetic_backend():
-    result = nh.SemanticScene.read("", format="synthetic")
+    result = nh.read_semantic("", format="synthetic")
 
     assert result.scene.valid
     assert not result.diags.has_errors
@@ -27,14 +27,14 @@ def test_read_imports_through_the_synthetic_backend():
 
 
 def test_result_unpacks_like_the_cpp_structured_binding():
-    scene, diags = nh.SemanticScene.read("", format="synthetic")
+    scene, diags = nh.read_semantic("", format="synthetic")
 
     assert scene.valid
     assert not diags.has_errors
 
 
 def test_formats_reports_what_this_build_can_read_and_write():
-    formats = nh.SemanticScene.formats()
+    formats = nh.semantic_read_formats()
 
     assert isinstance(formats, list)
     assert all(isinstance(f, str) for f in formats)
@@ -49,25 +49,25 @@ def test_formats_reports_what_this_build_can_read_and_write():
 
 def test_read_rejects_a_format_this_build_does_not_have():
     with pytest.raises(nh.Error) as excinfo:
-        nh.SemanticScene.read("", format="no-such-backend")
+        nh.read_semantic("", format="no-such-backend")
 
     assert excinfo.value.code == "NH0101"
-    assert "formats()" in str(excinfo.value)
+    assert "semanticReadFormats()" in str(excinfo.value)
 
 
 def test_read_throws_on_a_file_that_will_not_open(tmp_path):
     with pytest.raises(nh.Error):
-        nh.SemanticScene.read(tmp_path / "does-not-exist.nhb")
+        nh.read_semantic(tmp_path / "does-not-exist.nhb")
 
 
 def test_round_trips_through_nhb_bytes():
-    original = nh.SemanticScene.read("", format="synthetic").scene
+    original = nh.read_semantic("", format="synthetic").scene
 
-    payload = original.to_nhb()
+    payload = nh.to_nhb(original)
     assert isinstance(payload, bytes)
     assert len(payload) > 0
 
-    restored = nh.SemanticScene.read(payload).scene
+    restored = nh.from_nhb(payload).scene
 
     assert restored.valid
     assert restored.node_count == original.node_count
@@ -75,30 +75,30 @@ def test_round_trips_through_nhb_bytes():
 
 
 def test_round_trips_through_a_file(tmp_path):
-    original = nh.SemanticScene.read("", format="synthetic").scene
+    original = nh.read_semantic("", format="synthetic").scene
 
     path = tmp_path / "scene.nhb"
-    original.write(path)
+    nh.write(original, path)
     assert path.exists()
 
-    restored = nh.SemanticScene.read(path).scene
+    restored = nh.read_semantic(path).scene
     assert restored.node_count == original.node_count
 
 
 def test_read_accepts_os_pathlike_and_str(tmp_path):
-    scene = nh.SemanticScene.read("", format="synthetic").scene
+    scene = nh.read_semantic("", format="synthetic").scene
     path = tmp_path / "scene.nhb"
-    scene.write(path)
+    nh.write(scene, path)
 
-    assert nh.SemanticScene.read(path).scene.valid  # pathlib.Path
-    assert nh.SemanticScene.read(str(path)).scene.valid  # str
+    assert nh.read_semantic(path).scene.valid  # pathlib.Path
+    assert nh.read_semantic(str(path)).scene.valid  # str
 
 
 def test_write_rejects_a_format_this_build_does_not_have(tmp_path):
-    scene = nh.SemanticScene.read("", format="synthetic").scene
+    scene = nh.read_semantic("", format="synthetic").scene
 
     with pytest.raises(nh.Error):
-        scene.write(tmp_path / "scene.out", format="no-such-writer")
+        nh.write(scene, tmp_path / "scene.out", format="no-such-writer")
 
 
 def test_an_empty_scene_answers_and_raises_where_it_would_dereference():
@@ -109,7 +109,7 @@ def test_an_empty_scene_answers_and_raises_where_it_would_dereference():
     # NH0800: the call cannot deliver what its signature promises, so it is
     # fatal rather than a diagnostic.
     with pytest.raises(nh.Error):
-        empty.to_nhb()
+        nh.to_nhb(empty)
 
 
 def test_a_scene_outlives_the_result_that_produced_it():
@@ -117,7 +117,7 @@ def test_a_scene_outlives_the_result_that_produced_it():
     # from the result. If that ownership did not survive the binding, this reads
     # freed memory rather than failing an assertion — which is why it is a case.
     def make():
-        return nh.SemanticScene.read("", format="synthetic").scene
+        return nh.read_semantic("", format="synthetic").scene
 
     scene = make()
     import gc
@@ -126,3 +126,19 @@ def test_a_scene_outlives_the_result_that_produced_it():
 
     assert scene.valid
     assert scene.node_count == 1
+
+
+@pytest.mark.parametrize("level", [-1, 3, 9])
+def test_compression_level_and_filename_contract(tmp_path, level):
+    scene = nh.read_semantic("", format="synthetic").scene
+    payload = nh.to_nhb_zstd(scene, compression_level=level)
+    assert payload[:4] == bytes.fromhex("28b52ffd")
+    assert nh.to_nhb(nh.from_nhb(payload).scene) == nh.to_nhb(scene)
+    path = tmp_path / "scene.nhb.zst"
+    nh.write(scene, path, compression_level=level)
+    assert path.read_bytes() == payload
+    plain = tmp_path / "scene.nhb"
+    nh.write(scene, plain, compression_level=level)
+    assert plain.read_bytes() == nh.to_nhb(scene)
+    with pytest.raises(nh.Error):
+        nh.from_nhb(payload[:8])

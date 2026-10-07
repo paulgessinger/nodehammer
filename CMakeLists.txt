@@ -133,6 +133,7 @@ include(cmake/CompilerOptions.cmake)
 # Included early: the core-library helper below bakes CMAKE_INSTALL_INCLUDEDIR
 # into the shared target's INSTALL_INTERFACE include path.
 include(GNUInstallDirs)
+include(cmake/PublicBackendHeaders.cmake)
 
 # ── The web runtime's contract ───────────────────────────────────────────────
 # The wasm viewer is delivered as a directory, not a program: a shell, a worker
@@ -269,9 +270,10 @@ set(NH_CORE_SOURCES
     src/export_resolve.cpp
     src/version.cpp
     # The public API bridge: the only translation units that see both a public
-    # handle and its internals (src/api/handles.hpp is where the seam lives).
+    # handle and its internals (src/api/handles_semantic.hpp is where the seam lives).
     # Core, not app — these *are* what the installed library publishes.
     src/api/diagnostics.cpp
+    src/api/semantic_scene_formats.cpp
     src/api/semantic_scene.cpp
     src/api/config.cpp
     src/api/render_scene.cpp

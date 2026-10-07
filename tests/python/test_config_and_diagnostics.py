@@ -15,7 +15,7 @@ import nodehammer as nh
 
 
 def test_parse_accepts_toml_text():
-    result = nh.Config.parse("deduplicate_shapes = true\n")
+    result = nh.from_toml("deduplicate_shapes = true\n")
 
     assert result.config.valid
     assert not result.diags.has_errors
@@ -24,7 +24,7 @@ def test_parse_accepts_toml_text():
 
 
 def test_config_result_unpacks():
-    config, diags = nh.Config.parse("deduplicate_shapes = true\n")
+    config, diags = nh.from_toml("deduplicate_shapes = true\n")
 
     assert config.valid
     assert not diags.has_errors
@@ -34,12 +34,12 @@ def test_read_loads_a_file(tmp_path):
     path = tmp_path / "cfg.toml"
     path.write_text("deduplicate_shapes = true\n")
 
-    assert nh.Config.read(path).config.valid
+    assert nh.read_config(path).config.valid
 
 
 def test_formats_is_constant_and_includes_lua():
     # Lua ships everywhere now, wasm included, so this is build-independent.
-    assert nh.Config.formats() == ["toml", "lua"]
+    assert nh.config_formats() == ["toml", "lua"]
 
 
 def test_read_raises_on_a_document_that_does_not_load(tmp_path):
@@ -47,13 +47,13 @@ def test_read_raises_on_a_document_that_does_not_load(tmp_path):
     path.write_text("this is not = = toml\n")
 
     with pytest.raises(nh.Error):
-        nh.Config.read(path)
+        nh.read_config(path)
 
 
 def test_check_reports_rather_than_raising():
     # Two promises, two channels, one implementation: `parse` promises a config
     # and raises; `check_string` promises a report and returns one.
-    diags = nh.Config.check_string("this is not = = toml\n")
+    diags = nh.check_config_string("this is not = = toml\n")
 
     assert diags.has_errors
     assert len(diags) > 0
@@ -66,7 +66,7 @@ def test_an_unset_base_dir_means_no_location(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "included.toml").write_text("deduplicate_shapes = true\n")
 
-    diags = nh.Config.check_string('include = "included.toml"\n')
+    diags = nh.check_config_string('include = "included.toml"\n')
 
     assert diags.has_errors
     assert any("not found" in d.message for d in diags)
@@ -75,7 +75,7 @@ def test_an_unset_base_dir_means_no_location(tmp_path, monkeypatch):
 def test_a_base_dir_resolves_includes(tmp_path):
     (tmp_path / "included.toml").write_text("deduplicate_shapes = true\n")
 
-    diags = nh.Config.check_string('include = "included.toml"\n', base_dir=str(tmp_path))
+    diags = nh.check_config_string('include = "included.toml"\n', base_dir=str(tmp_path))
 
     assert not diags.has_errors
 
@@ -84,7 +84,7 @@ def test_a_base_dir_resolves_includes(tmp_path):
 
 
 def test_diagnostic_list_is_iterable_and_sized():
-    diags = nh.Config.check_string("this is not = = toml\n")
+    diags = nh.check_config_string("this is not = = toml\n")
 
     items = list(diags)
     assert len(items) == len(diags)
@@ -95,14 +95,14 @@ def test_diagnostic_list_is_iterable_and_sized():
 def test_no_returned_list_contains_fatal():
     # docs/error-model.md's one-line invariant: Fatal is reserved for
     # Error.diagnostic() and never appears in a list the library returns.
-    diags = nh.Config.check_string("this is not = = toml\n")
+    diags = nh.check_config_string("this is not = = toml\n")
 
     assert all(d.severity is not nh.Diagnostic.Severity.Fatal for d in diags)
 
 
 def test_error_carries_code_context_and_what_was_observed():
     with pytest.raises(nh.Error) as excinfo:
-        nh.SemanticScene.read("", format="no-such-backend")
+        nh.read_semantic("", format="no-such-backend")
 
     err = excinfo.value
     assert err.code == "NH0101"
@@ -125,13 +125,13 @@ def test_error_is_a_runtime_error():
 
 
 def test_read_accepts_toml_text():
-    assert nh.Config.read("deduplicate_shapes = true\n").config.valid
+    assert nh.from_toml("deduplicate_shapes = true\n").config.valid
 
 
 def test_read_accepts_a_dict():
     pytest.importorskip("tomli_w")
 
-    result = nh.Config.read({"deduplicate_shapes": True})
+    result = nh.from_dict({"deduplicate_shapes": True})
 
     assert result.config.valid
     assert result.config.scene.valid
@@ -142,7 +142,7 @@ def test_a_dict_routes_through_the_same_document_pipeline():
 
     # A dict is serialized and parsed, so it reaches the same validator as a
     # file the CLI reads -- there is no second path to keep in step.
-    assert nh.Config.read({"export": {"gltf": {"unit_scale": 0.01}}}).config.output.valid
+    assert nh.from_dict({"export": {"gltf": {"unit_scale": 0.01}}}).config.output.valid
 
 
 def test_a_dict_gets_the_same_diagnostic_codes_as_a_file():
@@ -151,7 +151,7 @@ def test_a_dict_gets_the_same_diagnostic_codes_as_a_file():
     # NH0003 is what the CLI reports for the same document
     # (fixtures/configs/invalid_bad_tolerance.toml).
     with pytest.raises(nh.Error) as excinfo:
-        nh.Config.read({"rules": [{"tessellation": {"max_segments_circle": -1}}]})
+        nh.from_dict({"rules": [{"tessellation": {"max_segments_circle": -1}}]})
 
     assert excinfo.value.code == "NH0003"
 
@@ -163,32 +163,28 @@ def test_a_config_source_is_decided_by_type(tmp_path):
     path = tmp_path / "cfg.toml"
     path.write_text("deduplicate_shapes = true\n")
 
-    assert nh.Config.read(path).config.valid  # Path -> the file
-    assert nh.Config.read("deduplicate_shapes = true\n").config.valid  # str -> text
+    assert nh.read_config(path).config.valid  # Path -> the file
+    assert nh.from_toml("deduplicate_shapes = true\n").config.valid  # str -> text
 
 
-def test_a_filename_passed_as_a_str_says_so(tmp_path):
-    # The heuristic lives in the error path only, so it cannot change what a
-    # successful call does — it just answers the question that "expected '='
-    # after key" provokes when someone passed a filename as text.
+def test_config_file_accepts_string_and_path(tmp_path):
     path = tmp_path / "cfg.toml"
     path.write_text("deduplicate_shapes = true\n")
-
-    with pytest.raises(nh.Error) as excinfo:
-        nh.Config.read(str(path))
-
-    assert "pass Path(" in str(excinfo.value)
+    assert nh.read_config(str(path)).config.valid
+    assert nh.read_config(path).config.valid
+    with pytest.raises(nh.Error):
+        nh.from_toml(str(path))
 
 
 def test_a_source_of_the_wrong_type_is_a_type_error():
     with pytest.raises(TypeError):
-        nh.Config.read(42)
+        nh.read_config(42)
 
 
 def test_the_cheap_accessors_are_properties_not_methods():
     # Mirroring the C++ API means its names and semantics, not its punctuation.
     # Calling one is a clear TypeError rather than something that silently works.
-    scene = nh.SemanticScene.read("", format="synthetic").scene
+    scene = nh.read_semantic("", format="synthetic").scene
 
     assert scene.valid is True
     assert isinstance(scene.node_count, int)
@@ -199,11 +195,11 @@ def test_the_cheap_accessors_are_properties_not_methods():
 def test_work_and_io_stay_methods():
     # The line is cost, not arity: anything that serializes, does I/O or builds
     # a container is still a call, so a property never hides work.
-    scene = nh.SemanticScene.read("", format="synthetic").scene
+    scene = nh.read_semantic("", format="synthetic").scene
 
-    assert isinstance(scene.to_nhb(), bytes)
-    assert isinstance(nh.SemanticScene.formats(), list)
-    assert isinstance(nh.Config.parse("").diags.items(), list)
+    assert isinstance(nh.to_nhb(scene), bytes)
+    assert isinstance(nh.semantic_read_formats(), list)
+    assert isinstance(nh.from_toml("").diags.items(), list)
 
 
 def test_check_is_the_reporting_half_of_read(tmp_path):
@@ -211,16 +207,16 @@ def test_check_is_the_reporting_half_of_read(tmp_path):
     path = tmp_path / "broken.toml"
     path.write_text("this is not = = toml\n")
 
-    assert nh.Config.check(path).has_errors  # Path -> a file
-    assert nh.Config.check("this is not = = toml\n").has_errors  # str -> text
-    assert not nh.Config.check("deduplicate_shapes = true\n").has_errors
+    assert nh.check_config(path).has_errors  # Path -> a file
+    assert nh.check_config_string("this is not = = toml\n").has_errors  # str -> text
+    assert not nh.check_config_string("deduplicate_shapes = true\n").has_errors
 
     with pytest.raises(nh.Error):
-        nh.Config.read(path)
+        nh.read_config(path)
 
 
 def test_check_accepts_a_dict():
     pytest.importorskip("tomli_w")
 
-    assert not nh.Config.check({"deduplicate_shapes": True}).has_errors
-    assert nh.Config.check({"rules": [{"tessellation": {"max_segments_circle": -1}}]}).has_errors
+    assert not nh.check_config_dict({"deduplicate_shapes": True}).has_errors
+    assert nh.check_config_dict({"rules": [{"tessellation": {"max_segments_circle": -1}}]}).has_errors

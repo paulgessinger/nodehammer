@@ -1,3 +1,6 @@
+> Historical implementation plan. For the current API and migration, see
+> [Public C++ API](public-api-sketch.md#python).
+
 # Python bindings and wheels — plan
 
 Status: plan of record for #41's step 7. Written after the API work closed

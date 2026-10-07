@@ -39,8 +39,8 @@ material = "doesNotExist"
 
 } // namespace
 
-TEST_CASE("Config::parse accepts a sound document", "[public][config]") {
-    const auto result = nh::Config::parse(kSound);
+TEST_CASE("fromToml accepts a sound document", "[public][config]") {
+    const auto result = nh::fromToml(kSound);
     REQUIRE(result.config.valid());
     REQUIRE_FALSE(result.diags.hasErrors());
 
@@ -50,8 +50,8 @@ TEST_CASE("Config::parse accepts a sound document", "[public][config]") {
     REQUIRE(result.config.output().valid());
 }
 
-TEST_CASE("Config::parse reports an unknown key without failing", "[public][config]") {
-    const auto result = nh::Config::parse("[tessellation_rulesx]\nmax_segments_circle = 32\n");
+TEST_CASE("fromToml reports an unknown key without failing", "[public][config]") {
+    const auto result = nh::fromToml("[tessellation_rulesx]\nmax_segments_circle = 32\n");
     REQUIRE(result.config.valid());
     REQUIRE_FALSE(result.diags.hasErrors()); // a warning, not a failure
 
@@ -64,23 +64,23 @@ TEST_CASE("Config::parse reports an unknown key without failing", "[public][conf
     REQUIRE(warned);
 }
 
-TEST_CASE("Config::read loads a file", "[public][config]") {
+TEST_CASE("readConfig loads a file", "[public][config]") {
     const nhtest::TempDir dir{"config_read"};
     const auto path = dir.put("config.toml", kSound);
 
-    const auto result = nh::Config::read(path);
+    const auto result = nh::readConfig(path);
     REQUIRE(result.config.valid());
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.config.scene().valid());
 }
 
-TEST_CASE("Config::read throws on a document that does not validate", "[public][config]") {
+TEST_CASE("readConfig throws on a document that does not validate", "[public][config]") {
     const nhtest::TempDir dir{"config_invalid"};
     const auto path = dir.put("config.toml", kUndefinedMaterial);
 
     bool caught = false;
     try {
-        (void)nh::Config::read(path);
+        (void)nh::readConfig(path);
     } catch (const nh::Error &e) {
         caught = true;
         REQUIRE(e.code() == "NH0002");
@@ -91,7 +91,7 @@ TEST_CASE("Config::read throws on a document that does not validate", "[public][
     REQUIRE(caught);
 }
 
-TEST_CASE("Config::check reports what Config::read throws", "[public][config]") {
+TEST_CASE("checkConfig reports what readConfig throws", "[public][config]") {
     // One document, two promises. This is the dual channel stated as a test:
     // the codes have to match, because it is the same collector behind both.
     const nhtest::TempDir dir{"config_check"};
@@ -99,13 +99,13 @@ TEST_CASE("Config::check reports what Config::read throws", "[public][config]") 
 
     std::string thrownCode;
     try {
-        (void)nh::Config::read(path);
+        (void)nh::readConfig(path);
     } catch (const nh::Error &e) {
         thrownCode = e.code();
     }
     REQUIRE(thrownCode == "NH0002");
 
-    const nh::DiagnosticList reported = nh::Config::check(path);
+    const nh::DiagnosticList reported = nh::checkConfig(path);
     REQUIRE(reported.hasErrors());
 
     bool matched = false;
@@ -117,17 +117,17 @@ TEST_CASE("Config::check reports what Config::read throws", "[public][config]") 
     REQUIRE(matched);
 }
 
-TEST_CASE("Config::check says nothing about a sound document", "[public][config]") {
+TEST_CASE("checkConfig says nothing about a sound document", "[public][config]") {
     const nhtest::TempDir dir{"config_sound"};
-    REQUIRE(nh::Config::check(dir.put("config.toml", "deduplicate_shapes = true\n")).empty());
+    REQUIRE(nh::checkConfig(dir.put("config.toml", "deduplicate_shapes = true\n")).empty());
 }
 
-TEST_CASE("Config::check still throws when there is no document", "[public][config]") {
+TEST_CASE("checkConfig still throws when there is no document", "[public][config]") {
     // It promised a report *about a document*. A file that will not open says
     // nothing about contents, so it stays fatal.
     bool caught = false;
     try {
-        (void)nh::Config::check("/nodehammer/definitely/not/here.toml");
+        (void)nh::checkConfig("/nodehammer/definitely/not/here.toml");
     } catch (const nh::Error &e) {
         caught = true;
         REQUIRE_FALSE(e.code().empty());
@@ -135,10 +135,10 @@ TEST_CASE("Config::check still throws when there is no document", "[public][conf
     REQUIRE(caught);
 }
 
-TEST_CASE("Config::checkString is the in-memory face", "[public][config]") {
-    REQUIRE(nh::Config::checkString("deduplicate_shapes = true\n").empty());
+TEST_CASE("checkConfigString is the in-memory face", "[public][config]") {
+    REQUIRE(nh::checkConfigString("deduplicate_shapes = true\n").empty());
 
-    const auto reported = nh::Config::checkString(kUndefinedMaterial);
+    const auto reported = nh::checkConfigString(kUndefinedMaterial);
     REQUIRE(reported.hasErrors());
     bool named = false;
     for (const auto &d : reported) {
@@ -149,17 +149,17 @@ TEST_CASE("Config::checkString is the in-memory face", "[public][config]") {
     REQUIRE(named);
 
     // An empty document is a sound one: every field has a default.
-    REQUIRE(nh::Config::checkString("").empty());
+    REQUIRE(nh::checkConfigString("").empty());
 }
 
-TEST_CASE("Config::formats reports what this build understands", "[public][config]") {
-    const auto formats = nh::Config::formats();
+TEST_CASE("configFormats reports what this build understands", "[public][config]") {
+    const auto formats = nh::configFormats();
     REQUIRE_FALSE(formats.empty());
     REQUIRE(nhtest::listed(formats, "toml"));
 
     // A view over library-lifetime storage, so a second call sees the same
     // bytes rather than a fresh container built for the caller.
-    REQUIRE(nh::Config::formats().data() == formats.data());
+    REQUIRE(nh::configFormats().data() == formats.data());
 }
 
 TEST_CASE("an empty Config slices to empty slices", "[public][config]") {

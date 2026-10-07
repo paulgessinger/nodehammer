@@ -1,8 +1,10 @@
+#include <nodehammer/io.hpp>
+#include <nodehammer/nhr.hpp>
 // #41's step-6 acceptance criterion: the public verbs produce byte-identical
 // output to the internal pipeline the CLI drives.
 //
 // Both halves start from the same `.nhb` on disk and the same TOML text, then
-// diverge — one through `SemanticScene::read` / `build` / `RenderScene::write`,
+// diverge — one through `readSemantic` / `build` / `write`,
 // the other through the importer, `SelectionEngine`, the dedup passes,
 // `TessellationPass`, `resolveExportConfig` and the exporter, in the order
 // `cmd_convert.cpp` runs them. The exported files are then compared byte for
@@ -15,7 +17,8 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include <api/handles.hpp>
+#include <api/handles_config.hpp>
+#include <api/handles_render.hpp>
 #include <config/config_ast.hpp>
 #include <config/config_loader.hpp>
 #include <detail/file_io.hpp>
@@ -187,10 +190,10 @@ TEST_CASE("Public verbs export byte-identically to the internal pipeline", "[api
     referenceExport(nhb, loaded.config, reference);
 
     // ── The public surface: handles throughout ───────────────────────────────
-    const auto cfg = nh::Config::parse(toml, dir);
+    const auto cfg = nh::fromToml(toml, dir);
     REQUIRE_FALSE(cfg.diags.hasErrors());
 
-    const auto sem = nh::SemanticScene::read(nhb);
+    const auto sem = nh::readSemantic(nhb);
     REQUIRE_FALSE(sem.diags.hasErrors());
     REQUIRE(sem.scene.valid());
 
@@ -199,7 +202,7 @@ TEST_CASE("Public verbs export byte-identically to the internal pipeline", "[api
     REQUIRE(rendered.scene.valid());
 
     const auto viaApi = dir / "api" / ("out" + std::string{extension});
-    rendered.scene.write(viaApi, cfg.config.output());
+    nh::write(rendered.scene, viaApi, cfg.config.output());
 
     REQUIRE(readBytes(viaApi) == readBytes(reference));
 
@@ -224,11 +227,11 @@ TEST_CASE("build equals applySelection + deduplicate + tessellate", "[api][equiv
     const auto nhb = dir / "scene.nhb";
     nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(sampleScene()));
 
-    const auto cfg = nh::Config::parse(kFullToml, dir);
+    const auto cfg = nh::fromToml(kFullToml, dir);
     REQUIRE_FALSE(cfg.diags.hasErrors());
     const auto scene = cfg.config.scene();
 
-    const auto sem = nh::SemanticScene::read(nhb);
+    const auto sem = nh::readSemantic(nhb);
     REQUIRE(sem.scene.valid());
 
     const auto whole = nh::build(sem.scene, scene);
@@ -246,13 +249,13 @@ TEST_CASE("build equals applySelection + deduplicate + tessellate", "[api][equiv
     const auto piecewise = nh::tessellate(deduped.scene, scene);
     REQUIRE(piecewise.scene.valid());
 
-    REQUIRE(whole.scene.toNhr() == piecewise.scene.toNhr());
+    REQUIRE(nh::toNhr(whole.scene) == nh::toNhr(piecewise.scene));
 
     // And the counterexample the verb exists to prevent: skipping `deduplicate`
     // gives a different scene, silently, with no diagnostic to say so.
     const auto withoutDedup = nh::tessellate(selected.scene, scene);
     REQUIRE(withoutDedup.scene.valid());
-    REQUIRE(withoutDedup.scene.toNhr() != whole.scene.toNhr());
+    REQUIRE(nh::toNhr(withoutDedup.scene) != nh::toNhr(whole.scene));
 }
 
 TEST_CASE("The stage verbs are no-ops when their config switch is off", "[api][equivalence]") {
@@ -260,9 +263,9 @@ TEST_CASE("The stage verbs are no-ops when their config switch is off", "[api][e
     const auto nhb = dir / "scene.nhb";
     nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(sampleScene()));
 
-    const auto cfg = nh::Config::parse(kNoSelectionToml, dir);
+    const auto cfg = nh::fromToml(kNoSelectionToml, dir);
     REQUIRE_FALSE(cfg.diags.hasErrors());
-    const auto sem = nh::SemanticScene::read(nhb);
+    const auto sem = nh::readSemantic(nhb);
     REQUIRE(sem.scene.valid());
 
     // No selection rules means no filtering — not "keep everything", which
@@ -285,15 +288,15 @@ TEST_CASE("write honours the output slice, not just build", "[api][equivalence]"
     const auto nhb = dir / "scene.nhb";
     nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(sampleScene()));
 
-    const auto cfg = nh::Config::parse(kFullToml, dir);
-    const auto sem = nh::SemanticScene::read(nhb);
+    const auto cfg = nh::fromToml(kFullToml, dir);
+    const auto sem = nh::readSemantic(nhb);
     const auto rendered = nh::build(sem.scene, cfg.config.scene());
     REQUIRE(rendered.scene.valid());
 
     const auto tuned = dir / "tuned.glb";
     const auto defaulted = dir / "defaulted.glb";
-    rendered.scene.write(tuned, cfg.config.output());
-    rendered.scene.write(defaulted);
+    nh::write(rendered.scene, tuned, cfg.config.output());
+    nh::write(rendered.scene, defaulted);
     REQUIRE(readBytes(tuned) != readBytes(defaulted));
 
     // And an omitted slice means exactly the format's built-in defaults —

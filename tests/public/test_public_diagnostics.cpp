@@ -1,3 +1,4 @@
+#include <nodehammer/io.hpp>
 // The two reporting channels, seen from outside the library.
 //
 // `DiagnosticList` is entirely inline, so these cases compile it in *this*
@@ -157,7 +158,7 @@ TEST_CASE("an Error thrown by the library keeps its type across the boundary",
     // has to be exported.
     bool caught = false;
     try {
-        (void)nh::SemanticScene::read("/nodehammer/definitely/not/here.nhb");
+        (void)nh::readSemantic("/nodehammer/definitely/not/here.nhb");
     } catch (const nh::Error &e) {
         caught = true;
         REQUIRE(e.code() == "NH0100");
@@ -171,12 +172,12 @@ TEST_CASE("no DiagnosticList the library returns carries Fatal", "[public][diagn
     // get hold of. Structurally guaranteed — `DiagnosticList` has no `fatal()` —
     // but `add` takes a whole Diagnostic, so the guarantee is about what the
     // library does rather than what the type permits.
-    const auto imported = nh::SemanticScene::read("", nh::SemanticScene::ReadOptions{"synthetic"});
+    const auto imported = nh::readSemantic("", nh::SemanticReadOptions{"synthetic"});
     REQUIRE_FALSE(nhtest::anyFatal(imported.diags));
 
-    const auto config = nh::Config::parse("deduplicate_shapes = true\n");
+    const auto config = nh::fromToml("deduplicate_shapes = true\n");
     REQUIRE_FALSE(nhtest::anyFatal(config.diags));
-    REQUIRE_FALSE(nhtest::anyFatal(nh::Config::checkString("[[rules]]\nmatch = \"!!!\"\n")));
+    REQUIRE_FALSE(nhtest::anyFatal(nh::checkConfigString("[[rules]]\nmatch = \"!!!\"\n")));
 
     const auto scene = config.config.scene();
     REQUIRE_FALSE(nhtest::anyFatal(nh::applySelection(imported.scene, scene).diags));

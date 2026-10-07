@@ -64,7 +64,7 @@ int parseAndDispatch(CLI::App &app, std::span<const std::string_view> args) {
 
 namespace detail {
 
-int runWith(std::span<const std::string_view> args, const RunOptions &options,
+int runWith(std::span<const std::string_view> args, const CliOptions &options,
             std::span<const Registrar> extra) {
     CLI::App app{"nodehammer -- HEP geometry conversion pipeline"};
     app.require_subcommand(1);
@@ -97,9 +97,9 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
     // A mutable copy, and the registrars below capture *this* rather than the
     // caller's object. `-q` has to be able to write somewhere the command
     // bodies read, and the front door's own settings are exactly that place:
-    // one `RunOptions`, whether the answer came from an embedder or from the
+    // one `CliOptions`, whether the answer came from an embedder or from the
     // command line. It outlives the parse, which is all a `Narrator` needs.
-    RunOptions effective = options;
+    CliOptions effective = options;
 
     // The stderr narration, switchable from the command line in both
     // directions — because the default differs by front door. Somebody who
@@ -177,8 +177,11 @@ int runWith(std::span<const std::string_view> args, const RunOptions &options,
 
 } // namespace detail
 
-int run(std::span<const std::string_view> args, const RunOptions &options) {
-    return detail::runWith(args, options, {});
+} // namespace nodehammer::cli
+
+namespace nodehammer {
+int runCli(std::span<const std::string_view> args, const CliOptions &options) {
+    return cli::detail::runWith(args, options, {});
 }
 
-} // namespace nodehammer::cli
+} // namespace nodehammer
