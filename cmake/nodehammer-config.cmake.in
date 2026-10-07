@@ -1,29 +1,51 @@
 @PACKAGE_INIT@
 
-# Deliberately no find_dependency() calls. Every dependency is PRIVATE behind
-# $<BUILD_INTERFACE:>, so none appears in INTERFACE_LINK_LIBRARIES and none has
-# to be resolvable by a consumer (#41 §10).
-#
-# This is the payoff for not shipping the archive. A static nodehammer would
-# leave every private dependency undefined until the consumer's final link, so
-# this file would have to find_dependency() the lot — ten packages a consumer has
-# no reason to know about. If that variant is ever added, this file grows the
-# branch.
-#
-# Note this covers *linking*, and how a dependency is satisfied differs by kind.
-# The static ones (zstd, flatbuffers, manifold, miniz, …) are absorbed into the
-# library and disappear. A shared backend — ROOT or DD4hep, when those importers
-# are enabled — stays a DT_NEEDED reference instead. Finding *that* at runtime is
-# an rpath question, not a find_dependency one: CMAKE_INSTALL_RPATH_USE_LINK_PATH
-# records where it was linked from, as DT_RUNPATH so LD_LIBRARY_PATH still wins.
-#
-# What would make find_dependency necessary is a public header including a
-# backend header. That would put ROOT's include directories in the interface,
-# which means ROOT::Geom becomes an INTERFACE dependency, which means a consumer
-# has to resolve it. As long as no installed header names a backend type, the
-# list above stays empty. That is the tripwire; this is the file that changes.
+set(nodehammer_FOUND TRUE)
+unset(nodehammer_NOT_FOUND_MESSAGE)
+set(nodehammer_Ingest_FOUND FALSE)
+set(nodehammer_Shared_FOUND FALSE)
+set(_nh_available "")
+foreach(_nh_component Ingest Shared)
+    string(TOLOWER "${_nh_component}" _nh_suffix)
+    if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/nodehammer-${_nh_suffix}-targets.cmake")
+        list(APPEND _nh_available ${_nh_component})
+    endif()
+endforeach()
 
-include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
+# With no explicit selection, load every component this installation provides.
+set(_nh_requested ${nodehammer_FIND_COMPONENTS})
+if(NOT _nh_requested)
+    set(_nh_requested ${_nh_available})
+endif()
+
+foreach(_nh_component IN LISTS _nh_requested)
+    if(NOT _nh_component IN_LIST _nh_available)
+        set(nodehammer_${_nh_component}_FOUND FALSE)
+        string(APPEND nodehammer_NOT_FOUND_MESSAGE
+            "Component '${_nh_component}' is not installed. Available: ${_nh_available}. ")
+        continue()
+    endif()
+    if(_nh_component STREQUAL "Ingest")
+        # Both libraries absorb implementation archives. Experiment backends
+        # remain runtime dependencies; consumers need no CMake dependency lookup.
+        include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-ingest-targets.cmake")
+        set(nodehammer_Ingest_FOUND TRUE)
+    elseif(_nh_component STREQUAL "Shared")
+        # The full shared library absorbs implementation archives. Enabled
+        # shared backends remain runtime dependencies, not CMake dependencies.
+        include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-shared-targets.cmake")
+        set(nodehammer_Shared_FOUND TRUE)
+        # Preserve the previously installed shared target spelling.
+        if(NOT TARGET nodehammer::nodehammer)
+            add_library(nodehammer::nodehammer ALIAS nodehammer::shared)
+        endif()
+    endif()
+endforeach()
+
+unset(_nh_available)
+unset(_nh_requested)
+unset(_nh_component)
+unset(_nh_suffix)
 
 # ── MSVC: the consumer's C runtime has to match the library's ─────────────────
 # This API passes owning std:: types across the boundary — std::string inside
@@ -55,8 +77,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/nodehammer-targets.cmake")
 # to parse the expressions and rejected correct builds instead — a false
 # positive here blocks a consumer outright, which is worse than the failure the
 # check exists to make legible.
-set(_nh_runtime_file "${CMAKE_CURRENT_LIST_DIR}/nodehammer-msvc-runtime.txt")
-if(MSVC AND CMAKE_BUILD_TYPE AND EXISTS "${_nh_runtime_file}")
+set(_nh_runtime_file "${CMAKE_CURRENT_LIST_DIR}/nodehammer-runtime.txt")
+if((nodehammer_Ingest_FOUND OR nodehammer_Shared_FOUND) AND MSVC AND CMAKE_BUILD_TYPE AND EXISTS "${_nh_runtime_file}")
     file(READ "${_nh_runtime_file}" _nh_lib_runtime)
     string(STRIP "${_nh_lib_runtime}" _nh_lib_runtime)
 

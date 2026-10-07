@@ -307,6 +307,13 @@ jobs:
         shell: bash
         run: ci/verify-shared-install.sh stage
 
+      # A fresh configure proves ingestion works without the full build's
+      # dependency graph; it can reuse this runner's compiler and build tools.
+      - name: Verify standalone C++20 ingestion
+        if: matrix.artifact-name == 'nodehammer-linux-x86_64'
+        shell: bash
+        run: bash ci/verify-ingest.sh build/ingestion-ci
+
       - name: Package archive
         shell: bash
         run: |
@@ -1141,6 +1148,10 @@ jobs:
             # cmake/nodehammer-config.cmake.in's "no find_dependency() needed".
             ci/build.sh install native stage
             ci/verify-shared-install.sh stage
+            # Separate configure: this must succeed without discovering any of
+            # the full build's processing or application dependencies.
+            bash ci/verify-ingest.sh build/ingestion-lcg \
+              -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
 
       # blubb
 

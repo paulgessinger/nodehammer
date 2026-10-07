@@ -1,0 +1,31 @@
+# Source embedding and standalone installation share this entry point.
+option(NODEHAMMER_WITH_TGEO "Enable ingestion from an existing ROOT installation" OFF)
+option(NODEHAMMER_WITH_DD4HEP "Enable ingestion from an existing DD4hep installation" OFF)
+option(NODEHAMMER_BUILD_TESTS "Build ingestion tests" OFF)
+option(NODEHAMMER_WERROR "Treat project warnings as errors" OFF)
+if(NODEHAMMER_BUILD_PYTHON OR NODEHAMMER_BUILD_SHARED OR NODEHAMMER_WITH_VIEWER)
+    message(FATAL_ERROR "NODEHAMMER_INGEST_ONLY cannot build Python, the full shared library, or the viewer")
+endif()
+if(EMSCRIPTEN)
+    message(FATAL_ERROR "The ingestion-only SDK requires native shared libraries")
+endif()
+if(NODEHAMMER_WITH_DD4HEP)
+    set(NODEHAMMER_WITH_TGEO ON)
+endif()
+
+# Directory-local defaults: neither the parent project nor its other targets
+# inherit these. Ingestion objects also state their standard explicitly.
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+include(GNUInstallDirs)
+include(${CMAKE_CURRENT_LIST_DIR}/PublicBackendHeaders.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/CompilerOptions.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/IngestionDependencies.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/Ingestion.cmake)
+
+if(NODEHAMMER_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests/ingest)
+endif()

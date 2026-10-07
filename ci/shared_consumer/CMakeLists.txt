@@ -20,10 +20,10 @@ project(nodehammer_shared_consumer LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(nodehammer REQUIRED)
+find_package(nodehammer CONFIG REQUIRED COMPONENTS Shared)
 
 add_executable(consumer main.cpp)
-target_link_libraries(consumer PRIVATE nodehammer::nodehammer)
+target_link_libraries(consumer PRIVATE nodehammer::shared)
 
 # Reported, not set. What a consumer is compiled with is exactly what this test
 # exists to leave unstated — but when the result misbehaves at run time rather
