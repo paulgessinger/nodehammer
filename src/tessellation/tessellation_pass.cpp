@@ -163,7 +163,7 @@ struct MergeResult {
 };
 
 struct MergeDescendant {
-    ir::semantic::NodeId nodeId;
+    ir::expanded::NodeId nodeId;
     glm::dmat4 toMergeLocal{1.0};
     int maxSegmentsCircle{64};
 };
@@ -174,7 +174,7 @@ struct PrototypeDescendantSignature {
     glm::dmat4 toMergeLocal{1.0};
 };
 
-bool collectPrototypeLeafDescendants(const ir::semantic::Scene &scene,
+bool collectPrototypeLeafDescendants(const ir::expanded::Scene &scene,
                                      ir::semantic::LogVolId rootLv,
                                      std::vector<PrototypeDescendantSignature> &out) {
     if (!scene.logVols.contains(rootLv)) {
@@ -242,7 +242,7 @@ void sortMergeDescendants(std::vector<MergeDescendantSignature> &descendants) {
 
 using ShapeMaterialKey = std::pair<uint64_t, uint64_t>;
 
-bool tryUsePrototypeMergeKey(const ir::semantic::Scene &scene, ir::semantic::LogVolId rootLv,
+bool tryUsePrototypeMergeKey(const ir::expanded::Scene &scene, ir::semantic::LogVolId rootLv,
                              MergeCacheKey &mergeKey) {
     std::vector<PrototypeDescendantSignature> prototypeDescendants;
     if (!collectPrototypeLeafDescendants(scene, rootLv, prototypeDescendants) ||
@@ -458,7 +458,7 @@ struct TriKeyHash {
 // suggestion: the node's original source path minus its own final segment (i.e.
 // the parent structure that holds the stack, e.g. ".../ECalBarrel"), falling
 // back to the node name when no path is recorded.
-inline std::string candidateStructureLabel(const ir::semantic::Node &node) {
+inline std::string candidateStructureLabel(const ir::expanded::Node &node) {
     const std::string &p = node.originalPath;
     if (!p.empty()) {
         const auto slash = p.find_last_of('/');
@@ -623,7 +623,7 @@ ir::render::Material makeDefaultMaterial(ir::render::Scene &rs,
 /// Collect all primitive leaf vertices from a (possibly nested) boolean shape,
 /// compute their AABB, and return a tessellated box of that size.
 TessellationOutput makeBBoxProxy(const ir::semantic::ShapeVariant &shapeData,
-                                 const ir::semantic::Scene &scene, PrimitiveTessellator &tess,
+                                 const ir::expanded::Scene &scene, PrimitiveTessellator &tess,
                                  const TessellationParams &params) {
     glm::dvec3 bboxMin{std::numeric_limits<double>::max()};
     glm::dvec3 bboxMax{-std::numeric_limits<double>::max()};
@@ -691,7 +691,7 @@ TessellationPass::TessellationPass(const config::NHConfig &config) : config_(con
 
 struct TessellationJob::Impl {
     const config::NHConfig *config{nullptr};
-    const ir::semantic::Scene *scene{nullptr};
+    const ir::expanded::Scene *scene{nullptr};
     /// True when the scene carries the wedge-cut marker logVol, i.e. an
     /// azimuthal cut was applied upstream. An empty merge_descendants result is
     /// then an expected consequence of the cut, not a selection/config error.
@@ -710,9 +710,9 @@ struct TessellationJob::Impl {
                                  ankerl::unordered_dense::map<int, ir::render::MeshAssetId>>
         meshCache;
     ankerl::unordered_dense::map<MergeCacheKey, MergeResult, MergeCacheKeyHash> mergeCache;
-    ankerl::unordered_dense::map<ir::semantic::NodeId, ir::render::NodeId> nodeMap;
+    ankerl::unordered_dense::map<ir::expanded::NodeId, ir::render::NodeId> nodeMap;
 
-    std::queue<ir::semantic::NodeId> q;
+    std::queue<ir::expanded::NodeId> q;
 
     bool started{false};
     bool done{false};
@@ -752,7 +752,7 @@ struct TessellationJob::Impl {
     std::map<std::string, std::pair<size_t, size_t>> coincidentCandidatesByParent;
     ankerl::unordered_dense::map<MergeCacheKey, size_t, MergeCacheKeyHash> dropCandidateByKey;
 
-    selection::NodeView makeNodeView(const ir::semantic::Node &node) const {
+    selection::NodeView makeNodeView(const ir::expanded::Node &node) const {
         std::string_view matName;
         if (scene->logVols.contains(node.logVolId)) {
             const auto &lv = scene->logVols.at(node.logVolId);
@@ -778,7 +778,7 @@ struct TessellationJob::Impl {
     }
 
     ir::render::MaterialId resolveRenderMaterial(ir::semantic::MaterialId srcMatId,
-                                                 const ir::semantic::Node &node);
+                                                 const ir::expanded::Node &node);
 
     // Process one outer-BFS iteration. Returns false if the queue became
     // empty (no more nodes to process) OR if the pass has already aborted
@@ -789,14 +789,14 @@ struct TessellationJob::Impl {
     // finalizes `rn` into the render scene and returns the same bool contract
     // as stepOneNode (false only on a fallback=fail abort).
     bool stepOneNode();
-    bool tessellateMergeDescendants(const ir::semantic::Node &semNode, ir::render::Node &rn,
+    bool tessellateMergeDescendants(const ir::expanded::Node &semNode, ir::render::Node &rn,
                                     ir::render::NodeId rnId, const ResolvedTessellation &rule);
-    bool tessellateBooleanNode(const ir::semantic::Node &semNode,
+    bool tessellateBooleanNode(const ir::expanded::Node &semNode,
                                const ir::semantic::LogicalVolume &lv,
                                const ir::semantic::Shape &shape, ir::render::Node &rn,
                                ir::render::NodeId rnId, const ResolvedTessellation &rule,
                                const TessellationParams &params);
-    bool tessellatePrimitiveNode(const ir::semantic::Node &semNode,
+    bool tessellatePrimitiveNode(const ir::expanded::Node &semNode,
                                  const ir::semantic::LogicalVolume &lv,
                                  const ir::semantic::Shape &shape, ir::render::Node &rn,
                                  ir::render::NodeId rnId, const TessellationParams &params);
@@ -819,7 +819,7 @@ struct TessellationJob::Impl {
             return 0;
         }
         size_t n = 0;
-        std::queue<ir::semantic::NodeId> qq;
+        std::queue<ir::expanded::NodeId> qq;
         qq.push(scene->rootId);
         while (!qq.empty()) {
             const auto id = qq.front();
@@ -844,7 +844,7 @@ struct TessellationJob::Impl {
 
 ir::render::MaterialId
 TessellationJob::Impl::resolveRenderMaterial(ir::semantic::MaterialId srcMatId,
-                                             const ir::semantic::Node &node) {
+                                             const ir::expanded::Node &node) {
     const auto &srcMat = scene->materials.at(srcMatId);
     selection::NodeView view = makeNodeView(node);
     const std::string *matName = resolveMaterial(compiledRules, view);
@@ -916,7 +916,7 @@ bool TessellationJob::Impl::stepOneNode() {
     }
     processedNodes.fetch_add(1, std::memory_order_relaxed);
 
-    const ir::semantic::Node &semNode = scene->nodes.at(semId);
+    const ir::expanded::Node &semNode = scene->nodes.at(semId);
 
     // ── Create render::Node ──────────────────────────────────────────────────
     const ir::render::NodeId rnId = result.scene.nextNodeId();
@@ -990,7 +990,7 @@ bool TessellationJob::Impl::stepOneNode() {
     return tessellatePrimitiveNode(semNode, lv, shape, rn, rnId, params);
 }
 
-bool TessellationJob::Impl::tessellateMergeDescendants(const ir::semantic::Node &semNode,
+bool TessellationJob::Impl::tessellateMergeDescendants(const ir::expanded::Node &semNode,
                                                        ir::render::Node &rn,
                                                        ir::render::NodeId rnId,
                                                        const ResolvedTessellation &rule) {
@@ -1017,7 +1017,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::semantic::Node 
         if (!scene->nodes.contains(descId)) {
             continue;
         }
-        const ir::semantic::Node &descNode = scene->nodes.at(descId);
+        const ir::expanded::Node &descNode = scene->nodes.at(descId);
 
         for (const auto gcId : descNode.children) {
             if (scene->nodes.contains(gcId)) {
@@ -1097,7 +1097,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::semantic::Node 
 
     for (const auto &mergeDesc : mergeDescendants) {
         const auto descId = mergeDesc.nodeId;
-        const ir::semantic::Node &descNode = scene->nodes.at(descId);
+        const ir::expanded::Node &descNode = scene->nodes.at(descId);
         if (!scene->logVols.contains(descNode.logVolId)) {
             continue;
         }
@@ -1362,7 +1362,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::semantic::Node 
     return true;
 }
 
-bool TessellationJob::Impl::tessellateBooleanNode(const ir::semantic::Node &semNode,
+bool TessellationJob::Impl::tessellateBooleanNode(const ir::expanded::Node &semNode,
                                                   const ir::semantic::LogicalVolume &lv,
                                                   const ir::semantic::Shape &shape,
                                                   ir::render::Node &rn, ir::render::NodeId rnId,
@@ -1464,7 +1464,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const ir::semantic::Node &semN
     return true;
 }
 
-bool TessellationJob::Impl::tessellatePrimitiveNode(const ir::semantic::Node &semNode,
+bool TessellationJob::Impl::tessellatePrimitiveNode(const ir::expanded::Node &semNode,
                                                     const ir::semantic::LogicalVolume &lv,
                                                     const ir::semantic::Shape &shape,
                                                     ir::render::Node &rn, ir::render::NodeId rnId,
@@ -1512,7 +1512,7 @@ TessellationJob::~TessellationJob() = default;
 TessellationJob::TessellationJob(TessellationJob &&) noexcept = default;
 TessellationJob &TessellationJob::operator=(TessellationJob &&) noexcept = default;
 
-void TessellationJob::start(const config::NHConfig &config, const ir::semantic::Scene &scene) {
+void TessellationJob::start(const config::NHConfig &config, const ir::expanded::Scene &scene) {
     // std::atomic members make Impl non-copyable; replace the unique_ptr
     // wholesale to reset the job between runs.
     impl_ = std::make_unique<Impl>();
@@ -1661,7 +1661,7 @@ size_t TessellationJob::processedNodes() const {
 
 // ── TessellationPass::lower (run-to-completion shim) ─────────────────────────
 
-TessellationPassResult TessellationPass::lower(const ir::semantic::Scene &scene) const {
+TessellationPassResult TessellationPass::lower(const ir::expanded::Scene &scene) const {
     TessellationJob job;
     job.start(config_, scene);
     while (!job.advance(std::numeric_limits<uint64_t>::max())) {

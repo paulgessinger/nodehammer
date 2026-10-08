@@ -2,8 +2,8 @@
 
 #include <detail/file_io.hpp>
 #include <detail/zstd_io.hpp>
+#include <ir/expanded/scene.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
-#include <ir/semantic.hpp>
 #include <viewer/build_session.hpp>
 #include <viewer/project_fs.hpp>
 #include <viewer/zip_working_set.hpp>
@@ -93,7 +93,7 @@ const DirNode *findChild(std::span<const DirNode> children, std::string_view nam
 /// A minimal valid `.nhb.zst` geometry payload for the build-session harness.
 std::vector<std::byte> minimalNhbZstBytes() {
     using namespace nodehammer;
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
     auto matId = scene.nextMaterialId();
@@ -101,7 +101,7 @@ std::vector<std::byte> minimalNhbZstBytes() {
     auto lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
     auto nodeId = scene.nextNodeId();
-    ir::semantic::Node node;
+    ir::expanded::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;

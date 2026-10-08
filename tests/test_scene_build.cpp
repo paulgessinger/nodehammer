@@ -16,8 +16,8 @@ namespace {
 
 // A minimal scene: a root box at the origin plus one wide box straddling the
 // +x axis, so a [0°,90°] wedge cut turns it into a Boolean subtraction.
-ir::semantic::Scene makeStraddlingScene() {
-    ir::semantic::Scene scene;
+ir::expanded::Scene makeStraddlingScene() {
+    ir::expanded::Scene scene;
     const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
 
@@ -31,16 +31,16 @@ ir::semantic::Scene makeStraddlingScene() {
     const ir::semantic::LogVolId boxLv = scene.nextLogVolId();
     scene.logVols[boxLv] = {boxLv, "box_lv", boxShape, mat};
 
-    const ir::semantic::NodeId root = scene.nextNodeId();
-    ir::semantic::Node rootNode;
+    const ir::expanded::NodeId root = scene.nextNodeId();
+    ir::expanded::Node rootNode;
     rootNode.id = root;
     rootNode.name = "root";
     rootNode.logVolId = rootLv;
     scene.nodes[root] = rootNode;
     scene.rootId = root;
 
-    const ir::semantic::NodeId box = scene.nextNodeId();
-    ir::semantic::Node boxNode;
+    const ir::expanded::NodeId box = scene.nextNodeId();
+    ir::expanded::Node boxNode;
     boxNode.id = box;
     boxNode.name = "straddle";
     boxNode.logVolId = boxLv;
@@ -53,7 +53,7 @@ ir::semantic::Scene makeStraddlingScene() {
     return scene;
 }
 
-bool hasBooleanSubtraction(const ir::semantic::Scene &scene) {
+bool hasBooleanSubtraction(const ir::expanded::Scene &scene) {
     for (const auto &[id, shape] : scene.shapes) {
         (void)id;
         if (std::holds_alternative<ir::semantic::BooleanSubtraction>(shape.data)) {

@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <diagnostics.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 #include <tessellation/boolean_tessellator.hpp>
 #include <tessellation/primitive_tessellator.hpp>
 
@@ -69,7 +69,7 @@ TEST_CASE("boolean tessellator: large full hollow pgon is manifold",
 // the wedge construction would instead clear the -x/-y quadrant.
 TEST_CASE("boolean tessellator: partial tube subtraction clears the named sector",
           "[tessellation][boolean][manifold]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     const ir::semantic::ShapeId boxId = scene.nextShapeId();
     scene.shapes[boxId] = {boxId, ir::semantic::BoxShape{4.0, 4.0, 1.0}};
     const ir::semantic::ShapeId wedgeId = scene.nextShapeId();

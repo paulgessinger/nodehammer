@@ -329,6 +329,9 @@ void from_json(const nlohmann::json &j, LogicalVolume &lv) {
     }
 }
 
+} // namespace nodehammer::ir::semantic
+
+namespace nodehammer::ir::expanded {
 void to_json(nlohmann::json &j, const Node &n) {
     j = {{"id", n.id}, {"name", n.name}, {"logVolId", n.logVolId}};
     dmat4ToJson(j, "locRot", "locTrl", n.localTransform);
@@ -440,4 +443,4 @@ void to_json(nlohmann::json &j, const Scene &sc) {
     }
 }
 
-} // namespace nodehammer::ir::semantic
+} // namespace nodehammer::ir::expanded

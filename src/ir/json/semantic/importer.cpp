@@ -19,7 +19,7 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
     try {
         auto jsonStr = detail::zstd_io::readJsonFromFile(path);
         auto j = nlohmann::json::parse(jsonStr);
-        result.scene = j.get<semantic::Scene>();
+        result.scene = j.get<expanded::Scene>();
         result.scene.computeWorldTransforms();
         result.scene.computeOriginalPaths();
     } catch (const Error &) {

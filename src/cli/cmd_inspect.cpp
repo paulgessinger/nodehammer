@@ -5,7 +5,7 @@
 #include <CLI/CLI.hpp>
 #include <detail/markup.hpp>
 #include <detail/overloaded.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 #include <map>
 #include <nlohmann/json.hpp>
 #include <print>
@@ -68,7 +68,7 @@ std::string shapeTypeName(const nodehammer::ir::semantic::Shape &shape) {
 }
 
 /// Shape-type histogram, keyed by the same names the text summary prints.
-std::map<std::string, int> shapeHistogram(const nodehammer::ir::semantic::Scene &scene) {
+std::map<std::string, int> shapeHistogram(const nodehammer::ir::expanded::Scene &scene) {
     std::map<std::string, int> counts;
     for (const auto &[id, shape] : scene.shapes) {
         counts[shapeTypeName(shape)]++;
@@ -151,14 +151,14 @@ nlohmann::json summaryJson(const nodehammer::ir::ImportResult &result,
 
 // ── Tree ───────────────────────────���───────────────────────────���─────────────
 
-void printTree(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
+void printTree(const nodehammer::ir::expanded::Scene &scene, int maxDepth,
                const std::string &filter, const nodehammer::detail::Console &con) {
     if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
         return;
     }
 
     struct Entry {
-        nodehammer::ir::semantic::NodeId id;
+        nodehammer::ir::expanded::NodeId id;
         int depth;
         std::string prefix; // tree-drawing prefix
         bool isLast;
@@ -257,14 +257,14 @@ void printTree(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
 /// and greps this; nesting would make every such question a recursive descent,
 /// and the tree lines the text view draws are the only thing that needed the
 /// shape in the first place. The parent is recoverable from the path.
-nlohmann::json treeJson(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
+nlohmann::json treeJson(const nodehammer::ir::expanded::Scene &scene, int maxDepth,
                         const std::string &filter) {
     nlohmann::json nodes = nlohmann::json::array();
     int shown = 0;
     int filtered = 0;
 
     struct Entry {
-        nodehammer::ir::semantic::NodeId id;
+        nodehammer::ir::expanded::NodeId id;
         int depth;
     };
     std::vector<Entry> stack;
@@ -319,7 +319,7 @@ nlohmann::json treeJson(const nodehammer::ir::semantic::Scene &scene, int maxDep
 
 // ── Tags ──────────��───────────────────────────────���──────────────────────────
 
-void printTags(const nodehammer::ir::semantic::Scene &scene,
+void printTags(const nodehammer::ir::expanded::Scene &scene,
                const nodehammer::detail::Console &con) {
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
@@ -366,7 +366,7 @@ void printTags(const nodehammer::ir::semantic::Scene &scene,
     }
 }
 
-nlohmann::json tagsJson(const nodehammer::ir::semantic::Scene &scene) {
+nlohmann::json tagsJson(const nodehammer::ir::expanded::Scene &scene) {
     std::map<std::string, std::set<std::string>> tagValues;
     int nodesWithTags = 0;
     for (const auto &[id, node] : scene.nodes) {

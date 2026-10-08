@@ -15,7 +15,7 @@ std::vector<std::string> SemanticFlatbufferExporter::supportedExtensions() const
     return {"nhb", "nhb.zst"};
 }
 
-void SemanticFlatbufferExporter::write(const semantic::Scene &scene,
+void SemanticFlatbufferExporter::write(const expanded::Scene &scene,
                                        const std::filesystem::path &path,
                                        [[maybe_unused]] const SemanticExportConfig &config) const {
     try {

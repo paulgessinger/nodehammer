@@ -2,8 +2,8 @@
 
 #include <detail/file_io.hpp>
 #include <detail/zstd_io.hpp>
+#include <ir/expanded/scene.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
-#include <ir/semantic.hpp>
 #include <viewer/bag_project_fs.hpp>
 #include <viewer/build_session.hpp>
 
@@ -28,8 +28,8 @@ namespace {
 
 constexpr int kPollBudget = 100;
 
-ir::semantic::Scene makeMinimalScene() {
-    ir::semantic::Scene scene;
+ir::expanded::Scene makeMinimalScene() {
+    ir::expanded::Scene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
@@ -41,7 +41,7 @@ ir::semantic::Scene makeMinimalScene() {
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
 
     auto nodeId = scene.nextNodeId();
-    ir::semantic::Node node;
+    ir::expanded::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;

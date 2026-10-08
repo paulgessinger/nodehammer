@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 #include <tessellation/tessellator.hpp>
 
 #include <manifold/manifold.h>
@@ -28,7 +28,7 @@ meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::strin
 ///
 /// Returns an empty TessellationOutput (with diagnostics) on failure.
 [[nodiscard]] TessellationOutput tessellateBooleanShape(const ir::semantic::ShapeVariant &shape,
-                                                        const ir::semantic::Scene &scene,
+                                                        const ir::expanded::Scene &scene,
                                                         const ITessellator &primitiveTessellator,
                                                         const TessellationParams &params);
 

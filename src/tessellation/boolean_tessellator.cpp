@@ -270,7 +270,7 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::semantic::Sha
 /// For primitives: tries Manifold built-in, falls back to tessellator.
 /// For booleans: recurses into operands.
 std::optional<manifold::Manifold> resolveAndTessellate(ir::semantic::ShapeId shapeId,
-                                                       const ir::semantic::Scene &scene,
+                                                       const ir::expanded::Scene &scene,
                                                        const ITessellator &tessellator,
                                                        const TessellationParams &params,
                                                        DiagnosticList &diags, int depth) {
@@ -367,7 +367,7 @@ TessellationOutput convexHull(const std::vector<glm::vec3> &points) {
 }
 
 TessellationOutput tessellateBooleanShape(const ir::semantic::ShapeVariant &shape,
-                                          const ir::semantic::Scene &scene,
+                                          const ir::expanded::Scene &scene,
                                           const ITessellator &primitiveTessellator,
                                           const TessellationParams &params) {
     TessellationOutput result;

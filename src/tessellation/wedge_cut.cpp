@@ -146,10 +146,10 @@ Aabb transformAabb(const Aabb &a, const glm::dmat4 &m) {
     return out;
 }
 
-Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::Scene &scene,
+Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::expanded::Scene &scene,
                int depth);
 
-Aabb localAabbById(ir::semantic::ShapeId id, const ir::semantic::Scene &scene, int depth) {
+Aabb localAabbById(ir::semantic::ShapeId id, const ir::expanded::Scene &scene, int depth) {
     auto it = scene.shapes.find(id);
     if (it == scene.shapes.end()) {
         return Aabb{};
@@ -157,7 +157,7 @@ Aabb localAabbById(ir::semantic::ShapeId id, const ir::semantic::Scene &scene, i
     return localAabb(it->second.data, scene, depth);
 }
 
-Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::Scene &scene,
+Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::expanded::Scene &scene,
                int depth) {
     if (depth > kMaxBoolDepth) {
         return Aabb{};
@@ -307,7 +307,7 @@ struct CutKeyHash {
 struct WedgeCutJob::Impl {
     enum class Phase : std::uint8_t { Idle, Bounds, Classify, Prune };
 
-    ir::semantic::Scene *scene{nullptr};
+    ir::expanded::Scene *scene{nullptr};
 
     double startRad{0.0};
     double endRad{0.0};
@@ -318,7 +318,7 @@ struct WedgeCutJob::Impl {
     // node *values* and insert into the shapes/logVols maps (never scene.nodes),
     // so iterating this id list across advance() calls stays valid. Prune is the
     // only phase that erases nodes, and it runs after the snapshot is consumed.
-    std::vector<ir::semantic::NodeId> nodeIds;
+    std::vector<ir::expanded::NodeId> nodeIds;
     std::size_t idx{0};
     Phase phase{Phase::Idle};
     bool started{false};
@@ -341,7 +341,7 @@ struct WedgeCutJob::Impl {
     // Per-node "produces its own geometry" flag (kept or cut), used by Prune.
     // Emptied/skipped nodes produce no mesh; unclassified nodes default to "has
     // geometry" (never pruned).
-    ankerl::unordered_dense::map<ir::semantic::NodeId, bool> hasOwnGeom;
+    ankerl::unordered_dense::map<ir::expanded::NodeId, bool> hasOwnGeom;
 
     WedgeCutStats stats;
     // Counters are atomic so the SceneBuildJob's native worker thread can bump
@@ -351,12 +351,12 @@ struct WedgeCutJob::Impl {
     std::atomic<std::size_t> processed{0};
 
     // ── Pass 1 (per node): grow the global radius/z bounds. ──────────────────
-    void stepBounds(ir::semantic::NodeId id) {
+    void stepBounds(ir::expanded::NodeId id) {
         const auto nit = scene->nodes.find(id);
         if (nit == scene->nodes.end()) {
             return;
         }
-        const ir::semantic::Node &node = nit->second;
+        const ir::expanded::Node &node = nit->second;
         const auto lvIt = scene->logVols.find(node.logVolId);
         if (lvIt == scene->logVols.end()) {
             return;
@@ -414,12 +414,12 @@ struct WedgeCutJob::Impl {
     // We only mutate scene.nodes values (logVolId) in place and *insert* into
     // scene.shapes / scene.logVols. Fields read from the (reference-returning)
     // maps are copied out before any insert that could rehash them.
-    void stepClassify(ir::semantic::NodeId id) {
+    void stepClassify(ir::expanded::NodeId id) {
         const auto nit = scene->nodes.find(id);
         if (nit == scene->nodes.end()) {
             return;
         }
-        ir::semantic::Node &node = nit->second;
+        ir::expanded::Node &node = nit->second;
         const auto lvIt = scene->logVols.find(node.logVolId);
         if (lvIt == scene->logVols.end()) {
             return;
@@ -480,8 +480,8 @@ struct WedgeCutJob::Impl {
         if (!scene->nodes.contains(scene->rootId)) {
             return;
         }
-        ankerl::unordered_dense::map<ir::semantic::NodeId, bool> subtreeGeom;
-        auto computeGeom = [&](auto &&self, ir::semantic::NodeId nid) -> bool {
+        ankerl::unordered_dense::map<ir::expanded::NodeId, bool> subtreeGeom;
+        auto computeGeom = [&](auto &&self, ir::expanded::NodeId nid) -> bool {
             const auto it = scene->nodes.find(nid);
             if (it == scene->nodes.end()) {
                 return false;
@@ -499,7 +499,7 @@ struct WedgeCutJob::Impl {
 
         // Collect maximal empty subtree roots: an empty node whose parent keeps
         // geometry. (The root itself is never removed.)
-        std::vector<ir::semantic::NodeId> removalRoots;
+        std::vector<ir::expanded::NodeId> removalRoots;
         for (const auto &[id, geom] : subtreeGeom) {
             if (geom || id == scene->rootId) {
                 continue;
@@ -528,7 +528,7 @@ struct WedgeCutJob::Impl {
                 }
             }
             // Erase the whole subtree.
-            std::vector<ir::semantic::NodeId> stack{rootOfEmpty};
+            std::vector<ir::expanded::NodeId> stack{rootOfEmpty};
             while (!stack.empty()) {
                 const auto cur = stack.back();
                 stack.pop_back();
@@ -551,7 +551,7 @@ WedgeCutJob::~WedgeCutJob() = default;
 WedgeCutJob::WedgeCutJob(WedgeCutJob &&) noexcept = default;
 WedgeCutJob &WedgeCutJob::operator=(WedgeCutJob &&) noexcept = default;
 
-void WedgeCutJob::start(ir::semantic::Scene &scene, const WedgeCutParams &params) {
+void WedgeCutJob::start(ir::expanded::Scene &scene, const WedgeCutParams &params) {
     // std::atomic members make Impl non-assignable; replace the unique_ptr
     // wholesale to reset the job between runs.
     impl_ = std::make_unique<Impl>();
@@ -654,7 +654,7 @@ std::size_t WedgeCutJob::processedPlacements() const {
 
 // ── applyWedgeCut (run-to-completion shim) ────────────────────────────────────
 
-WedgeCutStats applyWedgeCut(ir::semantic::Scene &scene, const WedgeCutParams &params) {
+WedgeCutStats applyWedgeCut(ir::expanded::Scene &scene, const WedgeCutParams &params) {
     WedgeCutJob job;
     job.start(scene, params);
     while (!job.advance(std::numeric_limits<std::uint64_t>::max())) {
