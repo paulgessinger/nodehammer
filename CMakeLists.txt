@@ -245,7 +245,9 @@ set(NH_CORE_SOURCES
     src/ir/json/semantic/importer.cpp
     src/ir/fb/render/flatbuffer.cpp
     src/selection/predicate.cpp
+    src/selection/occurrence_selector.cpp
     src/selection/selector.cpp
+    src/selection/shared_scene.cpp
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
     src/tessellation/wedge_cut.cpp
@@ -882,6 +884,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         src/api/build.cpp
         src/scene_build.cpp
         src/selection/selector.cpp
+        src/selection/shared_scene.cpp
         src/cli/cmd_convert.cpp
         PROPERTIES COMPILE_OPTIONS "-Wno-maybe-uninitialized"
     )

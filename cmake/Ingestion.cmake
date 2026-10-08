@@ -16,6 +16,9 @@ set(NH_INGEST_SOURCES
     src/api/semantic_scene.cpp
     src/ir/semantic.cpp
     src/ir/expanded/scene.cpp
+    src/ir/semantic/scene.cpp
+    src/ir/expanded/adapt.cpp
+    src/ir/expanded/conversion.cpp
     src/ir/fb/semantic/flatbuffer.cpp
     src/ir/fb/semantic/importer.cpp
 )

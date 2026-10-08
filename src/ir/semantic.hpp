@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <numbers>
 #include <optional>
 #include <queue>
@@ -235,6 +236,51 @@ struct GeometryCatalogs {
     uint64_t nextLogVolId_{1};
     uint64_t nextShapeId_{1};
     uint64_t nextMaterialId_{1};
+};
+
+// An identity in one immutable prototype graph: daughter indices from the root.
+// Unlike a display path, this also distinguishes siblings with identical names.
+using OccurrenceId = std::vector<std::size_t>;
+using OccurrenceTags = std::map<std::string, std::string>;
+
+class OccurrenceTree;
+struct Occurrence;
+
+using PlacementKey = std::pair<semantic::LogVolId, std::size_t>;
+
+// Tags are interned explicitly; metadata maps reference zero-based tagSets entries.
+// All identity keys are source daughter indices, never display-name strings.
+struct Metadata {
+    std::vector<OccurrenceTags> tagSets;
+    std::map<semantic::LogVolId, uint64_t> volumeTags;
+    std::map<PlacementKey, uint64_t> placementTags;
+    std::map<OccurrenceId, uint64_t> occurrenceTags;
+    std::map<OccurrenceId, std::string> displayNames;
+    std::map<OccurrenceId, std::string> pathNames;
+    std::map<OccurrenceId, std::string> originalPaths;
+    std::map<OccurrenceId, DegradationFlags> degradation;
+    std::string defaultSourceSystem;
+    std::map<OccurrenceId, std::string> sourceSystems;
+};
+
+// Canonical owning, pointer-free semantic scene. GeometryCatalogs cannot contain expanded nodes.
+struct Scene : GeometryCatalogs {
+    semantic::DaughterPlacement root;
+    Metadata metadata;
+
+    // Throws on invalid references, source/shape cycles, non-finite transforms,
+    // invalid metadata identities. Returns physical occurrence count
+    // without enumerating occurrences. Zero-based tag-set IDs stay unchanged.
+    [[nodiscard]] uint64_t validate() const;
+    [[nodiscard]] uint64_t nodeCount() const {
+        return logVols.empty() && root.logVolId.value == 0 ? 0 : validate();
+    }
+    std::size_t deduplicateLogVols();
+    void collectGarbage();
+
+    // Geometry must outlive the tree and all selection views, and stay immutable.
+    [[nodiscard]] std::unique_ptr<semantic::OccurrenceTree>
+    makeTree(std::size_t cacheCapacity = 128) const;
 };
 
 } // namespace nodehammer::ir::semantic
