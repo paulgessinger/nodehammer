@@ -1,7 +1,7 @@
 #include <nodehammer/nhb.hpp>
 
 #include <api/handles_semantic.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 
 #include <cmath>
 #include <fstream>
@@ -17,7 +17,7 @@ void require(bool value, const char *message) {
 int main(int argc, char **argv) {
     try {
         namespace sem = nodehammer::ir::semantic;
-        sem::Scene scene;
+        nodehammer::ir::expanded::Scene scene;
         const auto mat = scene.nextMaterialId();
         scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
         const auto shape = scene.nextShapeId();
@@ -29,7 +29,7 @@ int main(int argc, char **argv) {
         const auto child = scene.nextNodeId();
         const auto leaf = scene.nextNodeId();
         for (const auto id : {root, child, leaf}) {
-            sem::Node node;
+            nodehammer::ir::expanded::Node node;
             node.id = id;
             node.logVolId = lv;
             scene.nodes[id] = node;

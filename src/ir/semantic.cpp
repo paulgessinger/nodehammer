@@ -224,54 +224,19 @@ bool ShapeEqual::operator()(const ShapeVariant &a, const ShapeVariant &b) const 
 
 } // namespace
 
-void Scene::reseedIdCounters() {
+void GeometryCatalogs::reseedIdCounters() {
     auto maxKey = [](const auto &map, uint64_t seed) {
         for (const auto &[id, _] : map) {
             seed = std::max(seed, id.value);
         }
         return seed;
     };
-    nextNodeId_ = maxKey(nodes, nextNodeId_ - 1) + 1;
     nextLogVolId_ = maxKey(logVols, nextLogVolId_ - 1) + 1;
     nextShapeId_ = maxKey(shapes, nextShapeId_ - 1) + 1;
     nextMaterialId_ = maxKey(materials, nextMaterialId_ - 1) + 1;
 }
 
-void Scene::computeWorldTransforms() {
-    if (nodes.empty() || !nodes.contains(rootId)) {
-        return;
-    }
-    nodes.at(rootId).worldTransform = nodes.at(rootId).localTransform;
-    visitBFS([this](const Node &node) {
-        for (const auto childId : node.children) {
-            // Skip rather than throw on a dangling child id, matching visitBFS.
-            const auto it = nodes.find(childId);
-            if (it == nodes.end()) {
-                continue;
-            }
-            it->second.worldTransform = node.worldTransform * it->second.localTransform;
-        }
-    });
-}
-
-void Scene::computeOriginalPaths() {
-    if (nodes.empty() || !nodes.contains(rootId)) {
-        return;
-    }
-    nodes.at(rootId).originalPath = "/" + nodes.at(rootId).name;
-    visitBFS([this](const Node &node) {
-        for (const auto childId : node.children) {
-            // Skip rather than throw on a dangling child id, matching visitBFS.
-            const auto it = nodes.find(childId);
-            if (it == nodes.end()) {
-                continue;
-            }
-            it->second.originalPath = node.originalPath + "/" + it->second.name;
-        }
-    });
-}
-
-std::size_t Scene::deduplicateShapes() {
+std::size_t GeometryCatalogs::deduplicateShapes() {
     const std::size_t before = shapes.size();
     if (before <= 1) {
         return 0;
@@ -339,22 +304,24 @@ std::size_t Scene::deduplicateShapes() {
     return before - shapes.size();
 }
 
-std::size_t Scene::deduplicateLogVols() {
+std::map<LogVolId, LogVolId> GeometryCatalogs::deduplicateVolumeDefinitions() {
     const std::size_t before = logVols.size();
     if (before <= 1) {
-        return 0;
+        return {};
     }
 
     // Key: own shape/material plus optional source-level daughter placements.
     // Backends that do not populate daughters retain the old (shapeId, materialId)
     // behavior. Backends that do populate daughters avoid collapsing containers with
-    // different prototype subtrees.
+    // different prototype subtrees, including placement names used in source paths.
     struct DaughterKey {
+        std::string name;
         uint64_t logVol;
         glm::dmat4 localTransform;
 
         bool operator==(const DaughterKey &o) const {
-            return logVol == o.logVol && matEqual(localTransform, o.localTransform);
+            return name == o.name && logVol == o.logVol &&
+                   matEqual(localTransform, o.localTransform);
         }
     };
     struct Key {
@@ -372,6 +339,7 @@ std::size_t Scene::deduplicateLogVols() {
                 hashCombine(std::hash<uint64_t>{}(k.shape), std::hash<uint64_t>{}(k.material));
             h = hashCombine(h, std::hash<std::size_t>{}(k.daughters.size()));
             for (const auto &d : k.daughters) {
+                h = hashCombine(h, std::hash<std::string>{}(d.name));
                 h = hashCombine(h, std::hash<uint64_t>{}(d.logVol));
                 h = hashCombine(h, hashMat(d.localTransform));
             }
@@ -380,7 +348,7 @@ std::size_t Scene::deduplicateLogVols() {
     };
 
     std::unordered_map<Key, LogVolId, KeyHash> canonical;
-    std::unordered_map<LogVolId, LogVolId> remap;
+    std::map<LogVolId, LogVolId> remap;
 
     enum class VisitState { Visiting, Done };
     std::unordered_map<LogVolId, VisitState> states;
@@ -407,7 +375,8 @@ std::size_t Scene::deduplicateLogVols() {
         key.daughters.reserve(lv.daughters.size());
         for (const auto &daughter : lv.daughters) {
             const auto canonicalDaughter = self(self, daughter.logVolId);
-            key.daughters.push_back({canonicalDaughter.value, daughter.localTransform});
+            key.daughters.push_back(
+                {daughter.name, canonicalDaughter.value, daughter.localTransform});
         }
 
         const auto [it, inserted] = canonical.try_emplace(std::move(key), id);
@@ -430,14 +399,7 @@ std::size_t Scene::deduplicateLogVols() {
     }
 
     if (remap.empty()) {
-        return 0;
-    }
-
-    // Update all nodes to use canonical logVolIds.
-    for (auto &[_, node] : nodes) {
-        if (auto it = remap.find(node.logVolId); it != remap.end()) {
-            node.logVolId = it->second;
-        }
+        return {};
     }
 
     // Update prototype daughter references as well.
@@ -452,10 +414,10 @@ std::size_t Scene::deduplicateLogVols() {
         logVols.erase(dupId);
     }
 
-    return before - logVols.size();
+    return remap;
 }
 
-std::size_t Scene::deduplicateMaterials() {
+std::size_t GeometryCatalogs::deduplicateMaterials() {
     const std::size_t before = materials.size();
     if (before <= 1) {
         return 0;

@@ -392,18 +392,18 @@ semantic::ShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *
 // ── Layer 1: Type conversion ────────────────────────────────────────────────
 
 flatbuffers::Offset<fbs::SemanticScene>
-semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semantic::Scene &scene) {
+semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const expanded::Scene &scene) {
     TransformPoolBuild transformPool;
 
     // Collect nodes into a stable order (sorted by ID for reproducibility).
-    std::vector<const semantic::Node *> orderedNodes;
+    std::vector<const expanded::Node *> orderedNodes;
     orderedNodes.reserve(scene.nodes.size());
     for (const auto &[id, node] : scene.nodes) {
         (void)id;
         orderedNodes.push_back(&node);
     }
     std::sort(orderedNodes.begin(), orderedNodes.end(),
-              [](const semantic::Node *a, const semantic::Node *b) { return a->id < b->id; });
+              [](const expanded::Node *a, const expanded::Node *b) { return a->id < b->id; });
     const auto N = orderedNodes.size();
 
     // Remap logical volume IDs to a dense local range [1..M].
@@ -519,7 +519,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semanti
     std::vector<fbs::TagRef> tagRefs;
     std::vector<uint8_t> degradation(N);
     struct NodeRowData {
-        const semantic::Node *node{nullptr};
+        const expanded::Node *node{nullptr};
         uint32_t depth{0};
         uint64_t parentOldId{0};
         uint32_t logVolIndex{0};
@@ -590,14 +590,14 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semanti
     uint32_t maxNodeLogVolId = 0;
     uint32_t maxNodeNameIndex = 0;
     uint32_t maxNodeTransformIndex = 0;
-    std::unordered_map<semantic::NodeId, const semantic::Node *> nodeById;
+    std::unordered_map<expanded::NodeId, const expanded::Node *> nodeById;
     nodeById.reserve(orderedNodes.size());
     for (const auto *node : orderedNodes) {
         nodeById.emplace(node->id, node);
     }
-    std::unordered_map<semantic::NodeId, uint32_t> nodeDepth;
+    std::unordered_map<expanded::NodeId, uint32_t> nodeDepth;
     nodeDepth.reserve(orderedNodes.size());
-    auto computeDepth = [&](const semantic::Node *start) -> uint32_t {
+    auto computeDepth = [&](const expanded::Node *start) -> uint32_t {
         if (!start) {
             return 0;
         }
@@ -605,9 +605,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semanti
             return it->second;
         }
 
-        std::vector<const semantic::Node *> chain;
+        std::vector<const expanded::Node *> chain;
         chain.reserve(16);
-        const semantic::Node *cur = start;
+        const expanded::Node *cur = start;
         while (cur) {
             if (const auto it = nodeDepth.find(cur->id); it != nodeDepth.end()) {
                 uint32_t d = it->second;
@@ -724,7 +724,7 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semanti
         return a.node->id.value < b.node->id.value;
     });
 
-    std::unordered_map<semantic::NodeId, uint32_t> nodeIdRemap;
+    std::unordered_map<expanded::NodeId, uint32_t> nodeIdRemap;
     nodeIdRemap.reserve(N);
     for (std::size_t i = 0; i < N; ++i) {
         nodeIdRemap.emplace(nodeRows[i].node->id, static_cast<uint32_t>(i + 1));
@@ -849,9 +849,9 @@ semanticSceneToFlatBuffer(flatbuffers::FlatBufferBuilder &builder, const semanti
                                     nodeColumns, logVolsVec, shapesVec, matsVec);
 }
 
-semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
-    semantic::Scene scene;
-    scene.rootId = semantic::NodeId{fb.root_id()};
+expanded::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
+    expanded::Scene scene;
+    scene.rootId = expanded::NodeId{fb.root_id()};
     if (fb.source_file()) {
         scene.sourceFile = fb.source_file()->str();
     }
@@ -931,7 +931,7 @@ semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
         const auto *ssTable = nc->source_system_table();
         const auto *ssIndices = nc->source_system_indices();
         const auto *degrad = nc->degradation();
-        std::vector<semantic::NodeId> nodeOrder;
+        std::vector<expanded::NodeId> nodeOrder;
 
         std::size_t N = 0;
         if (parentIdsVec) {
@@ -954,8 +954,8 @@ semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
             nodeOrder.reserve(N);
             flatbuffers::uoffset_t tagCursor = 0;
             for (flatbuffers::uoffset_t i = 0; i < N; ++i) {
-                semantic::Node node;
-                node.id = semantic::NodeId{static_cast<uint64_t>(i) + 1u};
+                expanded::Node node;
+                node.id = expanded::NodeId{static_cast<uint64_t>(i) + 1u};
                 nodeOrder.push_back(node.id);
 
                 // Name from string table
@@ -1010,7 +1010,7 @@ semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
                 if (parentIdsVec) {
                     auto pid = parentIdsVec->Get(i);
                     if (pid != 0) {
-                        node.parentId = semantic::NodeId{pid};
+                        node.parentId = expanded::NodeId{pid};
                     }
                 }
 
@@ -1070,7 +1070,7 @@ semantic::Scene semanticSceneFromFlatBuffer(const fbs::SemanticScene &fb) {
     return scene;
 }
 
-SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const semantic::Scene &scene) {
+SemanticFlatbufferSizeReport semanticFlatbufferSizeReport(const expanded::Scene &scene) {
     SemanticFlatbufferSizeReport report;
     report.nodeCount = scene.nodes.size();
     report.logicalVolumeCount = scene.logVols.size();
@@ -1225,7 +1225,7 @@ std::string formatSemanticFlatbufferSizeReport(const SemanticFlatbufferSizeRepor
 
 // ── Layer 2: Byte buffer convenience ────────────────────────────────────────
 
-std::vector<std::byte> semanticSceneToBytes(const semantic::Scene &scene) {
+std::vector<std::byte> semanticSceneToBytes(const expanded::Scene &scene) {
     flatbuffers::FlatBufferBuilder builder{1024};
     auto root = semanticSceneToFlatBuffer(builder, scene);
     fbs::FinishSemanticSceneBuffer(builder, root);
@@ -1235,7 +1235,7 @@ std::vector<std::byte> semanticSceneToBytes(const semantic::Scene &scene) {
     return std::vector<std::byte>(span.begin(), span.end());
 }
 
-semantic::Scene semanticSceneFromBytes(std::span<const std::byte> buf) {
+expanded::Scene semanticSceneFromBytes(std::span<const std::byte> buf) {
     const auto *ptr = reinterpret_cast<const uint8_t *>(buf.data());
     flatbuffers::Verifier verifier{ptr, buf.size()};
     if (!fbs::VerifySemanticSceneBuffer(verifier)) {

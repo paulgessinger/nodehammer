@@ -1,8 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/scene.hpp>
 #include <ir/provenance.hpp>
-#include <ir/semantic.hpp>
 #include <ir/semantic/importer.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 
@@ -50,7 +50,7 @@ TEST_CASE("SyntheticSceneBuilder: buildNestedBoxes -- all nodes reachable from r
           "[import][synthetic]") {
     auto scene = nodehammer::ir::SyntheticSceneBuilder::buildNestedBoxes();
 
-    std::unordered_set<nodehammer::ir::semantic::NodeId> visited;
+    std::unordered_set<nodehammer::ir::expanded::NodeId> visited;
     scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == scene.nodes.size());
 }

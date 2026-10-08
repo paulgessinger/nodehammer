@@ -21,15 +21,15 @@ using namespace nodehammer::config;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-static ir::semantic::Scene makeSingleBoxScene() { return SyntheticSceneBuilder::buildSingleBox(); }
+static ir::expanded::Scene makeSingleBoxScene() { return SyntheticSceneBuilder::buildSingleBox(); }
 
-static ir::semantic::Scene makeNestedBoxScene() {
+static ir::expanded::Scene makeNestedBoxScene() {
     return SyntheticSceneBuilder::buildNestedBoxes();
 }
 
 // Build a scene with a single BooleanUnion node.
-static ir::semantic::Scene makeBooleanScene() {
-    ir::semantic::Scene scene;
+static ir::expanded::Scene makeBooleanScene() {
+    ir::expanded::Scene scene;
 
     ir::semantic::MaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
@@ -48,8 +48,8 @@ static ir::semantic::Scene makeBooleanScene() {
     ir::semantic::LogVolId lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "world_lv", boolId, matId};
 
-    ir::semantic::NodeId rootId = scene.nextNodeId();
-    ir::semantic::Node root;
+    ir::expanded::NodeId rootId = scene.nextNodeId();
+    ir::expanded::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = lvId;
@@ -61,8 +61,8 @@ static ir::semantic::Scene makeBooleanScene() {
 }
 
 // Build a scene with an UnknownShape node.
-static ir::semantic::Scene makeUnknownShapeScene() {
-    ir::semantic::Scene scene;
+static ir::expanded::Scene makeUnknownShapeScene() {
+    ir::expanded::Scene scene;
 
     ir::semantic::MaterialId matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "vacuum", std::nullopt, 0.0};
@@ -73,8 +73,8 @@ static ir::semantic::Scene makeUnknownShapeScene() {
     ir::semantic::LogVolId lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "world_lv", shapeId, matId};
 
-    ir::semantic::NodeId rootId = scene.nextNodeId();
-    ir::semantic::Node root;
+    ir::expanded::NodeId rootId = scene.nextNodeId();
+    ir::expanded::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = lvId;
@@ -163,7 +163,7 @@ TEST_CASE("TessellationPass: named material rule applies to matching node",
 
 TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendant layout",
           "[tessellation][pass]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -189,9 +189,9 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
     scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
 
     auto addNode = [&](std::string name, ir::semantic::LogVolId lv,
-                       std::optional<ir::semantic::NodeId> parent, double z) {
+                       std::optional<ir::expanded::NodeId> parent, double z) {
         const auto id = scene.nextNodeId();
-        ir::semantic::Node node;
+        ir::expanded::Node node;
         node.id = id;
         node.name = std::move(name);
         node.logVolId = lv;
@@ -283,7 +283,7 @@ TEST_CASE("TessellationPass: merge_descendants cache respects mirrored descendan
 
 TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identity",
           "[tessellation][pass]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -309,9 +309,9 @@ TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identi
     scene.logVols[kaptonLv] = {kaptonLv, "kapton_lv", layerShape, kaptonMat};
 
     auto addNode = [&](std::string name, ir::semantic::LogVolId lv,
-                       std::optional<ir::semantic::NodeId> parent, double z) {
+                       std::optional<ir::expanded::NodeId> parent, double z) {
         const auto id = scene.nextNodeId();
-        ir::semantic::Node node;
+        ir::expanded::Node node;
         node.id = id;
         node.name = std::move(name);
         node.logVolId = lv;
@@ -372,7 +372,7 @@ TEST_CASE("TessellationPass: merge_descendants cache uses exact transform identi
 
 TEST_CASE("TessellationPass: merge_descendants cache can use source daughter prototypes",
           "[tessellation][pass]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     const auto vacuumMat = scene.nextMaterialId();
     scene.materials[vacuumMat] = {vacuumMat, "Vacuum", std::nullopt, 0.0};
@@ -406,9 +406,9 @@ TEST_CASE("TessellationPass: merge_descendants cache can use source daughter pro
         {{"silicon", siliconLv, siliconPlacement}, {"kapton", kaptonLv, kaptonPlacement}}};
 
     auto addNode = [&](std::string name, ir::semantic::LogVolId lv,
-                       std::optional<ir::semantic::NodeId> parent, double z) {
+                       std::optional<ir::expanded::NodeId> parent, double z) {
         const auto id = scene.nextNodeId();
-        ir::semantic::Node node;
+        ir::expanded::Node node;
         node.id = id;
         node.name = std::move(name);
         node.logVolId = lv;
@@ -473,7 +473,7 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
           "[tessellation][boolean]") {
     // Reproduces the ODD CarbonFiber support shape: a solid partial-phi tube
     // used as a boolean operand.
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     auto shapeId = scene.nextShapeId();
     ir::semantic::TubeShape tube;
     tube.rMin = 0.0;
@@ -516,7 +516,7 @@ TEST_CASE("BooleanTessellator: partial-phi tube produces manifold-compatible mes
 
 TEST_CASE("BooleanTessellator: full-phi tube subtraction produces geometry",
           "[tessellation][boolean]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     auto outerId = scene.nextShapeId();
     scene.shapes[outerId] = {outerId,
@@ -595,7 +595,7 @@ TEST_CASE("BooleanTessellator: ODD CarbonFoam Trd minus tube union reproducer",
     })";
 
     auto j = nlohmann::json::parse(kSceneJson);
-    ir::semantic::Scene scene = j.get<ir::semantic::Scene>();
+    ir::expanded::Scene scene = j.get<ir::expanded::Scene>();
 
     // Verify shapes loaded correctly.
     REQUIRE(scene.shapes.contains(ir::semantic::ShapeId{80}));
@@ -667,7 +667,7 @@ TEST_CASE("TessellationPass: UnknownShape emits error diagnostic", "[tessellatio
 TEST_CASE("TessellationPass: empty scene produces empty result", "[tessellation][pass]") {
     NHConfig cfg;
     TessellationPass pass{cfg};
-    ir::semantic::Scene empty;
+    ir::expanded::Scene empty;
     auto result = pass.lower(empty);
 
     REQUIRE(result.scene.nodes.empty());

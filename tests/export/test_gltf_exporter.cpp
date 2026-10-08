@@ -19,7 +19,7 @@ namespace {
 
 // Build a render::Scene from a synthetic single-box scene with a default config.
 nodehammer::ir::render::Scene buildBoxRenderScene() {
-    nodehammer::ir::semantic::Scene semScene =
+    nodehammer::ir::expanded::Scene semScene =
         nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
     nodehammer::config::NHConfig cfg;
     nodehammer::tessellation::TessellationPass pass{cfg};
@@ -102,7 +102,7 @@ TEST_CASE("GltfExporter: PBR material round-trip", "[export][gltf]") {
     const auto out = tmpPath("box_mat.glb");
 
     // Build scene with a specific material colour
-    nodehammer::ir::semantic::Scene semScene =
+    nodehammer::ir::expanded::Scene semScene =
         nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
     nodehammer::config::NHConfig cfg;
     nodehammer::config::MaterialDef md;

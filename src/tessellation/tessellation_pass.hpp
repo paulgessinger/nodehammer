@@ -2,8 +2,8 @@
 
 #include <config/config_ast.hpp>
 #include <diagnostics.hpp>
+#include <ir/expanded/scene.hpp>
 #include <ir/render.hpp>
-#include <ir/semantic.hpp>
 
 namespace nodehammer::tessellation {
 
@@ -12,9 +12,9 @@ struct TessellationPassResult {
     DiagnosticList diags;
 };
 
-/// Lowers a semantic::Scene to a render::Scene.
+/// Lowers a expanded::Scene to a render::Scene.
 ///
-/// For each reachable semantic::Node (BFS from root):
+/// For each reachable expanded::Node (BFS from root):
 ///   1. Creates a corresponding render::Node (preserving hierarchy and transforms).
 ///   2. Tessellates the node's shape using the first matching Rule with tessellation settings
 ///      (or defaults if none match).
@@ -31,7 +31,7 @@ class TessellationPass {
   public:
     explicit TessellationPass(const config::NHConfig &config);
 
-    [[nodiscard]] TessellationPassResult lower(const ir::semantic::Scene &scene) const;
+    [[nodiscard]] TessellationPassResult lower(const ir::expanded::Scene &scene) const;
 
   private:
     const config::NHConfig &config_;

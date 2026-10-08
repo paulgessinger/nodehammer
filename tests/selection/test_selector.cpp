@@ -17,7 +17,7 @@ using namespace nodehammer::selection;
 
 // Build a 3-level scene: root("world") → mid("tracker") → leaf("sensor")
 static auto makeThreeLevelScene() {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     ir::semantic::ShapeId shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{10, 10, 10}};
@@ -35,18 +35,18 @@ static auto makeThreeLevelScene() {
     ir::semantic::LogVolId trackerLv = makeLv("tracker_lv");
     ir::semantic::LogVolId sensorLv = makeLv("sensor_lv");
 
-    ir::semantic::NodeId rootId = scene.nextNodeId();
-    ir::semantic::NodeId trackerId = scene.nextNodeId();
-    ir::semantic::NodeId sensorId = scene.nextNodeId();
+    ir::expanded::NodeId rootId = scene.nextNodeId();
+    ir::expanded::NodeId trackerId = scene.nextNodeId();
+    ir::expanded::NodeId sensorId = scene.nextNodeId();
 
-    ir::semantic::Node root;
+    ir::expanded::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = worldLv;
     root.children = {trackerId};
     scene.nodes[rootId] = root;
 
-    ir::semantic::Node tracker;
+    ir::expanded::Node tracker;
     tracker.id = trackerId;
     tracker.name = "tracker";
     tracker.logVolId = trackerLv;
@@ -54,7 +54,7 @@ static auto makeThreeLevelScene() {
     tracker.children = {sensorId};
     scene.nodes[trackerId] = tracker;
 
-    ir::semantic::Node sensor;
+    ir::expanded::Node sensor;
     sensor.id = sensorId;
     sensor.name = "sensor";
     sensor.logVolId = sensorLv;
@@ -66,8 +66,8 @@ static auto makeThreeLevelScene() {
     scene.computeOriginalPaths();
 
     struct Result {
-        ir::semantic::Scene scene;
-        ir::semantic::NodeId rootId, trackerId, sensorId;
+        ir::expanded::Scene scene;
+        ir::expanded::NodeId rootId, trackerId, sensorId;
     };
     return Result{std::move(scene), rootId, trackerId, sensorId};
 }
@@ -309,7 +309,7 @@ TEST_CASE("SelectionEngine: prune produces structurally sound scene", "[selectio
     eng.prune(scene);
 
     // BFS from root should reach all remaining nodes.
-    std::unordered_set<ir::semantic::NodeId> visited;
+    std::unordered_set<ir::expanded::NodeId> visited;
     scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == scene.nodes.size());
 }
@@ -339,8 +339,8 @@ TEST_CASE("SelectionEngine: node unreachable from root is excluded from evaluati
 
     // Insert an orphan node that exists in scene.nodes but is not reachable
     // from root via any children list.
-    ir::semantic::NodeId orphanId = scene.nextNodeId();
-    ir::semantic::Node orphan;
+    ir::expanded::NodeId orphanId = scene.nextNodeId();
+    ir::expanded::Node orphan;
     orphan.id = orphanId;
     orphan.name = "orphan";
     orphan.logVolId = scene.nodes.at(rootId).logVolId; // reuse existing logVol
@@ -418,14 +418,14 @@ TEST_CASE("SelectionEngine: scope restricts which nodes a rule evaluates",
 
 // ── Hoist helpers ─────────────────────────────────────────────────────────────
 
-// Build a minimal semantic::Scene with given names and double-precision
+// Build a minimal expanded::Scene with given names and double-precision
 // translation-only local transforms. Returns node IDs in insertion order.
 // Parent chain: nodes[0] is root, nodes[i] is parent of nodes[i+1].
-static ir::semantic::Scene
+static ir::expanded::Scene
 makeLinearScene(const std::vector<std::string> &names,
                 const std::vector<glm::dvec3> &translations) // local translation per node
 {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     ir::semantic::ShapeId shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{1, 1, 1}};
@@ -434,12 +434,12 @@ makeLinearScene(const std::vector<std::string> &names,
     ir::semantic::LogVolId lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "lv", shapeId, matId};
 
-    std::vector<ir::semantic::NodeId> ids;
+    std::vector<ir::expanded::NodeId> ids;
     ids.reserve(names.size());
     for (std::size_t i = 0; i < names.size(); ++i) {
-        ir::semantic::NodeId id = scene.nextNodeId();
+        ir::expanded::NodeId id = scene.nextNodeId();
         ids.push_back(id);
-        ir::semantic::Node node;
+        ir::expanded::Node node;
         node.id = id;
         node.name = names[i];
         node.logVolId = lvId;
@@ -465,7 +465,7 @@ TEST_CASE("SelectionEngine hoist: orphan re-parented to nearest kept ancestor",
     // After hoist: C.parentId = A, C.localTransform = translate(8,0,0)
     auto scene =
         makeLinearScene({"root", "A", "B", "C"}, {{0, 0, 0}, {10, 0, 0}, {5, 0, 0}, {3, 0, 0}});
-    ir::semantic::NodeId aId, bId, cId;
+    ir::expanded::NodeId aId, bId, cId;
     for (const auto &[id, n] : scene.nodes) {
         if (n.name == "A")
             aId = id;
@@ -513,7 +513,7 @@ TEST_CASE("SelectionEngine hoist: no kept ancestor falls back to root",
     // world(B) = (8,0,0). After hoist: B.parentId = root, localTransform = translate(8,0,0)
     auto scene = makeLinearScene({"root", "A", "B"}, {{0, 0, 0}, {5, 0, 0}, {3, 0, 0}});
     auto rootId = scene.rootId;
-    ir::semantic::NodeId aId, bId;
+    ir::expanded::NodeId aId, bId;
     for (const auto &[id, n] : scene.nodes) {
         if (n.name == "A")
             aId = id;
@@ -552,7 +552,7 @@ TEST_CASE("SelectionEngine hoist: subtree of hoisted node is preserved",
     auto scene =
         makeLinearScene({"root", "A", "B", "C"}, {{0, 0, 0}, {5, 0, 0}, {3, 0, 0}, {2, 0, 0}});
     auto rootId = scene.rootId;
-    ir::semantic::NodeId aId, bId, cId;
+    ir::expanded::NodeId aId, bId, cId;
     for (const auto &[id, n] : scene.nodes) {
         if (n.name == "A")
             aId = id;
@@ -609,8 +609,8 @@ TEST_CASE("SelectionEngine hoist: no effect when all parents are kept",
 // expectations form a reference contract for a future lazy occurrence tree.
 namespace {
 struct RepeatedModules {
-    ir::semantic::Scene scene;
-    ir::semantic::NodeId world, left, right, leftModule, rightModule, leftSensor, rightSensor;
+    ir::expanded::Scene scene;
+    ir::expanded::NodeId world, left, right, leftModule, rightModule, leftSensor, rightSensor;
     ir::semantic::LogVolId moduleLv, sensorLv;
 };
 
@@ -643,8 +643,8 @@ RepeatedModules makeRepeatedModules() {
     scene.logVols.at(rightLv).daughters = {{"module", f.moduleLv, moduleTransform}};
     scene.logVols.at(f.moduleLv).daughters = {{"sensor", f.sensorLv, sensorTransform}};
     auto addNode = [&](const std::string &name, ir::semantic::LogVolId lv,
-                       std::optional<ir::semantic::NodeId> parent, const glm::dmat4 &transform) {
-        ir::semantic::Node node;
+                       std::optional<ir::expanded::NodeId> parent, const glm::dmat4 &transform) {
+        ir::expanded::Node node;
         node.id = scene.nextNodeId();
         node.name = name;
         node.logVolId = lv;
@@ -707,7 +707,7 @@ TEST_CASE("SelectionEngine repeated prototypes: exact paths distinguish occurren
     REQUIRE_FALSE(engine.prune(f.scene).hasErrors());
     REQUIRE(f.scene.nodes.at(f.leftModule).children.empty());
     REQUIRE(f.scene.nodes.at(f.rightModule).children ==
-            std::vector<ir::semantic::NodeId>{f.rightSensor});
+            std::vector<ir::expanded::NodeId>{f.rightSensor});
     REQUIRE(f.scene.nodes.at(f.rightSensor).originalPath == "/world/right/module/sensor");
     requireSourceModuleIntact(f);
 }

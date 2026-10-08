@@ -2,7 +2,7 @@
 
 #include <config/config_ast.hpp>
 #include <diagnostics.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 #include <tessellation/tessellation_pass.hpp>
 #include <tessellation/wedge_cut.hpp>
 
@@ -27,13 +27,13 @@ namespace {
 //   C  @ ( 10, 10)  → emptied  (inside removed quadrant)
 //   D  @ ( 10,  0)  → straddle (crosses the +x / 0° boundary)
 struct TestScene {
-    ir::semantic::Scene scene;
-    ir::semantic::NodeId a, b, c, d, root;
+    ir::expanded::Scene scene;
+    ir::expanded::NodeId a, b, c, d, root;
 };
 
 TestScene makeScene() {
     TestScene ts;
-    ir::semantic::Scene &scene = ts.scene;
+    ir::expanded::Scene &scene = ts.scene;
 
     const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
@@ -54,8 +54,8 @@ TestScene makeScene() {
     scene.logVols[worldLv] = {worldLv, "world_lv", worldShape, mat};
 
     auto addNode = [&](const char *name, ir::semantic::LogVolId lv, glm::dvec3 pos) {
-        const ir::semantic::NodeId id = scene.nextNodeId();
-        ir::semantic::Node n;
+        const ir::expanded::NodeId id = scene.nextNodeId();
+        ir::expanded::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = lv;
@@ -83,7 +83,7 @@ TestScene makeScene() {
     return ts;
 }
 
-const ir::render::Node *findBySemId(const ir::render::Scene &rs, ir::semantic::NodeId sid) {
+const ir::render::Node *findBySemId(const ir::render::Scene &rs, ir::expanded::NodeId sid) {
     for (const auto &[id, rn] : rs.nodes) {
         (void)id;
         if (rn.semanticNodeId == sid) {
@@ -189,7 +189,7 @@ TEST_CASE("wedge cut: a narrow sector inside a wide AABB still cuts", "[tessella
     // no corner inside the removed sector and wrongly classified the box as
     // fully kept (so it was never cut); the angular-arc test classifies it as
     // straddling, as it must.
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     // World AABB x∈[9,11], y∈[-8,8] → angular span ≈ ±42°, corners near ±36/±42°,
@@ -199,8 +199,8 @@ TEST_CASE("wedge cut: a narrow sector inside a wide AABB still cuts", "[tessella
     const ir::semantic::LogVolId lv = scene.nextLogVolId();
     scene.logVols[lv] = {lv, "wide", box, mat};
 
-    const ir::semantic::NodeId root = scene.nextNodeId();
-    ir::semantic::Node n;
+    const ir::expanded::NodeId root = scene.nextNodeId();
+    ir::expanded::Node n;
     n.id = root;
     n.name = "wide";
     n.logVolId = lv;
@@ -254,7 +254,7 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     // Mimics a stave (envelope) with child modules, the whole assembly sitting
     // inside the removed sector. The envelope + all children must be pruned so a
     // merge_descendants parent is never asked to merge an empty child set.
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     const ir::semantic::ShapeId box = scene.nextShapeId();
@@ -262,9 +262,9 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     const ir::semantic::LogVolId lv = scene.nextLogVolId();
     scene.logVols[lv] = {lv, "lv", box, mat};
 
-    auto add = [&](const char *name, glm::dvec3 pos, std::optional<ir::semantic::NodeId> parent) {
-        const ir::semantic::NodeId id = scene.nextNodeId();
-        ir::semantic::Node n;
+    auto add = [&](const char *name, glm::dvec3 pos, std::optional<ir::expanded::NodeId> parent) {
+        const ir::expanded::NodeId id = scene.nextNodeId();
+        ir::expanded::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = lv;
@@ -276,12 +276,12 @@ TEST_CASE("wedge cut: a fully-inside subtree is pruned wholesale", "[tessellatio
     // Root box at the origin straddles → keeps geometry (and as the root is never
     // pruned). The stave envelope + its two modules sit fully inside the removed
     // quadrant (absolute positions; root is at the origin so no inherited offset).
-    const ir::semantic::NodeId root = add("root", {0, 0, 0}, std::nullopt);
+    const ir::expanded::NodeId root = add("root", {0, 0, 0}, std::nullopt);
     scene.rootId = root;
     scene.nodes[root].localTransform = glm::dmat4{1.0};
-    const ir::semantic::NodeId stave = add("stave", {30, 30, 0}, root);
-    const ir::semantic::NodeId m0 = add("mod0", {31, 30, 0}, stave);
-    const ir::semantic::NodeId m1 = add("mod1", {29, 30, 0}, stave);
+    const ir::expanded::NodeId stave = add("stave", {30, 30, 0}, root);
+    const ir::expanded::NodeId m0 = add("mod0", {31, 30, 0}, stave);
+    const ir::expanded::NodeId m1 = add("mod1", {29, 30, 0}, stave);
     scene.nodes[root].children = {stave};
     scene.nodes[stave].children = {m0, m1};
     // mod positions are relative to the stave at (30,30); offset back so their
@@ -308,7 +308,7 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
     // differ only by a translation along the cut (z) axis → identical local-frame
     // wedge → must share one cut mesh. The third sits on the +y axis (different
     // phi) → distinct cut. So: 3 cut placements, 2 unique cut meshes.
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     const ir::semantic::MaterialId mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     const ir::semantic::ShapeId shape = scene.nextShapeId();
@@ -324,9 +324,9 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
     scene.logVols[emptyLv] = {emptyLv, "root_lv", emptyShape, mat};
 
     auto add = [&](const char *name, ir::semantic::LogVolId vol, glm::dvec3 pos,
-                   std::optional<ir::semantic::NodeId> parent) {
-        const ir::semantic::NodeId id = scene.nextNodeId();
-        ir::semantic::Node n;
+                   std::optional<ir::expanded::NodeId> parent) {
+        const ir::expanded::NodeId id = scene.nextNodeId();
+        ir::expanded::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = vol;
@@ -335,12 +335,12 @@ TEST_CASE("wedge cut: instances sharing a local-frame cut stay instanced",
         scene.nodes[id] = n;
         return id;
     };
-    const ir::semantic::NodeId root = add("root", emptyLv, {0, 0, 0}, std::nullopt);
+    const ir::expanded::NodeId root = add("root", emptyLv, {0, 0, 0}, std::nullopt);
     scene.rootId = root;
     // Two copies on +x differing only along z (shared cut); one on +y (distinct).
-    const ir::semantic::NodeId pxZ0 = add("px_z0", lv, {10, 0, 0}, root);
-    const ir::semantic::NodeId pxZ50 = add("px_z50", lv, {10, 0, 50}, root);
-    const ir::semantic::NodeId py = add("py_z0", lv, {0, 10, 0}, root);
+    const ir::expanded::NodeId pxZ0 = add("px_z0", lv, {10, 0, 0}, root);
+    const ir::expanded::NodeId pxZ50 = add("px_z50", lv, {10, 0, 50}, root);
+    const ir::expanded::NodeId py = add("py_z0", lv, {0, 10, 0}, root);
     scene.nodes[root].children = {pxZ0, pxZ50, py};
     scene.computeWorldTransforms();
 
@@ -371,15 +371,15 @@ TEST_CASE("wedge cut: allocates fresh IDs without overwriting existing shapes",
           "[tessellation][wedgecut]") {
     // Simulate a deserialized scene whose ID counters are stale (start at 1)
     // while existing entries use large IDs.
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     const ir::semantic::MaterialId mat{500};
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
     const ir::semantic::ShapeId shape{1000};
     scene.shapes[shape] = {shape, ir::semantic::BoxShape{2, 1, 1}};
     const ir::semantic::LogVolId lv{2000};
     scene.logVols[lv] = {lv, "lv", shape, mat};
-    const ir::semantic::NodeId node{3000};
-    ir::semantic::Node n;
+    const ir::expanded::NodeId node{3000};
+    ir::expanded::Node n;
     n.id = node;
     n.name = "straddle";
     n.logVolId = lv;
@@ -404,7 +404,7 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     // below Manifold's tolerance). That yields an empty *but succeeded* mesh. The
     // merge path used to treat empty-vertices as a tessellation failure and emit
     // NH0503; it must instead skip the emptied descendant and still merge the rest.
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     const auto mat = scene.nextMaterialId();
     scene.materials[mat] = {mat, "vacuum", std::nullopt, 0.0};
@@ -433,9 +433,9 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     scene.logVols[staveLv] = {staveLv, "stave_lv", worldShape, mat};
 
     auto addNode = [&](const char *name, ir::semantic::LogVolId lv,
-                       std::optional<ir::semantic::NodeId> parent, glm::dvec3 pos) {
+                       std::optional<ir::expanded::NodeId> parent, glm::dvec3 pos) {
         const auto id = scene.nextNodeId();
-        ir::semantic::Node n;
+        ir::expanded::Node n;
         n.id = id;
         n.name = name;
         n.logVolId = lv;

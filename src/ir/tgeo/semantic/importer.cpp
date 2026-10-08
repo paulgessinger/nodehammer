@@ -31,12 +31,12 @@ glm::dmat4 tgeoMatrixToGlm(const TGeoMatrix *m) {
 }
 
 struct ImportState {
-    semantic::Scene &scene;
+    expanded::Scene &scene;
     DiagnosticList &diags;
     std::unordered_map<const TGeoVolume *, semantic::LogVolId> lvCache;
     std::unordered_map<const TGeoShape *, semantic::ShapeId> shapeCache;
     std::unordered_map<const TGeoMaterial *, semantic::MaterialId> matCache;
-    std::unordered_map<const TGeoNode *, semantic::NodeId> nodeMap;
+    std::unordered_map<const TGeoNode *, expanded::NodeId> nodeMap;
 };
 
 semantic::MaterialId importMaterial(const TGeoVolume *vol, ImportState &st) {
@@ -107,12 +107,12 @@ semantic::LogVolId importLogVol(const TGeoVolume *vol, ImportState &st) {
     return id;
 }
 
-semantic::NodeId importNode(const TGeoNode *node, std::optional<semantic::NodeId> parentId,
+expanded::NodeId importNode(const TGeoNode *node, std::optional<expanded::NodeId> parentId,
                             ImportState &st) {
-    const semantic::NodeId id = st.scene.nextNodeId();
+    const expanded::NodeId id = st.scene.nextNodeId();
     st.nodeMap[node] = id;
 
-    semantic::Node sn;
+    expanded::Node sn;
     sn.id = id;
     sn.name = node->GetName();
     sn.logVolId = importLogVol(node->GetVolume(), st);
@@ -124,7 +124,7 @@ semantic::NodeId importNode(const TGeoNode *node, std::optional<semantic::NodeId
 
     for (int i = 0; i < node->GetNdaughters(); ++i) {
         const TGeoNode *child = node->GetDaughter(i);
-        const semantic::NodeId childId = importNode(child, id, st);
+        const expanded::NodeId childId = importNode(child, id, st);
         st.scene.nodes[id].children.push_back(childId);
     }
 
@@ -139,7 +139,7 @@ TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile
     ImportState st{tr.result.scene, tr.result.diags, {}, {}, {}, {}};
 
     TGeoNode *topNode = mgr->GetTopNode();
-    const semantic::NodeId rootId = importNode(topNode, std::nullopt, st);
+    const expanded::NodeId rootId = importNode(topNode, std::nullopt, st);
     tr.result.scene.rootId = rootId;
     tr.result.scene.nodes[rootId].localTransform = glm::dmat4{1.0}; // top node is at origin
 

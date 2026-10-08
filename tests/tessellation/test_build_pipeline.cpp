@@ -76,7 +76,7 @@ std::shared_ptr<const NHConfig> emptyConfig() { return std::make_shared<const NH
 
 // The pre-refactor synchronous reference: prep (with an inline wedge, matching
 // the old buildSceneFromPaths / convert ordering) then a one-shot lower().
-ir::render::Scene referenceBuild(const ir::semantic::Scene &scene,
+ir::render::Scene referenceBuild(const ir::expanded::Scene &scene,
                                  std::optional<WedgeCutParams> wedge) {
     ScenePrepResult prep = prepareSceneForTessellationFromInputs(NHConfig{}, scene, wedge);
     TessellationPass pass{prep.config};
@@ -86,10 +86,10 @@ ir::render::Scene referenceBuild(const ir::semantic::Scene &scene,
 }
 
 // Drive a fresh pipeline to completion with the given per-slice budget.
-SceneBuildResult drivePipeline(const ir::semantic::Scene &scene,
+SceneBuildResult drivePipeline(const ir::expanded::Scene &scene,
                                std::optional<WedgeCutParams> wedge, std::uint64_t budget) {
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const ir::semantic::Scene>(scene), wedge);
+    pipe.start(emptyConfig(), std::make_shared<const ir::expanded::Scene>(scene), wedge);
     while (!pipe.advance(budget)) {
     }
     return pipe.take();
@@ -98,7 +98,7 @@ SceneBuildResult drivePipeline(const ir::semantic::Scene &scene,
 } // namespace
 
 TEST_CASE("BuildPipeline: drive-to-completion parity with one-shot lower", "[build_pipeline]") {
-    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::expanded::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
 
     SceneBuildResult built = drivePipeline(scene, std::nullopt, kSpin);
     REQUIRE_FALSE(built.diags.hasErrors());
@@ -110,7 +110,7 @@ TEST_CASE("BuildPipeline: drive-to-completion parity with one-shot lower", "[bui
 
 TEST_CASE("BuildPipeline: wedge parity with the pre-refactor synchronous path",
           "[build_pipeline]") {
-    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::expanded::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const WedgeCutParams wedge{.startDeg = 0.0, .endDeg = 90.0, .margin = 2.0};
 
     SceneBuildResult built = drivePipeline(scene, wedge, kSpin);
@@ -125,11 +125,11 @@ TEST_CASE("BuildPipeline: wedge parity with the pre-refactor synchronous path",
 }
 
 TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pipeline]") {
-    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::expanded::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
 
     // A tiny budget forces many advance() iterations.
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const ir::semantic::Scene>(scene), std::nullopt);
+    pipe.start(emptyConfig(), std::make_shared<const ir::expanded::Scene>(scene), std::nullopt);
     int falses = 0;
     while (!pipe.advance(1 /* ns */)) {
         ++falses;
@@ -148,12 +148,12 @@ TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pip
 }
 
 TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
-    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::expanded::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const WedgeCutParams wedge{.startDeg = 0.0, .endDeg = 90.0, .margin = 2.0};
 
     BuildPipeline pipe;
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Idle);
-    pipe.start(emptyConfig(), std::make_shared<const ir::semantic::Scene>(scene), wedge);
+    pipe.start(emptyConfig(), std::make_shared<const ir::expanded::Scene>(scene), wedge);
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Queued);
 
     // Counters are 0 before their phases run.
@@ -210,7 +210,7 @@ TEST_CASE("BuildPipeline: a fatal prep failure arrives as a value", "[build_pipe
     // A rule referencing an undefined material fails ConfigValidator, so prep
     // throws — and the pipeline is driven from a frame loop with no call to
     // unwind, so the exception lands in `failure` instead (docs/error-model.md).
-    ir::semantic::Scene scene = SyntheticSceneBuilder::buildSingleBox();
+    ir::expanded::Scene scene = SyntheticSceneBuilder::buildSingleBox();
     NHConfig cfg;
     Rule rule;
     rule.material = "does_not_exist";
@@ -218,7 +218,7 @@ TEST_CASE("BuildPipeline: a fatal prep failure arrives as a value", "[build_pipe
 
     BuildPipeline pipe;
     pipe.start(std::make_shared<const NHConfig>(std::move(cfg)),
-               std::make_shared<const ir::semantic::Scene>(std::move(scene)), std::nullopt);
+               std::make_shared<const ir::expanded::Scene>(std::move(scene)), std::nullopt);
     while (!pipe.advance(kSpin)) {
     }
     SceneBuildResult r = pipe.take();
@@ -231,7 +231,7 @@ TEST_CASE("BuildPipeline: a fatal prep failure arrives as a value", "[build_pipe
 }
 
 TEST_CASE("BuildPipeline: degenerate and absent wedge skip Cutting", "[build_pipeline]") {
-    const ir::semantic::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
+    const ir::expanded::Scene scene = SyntheticSceneBuilder::buildNestedBoxes();
     const ir::render::Scene reference = referenceBuild(scene, std::nullopt);
 
     SECTION("absent wedge") {

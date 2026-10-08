@@ -1,7 +1,7 @@
 #pragma once
 
 #include <diagnostics.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -32,7 +32,7 @@ class ISemanticExporter {
     /// Returns nothing: an exporter that cannot write throws, and no exporter in
     /// the tree has ever had a non-fatal observation to make about a file it
     /// wrote successfully (docs/error-model.md).
-    virtual void write(const semantic::Scene &scene, const std::filesystem::path &path,
+    virtual void write(const expanded::Scene &scene, const std::filesystem::path &path,
                        const SemanticExportConfig &config) const = 0;
 };
 
