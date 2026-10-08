@@ -1,0 +1,37 @@
+<lccdd>
+  <info name="global_detector" title="Test plugin requiring the default detector"
+        author="nodehammer" status="test" version="1"/>
+
+  <define>
+    <constant name="global_detector_probe" value="42"/>
+    <constant name="plugin_exit_code" value="0"/>
+    <constant name="world_side" value="1000*mm"/>
+    <constant name="world_x"    value="world_side"/>
+    <constant name="world_y"    value="world_side"/>
+    <constant name="world_z"    value="world_side"/>
+  </define>
+
+  <includes>
+    <gdmlFile ref="${DD4hepINSTALL}/DDDetectors/compact/elements.xml"/>
+  </includes>
+
+  <materials>
+    <material name="Vacuum">
+      <D type="density" unit="g/cm3" value="1e-25"/>
+      <fraction n="1.0" ref="N"/>
+    </material>
+    <material name="Air">
+      <D type="density" unit="g/cm3" value="0.00129"/>
+      <fraction n="0.754" ref="N"/>
+      <fraction n="0.246" ref="O"/>
+    </material>
+  </materials>
+
+  <readouts>
+    <readout name="GlobalHits"><id>system:8</id></readout>
+  </readouts>
+  <detectors>
+    <detector id="1" name="GlobalProbe" type="Nodehammer_GlobalDetectorProbe"
+              readout="GlobalHits"/>
+  </detectors>
+</lccdd>

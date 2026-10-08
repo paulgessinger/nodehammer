@@ -415,3 +415,21 @@ if(NODEHAMMER_BUILD_SHARED)
         DL_PATHS $<TARGET_FILE_DIR:nodehammer_shared>
     )
 endif()
+
+# A global-detector plugin must run behind an executable boundary, including
+# plugins that terminate instead of throwing. Link the test factory directly
+# into a copy of the real entry point so it needs no plugin search-path setup.
+if(TARGET nodehammer-dd4hep)
+    add_executable(nodehammer_dd4hep_probe
+        ${PROJECT_SOURCE_DIR}/src/cli/dd4hep_main.cpp
+        cli/dd4hep_global_plugin.cpp)
+    target_link_libraries(nodehammer_dd4hep_probe PRIVATE nodehammer_lib DD4hep::DDCore)
+    nh_set_compiler_options(nodehammer_dd4hep_probe)
+    add_test(NAME dd4hep_process_import COMMAND ${CMAKE_COMMAND}
+        -DDRIVER=$<TARGET_FILE:nodehammer-dd4hep>
+        -DPROBE=$<TARGET_FILE:nodehammer_dd4hep_probe>
+        -DNODEHAMMER=$<TARGET_FILE:nodehammer>
+        -DFIXTURES=${PROJECT_SOURCE_DIR}/fixtures/dd4hep
+        -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/dd4hep_process
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cli/dd4hep_process.cmake)
+endif()
