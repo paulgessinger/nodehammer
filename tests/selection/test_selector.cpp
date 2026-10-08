@@ -604,3 +604,228 @@ TEST_CASE("SelectionEngine hoist: no effect when all parents are kept",
     REQUIRE(scene.nodes.contains(sensorId));
     REQUIRE(scene.nodes.at(sensorId).parentId == trackerId);
 }
+
+// Repeated source prototypes still have distinct physical occurrences. These
+// expectations form a reference contract for a future lazy occurrence tree.
+namespace {
+struct RepeatedModules {
+    ir::semantic::Scene scene;
+    ir::semantic::NodeId world, left, right, leftModule, rightModule, leftSensor, rightSensor;
+    ir::semantic::LogVolId moduleLv, sensorLv;
+};
+
+RepeatedModules makeRepeatedModules() {
+    RepeatedModules f;
+    auto &scene = f.scene;
+    const auto shape = scene.nextShapeId();
+    scene.shapes.emplace(shape, ir::semantic::Shape{shape, ir::semantic::BoxShape{1, 1, 1}});
+    const auto material = scene.nextMaterialId();
+    scene.materials.emplace(material,
+                            ir::semantic::SourceMaterial{material, "silicon", std::nullopt, 2.33});
+    auto makeLv = [&](const std::string &name) {
+        const auto id = scene.nextLogVolId();
+        scene.logVols.emplace(id, ir::semantic::LogicalVolume{id, name, shape, material});
+        return id;
+    };
+    const auto worldLv = makeLv("world_lv");
+    const auto leftLv = makeLv("left_lv");
+    const auto rightLv = makeLv("right_lv");
+    f.moduleLv = makeLv("module_lv");
+    f.sensorLv = makeLv("sensor_lv");
+    const auto moduleTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{2, 0, 0});
+    const auto sensorTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{0, 3, 0});
+    const auto leftTransform = glm::rotate(glm::translate(glm::dmat4{1.0}, glm::dvec3{10, 0, 0}),
+                                           glm::radians(90.0), glm::dvec3{0, 0, 1});
+    const auto rightTransform = glm::translate(glm::dmat4{1.0}, glm::dvec3{-10, 0, 0});
+    scene.logVols.at(worldLv).daughters = {{"left", leftLv, leftTransform},
+                                           {"right", rightLv, rightTransform}};
+    scene.logVols.at(leftLv).daughters = {{"module", f.moduleLv, moduleTransform}};
+    scene.logVols.at(rightLv).daughters = {{"module", f.moduleLv, moduleTransform}};
+    scene.logVols.at(f.moduleLv).daughters = {{"sensor", f.sensorLv, sensorTransform}};
+    auto addNode = [&](const std::string &name, ir::semantic::LogVolId lv,
+                       std::optional<ir::semantic::NodeId> parent, const glm::dmat4 &transform) {
+        ir::semantic::Node node;
+        node.id = scene.nextNodeId();
+        node.name = name;
+        node.logVolId = lv;
+        node.parentId = parent;
+        node.localTransform = transform;
+        const auto id = node.id;
+        scene.nodes.emplace(id, std::move(node));
+        if (parent) {
+            scene.nodes.at(*parent).children.push_back(id);
+        }
+        return id;
+    };
+    f.world = addNode("world", worldLv, std::nullopt, glm::dmat4{1.0});
+    f.left = addNode("left", leftLv, f.world, leftTransform);
+    f.right = addNode("right", rightLv, f.world, rightTransform);
+    f.leftModule = addNode("module", f.moduleLv, f.left, moduleTransform);
+    f.rightModule = addNode("module", f.moduleLv, f.right, moduleTransform);
+    f.leftSensor = addNode("sensor", f.sensorLv, f.leftModule, sensorTransform);
+    f.rightSensor = addNode("sensor", f.sensorLv, f.rightModule, sensorTransform);
+    scene.nodes.at(f.leftSensor).tags.emplace("readout", "enabled");
+    scene.nodes.at(f.rightSensor).tags.emplace("readout", "disabled");
+    scene.rootId = f.world;
+    scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
+    return f;
+}
+
+SelectionRule occurrenceRule(SelectionAction action, PredicateExpr predicate,
+                             std::optional<std::string> scope = std::nullopt) {
+    SelectionRule rule;
+    rule.action = action;
+    rule.predicate = std::move(predicate);
+    rule.scope = std::move(scope);
+    return rule;
+}
+
+void requireSourceModuleIntact(const RepeatedModules &f) {
+    const auto &daughters = f.scene.logVols.at(f.moduleLv).daughters;
+    REQUIRE(daughters.size() == 1);
+    REQUIRE(daughters.front().name == "sensor");
+    REQUIRE(daughters.front().logVolId == f.sensorLv);
+    REQUIRE(daughters.front().localTransform ==
+            glm::translate(glm::dmat4{1.0}, glm::dvec3{0, 3, 0}));
+    REQUIRE(f.scene.logVols.contains(f.sensorLv));
+}
+} // namespace
+
+TEST_CASE("SelectionEngine repeated prototypes: exact paths distinguish occurrences",
+          "[selection][selector][occurrence]") {
+    auto f = makeRepeatedModules();
+    SelectionEngine engine{{occurrenceRule(
+        SelectionAction::DropIf, PredicateExpr{PathGlobPredicate{"/world/left/module/sensor"}})}};
+    const auto result = engine.dryRun(f.scene);
+    REQUIRE(result.kept.size() == 6);
+    REQUIRE(result.dropped.size() == 1);
+    REQUIRE(result.dropped.contains(f.leftSensor));
+    REQUIRE(result.kept.contains(f.rightSensor));
+    REQUIRE(result.diags.empty());
+    REQUIRE(f.scene.nodes.size() == 7);
+    REQUIRE_FALSE(engine.prune(f.scene).hasErrors());
+    REQUIRE(f.scene.nodes.at(f.leftModule).children.empty());
+    REQUIRE(f.scene.nodes.at(f.rightModule).children ==
+            std::vector<ir::semantic::NodeId>{f.rightSensor});
+    REQUIRE(f.scene.nodes.at(f.rightSensor).originalPath == "/world/right/module/sensor");
+    requireSourceModuleIntact(f);
+}
+
+TEST_CASE("SelectionEngine repeated prototypes: occurrence tags and scopes stay independent",
+          "[selection][selector][occurrence]") {
+    auto f = makeRepeatedModules();
+    std::vector<SelectionRule> rules;
+    SECTION("a tag value differs between occurrences of the same logical volume") {
+        rules.push_back(occurrenceRule(SelectionAction::DropIf,
+                                       PredicateExpr{TagPredicate{"readout", "enabled"}}));
+    }
+    SECTION("scope restricts a tag-existence match to one occurrence") {
+        rules.push_back(occurrenceRule(SelectionAction::DropIf,
+                                       PredicateExpr{TagPredicate{"readout", std::nullopt}},
+                                       "/world/left/**"));
+    }
+    SECTION("a scope cannot make a nonmatching tag match") {
+        rules.push_back(occurrenceRule(SelectionAction::DropIf,
+                                       PredicateExpr{TagPredicate{"readout", "enabled"}},
+                                       "/world/right/**"));
+        const auto result = SelectionEngine{rules}.dryRun(f.scene);
+        REQUIRE(result.kept.size() == 7);
+        REQUIRE(result.dropped.empty());
+        return;
+    }
+    const auto result = SelectionEngine{rules}.dryRun(f.scene);
+    REQUIRE(result.dropped.size() == 1);
+    REQUIRE(result.dropped.contains(f.leftSensor));
+    REQUIRE(result.kept.contains(f.rightSensor));
+    REQUIRE(result.diags.empty());
+}
+
+TEST_CASE("SelectionEngine repeated prototypes: ordered scoped rules override per occurrence",
+          "[selection][selector][occurrence]") {
+    auto f = makeRepeatedModules();
+    auto dropSensors =
+        occurrenceRule(SelectionAction::DropIf, PredicateExpr{NameGlobPredicate{"sensor"}});
+    auto keepLeft = occurrenceRule(SelectionAction::KeepIf,
+                                   PredicateExpr{NameGlobPredicate{"sensor"}}, "/world/left/**");
+    SECTION("later scoped keep revives only the left occurrence") {
+        const auto result = SelectionEngine{{dropSensors, keepLeft}}.dryRun(f.scene);
+        REQUIRE(result.dropped.size() == 1);
+        REQUIRE(result.dropped.contains(f.rightSensor));
+        REQUIRE(result.kept.contains(f.leftSensor));
+    }
+    SECTION("later unscoped drop wins for both occurrences") {
+        const auto result = SelectionEngine{{keepLeft, dropSensors}}.dryRun(f.scene);
+        REQUIRE(result.dropped.size() == 2);
+        REQUIRE(result.dropped.contains(f.leftSensor));
+        REQUIRE(result.dropped.contains(f.rightSensor));
+    }
+}
+
+TEST_CASE("SelectionEngine repeated prototypes: ancestor removal preserves occurrence identity",
+          "[selection][selector][occurrence][hoist]") {
+    auto f = makeRepeatedModules();
+    const auto dropLeftModule = occurrenceRule(
+        SelectionAction::DropIf, PredicateExpr{PathGlobPredicate{"/world/left/module"}});
+    const auto keepSensors =
+        occurrenceRule(SelectionAction::KeepIf, PredicateExpr{NameGlobPredicate{"sensor"}});
+    SECTION("without hoisting only the removed occurrence loses its descendant") {
+        const auto diags = SelectionEngine{{dropLeftModule, keepSensors}}.prune(f.scene);
+        REQUIRE(f.scene.nodes.size() == 5);
+        REQUIRE_FALSE(f.scene.nodes.contains(f.leftModule));
+        REQUIRE_FALSE(f.scene.nodes.contains(f.leftSensor));
+        REQUIRE(f.scene.nodes.at(f.rightSensor).parentId == f.rightModule);
+        REQUIRE(diags.items().size() == 1);
+        REQUIRE(diags.items().front().code == codes::kWarnSelectionOrphan);
+    }
+    SECTION("hoisting rebases through a rotated parent and retains original selection paths") {
+        REQUIRE(SelectionEngine{{dropLeftModule, keepSensors}, true}.prune(f.scene).empty());
+        REQUIRE(f.scene.nodes.size() == 6);
+        const auto &sensor = f.scene.nodes.at(f.leftSensor);
+        REQUIRE(sensor.parentId == f.left);
+        REQUIRE(sensor.originalPath == "/world/left/module/sensor");
+        REQUIRE(sensor.tags.at("readout") == "enabled");
+        REQUIRE(sensor.localTransform[3][0] == Catch::Approx(2.0));
+        REQUIRE(sensor.localTransform[3][1] == Catch::Approx(3.0));
+        // Recompute from the new hierarchy to catch an incorrect local rebase
+        // hidden behind an unchanged cached world transform.
+        f.scene.computeWorldTransforms();
+        glm::dmat4 expectedWorld{1.0};
+        expectedWorld[0] = {0, 1, 0, 0};
+        expectedWorld[1] = {-1, 0, 0, 0};
+        expectedWorld[3] = {7, 2, 0, 1};
+        for (int col = 0; col < 4; ++col) {
+            for (int row = 0; row < 4; ++row) {
+                REQUIRE(sensor.worldTransform[col][row] ==
+                        Catch::Approx(expectedWorld[col][row]).margin(1e-12));
+            }
+        }
+        REQUIRE(f.scene.nodes.at(f.rightSensor).worldTransform ==
+                glm::translate(glm::dmat4{1.0}, glm::dvec3{-8, 3, 0}));
+        auto removeHoisted = occurrenceRule(
+            SelectionAction::DropIf, PredicateExpr{PathGlobPredicate{"/world/left/module/sensor"}});
+        const auto secondPass = SelectionEngine{{removeHoisted}}.dryRun(f.scene);
+        REQUIRE(secondPass.dropped.size() == 1);
+        REQUIRE(secondPass.dropped.contains(f.leftSensor));
+        REQUIRE(secondPass.kept.contains(f.rightSensor));
+    }
+    requireSourceModuleIntact(f);
+}
+
+TEST_CASE("SelectionEngine repeated prototypes: leaf status follows selected occurrence children",
+          "[selection][selector][occurrence]") {
+    auto f = makeRepeatedModules();
+    const auto dropLeftSensor = occurrenceRule(
+        SelectionAction::DropIf, PredicateExpr{PathGlobPredicate{"/world/left/module/sensor"}});
+    REQUIRE(SelectionEngine{{dropLeftSensor}}.prune(f.scene).empty());
+    const auto dropLeafModules = occurrenceRule(
+        SelectionAction::DropIf, PredicateExpr{IsLeafPredicate{}}, "/world/*/module");
+    const auto result = SelectionEngine{{dropLeafModules}}.dryRun(f.scene);
+    REQUIRE(result.dropped.size() == 1);
+    REQUIRE(result.dropped.contains(f.leftModule));
+    REQUIRE(result.kept.contains(f.rightModule));
+    REQUIRE(result.kept.contains(f.rightSensor));
+    // The prototype still has a sensor daughter; that must not make this
+    // occurrence non-leaf or cause a later traversal to resurrect its sensor.
+    requireSourceModuleIntact(f);
+}
