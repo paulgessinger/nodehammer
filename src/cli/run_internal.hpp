@@ -62,10 +62,9 @@ using Registrar = void (*)(CLI::App &, const CliOptions &);
 
 /// `run`, plus subcommands the library cannot register for itself.
 ///
-/// The one that needs this is `viewer`: it constructs a `viewer::App`, so it
-/// cannot be compiled into a shared library that must resolve every symbol
-/// (`--no-undefined`) without dragging a window system in behind it. It is
-/// compiled into the executable instead and handed in here.
+/// The native viewer brings a window system; the native DD4hep options bring
+/// process-global detector policy and an exit handler. Both are compiled into
+/// the executable and handed in here, outside the callable CLI.
 int runWith(std::span<const std::string_view> args, const CliOptions &options,
             std::span<const Registrar> extra);
 
@@ -78,6 +77,9 @@ int runWith(std::span<const std::string_view> args, const CliOptions &options,
 void registerCmdConvert(CLI::App &app, const CliOptions &options);
 void registerCmdInspect(CLI::App &app, const CliOptions &options);
 void registerCmdConfig(CLI::App &app, const CliOptions &options);
+
+// Native executable only: opt-in DD4hep global detector and exit warning.
+void registerCmdDD4hepNative(CLI::App &app, const CliOptions &options);
 
 // Native-only: packing mounts a `FilesystemProjectFs`, which the web build
 // does not have. Registered beside `viewer` for the same reason.

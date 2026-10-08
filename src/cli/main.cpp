@@ -12,7 +12,6 @@
 
 #include <nodehammer/cli.hpp>
 
-#include <array>
 #include <cstddef>
 #include <print>
 #include <string_view>
@@ -55,17 +54,19 @@ int main(int argc, char **argv) {
     // say it directly: an .app bundle, a .desktop carrying `Exec=nodehammer
     // viewer`, an installer shortcut pointing at a GUI-subsystem binary. See
     // issue #74. `viewer` remains a subcommand like any other.
-    const std::array extra{static_cast<nodehammer::cli::detail::Registrar>(
-        &nodehammer::cli::detail::registerCmdViewerNative)};
-#else
-    const std::array<nodehammer::cli::detail::Registrar, 0> extra{};
 #endif
+    const std::vector<nodehammer::cli::detail::Registrar> extra{
+#ifdef NH_WITH_VIEWER
+        &nodehammer::cli::detail::registerCmdViewerNative,
+#endif
+#ifdef NH_WITH_DD4HEP
+        &nodehammer::cli::detail::registerCmdDD4hepNative,
+#endif
+    };
 
-    // `runWith` rather than `run`: the native viewer command constructs a
-    // window, so it is compiled into this executable rather than into a shared
-    // library that has to resolve every symbol it names. Handing it in is the
-    // seam, and `CLI::App &` in its signature is exactly why that seam cannot
-    // be a public header.
+    // Native registrations stay outside the callable CLI: the viewer owns a
+    // window, and DD4hep's global-detector option and exit warning own process
+    // policy. `runWith` supplies those additions to the shared dispatcher.
     try {
         return nodehammer::cli::detail::runWith(args, options, extra);
     } catch (const nodehammer::Error &e) {

@@ -199,31 +199,33 @@ source file, and writing through one would edit the tree.
 
 ## DD4hep plugins that require the global detector
 
-Some detector plugins, including the ALLEGRO readout segmentation in k4geo,
-look up constants and geometry through `dd4hep::Detector::getInstance()`.
-The regular XML importer creates a private detector so library callers retain
-ownership of their own detector; those plugins therefore see a different,
-empty detector and may terminate the process.
-
-DD4hep-enabled native builds also install `nodehammer-dd4hep`. Run it as a
-separate process to load one compact using the default detector and save the
-semantic geometry:
+Some detector plugins, including ALLEGRO's k4geo readout segmentation, look up
+constants and geometry through `dd4hep::Detector::getInstance()`. The default
+XML importer creates a private detector. In a DD4hep-enabled native build,
+opt into the global detector for these plugins:
 
 ```bash
-nodehammer-dd4hep -i ALLEGRO_o1_v03.xml -o allegro.nhb.zst
-nodehammer convert -i allegro.nhb.zst -c scene.toml -o allegro.glb
+nodehammer convert -i ALLEGRO_o1_v03.xml --dd4hep-global -c scene.toml -o allegro.glb
 ```
 
-Source the experiment's DD4hep/plugin environment first, just as for ordinary
-XML loading. This executable accepts `.nhb` and `.nhb.zst` outputs; selection,
-styling and tessellation remain in the normal processing commands. It writes
-all messages to stderr and returns nonzero if loading or writing fails. Each
-invocation starts with a fresh detector, and a plugin's `exit()` affects only
-that process. Programs can launch it as a subprocess and check the exit code
-before reading the output. It is not a new mode of `runCli` or `readSemantic`.
+Source the experiment's DD4hep/plugin environment first. The flag works before
+or after the subcommand, including `inspect`, and applies only to DD4hep XML
+loading. It loads one compact into a fresh default detector and leaves it alive
+until process exit. An already populated detector or a second global import is
+rejected; nodehammer never resets or replaces an existing detector. Selection
+and export run normally in the same process, with plugin output on stderr.
 
-Applications that already own a correctly constructed detector can continue to
-call `fromDD4hep(detector)` directly without loading XML or changing ownership.
+If a plugin calls `exit()` during XML import, the native CLI prints `NH0302`
+before exiting. In private-detector mode the warning suggests retrying with
+`--dd4hep-global`. Successful imports and caught exceptions do not trigger it.
+This uses `atexit`: it does not catch `abort()`, `_Exit()`, or fatal signals,
+and it preserves the plugin's exit status.
+
+The option and exit handler belong to the native executable. The callable
+`runCli` entry point (including the Python console script) does not expose the
+flag; `readSemantic` keeps its private-detector behavior. Applications that
+already own a constructed detector can continue to call `fromDD4hep(detector)`
+directly. No helper executable or subprocess is required.
 
 ## Building
 

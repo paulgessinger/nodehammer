@@ -74,6 +74,8 @@ inline constexpr std::string_view kInfoDedupMerged = "NH0200";
 // ── TGeo importer ─────────────────────────────────────────────────────────────
 inline constexpr std::string_view kFatalTgeoOpenFailed = "NH0300";
 inline constexpr std::string_view kWarnTgeoUnknownShape = "NH0301";
+// Native CLI atexit diagnostic: XML loading did not return or unwind.
+inline constexpr std::string_view kWarnDD4hepEarlyExit = "NH0302";
 
 // ── Selection engine ──────────────────────────────────────────────────────────
 inline constexpr std::string_view kWarnSelectionOrphan = "NH0400";
