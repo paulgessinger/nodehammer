@@ -164,7 +164,8 @@ namespace nodehammer::cli::detail {
 // parser, and the one front-door property that is not on the command line --
 // `webAssets` -- belongs to `serve`, which lives in the library half. The
 // parameter stays so both registrars are called the same way from `main`.
-void registerCmdViewerNative(CLI::App &app, const CliOptions & /*options*/) {
+void registerCmdViewerNative(CLI::App &app, const CliOptions & /*options*/,
+                             ir::ImporterRegistry & /*registry*/) {
     // Fills in, does not create. `registerCmdViewer` in the library owns the
     // `viewer` subcommand, its shared options and `serve`, because those have to
     // exist in builds this file is not compiled into -- a wheel above all. It

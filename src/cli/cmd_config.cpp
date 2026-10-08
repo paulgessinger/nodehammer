@@ -67,7 +67,8 @@ void verdict(bool ok, std::string_view word) {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdConfig(CLI::App &app, const CliOptions &options) {
+void registerCmdConfig(CLI::App &app, const CliOptions &options,
+                       ir::ImporterRegistry & /*registry*/) {
     const Narrator say{options};
 
     auto *sub =

@@ -83,7 +83,7 @@ std::vector<viewer::ZipDirEntry> allFiles(const viewer::ZipWorkingSet &ws) {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdProject(CLI::App &app, const CliOptions &options) {
+void registerCmdProject(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry) {
     // Copied into each callback below rather than reached through `options`:
     // it is a pointer to the caller's object, so copying it costs nothing and
     // it still sees a `-q` written during the parse.
@@ -103,10 +103,11 @@ void registerCmdProject(CLI::App &app, const CliOptions &options) {
     packSub->add_option("-o,--output", "Archive to write")->required()->type_name("FILE");
     packSub->add_option("--root", "Directory defining the archive's key space")->type_name("DIR");
 
-    packSub->callback([packSub, say] {
+    packSub->callback([packSub, say, &registry] {
         runOrReport("project pack", [&] {
             const project::PackResult packed =
-                project::pack({.config = optionText(*packSub, "--config"),
+                project::pack({.importers = &registry,
+                               .config = optionText(*packSub, "--config"),
                                .geometry = optionText(*packSub, "--input"),
                                .root = optionText(*packSub, "--root")});
 
@@ -138,7 +139,7 @@ void registerCmdProject(CLI::App &app, const CliOptions &options) {
     pubSub->add_option("--title", "Browser-tab title");
     pubSub->add_option("--web-assets", "Directory holding the built wasm runtime");
 
-    pubSub->callback([pubSub, &options, say] {
+    pubSub->callback([pubSub, &options, say, &registry] {
         runOrReport("project publish", [&] {
             web::LadderInputs inputs{};
             inputs.explicitDir = optionText(*pubSub, "--web-assets");
@@ -161,6 +162,7 @@ void registerCmdProject(CLI::App &app, const CliOptions &options) {
 
             const std::filesystem::path out = optionText(*pubSub, "--output");
             web::StageOptions stage{};
+            stage.importers = &registry;
             stage.runtime = runtime.dir;
             stage.target = out;
             stage.title = optionText(*pubSub, "--title");

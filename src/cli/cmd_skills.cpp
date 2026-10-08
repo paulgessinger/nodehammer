@@ -316,7 +316,8 @@ void copyTree(const fs::path &from, const fs::path &to) {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdSkills(CLI::App &app, const CliOptions &options) {
+void registerCmdSkills(CLI::App &app, const CliOptions &options,
+                       ir::ImporterRegistry & /*registry*/) {
     const Narrator say{options};
 
     auto *sub =

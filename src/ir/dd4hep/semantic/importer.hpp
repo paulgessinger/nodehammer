@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ir/semantic/importer.hpp>
+#include <nodehammer/import_options.hpp>
 
 #include <string_view>
 #include <vector>
@@ -15,12 +16,17 @@ namespace nodehammer::ir {
 /// Format name: "dd4hep"   Extensions: none — .xml is ambiguous, explicit --input-format required.
 class DD4hepImporter final : public ISemanticImporter {
   public:
+    [[nodiscard]] std::span<const ImporterOptionSpec> optionSpecs() const override;
+    void configure(const ImporterOptions &options) override;
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
     [[nodiscard]] ImportResult import(const std::filesystem::path &path) const override;
 
     /// Traverse an already-constructed `Detector`. Never loads a compact file.
     [[nodiscard]] ImportResult import(dd4hep::Detector &detector) const;
+
+  private:
+    bool useGlobalDetector_ = false;
 };
 
 } // namespace nodehammer::ir

@@ -161,7 +161,8 @@ struct ImportWithFormat {
 ///
 /// Throws rather than exiting: `runOrExit` is where a command ends, and a
 /// helper that called `exit` itself would be a second one.
-inline ImportWithFormat importFrom(CLI::Option *inputOpt, CLI::Option *formatOpt) {
+inline ImportWithFormat importFrom(const ir::ImporterRegistry &registry, CLI::Option *inputOpt,
+                                   CLI::Option *formatOpt) {
     std::string inputPath, inputFmt;
     if (*inputOpt) {
         inputOpt->results(inputPath);
@@ -173,7 +174,6 @@ inline ImportWithFormat importFrom(CLI::Option *inputOpt, CLI::Option *formatOpt
         throw Error{codes::kFatalImportFormatUnknown, "--input is required"};
     }
 
-    auto registry = ir::ImporterRegistry::makeDefault();
     const auto *imp = registry.resolve(inputPath, inputFmt);
     if (imp == nullptr) {
         throw Error{codes::kFatalImportFormatUnknown,

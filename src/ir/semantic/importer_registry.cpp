@@ -8,21 +8,19 @@
 #endif
 #ifdef NH_WITH_DD4HEP
 #include <ir/dd4hep/semantic/importer.hpp>
-#include <ir/dd4hep/semantic/native_importer.hpp>
+
 #endif
 
 #include <algorithm>
 #include <cctype>
+#include <diagnostic_codes.hpp>
+#include <format>
 #include <fstream>
 #include <string>
 
 namespace nodehammer::ir {
 
 namespace {
-
-#ifdef NH_WITH_DD4HEP
-DD4hepImporterFactory nativeDD4hepFactory = nullptr;
-#endif
 
 std::string toLower(std::string_view s) {
     std::string out{s};
@@ -76,8 +74,8 @@ const ISemanticImporter *ImporterRegistry::findByExtension(std::string_view ext)
     return nullptr;
 }
 
-const ISemanticImporter *ImporterRegistry::resolve(const std::filesystem::path &path,
-                                                   std::string_view formatName) const noexcept {
+const ISemanticImporter *ImporterRegistry::resolveUnchecked(const std::filesystem::path &path,
+                                                            std::string_view formatName) const {
     if (!formatName.empty()) {
         return findByFormat(formatName);
     }
@@ -115,13 +113,75 @@ ImporterRegistry::importers() const noexcept {
     return importers_;
 }
 
-#ifdef NH_WITH_DD4HEP
-void setNativeDD4hepImporterFactory(DD4hepImporterFactory factory) {
-    nativeDD4hepFactory = factory;
+const ISemanticImporter *ImporterRegistry::resolve(const std::filesystem::path &path,
+                                                   std::string_view formatName) const {
+    const auto *importer = resolveUnchecked(path, formatName);
+    if (importer) {
+        for (const auto &[name, value] : options_) {
+            const auto specs = importer->optionSpecs();
+            if (std::ranges::none_of(specs, [&](const auto &spec) { return spec.name == name; })) {
+                throw Error{codes::kFatalImportOptionsMismatch,
+                            std::format("option '{}' does not apply to importer '{}'", name,
+                                        importer->formatName()),
+                            path.string()};
+            }
+        }
+    }
+    return importer;
 }
-#endif
 
-ImporterRegistry ImporterRegistry::makeDefault() {
+void ImporterRegistry::configure(const ImporterOptions &options) {
+    // Validate everything first so a typo or wrong type cannot partially apply options.
+    for (const auto &[name, value] : options) {
+        const ImporterOptionSpec *found = nullptr;
+        for (const auto &importer : importers_) {
+            for (const auto &spec : importer->optionSpecs()) {
+                if (spec.name == name)
+                    found = &spec;
+            }
+        }
+        if (!found) {
+            throw Error{
+                codes::kFatalImportOptionsMismatch,
+                std::format(
+                    "unknown importer option '{}' (its backend may be unavailable in this build)",
+                    name)};
+        }
+        if (found->defaultValue.index() != value.index()) {
+            static constexpr std::string_view types[]{"bool", "int64", "double", "string"};
+            throw Error{codes::kFatalImportOptionsMismatch,
+                        std::format("option '{}' expects {}, got {}", name,
+                                    types[found->defaultValue.index()], types[value.index()])};
+        }
+    }
+    for (auto &importer : importers_) {
+        ImporterOptions effective;
+        for (const auto &spec : importer->optionSpecs()) {
+            const auto it = options.find(spec.name);
+            effective.emplace(spec.name, it == options.end() ? spec.defaultValue : it->second);
+        }
+        importer->configure(effective);
+    }
+    options_ = options;
+}
+
+void ImporterRegistry::setOption(std::string name, ImporterOptionValue value) {
+    auto options = options_;
+    options.insert_or_assign(std::move(name), std::move(value));
+    configure(options);
+}
+
+void ImporterRegistry::decorate(std::string_view format, const Decorator &decorator) {
+    for (auto &importer : importers_) {
+        if (importer->formatName() == format) {
+            importer = decorator(std::move(importer));
+            configure(options_);
+            return;
+        }
+    }
+}
+
+ImporterRegistry ImporterRegistry::makeDefault(const SemanticReadOptions &options) {
     ImporterRegistry reg;
     reg.registerImporter(std::make_unique<SyntheticImporter>());
     reg.registerImporter(std::make_unique<JsonImporter>());
@@ -130,9 +190,9 @@ ImporterRegistry ImporterRegistry::makeDefault() {
     reg.registerImporter(std::make_unique<TGeoImporter>());
 #endif
 #ifdef NH_WITH_DD4HEP
-    reg.registerImporter(nativeDD4hepFactory != nullptr ? nativeDD4hepFactory()
-                                                        : std::make_unique<DD4hepImporter>());
+    reg.registerImporter(std::make_unique<DD4hepImporter>());
 #endif
+    reg.configure(options.importerOptions);
     return reg;
 }
 

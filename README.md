@@ -221,11 +221,41 @@ before exiting. In private-detector mode the warning suggests retrying with
 This uses `atexit`: it does not catch `abort()`, `_Exit()`, or fatal signals,
 and it preserves the plugin's exit status.
 
-The option and exit handler belong to the native executable. The callable
-`runCli` entry point (including the Python console script) does not expose the
-flag; `readSemantic` keeps its private-detector behavior. Applications that
-already own a constructed detector can continue to call `fromDD4hep(detector)`
-directly. No helper executable or subprocess is required.
+The flag is also available through `runCli` and the Python console script in
+DD4hep-enabled builds. Programmatic callers can pass backend options explicitly:
+
+```cpp
+auto result = nodehammer::readSemantic("detector.xml", {
+    .importerOptions = {{"dd4hep.useGlobalDetector", true}},
+});
+```
+
+```python
+import nodehammer as nh
+
+result = nh.read_semantic(
+    "detector.xml",
+    importer_options={"dd4hep.useGlobalDetector": True},
+)
+```
+
+Omitting these options keeps private-detector behavior. Each call or CLI
+invocation owns its options; they do not affect subsequent calls. Supplying
+DD4hep options for another format, or without the backend compiled in, raises
+`NH0105`. Unknown keys and incorrect value types also raise `NH0105`; values
+are not coerced. The option map accepts `bool`, signed 64-bit integers, `double`,
+and strings (Python: `bool`, `int`, `float`, `str`). Backends declare supported
+keys and defaults; `dd4hep.useGlobalDetector` is a boolean defaulting to `false`.
+Explicit options, including `false`, must belong to the selected backend.
+
+Global mode rejects an already populated detector and any second load,
+including retries after a failed load. It never destroys the singleton.
+Applications that already own a detector can use `fromDD4hep(detector)`.
+
+The exit-warning handler and stdout redirection remain native executable
+policy. Library and Python calls do not install a process exit handler; a
+plugin that exits can terminate their host process. No helper executable or
+subprocess is required.
 
 ## Building
 

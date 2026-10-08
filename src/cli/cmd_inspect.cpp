@@ -403,7 +403,7 @@ void emitJson(const nlohmann::json &doc) { std::println("{}", doc.dump(2)); }
 
 namespace nodehammer::cli::detail {
 
-void registerCmdInspect(CLI::App &app, const CliOptions &options) {
+void registerCmdInspect(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry) {
     auto *sub = app.add_subcommand("inspect", "Inspect a geometry file")->require_subcommand(1);
 
     // Shared options on the parent.
@@ -423,9 +423,9 @@ void registerCmdInspect(CLI::App &app, const CliOptions &options) {
 
     // ── summary ──────────────────────────────────────────────────────────────
     auto *sumSub = sub->add_subcommand("summary", "Print a high-level summary");
-    sumSub->callback([=, &options] {
+    sumSub->callback([=, &options, &registry] {
         runOrReport("inspect summary", [&] {
-            auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            auto [result, fmt] = importFrom(registry, inputOpt, formatOpt);
             if (formatOutOpt->as<std::string>() == "json") {
                 emitJson(summaryJson(result, fmt));
                 return;
@@ -442,9 +442,9 @@ void registerCmdInspect(CLI::App &app, const CliOptions &options) {
     auto *filterOpt =
         treeSub->add_option("--filter,-f", "Path glob filter (only show matching nodes)");
 
-    treeSub->callback([=, &options] {
+    treeSub->callback([=, &options, &registry] {
         runOrReport("inspect tree", [&] {
-            auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            auto [result, fmt] = importFrom(registry, inputOpt, formatOpt);
             (void)fmt;
 
             int maxDepth = -1;
@@ -470,9 +470,9 @@ void registerCmdInspect(CLI::App &app, const CliOptions &options) {
 
     // ── tags ────────────────────────────────────���───────────────────────────���
     auto *tagsSub = sub->add_subcommand("tags", "List all unique tags and their values");
-    tagsSub->callback([=, &options] {
+    tagsSub->callback([=, &options, &registry] {
         runOrReport("inspect tags", [&] {
-            auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            auto [result, fmt] = importFrom(registry, inputOpt, formatOpt);
             (void)fmt;
 
             if (formatOutOpt->as<std::string>() == "json") {

@@ -1,3 +1,4 @@
+#include <atomic>
 #include <diagnostic_codes.hpp>
 #include <ir/dd4hep/semantic/importer.hpp>
 #include <ir/provenance.hpp>
@@ -152,9 +153,50 @@ std::string_view DD4hepImporter::formatName() const noexcept { return "dd4hep"; 
 
 std::vector<std::string> DD4hepImporter::supportedExtensions() const { return {}; }
 
-ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
-    QuietGuard quiet;
+std::span<const ImporterOptionSpec> DD4hepImporter::optionSpecs() const {
+    static const ImporterOptionSpec specs[]{
+        {"dd4hep.useGlobalDetector", false, "--dd4hep-global",
+         "Load DD4hep XML into the process-global detector (one compact per process)"},
+    };
+    return specs;
+}
 
+void DD4hepImporter::configure(const ImporterOptions &options) {
+    const auto it = options.find("dd4hep.useGlobalDetector");
+    useGlobalDetector_ = it != options.end() && std::get<bool>(it->second);
+}
+
+ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
+    // DD4hep and ROOT mutate process state even for privately owned detectors.
+    static std::atomic_flag importing = ATOMIC_FLAG_INIT;
+    if (importing.test_and_set(std::memory_order_acquire)) {
+        throw Error{codes::kFatalTgeoOpenFailed, "DD4hep XML imports cannot run concurrently"};
+    }
+    struct Release {
+        std::atomic_flag &flag;
+        ~Release() { flag.clear(std::memory_order_release); }
+    } release{importing};
+    QuietGuard quiet;
+    if (useGlobalDetector_) {
+        static bool attempted = false;
+        auto &detector = dd4hep::Detector::getInstance();
+        if (attempted || detector.state() != dd4hep::Detector::NOT_READY ||
+            !detector.detectors().empty()) {
+            throw Error{codes::kFatalTgeoOpenFailed,
+                        "global DD4hep import requires a fresh default detector; restart the "
+                        "process to load another compact",
+                        path.string()};
+        }
+        attempted = true;
+        try {
+            detector.fromCompact(path.string());
+        } catch (const std::exception &ex) {
+            throw Error{codes::kFatalTgeoOpenFailed,
+                        std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()),
+                        path.string()};
+        }
+        return importFromDetector(detector, path.string());
+    }
     std::unique_ptr<dd4hep::Detector> detOwner;
     try {
         detOwner = dd4hep::Detector::make_unique("");

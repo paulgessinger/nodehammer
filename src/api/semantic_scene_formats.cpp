@@ -22,7 +22,7 @@ void appendUnique(std::vector<std::string> &out, std::string_view name) {
 } // namespace
 
 SemanticResult readSemantic(const std::filesystem::path &path, const SemanticReadOptions &options) {
-    const auto registry = ir::ImporterRegistry::makeDefault();
+    const auto registry = ir::ImporterRegistry::makeDefault(options);
     const auto *importer = registry.resolve(path, options.format);
     if (importer == nullptr) {
         // The string-dispatched entry point necessarily fails here rather than

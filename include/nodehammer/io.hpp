@@ -1,6 +1,7 @@
 #pragma once
 #include <filesystem>
 #include <nodehammer/config.hpp>
+#include <nodehammer/import_options.hpp>
 #include <nodehammer/render_scene.hpp>
 #include <nodehammer/semantic_scene.hpp>
 #include <span>
@@ -8,10 +9,6 @@
 #include <string_view>
 
 namespace nodehammer {
-struct SemanticReadOptions {
-    /// Empty means infer from the filename; otherwise select this importer.
-    std::string format{};
-};
 struct SemanticWriteOptions {
     /// Overrides format inference, but never overrides filename compression.
     std::string format{};

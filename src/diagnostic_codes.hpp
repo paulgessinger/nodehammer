@@ -64,6 +64,7 @@ inline constexpr std::string_view kWarnImportNoMaterial = "NH0103";
 // asked or not — so it goes down the same channel as everything else and the
 // caller decides.
 inline constexpr std::string_view kDebugImportStats = "NH0104";
+inline constexpr std::string_view kFatalImportOptionsMismatch = "NH0105";
 
 // ── Scene operations ──────────────────────────────────────────────────────────
 // Info: how much deduplication actually merged. Reported rather than discarded

@@ -15,6 +15,9 @@
 
 #include <cstddef>
 #include <filesystem>
+namespace nodehammer::ir {
+class ImporterRegistry;
+}
 #include <string>
 #include <vector>
 
@@ -25,6 +28,8 @@ namespace nodehammer::project {
 // answers, by refusing — is otherwise a `-Wmissing-field-initializers` error
 // under GCC, which does not warn for a member that has a default initializer.
 struct PackOptions {
+    /// Optional invocation-owned importer registry; must outlive this operation.
+    const ir::ImporterRegistry *importers = nullptr;
     /// Entry config: TOML, or Lua whose include set is discovered by running it.
     std::filesystem::path config{};
 

@@ -1,4 +1,5 @@
 #include "cli_common.hpp"
+#include "importer_options.hpp"
 #include "run_internal.hpp"
 
 #include <CLI/CLI.hpp>
@@ -120,19 +121,21 @@ int runWith(std::span<const std::string_view> args, const CliOptions &options,
     // that reason.
     app.fallthrough();
 
-    registerCmdConvert(app, effective);
-    registerCmdInspect(app, effective);
-    registerCmdConfig(app, effective);
+    auto registry = ir::ImporterRegistry::makeDefault();
+    registerImporterOptions(app, registry);
+    registerCmdConvert(app, effective, registry);
+    registerCmdInspect(app, effective, registry);
+    registerCmdConfig(app, effective, registry);
     // Before `extra`: the native half extends the subcommand this registers, so
     // it has to exist first. Absent under Emscripten, where there is no host to
     // serve from and the whole web half is excluded from the build.
 #ifndef __EMSCRIPTEN__
-    registerCmdProject(app, effective);
-    registerCmdViewer(app, effective);
-    registerCmdSkills(app, effective);
+    registerCmdProject(app, effective, registry);
+    registerCmdViewer(app, effective, registry);
+    registerCmdSkills(app, effective, registry);
 #endif
     for (const auto registrar : extra) {
-        registrar(app, effective);
+        registrar(app, effective, registry);
     }
 
     // No arguments at all: print the help and succeed.

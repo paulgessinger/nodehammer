@@ -13,6 +13,7 @@ add_executable(nodehammer_tests
     config/test_predicate_parser.cpp
     config/test_lua_config.cpp
     import/test_synthetic_importer.cpp
+    import/test_importer_options.cpp
     selection/test_predicate.cpp
     selection/test_selector.cpp
     tessellation/test_primitive_tessellator.cpp

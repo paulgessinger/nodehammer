@@ -15,6 +15,9 @@
 // the payload.
 
 #include <filesystem>
+namespace nodehammer::ir {
+class ImporterRegistry;
+}
 #include <string>
 
 namespace nodehammer::web {
@@ -29,6 +32,8 @@ enum class Posture {
 };
 
 struct StageOptions {
+    /// Optional invocation-owned importer registry; must outlive this operation.
+    const ir::ImporterRegistry *importers = nullptr;
     /// A validated runtime directory — what `locateRuntime` returned.
     std::filesystem::path runtime;
 
