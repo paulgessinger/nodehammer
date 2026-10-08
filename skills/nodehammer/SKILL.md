@@ -195,20 +195,22 @@ backend enabled, never a different flag. Check with
 `nodehammer convert -i x.root -o /dev/null` and read the code, not the extension.
 
 **Some DD4hep plugins require the global detector.** ALLEGRO's k4geo readout
-segmentation is one example: the normal XML importer uses a private detector,
-but the plugin looks up constants through `Detector::getInstance()` and can
-terminate the process when it finds none. DD4hep-enabled native builds install
-a separate executable for this case:
+segmentation is one example. In a DD4hep-enabled native build, opt in with:
 
 ```bash
-nodehammer-dd4hep -i detector.xml -o detector.nhb.zst
-nodehammer convert -i detector.nhb.zst -c scene.toml -o detector.glb
+nodehammer convert -i detector.xml --dd4hep-global -c scene.toml -o detector.glb
 ```
 
-Run it in the experiment's plugin environment as a separate process and check
-its exit code before using the output. It loads one geometry and writes NHB;
-selection and tessellation use the normal commands afterwards. It is not a
-`runCli` mode and does not replace an application's existing detector.
+Source the experiment's plugin environment first. The flag loads one compact
+into a fresh default detector; a populated detector or repeated global import
+is rejected. It is native-only: the Python console script and `runCli` do not
+expose it. `readSemantic` keeps the private detector; applications with an
+existing detector can use `fromDD4hep(detector)`.
+
+If a plugin calls `exit()` during XML loading, the native CLI prints `NH0302`.
+For a private import it suggests `--dd4hep-global`. This warning uses `atexit`,
+so it does not cover `abort()`, `_Exit()`, or fatal signals. Successful imports
+and caught exceptions do not trigger it. No separate executable is needed.
 
 **DD4hep XML has no extension of its own.** It is recognised by sniffing for
 `<lccdd` in the first 512 bytes, or by `--input-format dd4hep` when the sniff

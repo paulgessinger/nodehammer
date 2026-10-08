@@ -861,14 +861,10 @@ else()
     nh_apply_emscripten_exe_options(nodehammer)
 endif()
 
-# A separate process can safely own DD4hep's global detector. Never link this
-# entry point into the shared library or the in-process CLI dispatcher.
+# Global-detector opt-in and exit warning belong only to the native CLI.
 if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
-    add_executable(nodehammer-dd4hep src/cli/dd4hep_main.cpp)
-    target_link_libraries(nodehammer-dd4hep PRIVATE nodehammer_lib DD4hep::DDCore)
-    nh_set_compiler_options(nodehammer-dd4hep)
-    install(TARGETS nodehammer-dd4hep
-        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime)
+    target_sources(nodehammer PRIVATE src/cli/cmd_dd4hep_native.cpp)
+    target_link_libraries(nodehammer PRIVATE DD4hep::DDCore)
 endif()
 
 # ── gcc 15: a false positive on copying a vector<SelectionRule> ───────────────

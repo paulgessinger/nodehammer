@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ir/dd4hep/semantic/importer.hpp>
+#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/fb/semantic/importer.hpp>
 #include <ir/semantic.hpp>
 
 #include <DD4hep/Detector.h>
@@ -112,4 +114,19 @@ TEST_CASE("DD4hepImporter: import(Detector&) matches import(path) for simple_box
 
     const auto &root = byDetector.scene.nodes.at(byDetector.scene.rootId);
     REQUIRE(root.sourceSystem == "dd4hep");
+}
+
+TEST_CASE("DD4hep selection paths agree with NHB readback", "[import][dd4hep]") {
+    auto direct = nodehammer::ir::DD4hepImporter{}.import(kSimpleBox);
+    const auto bytes = nodehammer::ir::semanticSceneToBytes(direct.scene);
+    const auto readback = nodehammer::ir::FlatBufferImporter::importFromBytes("box.nhb", bytes);
+    std::unordered_set<std::string> directPaths, readbackPaths;
+    for (const auto &[id, node] : direct.scene.nodes) {
+        directPaths.insert(node.originalPath);
+    }
+    for (const auto &[id, node] : readback.scene.nodes) {
+        readbackPaths.insert(node.originalPath);
+    }
+    REQUIRE(directPaths.contains("/world"));
+    REQUIRE(directPaths == readbackPaths);
 }

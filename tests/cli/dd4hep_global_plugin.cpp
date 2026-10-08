@@ -2,7 +2,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <stdexcept>
 
 namespace {
 
@@ -12,9 +11,12 @@ dd4hep::Ref_t createDetector(dd4hep::Detector &description, xml_h handle,
     // a constant, and then uses that same detector's geometry objects.
     auto &global = dd4hep::Detector::getInstance();
     if (&global != &description || global.constant<int>("global_detector_probe") != 42) {
-        throw std::runtime_error("plugin did not receive the default detector");
+        std::exit(19);
     }
     std::puts("global detector plugin stdout");
+    if (global.constant<int>("plugin_exit_code") == -1) {
+        std::abort();
+    }
     if (global.constant<int>("plugin_exit_code") != 0) {
         std::exit(global.constant<int>("plugin_exit_code"));
     }

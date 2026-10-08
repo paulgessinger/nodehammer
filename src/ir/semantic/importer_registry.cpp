@@ -8,6 +8,7 @@
 #endif
 #ifdef NH_WITH_DD4HEP
 #include <ir/dd4hep/semantic/importer.hpp>
+#include <ir/dd4hep/semantic/native_importer.hpp>
 #endif
 
 #include <algorithm>
@@ -18,6 +19,10 @@
 namespace nodehammer::ir {
 
 namespace {
+
+#ifdef NH_WITH_DD4HEP
+DD4hepImporterFactory nativeDD4hepFactory = nullptr;
+#endif
 
 std::string toLower(std::string_view s) {
     std::string out{s};
@@ -110,6 +115,12 @@ ImporterRegistry::importers() const noexcept {
     return importers_;
 }
 
+#ifdef NH_WITH_DD4HEP
+void setNativeDD4hepImporterFactory(DD4hepImporterFactory factory) {
+    nativeDD4hepFactory = factory;
+}
+#endif
+
 ImporterRegistry ImporterRegistry::makeDefault() {
     ImporterRegistry reg;
     reg.registerImporter(std::make_unique<SyntheticImporter>());
@@ -119,7 +130,8 @@ ImporterRegistry ImporterRegistry::makeDefault() {
     reg.registerImporter(std::make_unique<TGeoImporter>());
 #endif
 #ifdef NH_WITH_DD4HEP
-    reg.registerImporter(std::make_unique<DD4hepImporter>());
+    reg.registerImporter(nativeDD4hepFactory != nullptr ? nativeDD4hepFactory()
+                                                        : std::make_unique<DD4hepImporter>());
 #endif
     return reg;
 }

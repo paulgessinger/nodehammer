@@ -121,6 +121,10 @@ ImportResult importFromDetector(dd4hep::Detector &detector, std::string sourceFi
     const dd4hep::DetElement world = detector.world();
     annotateDetElement(world, tr.result.scene, tr.result.diags, tr.nodeMap);
 
+    // Annotation replaces TGeo placement names with DetElement names. Refresh
+    // selection paths now, so direct XML import agrees with an NHB round-trip.
+    tr.result.scene.computeOriginalPaths();
+
     // Update sourceSystem for nodes not touched by annotateDetElement.
     for (auto &[_, node] : tr.result.scene.nodes) {
         if (node.sourceSystem == "tgeo") {

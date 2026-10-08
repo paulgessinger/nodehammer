@@ -416,20 +416,27 @@ if(NODEHAMMER_BUILD_SHARED)
     )
 endif()
 
-# A global-detector plugin must run behind an executable boundary, including
-# plugins that terminate instead of throwing. Link the test factory directly
-# into a copy of the real entry point so it needs no plugin search-path setup.
-if(TARGET nodehammer-dd4hep)
+# Link the test factory into the real native CLI; no external k4geo is needed.
+if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
     add_executable(nodehammer_dd4hep_probe
-        ${PROJECT_SOURCE_DIR}/src/cli/dd4hep_main.cpp
+        ${PROJECT_SOURCE_DIR}/src/cli/main.cpp
+        ${PROJECT_SOURCE_DIR}/src/cli/cmd_dd4hep_native.cpp
         cli/dd4hep_global_plugin.cpp)
     target_link_libraries(nodehammer_dd4hep_probe PRIVATE nodehammer_lib DD4hep::DDCore)
+    target_compile_options(nodehammer_dd4hep_probe PRIVATE
+        $<$<CXX_COMPILER_ID:MSVC>:/UNH_WITH_VIEWER>
+        $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNH_WITH_VIEWER>)
     nh_set_compiler_options(nodehammer_dd4hep_probe)
-    add_test(NAME dd4hep_process_import COMMAND ${CMAKE_COMMAND}
-        -DDRIVER=$<TARGET_FILE:nodehammer-dd4hep>
-        -DPROBE=$<TARGET_FILE:nodehammer_dd4hep_probe>
+    add_executable(nodehammer_dd4hep_native_host
+        cli/dd4hep_native_host.cpp
+        ${PROJECT_SOURCE_DIR}/src/cli/cmd_dd4hep_native.cpp)
+    target_link_libraries(nodehammer_dd4hep_native_host PRIVATE nodehammer_lib DD4hep::DDCore)
+    nh_set_compiler_options(nodehammer_dd4hep_native_host)
+    add_test(NAME dd4hep_native_import COMMAND ${CMAKE_COMMAND}
         -DNODEHAMMER=$<TARGET_FILE:nodehammer>
+        -DPROBE=$<TARGET_FILE:nodehammer_dd4hep_probe>
+        -DHOST=$<TARGET_FILE:nodehammer_dd4hep_native_host>
         -DFIXTURES=${PROJECT_SOURCE_DIR}/fixtures/dd4hep
-        -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/dd4hep_process
-        -P ${CMAKE_CURRENT_SOURCE_DIR}/cli/dd4hep_process.cmake)
+        -DWORKDIR=${CMAKE_CURRENT_BINARY_DIR}/dd4hep_native
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cli/dd4hep_native.cmake)
 endif()
