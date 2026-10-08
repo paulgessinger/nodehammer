@@ -1,5 +1,6 @@
 #include <detail/zstd_io.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/adapt.hpp>
 #include <ir/json/semantic/importer.hpp>
 #include <ir/semantic_json.hpp>
 
@@ -19,9 +20,10 @@ ImportResult JsonImporter::import(const std::filesystem::path &path) const {
     try {
         auto jsonStr = detail::zstd_io::readJsonFromFile(path);
         auto j = nlohmann::json::parse(jsonStr);
-        result.scene = j.get<expanded::Scene>();
-        result.scene.computeWorldTransforms();
-        result.scene.computeOriginalPaths();
+        auto expanded = j.get<expanded::Scene>();
+        expanded.computeWorldTransforms();
+        expanded.computeOriginalPaths();
+        result.scene = semantic::fromExpanded(expanded);
     } catch (const Error &) {
         throw;
     } catch (const std::exception &ex) {

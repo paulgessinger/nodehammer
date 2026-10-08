@@ -1,0 +1,224 @@
+DD4hep shared-geometry import: metadata investigation and design notes
+2026-10-08
+
+Status and scope
+
+These investigation notes informed the canonical source importer now implemented
+in src/ir/dd4hep/semantic/shared_importer.cpp. Standard convert/inspect commands
+import and query the shared graph. Processing expands retained occurrences
+after shared selection. These notes record the original investigation
+and current limits. The observations below describe the eager importer at the time
+of the investigation, and the rationale for its shared replacement.
+
+The intended fidelity target here is the geometry and selection metadata that
+nodehammer currently exposes. It is not preservation of every DD4hep simulation
+object, alignment condition, extension, readout definition, or detector service.
+
+Inspected local sources
+
+- nodehammer: src/ir/dd4hep/semantic/importer.cpp,
+  src/ir/tgeo/semantic/importer.cpp and importer.hpp,
+  src/ir/semantic.hpp, src/ir/expanded/scene.cpp.
+- DD4hep checkout: /home/pagessin/dev/DD4hep,
+  commit 9cdc3ba5081a35e43c483c6daf1cb8f10fcc3f60.
+  Relevant paths below are relative to that checkout. This was a source review;
+  it does not establish that every installed DD4hep version behaves identically.
+- k4geo checkout: analysis/fccee/k4geo-source,
+  commit b0087c8cbda29cc8c69172581b6df033c644d0cf (v00-24).
+  Relevant paths below are relative to that checkout.
+
+Existing metadata behavior
+
+1. TGeo import creates one semantic Node for every physical occurrence. Its
+   initial name is TGeoNode::GetName(), its logical-volume reference comes from
+   TGeoNode::GetVolume(), and its sourceSystem is "tgeo". Unique volumes carry
+   their own TGeoVolume::GetName(), shape, material and ordered daughter
+   placements. A volume's name and a daughter's placement name are distinct.
+   References: src/ir/tgeo/semantic/importer.cpp:81-107,110-129.
+
+2. The root Node's local transform is explicitly set to identity. World
+   transforms and originalPath strings are computed before DD4hep annotation.
+   originalPath therefore uses original TGeo placement names, not later
+   DetElement display names. References: importer.cpp:141-147;
+   src/ir/expanded/scene.cpp:Scene::computeOriginalPaths().
+
+3. DD4hep sensitivity is a logical-volume property. For each unique TGeoVolume,
+   Volume::isSensitive() tests whether its sensitive-detector handle is valid.
+   Every Node referencing a sensitive volume receives sensitive="true". A
+   nonsensitive volume gets no sensitive key, rather than sensitive="false".
+   There is no parent-to-child inheritance. References:
+   src/ir/dd4hep/semantic/importer.cpp:59-87;
+   DDCore/src/Volumes.cpp:1321-1324.
+
+4. For each DetElement whose placement is found in nodeMap, annotation changes
+   that matched Node's display name to elem.name() and sourceSystem to "dd4hep".
+   A nonempty elem.type() adds/replaces subdetector with that exact string.
+   This is DetElement::type(), not SensitiveDetector::type(), a typeFlag, or a
+   synthesized tracker/calorimeter category. Annotation also sets sensitive to
+   true if elem.volume().isSensitive(); elem.volume() is the placement's volume,
+   so this is the same volume property used in step 3. Empty type and false
+   sensitivity do not erase existing keys. References:
+   src/ir/dd4hep/semantic/importer.cpp:27-56;
+   DDCore/src/DetElement.cpp:96-99,351-354.
+
+5. Annotation applies only to explicitly matched nodes. Walking the DetElement
+   hierarchy does not propagate subdetector, sensitivity, display names or
+   sourceSystem into unannotated descendants. Unannotated sourceSystem values
+   become "dd4hep/tgeo" afterwards. originalPath is not recomputed after display
+   names change. Reference: src/ir/dd4hep/semantic/importer.cpp:113-128.
+
+6. The importer does not currently copy readout names, physvol IDs, DetElement
+   IDs/typeFlags, regions, limits or arbitrary DD4hep extensions into Node tags.
+   Those are additional requirements if a broader fidelity target is desired.
+
+Repeated TGeoNode pointer-map bug
+
+TGeo daughters belong to a reusable logical volume. Placing that volume more
+than once reuses the same daughter TGeoNode pointers under different physical
+ancestor paths. The eager traversal nevertheless stores a single NodeId per
+pointer, assigning nodeMap[node] = id on each physical visit. The final map
+therefore identifies only the last DFS occurrence of each reused pointer.
+References: src/ir/tgeo/semantic/importer.cpp:110-128;
+src/ir/tgeo/semantic/importer.hpp:TGeoTraversalResult.
+
+The sensitivity pass already accounts for this by working through the volume
+map. DetElement annotation still uses the lossy pointer map. Distinct
+DetElements associated with repeated placements can consequently overwrite
+one final occurrence's name/type/provenance while the other occurrences retain
+raw TGeo names and no subdetector tag. If several annotations hit that one
+Node, the last visited name wins, while an empty later type leaves the previous
+nonempty subdetector value in place.
+
+A future importer must distinguish preserving this legacy output from fixing
+its occurrence attribution. Do not silently promote the legacy annotation to
+a daughter default: that labels every use of the reusable daughter, which is
+not equivalent to an annotation on one physical occurrence. Tests should have
+a repeated parent volume, a shared daughter pointer, and distinct DetElement
+ancestors so the intended attribution is explicit.
+
+There is another existing omission: when a DetElement placement is missing
+from nodeMap, annotateDetElement emits a warning and returns before visiting
+its children. A missing or unplaced ancestor can therefore suppress otherwise
+resolvable descendant metadata. Reference:
+src/ir/dd4hep/semantic/importer.cpp:30-35,54-56. Whether to keep this behavior or
+continue through descendants using the nearest placed ancestor is a separate
+compatibility decision.
+
+Minimal sparse metadata representation
+
+- Preserve each unique logical volume and its ordered daughter placements.
+  Each daughter needs its original placement name, referenced volume and local
+  transform. Preserve the root's original name and explicit root transform
+  policy separately. Occurrence identity is the sequence of daughter indices,
+  scoped to an immutable source graph and root, not a display-path string.
+
+- Store sensitive="true" once as a volume-level default. All occurrences of
+  that same sensitive volume obtain the key without one map per fibre/node.
+  Nonsensitive volumes have no key. Do not inherit a parent's tags into its
+  children.
+
+- Daughter-placement defaults may hold metadata that actually belongs to a
+  reusable placement slot, or metadata proven identical for all its physical
+  uses. They do not automatically inherit the parent volume's metadata.
+  In particular, a DetElement's subdetector annotation is not by itself proof
+  that every occurrence of its placement slot should receive that annotation.
+
+- Use sparse occurrence overrides for explicit DetElement metadata when
+  occurrence context matters. A complete-map tag override must be assembled
+  from the effective volume/placement defaults before adding subdetector or
+  other explicit keys; otherwise it accidentally removes sensitivity. An
+  explicitly empty override and absence of an override must remain distinct
+  if callers can intentionally clear inherited defaults.
+
+- Tags alone are insufficient for fidelity to current name predicates and
+  provenance. Preserve sparse display-name and sourceSystem overrides as well,
+  separate from raw placement names. originalPath continues to derive from raw
+  source placement names even when the displayed name changes. Do not rename
+  a reusable daughter globally to represent one DetElement occurrence.
+
+- Include all effective volume and daughter metadata in deduplication identity,
+  or preserve equivalent distinctions in separate metadata identities. Equal
+  shape/material is not enough to merge a sensitive and nonsensitive volume;
+  equal child geometry is not enough to merge differently named/tagged slots.
+  Source identities and overrides must be remapped consistently if dedup runs.
+
+- Persist graph/root identity and the daughter-index occurrence keys alongside
+  these definitions when format integration is implemented. Runtime pointers
+  must not be serialized as identities. Source graph and tags must be immutable
+  while selection views depend on them, or those views require invalidation.
+
+Resolving DetElements without expanding the physical tree
+
+During unique-volume extraction, record exact TGeoNode pointer -> owner-volume
+and emitted daughter-index associations, plus the root association. If invalid
+children are filtered, record the emitted index rather than assuming it equals
+GetNode(i)'s original array index.
+
+Resolve a DetElement relative to its already resolved placed DetElement
+ancestors. Use their placement pointers as anchors and connect gaps through
+the prototype DAG using exact pointer/edge identity. Shared-volume reachability
+and route-count checks can be memoized; count possible routes only up to two
+when the immediate question is uniqueness. This avoids materializing all
+physical descendants just to find a small set of explicit metadata records.
+
+A pointer alone does not identify an occurrence. If the available DetElement
+ancestor anchors still permit multiple source paths, report the ambiguity
+rather than silently choosing the first or last route. If several DetElements
+resolve to one occurrence with conflicting metadata, retain/report the conflict
+or apply a documented compatibility rule; a one-value tag map cannot preserve
+all conflicting annotations by itself.
+
+Do not use DetElement::path() as the geometry identity: it is the DetElement
+hierarchy's path, which can omit intermediate physical placements and uses
+detector-element names. DetElement::placementPath() is also not an exact,
+necessarily cheap replacement for occurrence indexing in the inspected source:
+
+- DDCore/src/DetElement.cpp:85-93 lazily delegates placementPath construction.
+- DDCore/src/DetectorTools.cpp:245-273 fills gaps between DetElement placement
+  anchors using makePlacementPath().
+- makePlacementPath calls findChildByName(), whose implementation at lines
+  100-127 compares names, accepts the first match and recursively searches
+  physical daughter subtrees without prototype memoization.
+
+Duplicate names or repeated intermediate volumes can therefore make that
+helper ambiguous; repeated source subtrees can also make its search expensive.
+Even the pointer-based findChild() helper (lines 68-96) returns the first route
+and recursively walks daughters. A future resolver needs explicit ambiguity
+handling and must not confuse a name-based convenience path with a unique
+physical occurrence key.
+
+IDEA evidence relevant to metadata size
+
+The reviewed FiberDualReadoutCalo_o1_v01.cpp creates one top-level drDet,
+passes it to DRconstructor and assigns its envelope placement (lines 21,67,76).
+DRconstructor uses that owner for skin surfaces and sets sensitivity on reusable
+SiPM wafer volumes (DRconstructor.cpp:99-109); it does not create one DetElement
+per physical fibre in this implementation.
+
+DREndcapTubes_o1_v01.cpp similarly sets sensitivity on reusable core/cladding
+volumes (for example lines 189,202,209), then creates one top-level DetElement
+for the endcap assembly (lines 489-500). Both paths are under
+k4geo's detector/calorimeter/{dual-readout,dual-readout-tubes}/src/.
+
+These observations support volume defaults plus sparse DetElement overrides
+for these calorimeters. They are not a measurement of all IDEA metadata, and
+they do not prove that every future detector has a small DetElement tree.
+
+Suggested integration checks
+
+- Two physical uses of one sensitive LV both match sensitive=true without
+  allocating two persistent tag maps.
+- A nonsensitive child of a tagged/sensitive parent does not inherit its keys.
+- Distinct DetElement ancestors over a shared daughter pointer receive their
+  own explicit names/type annotations instead of the last-DFS overwrite.
+- Name predicates see the DetElement display name while path predicates still
+  see the original TGeo placement path.
+- An explicit empty tag override clears defaults; removing that override
+  restores defaults; adding subdetector preserves sensitivity when intended.
+- Duplicate-name and multiply reachable placements produce an explicit
+  ambiguity result, not an arbitrary occurrence.
+- Missing ancestor placements exercise the documented continue-or-skip policy.
+- Metadata-preserving deduplication keeps relevant tag/name distinctions.
+- Snapshot eviction, selection/pruning and eventual serialization round trips
+  preserve effective tags and occurrence identities without expanding the full
+  physical tree.

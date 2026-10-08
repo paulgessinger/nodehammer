@@ -1,7 +1,7 @@
 #pragma once
 
 #include <diagnostics.hpp>
-#include <ir/expanded/scene.hpp>
+#include <ir/semantic.hpp>
 
 class TGeoShape;
 
@@ -13,7 +13,7 @@ namespace nodehammer::ir {
 /// On unknown shape types emits NH0301, sets DegradationBit::UnknownShape on
 /// the returned shape's provenance (via UnknownShape.originalType), and still
 /// returns a valid ID — nodes are never silently omitted.
-[[nodiscard]] semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, expanded::Scene &scene,
-                                                  DiagnosticList &diags);
+[[nodiscard]] semantic::ShapeId
+dispatchTGeoShape(const TGeoShape *shape, semantic::GeometryCatalogs &scene, DiagnosticList &diags);
 
 } // namespace nodehammer::ir
