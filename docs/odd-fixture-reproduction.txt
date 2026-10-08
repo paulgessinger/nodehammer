@@ -1,0 +1,54 @@
+ODD historical fixture reproduction — 2026-10-12
+
+The fixture added in 93b19054de695ba5196ff5f0d71001fca35ecd75 is byte-identical
+to the retained odd-nhs8.nhb.zst (SHA1 52b374dcb1c242258757bb8ef39c914039ecc766).
+Original source_file: /Users/pagessin/dev/OpenDataDetector/xml/OpenDataDetector.xml.
+The fixture recompresses byte-identically with ZSTD_compress at level 3.
+
+Rebuilt original exporter unmodified in /tmp/nodehammer-odd-historical using
+current existing Conan dependencies and DD4hep 1.37/ROOT 6.40.04. Ran original
+dump-semantic --output-format nhb against the ACTS ODD XML/plugin, source revision
+d70556f33b1c36abdf101a07ad8cf57eb56fbdf1. This is a controlled same-input code
+comparison, not a complete reconstruction of the April dependency environment.
+
+Results, all zstd level 3:
+Historical fixture                             507,965 bytes
+Original exporter, current ACTS ODD source      512,217 bytes
+Current NHS8 writer, original export readback   510,838 bytes
+New importer expanded + current dedup + NHS8  1,258,684 bytes
+Same expanded scene + old dedup rule + NHS8     508,275 bytes
+Current direct NHS9                          1,013,444 bytes
+All have 325,232 physical occurrences.
+
+Old prototype dedup key: own shape/material plus ordered daughter canonical
+volume reference and transform. Current key also includes daughter name.
+Original export: 1,238 volumes, 9,308 stored prototype daughters.
+Current expanded/deduplicated control: 1,654 volumes, 127,672 prototype daughters.
+The old-rule diagnostic produces 1,238 volumes. It temporarily clears names for
+key comparison and restores the retained representative's daughter names. Actual
+expanded node names, transforms, tags and source-system entries remain present.
+It deliberately merges volume identities/labels and prototype names; it is NOT
+an exact canonical-information-preserving optimization for NHS9.
+
+Old and current NHS8 transform pools have identical cardinalities: 1,139 rotation
+rows, 5,615 translation rows, 5,628 transform combinations. Fresh old/current
+exports have the same separately compressed transform-pool column sizes.
+Removing tags/source systems barely changes compressed size; it does not explain
+the gap (old 510,838 -> 506,859; new 1,258,684 -> 1,255,305).
+
+The historical DD4hep node-pointer mapping annotates only the last occurrence of
+a reused TGeoNode. New import preserves more occurrence annotations: old export
+has 72,680 dd4hep nodes / 95,345 tagged nodes, new has 133,852 / 133,851.
+Those differences exist but do not explain the near-factor-two file increase.
+
+Correction to previous audit/conclusion: 1,258,684 was a serialization control
+for the NEW importer and NEW dedup behavior. It is not a faithful old-pipeline
+NHS8 baseline. The old pipeline still achieves about 0.51 MB with today's source.
+Current NHS9 is about 98% larger than that reproduction, exceeding the user's
+15% tolerance. Higher zstd levels do not eliminate the same-level comparison.
+
+NHS9 retains source volume identities; tagged scenes also bypass dedup entirely.
+Recovering old sharing safely needs separation of repeated geometry payloads
+from occurrence/identity/name metadata, or an equivalent lossless representation.
+Simply restoring the old name-blind merge would change NHS9 occurrence paths.
+No production changes made during this investigation.

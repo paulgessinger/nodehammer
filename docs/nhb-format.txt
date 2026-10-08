@@ -1,3 +1,6 @@
+This document describes the legacy NHS8 format, retained for reading existing
+files. New writes use NHS9: see nhs9-current.txt and schemas/shared.fbs.
+
 ================================================================================
 nhb FILE FORMAT
 nodehammer semantic geometry container
@@ -17,9 +20,9 @@ conventions the writer applies. It is NOT a from-scratch byte spec of
 FlatBuffers itself.
 
 Authoritative schema:   schemas/semantic.fbs
-Writer:                 src/ir/fb/semantic/flatbuffer.cpp (semanticSceneToFlatBuffer)
+Writer:                 src/ir/legacy/nhs8.cpp (semanticSceneToFlatBuffer)
                         src/ir/fb/semantic/exporter.cpp
-Reader:                 src/ir/fb/semantic/flatbuffer.cpp (semanticSceneFromFlatBuffer)
+Reader:                 src/ir/legacy/nhs8.cpp (semanticSceneFromFlatBuffer)
                         src/ir/fb/semantic/importer.cpp
 
 To regenerate a human-readable JSON dump or re-verify the binary, use the

@@ -105,7 +105,8 @@ TEST_CASE("BuildSession resolves a flat config + geometry from a bag", "[viewer]
     REQUIRE_FALSE(inputs->config.diags.hasErrors());
     REQUIRE_FALSE(inputs->import.diags.hasErrors());
     REQUIRE(inputs->import.scene.nodeCount() > 0);
-    REQUIRE(inputs->import.diags.empty());
+    REQUIRE(inputs->import.diags.size() == 1);
+    CHECK(inputs->import.diags.items().front().code == codes::kWarnImportLegacyNhb);
 }
 
 TEST_CASE("BuildSession input_hash is content-addressed and backend-independent",

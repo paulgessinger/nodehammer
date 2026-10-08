@@ -6,6 +6,8 @@
 #include <bit>
 #include <cstdint>
 #include <cstring>
+#include <limits>
+#include <stdexcept>
 
 namespace nodehammer::ir::semantic {
 
@@ -224,16 +226,36 @@ bool ShapeEqual::operator()(const ShapeVariant &a, const ShapeVariant &b) const 
 
 } // namespace
 
+namespace {
+uint64_t allocateCatalogId(uint64_t &next) {
+    if (next == 0)
+        throw std::overflow_error("geometry catalog ID space exhausted");
+    const auto result = next;
+    next = next == std::numeric_limits<uint64_t>::max() ? 0 : next + 1;
+    return result;
+}
+} // namespace
+LogVolId GeometryCatalogs::nextLogVolId() { return LogVolId{allocateCatalogId(nextLogVolId_)}; }
+ShapeId GeometryCatalogs::nextShapeId() { return ShapeId{allocateCatalogId(nextShapeId_)}; }
+MaterialId GeometryCatalogs::nextMaterialId() {
+    return MaterialId{allocateCatalogId(nextMaterialId_)};
+}
 void GeometryCatalogs::reseedIdCounters() {
-    auto maxKey = [](const auto &map, uint64_t seed) {
-        for (const auto &[id, _] : map) {
-            seed = std::max(seed, id.value);
+    auto reseed = [](const auto &map, uint64_t next) {
+        if (next == 0)
+            return next;
+        for (const auto &[id, value] : map) {
+            (void)value;
+            if (id.value == std::numeric_limits<uint64_t>::max())
+                return uint64_t{0};
+            if (id.value >= next)
+                next = id.value + 1;
         }
-        return seed;
+        return next;
     };
-    nextLogVolId_ = maxKey(logVols, nextLogVolId_ - 1) + 1;
-    nextShapeId_ = maxKey(shapes, nextShapeId_ - 1) + 1;
-    nextMaterialId_ = maxKey(materials, nextMaterialId_ - 1) + 1;
+    nextLogVolId_ = reseed(logVols, nextLogVolId_);
+    nextShapeId_ = reseed(shapes, nextShapeId_);
+    nextMaterialId_ = reseed(materials, nextMaterialId_);
 }
 
 std::size_t GeometryCatalogs::deduplicateShapes() {

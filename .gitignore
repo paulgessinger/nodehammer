@@ -10,6 +10,7 @@
 *.nhb
 *.nhb.zst
 !/odd.nhb.zst
+!/odd-nhs8.nhb.zst
 
 # Project archives packed by the viewer / make_nhproj.py — always generated.
 *.nhproj

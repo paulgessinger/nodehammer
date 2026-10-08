@@ -228,11 +228,12 @@ struct GeometryCatalogs {
     std::size_t deduplicateShapes();
     std::size_t deduplicateMaterials();
     std::map<LogVolId, LogVolId> deduplicateVolumeDefinitions();
-    LogVolId nextLogVolId() { return LogVolId{nextLogVolId_++}; }
-    ShapeId nextShapeId() { return ShapeId{nextShapeId_++}; }
-    MaterialId nextMaterialId() { return MaterialId{nextMaterialId_++}; }
+    LogVolId nextLogVolId();
+    ShapeId nextShapeId();
+    MaterialId nextMaterialId();
 
   private:
+    // Zero marks an exhausted monotonic allocator; imported zero IDs remain valid.
     uint64_t nextLogVolId_{1};
     uint64_t nextShapeId_{1};
     uint64_t nextMaterialId_{1};
