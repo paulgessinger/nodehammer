@@ -75,6 +75,7 @@ int runWith(std::span<const std::string_view> args, const CliOptions &options,
 // visibility ever slipped, `ci/check_shared_exports.py` would report it as an
 // *unqualified* symbol and point the reader at --exclude-libs, which is not the
 // line at fault.
+void registerCmdUpgrade(CLI::App &app, const CliOptions &options);
 void registerCmdConvert(CLI::App &app, const CliOptions &options);
 void registerCmdInspect(CLI::App &app, const CliOptions &options);
 void registerCmdConfig(CLI::App &app, const CliOptions &options);

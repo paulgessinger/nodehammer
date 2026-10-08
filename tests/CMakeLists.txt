@@ -1,7 +1,7 @@
 add_executable(nodehammer_tests
     test_main.cpp
-    ir/test_shared_flatbuffer.cpp
     ir/test_occurrence_tree.cpp
+    ir/test_shared_flatbuffer.cpp
     ir/test_legacy_shared.cpp
     ir/test_shared_geometry.cpp
     ir/test_semantic_ir.cpp
@@ -85,6 +85,7 @@ endif()
 # notice it slipping, so it is a regression test and not merely a suite member.
 target_sources(nodehammer_tests PRIVATE
     cli/test_cli_run.cpp
+    cli/test_cli_shared.cpp
     cli/test_cli_inspect_json.cpp
     cli/test_cli_config.cpp
     cli/test_cli_convert_stages.cpp
@@ -427,4 +428,13 @@ if(NODEHAMMER_BUILD_SHARED)
     catch_discover_tests(nodehammer_public_tests
         DL_PATHS $<TARGET_FILE_DIR:nodehammer_shared>
     )
+endif()
+
+if(NOT EMSCRIPTEN)
+    add_test(NAME shared_geometry_legacy_upgrade
+        COMMAND ${CMAKE_COMMAND}
+            -DCLI=$<TARGET_FILE:nodehammer>
+            -DINPUT=${PROJECT_SOURCE_DIR}/fixtures/nhb/legacy-nhs8-mdi.nhb.zst
+            -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shared-upgrade-check
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_shared_upgrade.cmake)
 endif()
