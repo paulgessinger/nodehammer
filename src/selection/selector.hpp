@@ -47,6 +47,7 @@ class SelectionEngine {
     /// If the root node is in the dropped set the scene is left unchanged and
     /// an NH0401 error is emitted.  Returns accumulated diagnostics.
     DiagnosticList prune(ir::expanded::Scene &scene) const;
+    [[nodiscard]] DiagnosticList prune(ir::semantic::Scene &scene) const;
 
   private:
     std::vector<config::SelectionRule> rules_;

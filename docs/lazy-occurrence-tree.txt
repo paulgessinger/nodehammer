@@ -1,0 +1,140 @@
+Shared occurrence selection: implementation status
+==================================================
+
+Status (2026-10-08)
+-------------------
+The shared selector evaluates existing selection rules without building expanded
+Node objects. Standard import returns the canonical source graph. Selection
+projects retained occurrences into another canonical scene; tessellation and
+JSON/wedge processing explicitly expand it. Regression tests compare against the
+old physical selector, including successive pruning and rotated-parent hoisting.
+
+Source representation and lazy snapshots
+----------------------------------------
+src/ir/semantic/occurrence_tree.hpp borrows an immutable source Scene's logical
+volumes and daughter placements. No expanded nodes are required or consulted.
+Occurrence identity is a sequence of daughter indices, distinguishing siblings
+even when their display paths are identical. A bounded LRU owns a configurable
+number of immutable snapshots; external shared_ptr handles pin snapshots across
+eviction. Metadata lives separately and survives cache eviction. Volume defaults and
+prototype daughter-placement defaults share interned tag maps. Placement keys
+supersede volume keys; a sparse occurrence override replaces the complete effective
+map. An explicit empty override clears all defaults; clearTagOverride restores them.
+Merged default combinations are interned lazily, never once per physical occurrence.
+
+Sparse display-name overrides affect name predicates and diagnostics, while import-time
+path segments continue defining original paths. DD4hep freezes its annotated
+detector names into sparse path-segment overrides; unannotated segments use raw
+placement names. Later display renaming does not rewrite those source paths.
+Defaults, overrides and names must remain immutable while selection views exist. Cache eviction is allowed;
+pinned snapshots retain their prior values. Tags are supplied explicitly, not
+inferred from existing expanded nodes. Persistence must preserve these metadata
+maps and provenance.
+Interned definitions live for the tree lifetime, so repeated unbounded metadata
+edits are not a supported bounded-memory use case. Cache bounds exclude external
+pins, persistent metadata, allocator overhead and variable path lengths.
+
+The source must describe the actual retained topology. An expanded legacy scene
+is adapted from its physical child lists, never from stale prototype daughters.
+Current logical-volume deduplication now includes daughter names in its key,
+with direct and transitive regression coverage. This prevents future naming loss;
+it cannot restore names already lost in older deduplicated NHBs. Leaf volume
+names can still merge because occurrence names come from daughter placements.
+
+Persistent selected topology
+----------------------------
+src/selection/occurrence_selector.hpp/.cpp provides SelectedOccurrences:
+- Initially all source occurrences are present implicitly, without a node mask.
+- dryRun compiles the same predicates and evaluates ordered/scoped rules using
+  transient NodeViews. It does not populate or touch the snapshot cache.
+- prune returns a new immutable selection view; the old view remains unchanged.
+  The resulting bitset records retained source DFS ordinals, with a per-word rank
+  index for constant-time subtree-presence queries. Retained mask/rank payload
+  is about 0.25 bytes per source occurrence (about 65 MB for 260 million).
+  During evaluation, old and new masks may coexist. An empty-rule prune returns
+  the same immutable topology without allocating a mask or traversing occurrences.
+- Prototype counts and child ordinal offsets are memoized per source volume;
+  count overflow and cyclic prototype graphs are rejected before traversal.
+- One mutable path and an explicit depth stack drive filtering. No world matrices
+  or full-path strings are stored per physical occurrence during selection.
+- Selected leaf status comes from retained descendants, not prototype daughters.
+  Removed intermediate ancestors can be traversed to reach previously hoisted
+  survivors. Fully absent source subtrees are skipped using the rank index.
+- Materialization finds the nearest retained source ancestor and rebases the
+  local transform while preserving original path and world transform. Eviction
+  cannot resurrect removed nodes; repeated filters start from current topology.
+
+The mask is compact but still linear in physical occurrences. Traversal remains
+linear in the visited source occurrences times rule count; no cross-instance
+predicate-result memoization is implemented. An arbitrary filter over 260 million
+placements is not promised to finish within three seconds.
+
+Shared selection retains at most 1,024 detailed orphan warnings by default,
+plus one explicit summary of omitted details and total warnings. Configure
+OccurrenceSelectionOptions::orphanDiagnosticLimit to change the limit; nullopt
+requests unlimited details for strict parity investigations. orphanWarningCount()
+and omittedOrphanDiagnosticCount() remain exact regardless of the detail budget.
+Omitted per-node messages are not formatted or allocated. Counts describe the
+latest selection run and reset on subsequent runs, including empty-rule pruning.
+Root-drop exceptions retain observed summary diagnostics; hoisting causes no
+forced-orphan warnings. Production expanded-selector diagnostics are unchanged.
+Diagnostic contents below the budget match the expanded selector, but emission
+order is DFS rather than BFS; differential tests compare content multisets.
+
+Regression coverage
+-------------------
+- Expanded reference: repeated prototypes with distinct paths, tags and scopes,
+  ordered rules, rotated-parent hoisting, stable original paths and leaf status
+  after an occurrence-specific prune.
+- Snapshot cache: eviction/reconstruction, pin lifetime, tag isolation, duplicate
+  names, traversal bounds, invalid addresses, cycles and reference transforms.
+- Shared differential selection: exact retained identities, source paths/tags,
+  selected parents/leaf state, full local/world matrices, diagnostics, root-drop
+  error and hoisted root forcekeep, repeated selection and cache capacities 0/1/4.
+- Rank-mask boundaries: source counts 63/64/65/129, sparse survivors, root-only
+  result and successive prune without resurrecting old source daughters.
+- Prototype indexing: cycles and uint64_t count overflow without expanding nodes.
+
+Native benchmark
+----------------
+The benchmark is local-only: excluded from default builds and not registered
+with CTest. Build it explicitly, then run:
+  cmake --build build/key4hep/build/Release --target nodehammer_selection_bench
+  scripts/selection-bench.sh build/key4hep/build/Release/tests/nodehammer_selection_bench
+Arguments: modules fibers_per_module measured_runs warmups (defaults 256 1024 5 1).
+For a quick local smoke run, pass 3 7 1 1. JSON schema v2 contains paired expanded and
+shared reports for equivalent tag, scoped-order and hoisting rules.
+
+Every run verifies selected occurrences and materialized paths/transforms/parents
+outside timing. Shared selection must materialize zero snapshots. Construction,
+source copying and correctness checks are outside timers. The prune timer includes
+selection again: it is not a pure mutation measurement. The shared prune does not
+yet produce an expanded export or garbage-collect the borrowed prototype catalogs,
+so its downstream work is different from production. dryRun is the closest paired
+comparison of filter execution. End-to-end export remains to be benchmarked.
+
+Reusable metadata measurements (same Release environment, 1,049,601 nodes,
+three runs after one warmup):
+                  expanded dryRun ms   shared dryRun ms
+  tag                      374.66              74.91
+  scope_order              503.31             118.55
+  hoist                    289.28              86.87
+Raw local report: analysis/fccee/selection-native-metadata-million.json.
+Each shared scenario confirms two interned tag sets, 1,024 prototype-placement
+defaults, zero occurrence tag overrides and zero selection materializations.
+Coverage includes default precedence/sharing, explicit empty overrides, default
+restoration, pinned old metadata, renamed-root errors, raw paths versus display
+names, detail limits 0/1/exact/unlimited, and 10,000 forced orphan warnings with
+bounded retained diagnostics.
+
+Follow-up work
+--------------
+- Continue checking source fidelity on additional detector families. Exact pointer
+  routes anchored by placed DetElements resolve metadata without expanding the
+  physical tree; ambiguity fails explicitly.
+- Make tessellation/rendering consume selected occurrences without expanding every
+  survivor. Instancing, batching and picking identities need a separate design.
+- Measure end-to-end import/select/render memory and latency on real geometries,
+  and validate WASM where the SDK is available. The native benchmark is a proxy.
+- Accelerate selection over very large repeated structures. The current masks and
+  traversal remain proportional to physical occurrence count.
