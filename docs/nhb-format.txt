@@ -17,9 +17,9 @@ conventions the writer applies. It is NOT a from-scratch byte spec of
 FlatBuffers itself.
 
 Authoritative schema:   schemas/semantic.fbs
-Writer:                 src/ir/fb/semantic/flatbuffer.cpp (semanticSceneToFlatBuffer)
+Writer:                 src/ir/expanded/transport.cpp (semanticSceneToFlatBuffer)
                         src/ir/fb/semantic/exporter.cpp
-Reader:                 src/ir/fb/semantic/flatbuffer.cpp (semanticSceneFromFlatBuffer)
+Reader:                 src/ir/expanded/transport.cpp (semanticSceneFromFlatBuffer)
                         src/ir/fb/semantic/importer.cpp
 
 To regenerate a human-readable JSON dump or re-verify the binary, use the

@@ -1,5 +1,6 @@
 add_executable(nodehammer_tests
     test_main.cpp
+    ir/test_shared_flatbuffer.cpp
     ir/test_occurrence_tree.cpp
     ir/test_legacy_shared.cpp
     ir/test_shared_geometry.cpp

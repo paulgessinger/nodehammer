@@ -61,7 +61,7 @@ int main(int argc, char **argv) {
         const auto bytes = nodehammer::toNhb(handle);
         require(bytes.size() > 8, "serialized bytes");
         require(static_cast<char>(bytes[4]) == 'N' && static_cast<char>(bytes[5]) == 'H' &&
-                    static_cast<char>(bytes[6]) == 'S' && static_cast<char>(bytes[7]) == '8',
+                    static_cast<char>(bytes[6]) == 'S' && static_cast<char>(bytes[7]) == '9',
                 "semantic file identifier");
         if (argc != 2) {
             throw std::runtime_error("expected output fixture path");

@@ -1,0 +1,108 @@
+namespace nodehammer.shared_fbs;
+
+struct Vec3f {
+    x:float; y:float; z:float;
+}
+
+struct DVec3 {
+    x:double; y:double; z:double;
+}
+
+struct Triangle {
+    v0:DVec3;
+    v1:DVec3;
+    v2:DVec3;
+}
+
+struct Section {
+    z:double;
+    r_min:double;
+    r_max:double;
+}
+
+// --- Shape tables ---
+
+table BoxShape       { dx:double; dy:double; dz:double; }
+table TubeShape      { r_min:double; r_max:double; dz:double; phi_start:double; phi_delta:double; }
+table ConeShape      { r_min1:double; r_max1:double; r_min2:double; r_max2:double; dz:double; phi_start:double; phi_delta:double; }
+table TrdShape       { dx1:double; dx2:double; dy1:double; dy2:double; dz:double; }
+table ParaShape      { dx:double; dy:double; dz:double; alpha:double; theta:double; phi:double; }
+table PconShape      { phi_start:double; phi_delta:double; sections:[Section]; }
+table PgonShape      { phi_start:double; phi_delta:double; n_sides:int; sections:[Section]; }
+table TorusShape     { r_min:double; r_max:double; r_tor:double; phi_start:double; phi_delta:double; }
+table TessellatedShape { triangles:[Triangle]; }
+table BooleanUnion        { left:uint64; right:uint64; right_transform_index:uint32; }
+table BooleanIntersection { left:uint64; right:uint64; right_transform_index:uint32; }
+table BooleanSubtraction  { left:uint64; right:uint64; right_transform_index:uint32; }
+table UnknownShape   { original_type:string; }
+
+union ShapeData {
+    BoxShape,
+    TubeShape,
+    ConeShape,
+    TrdShape,
+    ParaShape,
+    PconShape,
+    PgonShape,
+    TorusShape,
+    TessellatedShape,
+    BooleanUnion,
+    BooleanIntersection,
+    BooleanSubtraction,
+    UnknownShape
+}
+
+table Shape {
+    id:uint64;
+    data:ShapeData;
+}
+
+// --- Material ---
+
+table Material {
+    id:uint64;
+    name:string;
+    has_color:bool;
+    color:Vec3f;
+    density:double;
+}
+
+// NHS9 stores source definitions and sparse occurrence metadata, never nodes.
+// Whole-file compression is external. Future container layouts get a new identifier.
+table Placement { name:string (required); log_vol_id:uint64; transform_index:uint32; }
+table Volume { id:uint64; name:string (required); shape_id:uint64; material_id:uint64; daughters:[Placement] (required); }
+table Tag { key:string (required); value:string (required); }
+table TagSet { tags:[Tag] (required); }
+table VolumeTags { volume:uint64; tag_set:uint64; }
+table PlacementTags { volume:uint64; daughter:uint64; tag_set:uint64; }
+table OccurrenceTags { path:[uint64] (required); tag_set:uint64; }
+table OccurrenceString { path:[uint64] (required); value:string (required); }
+table OccurrenceDegradation { path:[uint64] (required); flags:uint64; }
+table Metadata {
+ tag_sets:[TagSet] (required);
+ volume_tags:[VolumeTags] (required);
+ placement_tags:[PlacementTags] (required);
+ occurrence_tags:[OccurrenceTags] (required);
+ display_names:[OccurrenceString] (required);
+ path_names:[OccurrenceString] (required);
+ original_paths:[OccurrenceString] (required);
+ degradation:[OccurrenceDegradation] (required);
+ default_source_system:string (required);
+ source_systems:[OccurrenceString] (required);
+}
+table SharedGeometry {
+ schema_version:uint32 = 1;
+ required_features:uint64;
+ source_file:string (required);
+ root:Placement (required);
+ occurrence_count:uint64;
+ // Full 4x4 column-major double matrices, 16 consecutive doubles per entry.
+ transforms:[double] (required);
+ materials:[Material] (required);
+ shapes:[Shape] (required);
+ volumes:[Volume] (required);
+ metadata:Metadata (required);
+}
+root_type SharedGeometry;
+file_identifier "NHS9";
+file_extension "nhb";

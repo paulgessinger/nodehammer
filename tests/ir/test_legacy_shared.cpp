@@ -94,6 +94,11 @@ TEST_CASE("Legacy upgrade keeps actual topology and occurrence metadata", "[ir][
     auto selected = all.prune({rule});
     REQUIRE(selected.size() == 4);
     REQUIRE_FALSE(selected.contains({0, 0}));
+    const auto path =
+        std::filesystem::temp_directory_path() / "nodehammer-legacy-upgrade-test.nhb.zst";
+    semantic::writeFlatbuffer(g, path);
+    compare(s, semantic::readFlatbuffer(path));
+    std::filesystem::remove(path);
 }
 TEST_CASE("Legacy upgrade refuses malformed topology instead of dropping data",
           "[ir][shared][legacy]") {

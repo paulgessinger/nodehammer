@@ -131,8 +131,8 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
         "Semantic: json, nhb. Render: gltf, obj, nhr, render-json.");
     auto *strictOpt = sub->add_flag("--strict", "Treat warnings as errors");
     auto *timingOpt = sub->add_flag("--timing", "Print per-step wall-clock timings");
-    auto *sizeReportOpt =
-        sub->add_flag("--size-report", "Print FlatBuffer size and definition counts to stderr");
+    auto *sizeReportOpt = sub->add_flag(
+        "--size-report", "Print NHS9 uncompressed size and definition counts to stderr");
     auto *syntheticBoxOpt =
         sub->add_flag("--synthetic-box", "Use a synthetic single-box scene instead of --input");
 
@@ -293,8 +293,8 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
                 const auto geometry = importResult.scene;
                 const auto bytes = nodehammer::ir::semantic::sceneToBytes(geometry);
                 std::print(stderr,
-                           "NHS8 FlatBuffer: {} bytes uncompressed; {} occurrences, "
-                           "{} canonical volume definitions\n",
+                           "NHS9 FlatBuffer: {} bytes uncompressed; {} occurrences, "
+                           "{} volume definitions, no expanded node payload\n",
                            bytes.size(), geometry.validate(), geometry.logVols.size());
             }
 

@@ -62,7 +62,14 @@ add_custom_command(OUTPUT ${NH_SEMANTIC_GENERATED}
             ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/schemas/semantic.fbs ${NH_INGEST_FLATC}
     VERBATIM)
-add_custom_target(nodehammer_semantic_generate DEPENDS ${NH_SEMANTIC_GENERATED})
+set(NH_SHARED_GENERATED ${NH_FBS_GENERATED_DIR}/shared_generated.h)
+add_custom_command(OUTPUT ${NH_SHARED_GENERATED}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${NH_FBS_GENERATED_DIR}
+    COMMAND ${NH_INGEST_FLATC} --cpp -o ${NH_FBS_GENERATED_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/schemas/shared.fbs
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/schemas/shared.fbs ${NH_INGEST_FLATC}
+    VERBATIM)
+add_custom_target(nodehammer_semantic_generate DEPENDS ${NH_SEMANTIC_GENERATED} ${NH_SHARED_GENERATED})
 
 function(nh_ingest_objects target)
     add_library(${target} OBJECT EXCLUDE_FROM_ALL ${NH_INGEST_SOURCES})
