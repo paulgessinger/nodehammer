@@ -15,6 +15,7 @@
 #include <TGeoTrd2.h>
 #include <TGeoTube.h>
 
+#include <array>
 #include <format>
 
 namespace nodehammer::ir {
@@ -58,15 +59,18 @@ semantic::ShapeId dispatchTGeoShape(const TGeoShape *shape, semantic::Scene &sce
         semantic::TessellatedShape ts;
         for (int i = 0; i < tess->GetNfacets(); ++i) {
             const TGeoFacet &f = tess->GetFacet(i);
-            if (f.GetNvert() != 3) {
-                continue; // skip non-triangle facets
+            // ROOT supports triangular and quadrilateral facets. Preserve the
+            // winding when splitting quads; dropping them opens otherwise
+            // closed solids and prevents their use as boolean operands.
+            for (int v = 1; v + 1 < f.GetNvert(); ++v) {
+                const std::array corners{0, v, v + 1};
+                semantic::TessellatedShape::Triangle tri{};
+                for (std::size_t c = 0; c < corners.size(); ++c) {
+                    const auto &pt = tess->GetVertex(f[corners.at(c)]);
+                    tri.vertices.at(c) = glm::dvec3{pt.x(), pt.y(), pt.z()};
+                }
+                ts.triangles.push_back(tri);
             }
-            semantic::TessellatedShape::Triangle tri{};
-            for (int v = 0; v < 3; ++v) {
-                const auto &pt = tess->GetVertex(f[v]);
-                tri.vertices[static_cast<std::size_t>(v)] = glm::dvec3{pt.x(), pt.y(), pt.z()};
-            }
-            ts.triangles.push_back(tri);
         }
         variant = std::move(ts);
     }
