@@ -2,8 +2,9 @@
 
 #include <detail/file_io.hpp>
 #include <detail/zstd_io.hpp>
+#include <diagnostic_codes.hpp>
 #include <ir/expanded/scene.hpp>
-#include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/legacy/nhs8.hpp>
 #include <viewer/bag_project_fs.hpp>
 #include <viewer/build_session.hpp>
 
@@ -54,7 +55,7 @@ ir::expanded::Scene makeMinimalScene() {
 }
 
 std::vector<std::byte> minimalNhbZstBytes() {
-    auto raw = semanticSceneToBytes(makeMinimalScene());
+    auto raw = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(makeMinimalScene());
     return detail::zstd_io::compress(std::span<const std::byte>{raw});
 }
 
@@ -103,7 +104,8 @@ TEST_CASE("BuildSession resolves a flat config + geometry from a bag", "[viewer]
     REQUIRE(inputs);
     REQUIRE_FALSE(inputs->config.diags.hasErrors());
     REQUIRE_FALSE(inputs->import.diags.hasErrors());
-    REQUIRE(inputs->import.scene.nodes.contains(inputs->import.scene.rootId));
+    REQUIRE(inputs->import.scene.nodeCount() > 0);
+    REQUIRE(inputs->import.diags.empty());
 }
 
 TEST_CASE("BuildSession input_hash is content-addressed and backend-independent",

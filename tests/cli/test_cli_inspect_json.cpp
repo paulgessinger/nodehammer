@@ -1,3 +1,4 @@
+#include <ir/expanded/adapt.hpp>
 // `inspect --output-format json`.
 //
 // `inspect` answers questions *about* a scene — how many nodes, which tags,
@@ -79,7 +80,8 @@ class SceneFile {
     SceneFile() {
         const auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
         path_ = fs::temp_directory_path() / std::format("nh_inspect_{}.nhb", tick);
-        const auto bytes = nodehammer::ir::semanticSceneToBytes(makeTaggedScene());
+        const auto bytes = nodehammer::ir::semanticSceneToBytes(
+            nodehammer::ir::semantic::fromExpanded(makeTaggedScene()));
         std::ofstream out(path_, std::ios::binary);
         out.write(reinterpret_cast<const char *>(bytes.data()),
                   static_cast<std::streamsize>(bytes.size()));

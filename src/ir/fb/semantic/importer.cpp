@@ -4,10 +4,20 @@
 #include <diagnostic_codes.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 
+#include <cstring>
 #include <format>
 #include <span>
 
 namespace nodehammer::ir {
+
+namespace {
+ImportResult decode(std::span<const std::byte> raw, std::string_view source) {
+    ImportResult result;
+    result.scene = semanticSceneFromBytes(raw);
+    (void)source;
+    return result;
+}
+} // namespace
 
 std::string_view FlatBufferImporter::formatName() const noexcept { return "nhb"; }
 
@@ -20,10 +30,7 @@ ImportResult FlatBufferImporter::import(const std::filesystem::path &path) const
 
     try {
         auto raw = detail::zstd_io::readBytesFromFile(path);
-        auto scene = semanticSceneFromBytes(raw);
-        scene.computeWorldTransforms();
-        scene.computeOriginalPaths();
-        result.scene = std::move(scene);
+        result = decode(raw, path.string());
     } catch (const Error &) {
         throw;
     } catch (const std::exception &ex) {
@@ -53,10 +60,7 @@ ImportResult FlatBufferImporter::importFromBytes(std::string_view filename,
             decompressed = detail::zstd_io::decompress(bytes);
             raw = std::span<const std::byte>{decompressed};
         }
-        auto scene = semanticSceneFromBytes(raw);
-        scene.computeWorldTransforms();
-        scene.computeOriginalPaths();
-        result.scene = std::move(scene);
+        result = decode(raw, filename);
     } catch (const Error &) {
         throw;
     } catch (const std::exception &ex) {

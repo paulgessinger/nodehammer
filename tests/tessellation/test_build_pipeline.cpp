@@ -1,3 +1,4 @@
+#include <ir/expanded/adapt.hpp>
 // Unit coverage for BuildPipeline — the core primitive that unifies the four
 // hand-copied `prep → wedge → tessellate` build sequences (native worker,
 // web-cooperative, web-worker, synchronous). Because BuildPipeline lives in
@@ -78,7 +79,8 @@ std::shared_ptr<const NHConfig> emptyConfig() { return std::make_shared<const NH
 // the old buildSceneFromPaths / convert ordering) then a one-shot lower().
 ir::render::Scene referenceBuild(const ir::expanded::Scene &scene,
                                  std::optional<WedgeCutParams> wedge) {
-    ScenePrepResult prep = prepareSceneForTessellationFromInputs(NHConfig{}, scene, wedge);
+    ScenePrepResult prep =
+        prepareSceneForTessellationFromInputs(NHConfig{}, ir::semantic::fromExpanded(scene), wedge);
     TessellationPass pass{prep.config};
     TessellationPassResult tess = pass.lower(prep.scene);
     REQUIRE_FALSE(tess.diags.hasErrors());
@@ -89,7 +91,9 @@ ir::render::Scene referenceBuild(const ir::expanded::Scene &scene,
 SceneBuildResult drivePipeline(const ir::expanded::Scene &scene,
                                std::optional<WedgeCutParams> wedge, std::uint64_t budget) {
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const ir::expanded::Scene>(scene), wedge);
+    pipe.start(emptyConfig(),
+               std::make_shared<const ir::semantic::Scene>(ir::semantic::fromExpanded(scene)),
+               wedge);
     while (!pipe.advance(budget)) {
     }
     return pipe.take();
@@ -129,7 +133,9 @@ TEST_CASE("BuildPipeline: budget slicing yields an identical scene", "[build_pip
 
     // A tiny budget forces many advance() iterations.
     BuildPipeline pipe;
-    pipe.start(emptyConfig(), std::make_shared<const ir::expanded::Scene>(scene), std::nullopt);
+    pipe.start(emptyConfig(),
+               std::make_shared<const ir::semantic::Scene>(ir::semantic::fromExpanded(scene)),
+               std::nullopt);
     int falses = 0;
     while (!pipe.advance(1 /* ns */)) {
         ++falses;
@@ -153,7 +159,9 @@ TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
 
     BuildPipeline pipe;
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Idle);
-    pipe.start(emptyConfig(), std::make_shared<const ir::expanded::Scene>(scene), wedge);
+    pipe.start(emptyConfig(),
+               std::make_shared<const ir::semantic::Scene>(ir::semantic::fromExpanded(scene)),
+               wedge);
     REQUIRE(pipe.phase() == BuildPipeline::Phase::Queued);
 
     // Counters are 0 before their phases run.
@@ -218,7 +226,8 @@ TEST_CASE("BuildPipeline: a fatal prep failure arrives as a value", "[build_pipe
 
     BuildPipeline pipe;
     pipe.start(std::make_shared<const NHConfig>(std::move(cfg)),
-               std::make_shared<const ir::expanded::Scene>(std::move(scene)), std::nullopt);
+               std::make_shared<const ir::semantic::Scene>(ir::semantic::fromExpanded(scene)),
+               std::nullopt);
     while (!pipe.advance(kSpin)) {
     }
     SceneBuildResult r = pipe.take();

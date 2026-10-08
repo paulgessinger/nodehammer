@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <ir/expanded/adapt.hpp>
 
 #include <scene_build.hpp>
 
@@ -72,19 +73,22 @@ NHConfig noDedupConfig() {
 } // namespace
 
 TEST_CASE("prepareScene: no wedge param leaves geometry uncut", "[scene_build][wedgecut]") {
-    auto prep = prepareSceneForTessellationFromInputs(noDedupConfig(), makeStraddlingScene());
+    auto prep = prepareSceneForTessellationFromInputs(
+        noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()));
     CHECK_FALSE(hasBooleanSubtraction(prep.scene));
 }
 
 TEST_CASE("prepareScene: wedge param applies the Boolean cut", "[scene_build][wedgecut]") {
-    auto prep = prepareSceneForTessellationFromInputs(noDedupConfig(), makeStraddlingScene(),
-                                                      WedgeCutParams{0.0, 90.0});
+    auto prep = prepareSceneForTessellationFromInputs(
+        noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()),
+        WedgeCutParams{0.0, 90.0});
     // The straddling box becomes a BooleanSubtraction(box, wedge) shape.
     CHECK(hasBooleanSubtraction(prep.scene));
 }
 
 TEST_CASE("prepareScene: degenerate wedge is a no-op", "[scene_build][wedgecut]") {
-    auto prep = prepareSceneForTessellationFromInputs(noDedupConfig(), makeStraddlingScene(),
-                                                      WedgeCutParams{45.0, 45.0});
+    auto prep = prepareSceneForTessellationFromInputs(
+        noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()),
+        WedgeCutParams{45.0, 45.0});
     CHECK_FALSE(hasBooleanSubtraction(prep.scene));
 }

@@ -302,6 +302,8 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("nodehammer::cli::detail::registerCmdConvert(CLI::App&)", "leak"),
     ("nodehammer::detail::zstd_io::compress(std::span<std::byte const>)", "leak"),
     ("typeinfo for nodehammer::ir::semantic::Scene", "leak"),
+    ("typeinfo for nodehammer::ir::expanded::Scene", "leak"),
+    ("nodehammer::ir::legacy::nhs8::semanticSceneFromBytes()", "leak"),
     # A namespace nobody has written yet: rule 1 cannot know it, rule 3 must.
     ("nodehammer::brandnew::Thing::f()", "leak"),
     # Real symbols from CI: libstdc++ gives namespace std default visibility, so

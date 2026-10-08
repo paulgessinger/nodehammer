@@ -1,6 +1,8 @@
 #include <atomic>
 #include <diagnostic_codes.hpp>
 #include <ir/dd4hep/semantic/importer.hpp>
+#include <ir/dd4hep/semantic/shared_importer.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/provenance.hpp>
 #include <ir/tgeo/semantic/importer.hpp>
 
@@ -110,7 +112,7 @@ struct QuietGuard {
 
 /// The three traversal passes shared by both entry points: TGeo tree walk,
 /// DD4hep sensitivity tagging, DD4hep DetElement annotation.
-ImportResult importFromDetector(dd4hep::Detector &detector, std::string sourceFile) {
+expanded::ImportResult importFromDetector(dd4hep::Detector &detector, std::string sourceFile) {
     // Pass 1: full TGeo tree traversal — every node gets a expanded::Node.
     auto tr = traverseTGeoManager(&detector.manager(), std::move(sourceFile));
 
@@ -166,6 +168,11 @@ void DD4hepImporter::configure(const ImporterOptions &options) {
     useGlobalDetector_ = it != options.end() && std::get<bool>(it->second);
 }
 
+expanded::ImportResult DD4hepImporter::importExpanded(dd4hep::Detector &detector) const {
+    QuietGuard quiet;
+    return importFromDetector(detector, detector.manager().GetName());
+}
+
 ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     // DD4hep and ROOT mutate process state even for privately owned detectors.
     static std::atomic_flag importing = ATOMIC_FLAG_INIT;
@@ -195,24 +202,27 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
                         std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()),
                         path.string()};
         }
-        return importFromDetector(detector, path.string());
-    }
-    std::unique_ptr<dd4hep::Detector> detOwner;
-    try {
-        detOwner = dd4hep::Detector::make_unique("");
-        detOwner->fromCompact(path.string());
-    } catch (const std::exception &ex) {
-        throw Error{codes::kFatalTgeoOpenFailed,
-                    std::format("DD4hep failed to load '{}': {}", path.string(), ex.what()),
-                    path.string()};
+        auto result = semantic::importDD4hep(detector, path.string());
+        diagnostics::throwIfErrors(result.diags, path.string());
+        return result;
     }
 
-    return importFromDetector(*detOwner, path.string());
+    try {
+        QuietGuard quiet;
+        auto detector = dd4hep::Detector::make_unique("");
+        detector->fromCompact(path.string());
+        auto result = semantic::importDD4hep(*detector, path.string());
+        diagnostics::throwIfErrors(result.diags, path.string());
+        return result;
+    } catch (const Error &) {
+        throw;
+    } catch (const std::exception &ex) {
+        throw Error{codes::kFatalTgeoOpenFailed, ex.what(), path.string()};
+    }
 }
 
 ImportResult DD4hepImporter::import(dd4hep::Detector &detector) const {
     QuietGuard quiet;
-    return importFromDetector(detector, detector.manager().GetName());
+    return semantic::importDD4hep(detector, detector.manager().GetName());
 }
-
 } // namespace nodehammer::ir

@@ -109,8 +109,7 @@ TEST_CASE("SyntheticImporter: import produces no errors", "[import][synthetic]")
 TEST_CASE("SyntheticImporter: sourceSystem is synthetic", "[import][synthetic]") {
     nodehammer::ir::SyntheticImporter imp;
     auto result = imp.import({});
-    const auto &root = result.scene.nodes.at(result.scene.rootId);
-    REQUIRE(root.sourceSystem == "synthetic");
+    REQUIRE(result.scene.metadata.sourceSystems.at({}) == "synthetic");
 }
 
 // ── worldTransform accumulation ───────────────────────────────────────────────

@@ -18,7 +18,10 @@
 namespace nodehammer {
 
 struct SemanticScene::Impl {
-    ir::expanded::Scene scene;
+    ir::semantic::Scene scene;
+    uint64_t occurrenceCount;
+    explicit Impl(ir::semantic::Scene input)
+        : scene(std::move(input)), occurrenceCount(scene.nodeCount()) {}
 };
 
 // ── The members that mention an Impl ─────────────────────────────────────────
@@ -40,12 +43,12 @@ inline const SemanticScene::Impl &SemanticScene::impl() const {
 
 namespace api {
 
-[[nodiscard]] inline SemanticScene asHandle(ir::expanded::Scene scene) {
+[[nodiscard]] inline SemanticScene asHandle(ir::semantic::Scene scene) {
     return SemanticScene{
         std::make_shared<const SemanticScene::Impl>(SemanticScene::Impl{std::move(scene)})};
 }
 
-/// Move an importer's scene and diagnostics into the public result.
+// Explicit adapter for callers constructing physical processing fixtures.
 [[nodiscard]] inline SemanticResult asHandle(ir::ImportResult result) {
     return {asHandle(std::move(result.scene)), std::move(result.diags)};
 }
@@ -58,7 +61,7 @@ namespace api {
 /// All this adds over `handle.impl()`, which throws on its own, is the verb
 /// name: an exception that says which call the caller got wrong, rather than
 /// only which type, is worth one wrapper.
-[[nodiscard]] inline const ir::expanded::Scene &sceneOrThrow(const SemanticScene &handle,
+[[nodiscard]] inline const ir::semantic::Scene &sceneOrThrow(const SemanticScene &handle,
                                                              std::string_view verb) {
     if (!handle.valid()) {
         throw Error{codes::kFatalApiInvalidHandle, "the semantic scene handle refers to nothing",

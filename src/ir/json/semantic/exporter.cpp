@@ -2,6 +2,7 @@
 
 #include <detail/zstd_io.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/semantic_json.hpp>
 
 #include <nlohmann/json.hpp>
@@ -16,10 +17,10 @@ std::vector<std::string> SemanticJsonExporter::supportedExtensions() const {
     return {"json", "json.zst"};
 }
 
-void SemanticJsonExporter::write(const expanded::Scene &scene, const std::filesystem::path &path,
+void SemanticJsonExporter::write(const semantic::Scene &scene, const std::filesystem::path &path,
                                  [[maybe_unused]] const SemanticExportConfig &config) const {
     try {
-        nlohmann::json j = scene;
+        nlohmann::json j = semantic::expand(scene);
         const std::string jsonStr = j.dump(-1);
         detail::zstd_io::writeJsonToFile(path, jsonStr, config.compressionLevel);
     } catch (const Error &) {

@@ -2,8 +2,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <detail/zstd_io.hpp>
 #include <ir/expanded/scene.hpp>
-#include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/fb/semantic/importer.hpp>
+#include <ir/legacy/nhs8.hpp>
 #include <ir/semantic/importer.hpp>
 
 #include <chrono>
@@ -50,10 +50,11 @@ ir::expanded::Scene makeMinimalScene() {
 TEST_CASE("FlatBuffer roundtrip: minimal scene", "[ir][flatbuffer]") {
     auto original = makeMinimalScene();
 
-    auto bytes = semanticSceneToBytes(original);
+    auto bytes = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(original);
     REQUIRE(!bytes.empty());
 
-    auto restored = semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
+    auto restored =
+        nodehammer::ir::legacy::nhs8::semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
 
     REQUIRE(restored.sourceFile == original.sourceFile);
     REQUIRE(restored.nodes.size() == original.nodes.size());
@@ -153,8 +154,9 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
     scene.nodes[nodeId] = node;
     scene.rootId = nodeId;
 
-    auto bytes = semanticSceneToBytes(scene);
-    auto restored = semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
+    auto bytes = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
+    auto restored =
+        nodehammer::ir::legacy::nhs8::semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
 
     REQUIRE(restored.shapes.size() == scene.shapes.size());
 
@@ -267,8 +269,9 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
 
     scene.sourceFile = "/test/detector.xml";
 
-    auto bytes = semanticSceneToBytes(scene);
-    auto restored = semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
+    auto bytes = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
+    auto restored =
+        nodehammer::ir::legacy::nhs8::semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
 
     REQUIRE(restored.nodes.size() == 3);
     REQUIRE(restored.sourceFile == "/test/detector.xml");
@@ -328,7 +331,7 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
 
 TEST_CASE("FlatBuffer: file identifier check", "[ir][flatbuffer]") {
     auto scene = makeMinimalScene();
-    auto bytes = semanticSceneToBytes(scene);
+    auto bytes = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
 
     // Valid buffer should have "NHSM" identifier
     REQUIRE(bytes.size() >= 8);
@@ -336,8 +339,9 @@ TEST_CASE("FlatBuffer: file identifier check", "[ir][flatbuffer]") {
 
     // Garbage input should throw
     std::vector<uint8_t> garbage = {0, 1, 2, 3, 4, 5, 6, 7};
-    REQUIRE_THROWS_AS(semanticSceneFromBytes(std::as_bytes(std::span{garbage})),
-                      std::runtime_error);
+    REQUIRE_THROWS_AS(
+        nodehammer::ir::legacy::nhs8::semanticSceneFromBytes(std::as_bytes(std::span{garbage})),
+        std::runtime_error);
 }
 
 TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffer]") {
@@ -372,8 +376,9 @@ TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffe
     scene.nodes[nodeId] = node;
     scene.rootId = nodeId;
 
-    auto bytes = semanticSceneToBytes(scene);
-    auto restored = semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
+    auto bytes = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
+    auto restored =
+        nodehammer::ir::legacy::nhs8::semanticSceneFromBytes(std::as_bytes(std::span{bytes}));
 
     const auto &resLv = restored.logVols.at(parentLvId);
     REQUIRE(resLv.daughters.size() == 1);
@@ -387,13 +392,13 @@ TEST_CASE("FlatBuffer roundtrip: Layer 1 API composes", "[ir][flatbuffer]") {
     auto scene = makeMinimalScene();
 
     flatbuffers::FlatBufferBuilder builder{1024};
-    auto offset = semanticSceneToFlatBuffer(builder, scene);
+    auto offset = nodehammer::ir::legacy::nhs8::semanticSceneToFlatBuffer(builder, scene);
     fbs::FinishSemanticSceneBuffer(builder, offset);
 
     auto *ptr = builder.GetBufferPointer();
 
     const auto *fb = fbs::GetSemanticScene(ptr);
-    auto restored = semanticSceneFromFlatBuffer(*fb);
+    auto restored = nodehammer::ir::legacy::nhs8::semanticSceneFromFlatBuffer(*fb);
 
     REQUIRE(restored.sourceFile == scene.sourceFile);
     REQUIRE(restored.nodes.size() == scene.nodes.size());
@@ -403,7 +408,7 @@ TEST_CASE("FlatBuffer roundtrip: Layer 1 API composes", "[ir][flatbuffer]") {
 
 TEST_CASE("FlatBuffer zstd bytes: nhb.zst roundtrip", "[ir][flatbuffer]") {
     auto scene = makeMinimalScene();
-    auto bytes = semanticSceneToBytes(scene);
+    auto bytes = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
 
     const auto uniqueSuffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto tmp = std::filesystem::temp_directory_path() /
@@ -412,7 +417,7 @@ TEST_CASE("FlatBuffer zstd bytes: nhb.zst roundtrip", "[ir][flatbuffer]") {
     nodehammer::detail::zstd_io::writeBytesToFile(tmp, std::as_bytes(std::span{bytes}));
 
     auto decoded = nodehammer::detail::zstd_io::readBytesFromFile(tmp);
-    auto restored = semanticSceneFromBytes(decoded);
+    auto restored = nodehammer::ir::legacy::nhs8::semanticSceneFromBytes(decoded);
 
     std::error_code ec;
     std::filesystem::remove(tmp, ec);
@@ -432,33 +437,33 @@ TEST_CASE("FlatBuffer importer resolves compound .nhb.zst extension", "[ir][flat
 
 TEST_CASE("FlatBufferImporter::importFromBytes accepts raw .nhb bytes", "[ir][flatbuffer][bytes]") {
     auto scene = makeMinimalScene();
-    auto raw = semanticSceneToBytes(scene);
+    auto raw = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
 
     auto result = FlatBufferImporter::importFromBytes("scene.nhb", std::as_bytes(std::span{raw}));
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(!result.diags.hasErrors());
-    REQUIRE(result.scene.nodes.contains(result.scene.rootId));
-    REQUIRE(result.scene.nodes.at(result.scene.rootId).name == "root");
+    REQUIRE(result.scene.nodeCount() > 0);
+    REQUIRE(result.scene.root.name == "root");
 }
 
 TEST_CASE("FlatBufferImporter::importFromBytes decompresses .nhb.zst bytes",
           "[ir][flatbuffer][bytes]") {
     auto scene = makeMinimalScene();
-    auto raw = semanticSceneToBytes(scene);
+    auto raw = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
     auto compressed = nodehammer::detail::zstd_io::compress(std::as_bytes(std::span{raw}));
 
     auto result = FlatBufferImporter::importFromBytes("scene.nhb.zst",
                                                       std::span<const std::byte>{compressed});
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(!result.diags.hasErrors());
-    REQUIRE(result.scene.nodes.contains(result.scene.rootId));
-    REQUIRE(result.scene.nodes.at(result.scene.rootId).name == "root");
+    REQUIRE(result.scene.nodeCount() > 0);
+    REQUIRE(result.scene.root.name == "root");
 }
 
 TEST_CASE("FlatBufferImporter::importFromBytes matches path-based import",
           "[ir][flatbuffer][bytes]") {
     auto scene = makeMinimalScene();
-    auto raw = semanticSceneToBytes(scene);
+    auto raw = nodehammer::ir::legacy::nhs8::semanticSceneToBytes(scene);
 
     const auto uniqueSuffix = std::chrono::steady_clock::now().time_since_epoch().count();
     const auto tmp = std::filesystem::temp_directory_path() /
@@ -476,7 +481,7 @@ TEST_CASE("FlatBufferImporter::importFromBytes matches path-based import",
 
     REQUIRE_FALSE(via_path.diags.hasErrors());
     REQUIRE_FALSE(via_bytes.diags.hasErrors());
-    REQUIRE(via_path.scene.nodes.size() == via_bytes.scene.nodes.size());
+    REQUIRE(via_path.scene.nodeCount() == via_bytes.scene.nodeCount());
     REQUIRE(via_path.scene.materials.size() == via_bytes.scene.materials.size());
     REQUIRE(via_path.scene.shapes.size() == via_bytes.scene.shapes.size());
 }

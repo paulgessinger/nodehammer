@@ -1,4 +1,5 @@
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/adapt.hpp>
 #include <ir/provenance.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 
@@ -137,7 +138,7 @@ expanded::Scene SyntheticSceneBuilder::buildBooleanSubtraction() {
     return scene;
 }
 
-ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
+expanded::ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
     expanded::Scene scene;
     DiagnosticList diags;
 
@@ -169,7 +170,7 @@ ImportResult SyntheticSceneBuilder::buildWithDiagnostics() {
 
     diags.warn(codes::kWarnImportUnknownShape, "Unknown shape type: SyntheticUnknown", "world");
 
-    return ImportResult{std::move(scene), std::move(diags)};
+    return expanded::ImportResult{std::move(scene), std::move(diags)};
 }
 
 // ── SyntheticImporter ─────────────────────────────────────────────────────────
@@ -179,7 +180,7 @@ std::string_view SyntheticImporter::formatName() const noexcept { return "synthe
 std::vector<std::string> SyntheticImporter::supportedExtensions() const { return {}; }
 
 ImportResult SyntheticImporter::import([[maybe_unused]] const std::filesystem::path &path) const {
-    return ImportResult{SyntheticSceneBuilder::buildSingleBox(), {}};
+    return ImportResult{semantic::fromExpanded(SyntheticSceneBuilder::buildSingleBox()), {}};
 }
 
 } // namespace nodehammer::ir

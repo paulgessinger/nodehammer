@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ir/expanded/scene.hpp>
 #include <ir/semantic/importer.hpp>
 
 #include <string_view>
@@ -27,7 +28,7 @@ class SyntheticSceneBuilder {
     /// Scene with one node whose shape is UnknownShape.
     /// Sets DegradationBit::UnknownShape on the node's provenance and emits
     /// a NH0102 warning into the returned DiagnosticList.
-    [[nodiscard]] static ImportResult buildWithDiagnostics();
+    [[nodiscard]] static expanded::ImportResult buildWithDiagnostics();
 };
 
 /// ISemanticImporter implementation for the "synthetic" format.

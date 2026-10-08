@@ -1,3 +1,4 @@
+#include <ir/expanded/adapt.hpp>
 #include <viewer/archive_project_fs.hpp>
 
 #include <detail/file_io.hpp>
@@ -110,7 +111,7 @@ std::vector<std::byte> minimalNhbZstBytes() {
     scene.rootId = nodeId;
     scene.sourceFile = "/test/input";
 
-    auto raw = ir::semanticSceneToBytes(scene);
+    auto raw = ir::semanticSceneToBytes(ir::semantic::fromExpanded(scene));
     return detail::zstd_io::compress(std::span<const std::byte>{raw});
 }
 
@@ -282,7 +283,8 @@ TEST_CASE("ArchiveProjectFs drives a headless scene build via BuildSession",
     auto inputs = session.takeInputs();
     REQUIRE(inputs);
     REQUIRE_FALSE(inputs->import.diags.hasErrors());
-    REQUIRE(inputs->import.scene.nodes.contains(inputs->import.scene.rootId));
+    REQUIRE(inputs->import.scene.nodeCount() == 1);
+    REQUIRE(inputs->import.scene.nodeCount() == 1);
 }
 
 TEST_CASE("ArchiveProjectFs enters an error state on a bad archive",
