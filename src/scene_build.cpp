@@ -48,7 +48,8 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Sce
 }
 
 SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
-                                     const std::filesystem::path &geometry_path) {
+                                     const std::filesystem::path &geometry_path,
+                                     const SemanticReadOptions &options) {
     SceneBuildResult result;
 
     if (geometry_path.empty()) {
@@ -62,8 +63,8 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
         cfg = std::move(loaded.config);
     }
 
-    const auto importerRegistry = ir::ImporterRegistry::makeDefault();
-    const auto *importer = importerRegistry.resolve(geometry_path);
+    const auto importerRegistry = ir::ImporterRegistry::makeDefault(options);
+    const auto *importer = importerRegistry.resolve(geometry_path, options.format);
     if (importer == nullptr) {
         throw Error{codes::kFatalImportFormatUnknown,
                     "buildSceneFromPaths: no importer for '" + geometry_path.string() + "'",

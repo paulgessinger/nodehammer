@@ -4,7 +4,10 @@
 #include <ir/semantic.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <memory>
+#include <nodehammer/import_options.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +23,15 @@ struct ImportResult {
     DiagnosticList diags;
 };
 
+/// Backend-owned schema shared by API validation and the optional CLI adapter.
+struct ImporterOptionSpec {
+    std::string_view name;
+    ImporterOptionValue defaultValue;
+    /// Empty for options exposed only programmatically. No CLI11 dependency.
+    std::string_view cliFlag{};
+    std::string_view description{};
+};
+
 /// Pure interface for all geometry importers.
 class ISemanticImporter {
   public:
@@ -31,6 +43,10 @@ class ISemanticImporter {
     /// File extensions this importer claims, without leading dot, e.g. {"gdml"}.
     /// Returns empty vector for format-name-only importers (e.g. synthetic).
     [[nodiscard]] virtual std::vector<std::string> supportedExtensions() const = 0;
+
+    [[nodiscard]] virtual std::span<const ImporterOptionSpec> optionSpecs() const { return {}; }
+    /// Receives this backend's validated values, including defaults.
+    virtual void configure(const ImporterOptions &) {}
 
     /// Perform the import. For importers that do not use a file path (e.g. synthetic),
     /// the path argument is ignored.
@@ -55,17 +71,27 @@ class ImporterRegistry {
     /// Resolve an importer from a path and an optional explicit format name.
     /// If formatName is non-empty it takes precedence; otherwise the path
     /// extension is used. Returns nullptr if resolution fails.
+    /// Throws when explicitly configured backend options target another format.
     [[nodiscard]] const ISemanticImporter *resolve(const std::filesystem::path &path,
-                                                   std::string_view formatName = {}) const noexcept;
+                                                   std::string_view formatName = {}) const;
 
     /// All registered importers, in registration order.
     [[nodiscard]] const std::vector<std::unique_ptr<ISemanticImporter>> &importers() const noexcept;
 
     /// Build a registry pre-populated with all built-in importers.
-    /// Currently registers: SyntheticImporter.
-    [[nodiscard]] static ImporterRegistry makeDefault();
+    [[nodiscard]] static ImporterRegistry makeDefault(const SemanticReadOptions &options = {});
+    /// Validate the complete option set before configuring any importer.
+    void configure(const ImporterOptions &options);
+    /// Set one option while retaining other explicit values (used by CLI adapters).
+    void setOption(std::string name, ImporterOptionValue value);
+    using Decorator =
+        std::function<std::unique_ptr<ISemanticImporter>(std::unique_ptr<ISemanticImporter>)>;
+    void decorate(std::string_view format, const Decorator &decorator);
 
   private:
+    [[nodiscard]] const ISemanticImporter *resolveUnchecked(const std::filesystem::path &path,
+                                                            std::string_view formatName) const;
+    ImporterOptions options_{};
     std::vector<std::unique_ptr<ISemanticImporter>> importers_;
 };
 

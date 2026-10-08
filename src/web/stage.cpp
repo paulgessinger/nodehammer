@@ -91,8 +91,9 @@ StagedRoot stageRoot(const StageOptions &options) {
         // The same packer `nodehammer project pack` uses, so a root staged on
         // the way to a browser and an archive written to a path are the same
         // bytes rather than two implementations that agree today.
-        const project::PackResult packed =
-            project::pack({.config = options.config, .geometry = options.geometry});
+        const project::PackResult packed = project::pack({.importers = options.importers,
+                                                          .config = options.config,
+                                                          .geometry = options.geometry});
         staged.archive = "project.nhproj";
         writeBytes(options.target / staged.archive, packed.bytes);
         staged.posture = Posture::Viewer;

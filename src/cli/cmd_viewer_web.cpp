@@ -185,7 +185,8 @@ void addViewerServeOptions(CLI::App &sub) {
     sub.add_option("--web-assets", "Directory holding the built wasm runtime");
 }
 
-void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options) {
+void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options,
+                    ir::ImporterRegistry &registry) {
     const Narrator say{options};
     runOrReport("viewer serve", [&] {
         web::LadderInputs inputs{};
@@ -208,6 +209,7 @@ void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options
 
         const ScopedStagingDir staging;
         web::StageOptions stage{};
+        stage.importers = &registry;
         stage.runtime = runtime.dir;
         stage.target = staging.path();
         stage.title = optionText(viewer, "--title");
@@ -283,7 +285,7 @@ void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options
                     mode)};
 }
 
-void registerCmdViewer(CLI::App &app, const CliOptions &options) {
+void registerCmdViewer(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry) {
     // (0, 1) rather than (1): a bare `nodehammer viewer` still opens a window,
     // which is what a .desktop `Exec=` or an installer shortcut invokes (#74).
     // The native half turns that into `open`; here it is the refusal below.
@@ -298,7 +300,9 @@ void registerCmdViewer(CLI::App &app, const CliOptions &options) {
     // other way.
     auto *serveSub = sub->add_subcommand("serve", "Serve the wasm viewer and open it in a browser");
     addViewerServeOptions(*serveSub);
-    serveSub->callback([sub, serveSub, &options] { runViewerServe(*sub, *serveSub, options); });
+    serveSub->callback([sub, serveSub, &options, &registry] {
+        runViewerServe(*sub, *serveSub, options, registry);
+    });
 
     // ── open / shot / bench ──────────────────────────────────────────────────
     //

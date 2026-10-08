@@ -1,9 +1,8 @@
-// Native-executable policy: opt into the global detector, and explain plugin
-// exit() during XML loading. Never linked into the callable CLI or the SDK.
+// Native-executable policy: redirect plugin output and explain premature
+// process exit during XML loading. Never linked into the callable CLI or the SDK.
 #include "cli_common.hpp"
 
 #include <ir/dd4hep/semantic/importer.hpp>
-#include <ir/dd4hep/semantic/native_importer.hpp>
 
 #include <DD4hep/Detector.h>
 #include <DD4hep/Printout.h>
@@ -22,7 +21,6 @@
 namespace nodehammer::cli::detail {
 namespace {
 
-bool useGlobalDetector = false; // Set by parsing, before any imports start.
 constinit std::atomic<unsigned> privateImports{0};
 constinit std::atomic<unsigned> globalImports{0};
 constinit std::atomic_flag importing = ATOMIC_FLAG_INIT;
@@ -124,61 +122,40 @@ class ImportLogGuard {
 
 class NativeDD4hepImporter final : public ir::ISemanticImporter {
   public:
-    explicit NativeDD4hepImporter(bool global) : global_(global) {}
+    explicit NativeDD4hepImporter(std::unique_ptr<ir::ISemanticImporter> importer)
+        : importer_(std::move(importer)) {}
+    std::span<const ir::ImporterOptionSpec> optionSpecs() const override {
+        return importer_->optionSpecs();
+    }
+    void configure(const ImporterOptions &options) override {
+        importer_->configure(options);
+        const auto it = options.find("dd4hep.useGlobalDetector");
+        global_ = it != options.end() && std::get<bool>(it->second);
+    }
     std::string_view formatName() const noexcept override { return "dd4hep"; }
     std::vector<std::string> supportedExtensions() const override { return {}; }
-
     ir::ImportResult import(const std::filesystem::path &path) const override {
         const ImportGate gate;
         const ImportLogGuard log;
-        if (!global_) {
-            const ImportExitGuard warning{false};
-            return ir::DD4hepImporter{}.import(path);
-        }
-
-        // DD4hep's singleton is process-owned. Never reset it, append another
-        // compact, or retry after partially constructing one.
-        static bool attempted = false;
-        auto &detector = dd4hep::Detector::getInstance();
-        if (attempted || detector.state() != dd4hep::Detector::NOT_READY ||
-            !detector.detectors().empty()) {
-            throw Error{codes::kFatalTgeoOpenFailed,
-                        "--dd4hep-global requires a fresh default detector; restart nodehammer "
-                        "to load another compact",
-                        path.string()};
-        }
-        attempted = true;
-        {
-            const ImportExitGuard warning{true};
-            try {
-                detector.fromCompact(path.string());
-            } catch (const std::exception &error) {
-                throw Error{
-                    codes::kFatalTgeoOpenFailed,
-                    std::format("DD4hep failed to load '{}': {}", path.string(), error.what()),
-                    path.string()};
-            }
-        }
-        return ir::DD4hepImporter{}.import(detector);
+        const ImportExitGuard warning{global_};
+        return importer_->import(path);
     }
 
   private:
-    bool global_;
+    std::unique_ptr<ir::ISemanticImporter> importer_;
+    bool global_ = false;
 };
 
 } // namespace
 
-void registerCmdDD4hepNative(CLI::App &app, const CliOptions &) {
+void registerCmdDD4hepNative(CLI::App & /*app*/, const CliOptions &,
+                             ir::ImporterRegistry &registry) {
     static const int registered = std::atexit(warnOnImportExit);
     if (registered != 0) {
         throw Error{codes::kFatalTgeoOpenFailed, "cannot register DD4hep import exit warning"};
     }
-    useGlobalDetector = false;
-    // The root parser's fallthrough permits this before or after a subcommand.
-    app.add_flag("--dd4hep-global", useGlobalDetector,
-                 "Load DD4hep XML into the process-global detector (one compact per process)");
-    ir::setNativeDD4hepImporterFactory([]() -> std::unique_ptr<ir::ISemanticImporter> {
-        return std::make_unique<NativeDD4hepImporter>(useGlobalDetector);
+    registry.decorate("dd4hep", [](std::unique_ptr<ir::ISemanticImporter> importer) {
+        return std::make_unique<NativeDD4hepImporter>(std::move(importer));
     });
 }
 

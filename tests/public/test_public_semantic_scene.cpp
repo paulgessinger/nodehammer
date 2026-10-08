@@ -227,3 +227,34 @@ TEST_CASE("NHB transport and file compression share the selected level", "[publi
     REQUIRE_THROWS_AS(nh::toNhbZstd(nh::SemanticScene{}), nh::Error);
     std::filesystem::remove_all(dir);
 }
+
+TEST_CASE("Format-specific read options are explicit and do not leak", "[public][import-options]") {
+    namespace nh = nodehammer;
+    try {
+        (void)nh::readSemantic(
+            "", {.format = "synthetic", .importerOptions = {{"dd4hep.useGlobalDetector", false}}});
+        FAIL("DD4hep options were silently ignored");
+    } catch (const nh::Error &error) {
+        REQUIRE(error.code() == "NH0105");
+    }
+    REQUIRE(nh::readSemantic("", {.format = "synthetic"}).scene.nodeCount() == 1);
+}
+
+TEST_CASE("Importer option names and primitive types are validated", "[public][import-options]") {
+    for (const auto &options :
+         std::vector<nh::ImporterOptions>{{{"dd4hep.typo", true}},
+                                          {{"dd4hep.useGlobalDetector", std::int64_t{1}}},
+                                          {{"dd4hep.useGlobalDetector", 1.0}},
+                                          {{"dd4hep.useGlobalDetector", std::string{"true"}}}}) {
+        try {
+            (void)nh::readSemantic("", {.format = "synthetic", .importerOptions = options});
+            FAIL("invalid importer options were accepted");
+        } catch (const nh::Error &error) {
+            REQUIRE(error.code() == "NH0105");
+            REQUIRE(std::string{error.what()}.find(options.begin()->first) != std::string::npos);
+        }
+    }
+    REQUIRE(
+        nh::readSemantic("", {.format = "synthetic", .importerOptions = {}}).scene.nodeCount() ==
+        1);
+}

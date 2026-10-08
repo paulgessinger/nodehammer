@@ -1,5 +1,7 @@
 #pragma once
 
+#include <nodehammer/import_options.hpp>
+
 #include <config/config_ast.hpp>
 #include <diagnostics.hpp>
 #include <ir/render.hpp>
@@ -53,7 +55,8 @@ struct ScenePrepResult {
 /// `render::Scene`. Mirrors the `convert` CLI pipeline minus the export
 /// stage and CLI surface.
 SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
-                                     const std::filesystem::path &geometry_path);
+                                     const std::filesystem::path &geometry_path,
+                                     const SemanticReadOptions &options = {});
 
 /// Run validate + select + dedup against an already-parsed config and
 /// already-imported semantic scene. Used by the viewer's BuildSession,

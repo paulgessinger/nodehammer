@@ -263,11 +263,34 @@ NB_MODULE(_nodehammer, m) {
         "bytes"_a);
     m.def(
         "read_semantic",
-        [](const std::filesystem::path &path, const std::string &format) {
+        [](const std::filesystem::path &path, const std::string &format, const nb::dict &values) {
+            nh::ImporterOptions options;
+            for (auto [key, value] : values) {
+                if (!nb::isinstance<nb::str>(key)) {
+                    throw nb::type_error("importer option names must be strings");
+                }
+                auto name = nb::cast<std::string>(key);
+                // Test bool before int: Python bool is an int subclass. No coercion.
+                if (nb::isinstance<nb::bool_>(value))
+                    options.emplace(name, nb::cast<bool>(value));
+                else if (nb::isinstance<nb::int_>(value)) {
+                    const auto integer = PyLong_AsLongLong(value.ptr());
+                    if (PyErr_Occurred())
+                        throw nb::python_error();
+                    options.emplace(name, static_cast<std::int64_t>(integer));
+                } else if (nb::isinstance<nb::float_>(value))
+                    options.emplace(name, nb::cast<double>(value));
+                else if (nb::isinstance<nb::str>(value))
+                    options.emplace(name, nb::cast<std::string>(value));
+                else
+                    throw nb::type_error(
+                        "importer option values must be bool, int64, float, or str");
+            }
             nb::gil_scoped_release unlocked;
-            return nh::readSemantic(path, {.format = format});
+            return nh::readSemantic(path,
+                                    {.format = format, .importerOptions = std::move(options)});
         },
-        "path"_a, "format"_a = "");
+        "path"_a, "format"_a = "", nb::kw_only(), "importer_options"_a = nb::dict());
     m.def("semantic_read_formats", [] { return toStringList(nh::semanticReadFormats()); });
     m.def("semantic_write_formats", [] { return toStringList(nh::semanticWriteFormats()); });
     m.def(

@@ -27,6 +27,10 @@
 // Declared, not included: `CLI::App &` inside a function-pointer type needs no
 // definition, so a translation unit that only *passes* a registrar — main.cpp —
 // compiles without CLI11's header forest.
+namespace nodehammer::ir {
+class ImporterRegistry;
+}
+
 namespace CLI {
 class App;
 } // namespace CLI
@@ -58,12 +62,12 @@ struct CommandFailure {
 /// caller they have before they do anything — `inspect` asks
 /// it whether they may page. It is a reference to the caller's object, which
 /// outlives the parse.
-using Registrar = void (*)(CLI::App &, const CliOptions &);
+using Registrar = void (*)(CLI::App &, const CliOptions &, ir::ImporterRegistry &);
 
 /// `run`, plus subcommands the library cannot register for itself.
 ///
-/// The native viewer brings a window system; the native DD4hep options bring
-/// process-global detector policy and an exit handler. Both are compiled into
+/// The native viewer brings a window system; the native DD4hep adapter brings
+/// output redirection and an exit handler. Both are compiled into
 /// the executable and handed in here, outside the callable CLI.
 int runWith(std::span<const std::string_view> args, const CliOptions &options,
             std::span<const Registrar> extra);
@@ -74,22 +78,23 @@ int runWith(std::span<const std::string_view> args, const CliOptions &options,
 // visibility ever slipped, `ci/check_shared_exports.py` would report it as an
 // *unqualified* symbol and point the reader at --exclude-libs, which is not the
 // line at fault.
-void registerCmdConvert(CLI::App &app, const CliOptions &options);
-void registerCmdInspect(CLI::App &app, const CliOptions &options);
-void registerCmdConfig(CLI::App &app, const CliOptions &options);
+void registerCmdConvert(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
+void registerCmdInspect(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
+void registerCmdConfig(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
 
-// Native executable only: opt-in DD4hep global detector and exit warning.
-void registerCmdDD4hepNative(CLI::App &app, const CliOptions &options);
+// Native executable only: plugin output redirection and exit warning.
+void registerCmdDD4hepNative(CLI::App &app, const CliOptions &options,
+                             ir::ImporterRegistry &registry);
 
 // Native-only: packing mounts a `FilesystemProjectFs`, which the web build
 // does not have. Registered beside `viewer` for the same reason.
-void registerCmdProject(CLI::App &app, const CliOptions &options);
+void registerCmdProject(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
 
 // Native-only for a different reason: every line of it writes to a filesystem
 // the user keeps, which under Emscripten is a virtual one that vanishes with the
 // tab. The skill bytes themselves are gated with it, so a wasm module carries
 // neither the command nor its payload.
-void registerCmdSkills(CLI::App &app, const CliOptions &options);
+void registerCmdSkills(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
 
 // ── `viewer`, in two halves ───────────────────────────────────────────────────
 //
@@ -124,11 +129,12 @@ void addViewerServeOptions(CLI::App &sub);
 /// `options` rides along for `webAssets`: the runtime's location is a property
 /// of the front door rather than of the command line, so it arrives with the
 /// other front-door properties instead of through an option nobody typed.
-void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options);
+void runViewerServe(CLI::App &viewer, CLI::App &serve, const CliOptions &options,
+                    ir::ImporterRegistry &registry);
 
 /// Registers `viewer` with the shared and web options, and a callback that
 /// serves or explains. The native half replaces that callback.
-void registerCmdViewer(CLI::App &app, const CliOptions &options);
+void registerCmdViewer(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
 
 /// Extends the `viewer` subcommand with the native window: its options, and the
 /// run path plain `viewer` takes.
@@ -137,6 +143,7 @@ void registerCmdViewer(CLI::App &app, const CliOptions &options);
 /// `viewer::App`, which `--no-undefined` on the shared library would turn into a
 /// link error rather than a missing feature. Declared here so main.cpp can name
 /// it without a second forward declaration going stale.
-void registerCmdViewerNative(CLI::App &app, const CliOptions &options);
+void registerCmdViewerNative(CLI::App &app, const CliOptions &options,
+                             ir::ImporterRegistry &registry);
 
 } // namespace nodehammer::cli::detail

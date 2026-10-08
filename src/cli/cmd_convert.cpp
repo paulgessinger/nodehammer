@@ -101,7 +101,7 @@ struct Strictness {
 
 namespace nodehammer::cli::detail {
 
-void registerCmdConvert(CLI::App &app, const CliOptions &options) {
+void registerCmdConvert(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry) {
     // What this command says about its progress is narration, and it was on
     // stdout until now — the one stream a caller parses. See cli_common.hpp for
     // the contract; `Narrator` is where it is enforced.
@@ -147,7 +147,7 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
         sub->add_option("--wedge-cut-margin", "Cutting-solid oversize factor (default 2.0)")
             ->needs(wedgeCutOpt);
 
-    sub->callback([=] {
+    sub->callback([=, &registry] {
         runOrReport("convert", [&] {
             std::string outputFmt;
             std::vector<std::string> outputPaths;
@@ -222,7 +222,7 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
                 importFmt = "synthetic";
             } else if (*inputOpt) {
                 nodehammer::detail::Timer importTimer;
-                auto imported = importFrom(inputOpt, fmtInOpt);
+                auto imported = importFrom(registry, inputOpt, fmtInOpt);
                 timings.record("import", importTimer.elapsed());
                 importResult = std::move(imported.result);
                 importFmt = std::move(imported.formatName);

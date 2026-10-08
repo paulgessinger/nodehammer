@@ -142,3 +142,79 @@ def test_compression_level_and_filename_contract(tmp_path, level):
     assert plain.read_bytes() == nh.to_nhb(scene)
     with pytest.raises(nh.Error):
         nh.from_nhb(payload[:8])
+
+
+@pytest.mark.parametrize("options", [
+    {"dd4hep.typo": True},
+    {"dd4hep.useGlobalDetector": True},
+    {"dd4hep.useGlobalDetector": False},
+    {"dd4hep.useGlobalDetector": 1},
+    {"dd4hep.useGlobalDetector": 1.0},
+    {"dd4hep.useGlobalDetector": "true"},
+])
+def test_backend_options_are_validated_and_do_not_leak(options):
+    with pytest.raises(nh.Error) as error:
+        nh.read_semantic("", format="synthetic", importer_options=options)
+    assert error.value.code == "NH0105"
+    assert next(iter(options)) in str(error.value)
+    assert nh.read_semantic("", format="synthetic").scene.node_count == 1
+
+
+@pytest.mark.parametrize("options", [{1: True}, {"option": []}, {"option": {}}, {"option": None}])
+def test_backend_options_reject_nonprimitive_values(options):
+    with pytest.raises(TypeError):
+        nh.read_semantic("", format="synthetic", importer_options=options)
+
+
+@pytest.mark.skipif("dd4hep" not in nh.semantic_read_formats(), reason="requires DD4hep")
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_global_detector_lifetime_in_a_fresh_process(tmp_path, fail_first):
+    import pathlib
+    import subprocess
+    import sys
+
+    simple = pathlib.Path(__file__).resolve().parents[2] / "fixtures/dd4hep/simple_box.xml"
+    broken = tmp_path / "broken.xml"
+    broken.write_text("<lccdd><broken")
+    script = """
+import sys
+import nodehammer as nh
+options = {"dd4hep.useGlobalDetector": True}
+if sys.argv[3] == "True":
+    try:
+        nh.read_semantic(sys.argv[2], importer_options=options)
+    except nh.Error as error:
+        assert error.code == "NH0300"
+    else:
+        raise AssertionError("invalid compact was accepted")
+else:
+    assert nh.read_semantic(sys.argv[1], importer_options=options).scene.node_count == 2
+try:
+    nh.read_semantic(sys.argv[1], importer_options=options)
+except nh.Error as error:
+    assert "fresh default detector" in str(error)
+else:
+    raise AssertionError("global detector was reused")
+assert nh.read_semantic(sys.argv[1]).scene.node_count == 2
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(simple), str(broken), str(fail_first)],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "NH0302" not in result.stderr
+
+
+@pytest.mark.parametrize("value", [-(2**63) - 1, 2**63])
+def test_backend_option_integer_overflow(value):
+    with pytest.raises(OverflowError):
+        nh.read_semantic("", format="synthetic", importer_options={"option": value})
+
+
+@pytest.mark.skipif("dd4hep" not in nh.semantic_read_formats(), reason="requires DD4hep")
+@pytest.mark.parametrize("value,kind", [(1, "int64"), (1.0, "double"), ("true", "string")])
+def test_backend_options_do_not_coerce_values_to_bool(value, kind):
+    with pytest.raises(nh.Error) as error:
+        nh.read_semantic("unused.xml", importer_options={"dd4hep.useGlobalDetector": value})
+    assert error.value.code == "NH0105"
+    assert f"expects bool, got {kind}" in str(error.value)

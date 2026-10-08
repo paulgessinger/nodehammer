@@ -7,8 +7,10 @@
 #include "viewer/project_manifest.hpp"
 #include "viewer/zip_working_set.hpp"
 
+#include <api/handles_semantic.hpp>
 #include <detail/file_io.hpp>
 #include <detail/zstd_io.hpp>
+#include <ir/semantic/importer.hpp>
 #include <nodehammer/diagnostics.hpp>
 #include <nodehammer/io.hpp>
 
@@ -100,6 +102,8 @@ PackResult pack(const PackOptions &options) {
 
     const std::filesystem::path configAbs = requireExisting(options.config, "config file");
     const std::filesystem::path geometryAbs = requireExisting(options.geometry, "input file");
+    if (options.importers)
+        (void)options.importers->resolve(geometryAbs);
     if (configAbs == geometryAbs) {
         throw Error{codes::kFatalProjectPack, "the config and the input name the same file",
                     options.config.string()};
@@ -198,7 +202,14 @@ PackResult pack(const PackOptions &options) {
                         std::format("cannot read the input: {}", ex.what()), geometryAbs.string()};
         }
     } else {
-        const SemanticResult imported = readSemantic(geometryAbs);
+        const auto defaults =
+            options.importers ? ir::ImporterRegistry{} : ir::ImporterRegistry::makeDefault();
+        const auto &registry = options.importers ? *options.importers : defaults;
+        const auto *importer = registry.resolve(geometryAbs);
+        if (!importer)
+            throw Error{codes::kFatalImportFormatUnknown, "cannot determine geometry input format",
+                        geometryAbs.string()};
+        const SemanticResult imported = api::asHandle(importer->import(geometryAbs));
         const std::vector<std::byte> nhb = toNhb(imported.scene);
         ws.writeEntry(geometryKey, detail::zstd_io::compress(nhb));
     }

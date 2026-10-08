@@ -110,10 +110,27 @@ foreach(flag "" --dd4hep-global)
     endif()
 endforeach()
 
-foreach(mode repeat populated)
+foreach(mode repeat populated callable)
     execute_process(COMMAND "${HOST}" "${FIXTURES}/simple_box.xml" "${mode}"
         RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
     if(NOT code EQUAL 0 OR NOT out MATCHES "HOST_RETURNED" OR err MATCHES "NH0302")
         message(FATAL_ERROR "Global detector lifecycle test failed: ${code} ${out}\n${err}")
     endif()
 endforeach()
+
+# Backend-specific CLI options must not be ignored for other formats.
+execute_process(COMMAND "${NODEHAMMER}" convert --dd4hep-global
+    -i synthetic --input-format synthetic -o "${WORKDIR}/wrong-format.nhb"
+    RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT code EQUAL 1 OR NOT err MATCHES "NH0105")
+    message(FATAL_ERROR "Wrong-format options were ignored: ${code} ${out} ${err}")
+endif()
+
+file(WRITE "${WORKDIR}/scene.toml" "")
+execute_process(COMMAND "${PROBE}" project pack --dd4hep-global
+    --config "${WORKDIR}/scene.toml" --input "${FIXTURES}/global_detector.xml"
+    -o "${WORKDIR}/global.nhproj"
+    RESULT_VARIABLE code OUTPUT_VARIABLE out ERROR_VARIABLE err)
+if(NOT code EQUAL 0 OR NOT EXISTS "${WORKDIR}/global.nhproj")
+    message(FATAL_ERROR "Project pack lost importer options: ${code} ${out} ${err}")
+endif()

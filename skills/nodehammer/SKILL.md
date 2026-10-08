@@ -203,9 +203,14 @@ nodehammer convert -i detector.xml --dd4hep-global -c scene.toml -o detector.glb
 
 Source the experiment's plugin environment first. The flag loads one compact
 into a fresh default detector; a populated detector or repeated global import
-is rejected. It is native-only: the Python console script and `runCli` do not
-expose it. `readSemantic` keeps the private detector; applications with an
-existing detector can use `fromDD4hep(detector)`.
+is rejected. The Python console script and `runCli` expose the same flag.
+`readSemantic` accepts `.importerOptions = {{"dd4hep.useGlobalDetector", true}}`;
+the default remains private. Python uses `read_semantic(path,
+importer_options={"dd4hep.useGlobalDetector": True})`. Unknown keys, incorrect
+primitive types, and options for a different backend raise `NH0105`.
+Applications with an existing
+detector can use `fromDD4hep(detector)`. Only the native executable installs
+the exit warning and redirects plugin stdout.
 
 If a plugin calls `exit()` during XML loading, the native CLI prints `NH0302`.
 For a private import it suggests `--dd4hep-global`. This warning uses `atexit`,
