@@ -136,7 +136,9 @@ TEST_CASE("a TGeo-imported scene round-trips through .nhb", "[public][tgeo]") {
 
     const auto reread = nh::fromNhb(std::span<const std::byte>{nhb});
     REQUIRE(reread.scene.nodeCount() == scene.nodeCount());
-    REQUIRE(reread.scene.logVolCount() == scene.logVolCount());
+    // NHS8 stores physical topology. Its lossless canonical adapter uses one
+    // definition per stored node; the next stack stage preserves sharing on disk.
+    REQUIRE(reread.scene.logVolCount() == scene.nodeCount());
     REQUIRE(reread.scene.shapeCount() == scene.shapeCount());
     REQUIRE(reread.scene.materialCount() == scene.materialCount());
 }

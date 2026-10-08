@@ -1,4 +1,5 @@
-#include <ir/fb/semantic/flatbuffer.hpp>
+#include <cstring>
+#include <ir/legacy/nhs8.hpp>
 
 #include <detail/overloaded.hpp>
 
@@ -19,7 +20,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace nodehammer::ir {
+namespace nodehammer::ir::legacy::nhs8 {
 
 namespace {
 
@@ -1245,4 +1246,4 @@ expanded::Scene semanticSceneFromBytes(std::span<const std::byte> buf) {
     return semanticSceneFromFlatBuffer(*fb);
 }
 
-} // namespace nodehammer::ir
+} // namespace nodehammer::ir::legacy::nhs8

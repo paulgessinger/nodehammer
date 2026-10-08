@@ -13,7 +13,7 @@
 //
 // That is a constraint nobody wrote down, and it is the wrong one to have. The
 // `.nhb` writer already sorts by ID before emitting anything
-// (ir/fb/semantic/flatbuffer.cpp); this is the same discipline for the two
+// (ir/semantic/flatbuffer.cpp); this is the same discipline for the two
 // exporters that skipped it.
 //
 // Note what is *not* affected, and does not need this: glTF node indices come

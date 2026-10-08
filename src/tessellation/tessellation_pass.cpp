@@ -1528,8 +1528,8 @@ void TessellationJob::start(const config::NHConfig &config, const ir::expanded::
     // countEffectiveNodes uses compiledRules + config + scene set above,
     // so it must run after those are wired in.
     impl_->totalNodes.store(impl_->countEffectiveNodes(), std::memory_order_relaxed);
-    if (!scene.nodes.empty() && scene.nodes.contains(scene.rootId)) {
-        impl_->q.push(scene.rootId);
+    if (!impl_->scene->nodes.empty() && impl_->scene->nodes.contains(impl_->scene->rootId)) {
+        impl_->q.push(impl_->scene->rootId);
     } else {
         impl_->done = true;
     }

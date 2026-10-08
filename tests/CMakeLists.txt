@@ -1,6 +1,7 @@
 add_executable(nodehammer_tests
     test_main.cpp
     ir/test_occurrence_tree.cpp
+    ir/test_legacy_shared.cpp
     ir/test_shared_geometry.cpp
     ir/test_semantic_ir.cpp
     ir/test_json_roundtrip.cpp
@@ -256,6 +257,7 @@ if(NODEHAMMER_WITH_TGEO)
 endif()
 
 if(NODEHAMMER_WITH_DD4HEP)
+    target_sources(nodehammer_tests PRIVATE import/test_shared_dd4hep.cpp)
     target_sources(nodehammer_tests PRIVATE import/test_dd4hep_importer.cpp)
     target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_DD4HEP=1)
 endif()

@@ -1,3 +1,5 @@
+#include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <nodehammer/io.hpp>
 #include <nodehammer/nhr.hpp>
 // #41's step-6 acceptance criterion: the public verbs produce byte-identical
@@ -155,7 +157,7 @@ void referenceExport(const fs::path &nhb, const nh::config::NHConfig &cfg, const
     }
 
     const nh::tessellation::TessellationPass pass{cfg};
-    auto lowered = pass.lower(scene);
+    auto lowered = pass.lower(nh::ir::semantic::expand(scene));
     REQUIRE_FALSE(lowered.diags.hasErrors());
 
     const auto registry = nh::ir::RenderExporterRegistry::makeDefault();
@@ -175,7 +177,8 @@ TEST_CASE("Public verbs export byte-identically to the internal pipeline", "[api
 
     const auto dir = caseDir("export");
     const auto nhb = dir / "scene.nhb";
-    nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(sampleScene()));
+    nh::detail::file_io::writeFile(
+        nhb, nh::ir::semanticSceneToBytes(nh::ir::semantic::fromExpanded(sampleScene())));
 
     // Same basename, different directories. OBJ writes `mtllib <stem>.mtl` and
     // glTF a `<stem>.bin` URI into the file itself, so comparing two outputs
@@ -225,7 +228,8 @@ TEST_CASE("build equals applySelection + deduplicate + tessellate", "[api][equiv
     // a different order, these two `.nhr` blobs would differ.
     const auto dir = caseDir("decompose");
     const auto nhb = dir / "scene.nhb";
-    nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(sampleScene()));
+    nh::detail::file_io::writeFile(
+        nhb, nh::ir::semanticSceneToBytes(nh::ir::semantic::fromExpanded(sampleScene())));
 
     const auto cfg = nh::fromToml(kFullToml, dir);
     REQUIRE_FALSE(cfg.diags.hasErrors());
@@ -261,7 +265,8 @@ TEST_CASE("build equals applySelection + deduplicate + tessellate", "[api][equiv
 TEST_CASE("The stage verbs are no-ops when their config switch is off", "[api][equivalence]") {
     const auto dir = caseDir("switches");
     const auto nhb = dir / "scene.nhb";
-    nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(sampleScene()));
+    nh::detail::file_io::writeFile(
+        nhb, nh::ir::semanticSceneToBytes(nh::ir::semantic::fromExpanded(sampleScene())));
 
     const auto cfg = nh::fromToml(kNoSelectionToml, dir);
     REQUIRE_FALSE(cfg.diags.hasErrors());
@@ -286,7 +291,8 @@ TEST_CASE("write honours the output slice, not just build", "[api][equivalence]"
     // produce different bytes from passing the document's own.
     const auto dir = caseDir("unit_scale");
     const auto nhb = dir / "scene.nhb";
-    nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(sampleScene()));
+    nh::detail::file_io::writeFile(
+        nhb, nh::ir::semanticSceneToBytes(nh::ir::semantic::fromExpanded(sampleScene())));
 
     const auto cfg = nh::fromToml(kFullToml, dir);
     const auto sem = nh::readSemantic(nhb);

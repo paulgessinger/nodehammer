@@ -1,3 +1,4 @@
+#include <ir/expanded/conversion.hpp>
 #include <scene_build.hpp>
 
 #include <config/config_loader.hpp>
@@ -17,11 +18,10 @@
 namespace nodehammer::pipeline {
 
 ScenePrepResult
-prepareSceneForTessellationFromInputs(config::NHConfig config, ir::expanded::Scene scene,
+prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Scene scene,
                                       std::optional<tessellation::WedgeCutParams> wedgeCut) {
     ScenePrepResult prep;
     prep.config = std::move(config);
-    prep.scene = std::move(scene);
 
     auto validDiags = config::ConfigValidator::validate(prep.config);
     prep.diags.append(validDiags);
@@ -29,14 +29,16 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::expanded::Sce
 
     if (!prep.config.selection.empty()) {
         selection::SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
-        prep.diags.append(sel.prune(prep.scene));
+        prep.diags.append(sel.prune(scene));
     }
 
     if (prep.config.deduplicateShapes) {
-        prep.scene.deduplicateMaterials();
-        prep.scene.deduplicateShapes();
-        prep.scene.deduplicateLogVols();
+        scene.deduplicateMaterials();
+        scene.deduplicateShapes();
+        scene.deduplicateLogVols();
     }
+
+    prep.scene = ir::semantic::expand(scene);
 
     // Azimuthal wedge cut runs after dedup so cut shapes that share an
     // identical local-frame cut stay instanced (mirrors the convert CLI).
@@ -80,7 +82,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
     // (invariant #1). A single unbounded slice finishes in one drive loop.
     tessellation::BuildPipeline pipe;
     pipe.start(std::make_shared<const config::NHConfig>(std::move(cfg)),
-               std::make_shared<const ir::expanded::Scene>(std::move(importResult.scene)),
+               std::make_shared<const ir::semantic::Scene>(std::move(importResult.scene)),
                std::nullopt);
     while (!pipe.advance(std::numeric_limits<std::uint64_t>::max())) {
     }

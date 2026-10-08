@@ -4,6 +4,7 @@
 #include <api/handles_render.hpp>
 
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <selection/selector.hpp>
 #include <tessellation/tessellation_pass.hpp>
 
@@ -22,7 +23,7 @@ namespace {
 
 [[nodiscard]] bool dedupApplies(const config::NHConfig &cfg) { return cfg.deduplicateShapes; }
 
-void runSelection(ir::expanded::Scene &scene, const config::NHConfig &cfg, DiagnosticList &diags) {
+void runSelection(ir::semantic::Scene &scene, const config::NHConfig &cfg, DiagnosticList &diags) {
     const selection::SelectionEngine engine{cfg.selection, cfg.hoistOrphans};
     diags.append(engine.prune(scene));
 }
@@ -33,7 +34,7 @@ void runSelection(ir::expanded::Scene &scene, const config::NHConfig &cfg, Diagn
 /// discarded them, so a caller had no way to tell "dedup ran" from "dedup did
 /// something". They are `Info` — the result is exactly what was asked for, and
 /// this is worth recording (docs/error-model.md).
-void runDedup(ir::expanded::Scene &scene, DiagnosticList &diags) {
+void runDedup(ir::semantic::Scene &scene, DiagnosticList &diags) {
     const auto materials = scene.deduplicateMaterials();
     const auto shapes = scene.deduplicateShapes();
     const auto logVols = scene.deduplicateLogVols();
@@ -54,7 +55,7 @@ SemanticResult applySelection(const SemanticScene &scene, const SceneConfig &con
         return SemanticResult{scene, DiagnosticList{}};
     }
 
-    ir::expanded::Scene working = input;
+    ir::semantic::Scene working = input;
     DiagnosticList diags;
     runSelection(working, cfg, diags);
     // The scene comes back even when the diagnostics carry errors — a
@@ -70,7 +71,7 @@ SemanticResult deduplicate(const SemanticScene &scene, const SceneConfig &config
         return SemanticResult{scene, DiagnosticList{}};
     }
 
-    ir::expanded::Scene working = input;
+    ir::semantic::Scene working = input;
     DiagnosticList diags;
     runDedup(working, diags);
     return SemanticResult{api::asHandle(std::move(working)), std::move(diags)};
@@ -80,7 +81,7 @@ RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
     const auto &input = api::sceneOrThrow(scene, "tessellate");
     const auto &cfg = api::documentOf(config);
     const tessellation::TessellationPass pass{cfg};
-    auto result = pass.lower(input);
+    auto result = pass.lower(ir::semantic::expand(input));
     // Errors and a usable scene genuinely coexist here: NH0500 reports an
     // unknown shape and leaves that one node without a mesh binding, and the
     // rest of the scene is still a scene. Returning it is what lets a caller
@@ -95,7 +96,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     // One working copy for all three stages rather than three handles chained
     // through the public verbs: same order, same conditions, one copy of the
     // scene instead of three.
-    ir::expanded::Scene working = input;
+    ir::semantic::Scene working = input;
     DiagnosticList diags;
 
     if (selectionApplies(cfg)) {
@@ -106,7 +107,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     }
 
     const tessellation::TessellationPass pass{cfg};
-    auto result = pass.lower(working);
+    auto result = pass.lower(ir::semantic::expand(working));
     diags.append(result.diags);
     // Tessellation errors come back *with* the scene — see `tessellate`.
     return RenderResult{api::asHandle(std::move(result.scene)), std::move(diags)};
