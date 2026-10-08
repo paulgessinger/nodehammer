@@ -10,7 +10,10 @@
 #include <diagnostics.hpp>
 #include <ir/semantic.hpp>
 #include <ir/tgeo/semantic/shape_dispatch.hpp>
+#include <tessellation/boolean_tessellator.hpp>
 #include <tessellation/primitive_tessellator.hpp>
+
+#include <manifold/manifold.h>
 
 #include <TGeoBBox.h>
 #include <TGeoCone.h>
@@ -365,4 +368,33 @@ TEST_CASE("TGeo->Tess: TGeoTessellated (tetrahedron) dispatches and tessellates"
     REQUIRE(out.vertices.size() == 12); // 4 facets × 3 verts
     REQUIRE(out.indices.size() == 12);
     REQUIRE(hasNoDegenerateTriangles(out));
+}
+
+TEST_CASE("TGeo->Tess: quadrilateral facets preserve a closed solid", "[tgeo][tess]") {
+    using Vertex = TGeoTessellated::Vertex_t;
+    resetManager();
+    new TGeoManager("tgeo_quads", "tgeo_quads");
+    const std::vector<Vertex> vertices{{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
+                                       {-1, -1, 1},  {1, -1, 1},  {1, 1, 1},  {-1, 1, 1}};
+    auto *shape = new TGeoTessellated("cube", vertices);
+    shape->AddFacet(0, 3, 2, 1);
+    shape->AddFacet(0, 1, 5, 4);
+    shape->AddFacet(1, 2, 6, 5);
+    shape->AddFacet(2, 3, 7, 6);
+    shape->AddFacet(3, 0, 4, 7);
+    SECTION("all quadrilateral faces") { shape->AddFacet(4, 5, 6, 7); }
+    SECTION("mixed triangular and quadrilateral faces") {
+        shape->AddFacet(4, 5, 6);
+        shape->AddFacet(4, 6, 7);
+    }
+    shape->CloseShape(false, false, false);
+
+    auto [out, diags] = dispatchAndTessellate(shape, "tessellated_quads");
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE_FALSE(out.diags.hasErrors());
+    REQUIRE(out.indices.size() == 36);
+    REQUIRE(hasNoDegenerateTriangles(out));
+    auto solid = meshToManifold(out, diags, "tessellated_quads");
+    REQUIRE(solid.has_value());
+    CHECK(solid->Volume() == Catch::Approx(8.0));
 }
