@@ -8,6 +8,7 @@ Scene fromExpanded(const expanded::Scene &scene) {
     if (scene.nodes.empty() && scene.logVols.empty() && scene.rootId.value == 0) {
         Scene result;
         static_cast<GeometryCatalogs &>(result) = scene;
+        result.reseedIdCounters();
         return result;
     }
     if (!scene.nodes.contains(scene.rootId) || scene.nodes.at(scene.rootId).parentId) {
@@ -70,6 +71,7 @@ Scene fromExpanded(const expanded::Scene &scene) {
         throw std::invalid_argument("expanded scene has disconnected nodes");
     }
     (void)result.validate();
+    result.reseedIdCounters();
     return result;
 }
 } // namespace nodehammer::ir::semantic

@@ -85,6 +85,7 @@ void registerCmdConfig(CLI::App &app, const CliOptions &options, ir::ImporterReg
 // Native executable only: plugin output redirection and exit warning.
 void registerCmdDD4hepNative(CLI::App &app, const CliOptions &options,
                              ir::ImporterRegistry &registry);
+void registerCmdUpgrade(CLI::App &app, const CliOptions &options);
 
 // Native-only: packing mounts a `FilesystemProjectFs`, which the web build
 // does not have. Registered beside `viewer` for the same reason.

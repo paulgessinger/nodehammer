@@ -1,0 +1,96 @@
+NHS9 current column encoding
+============================
+
+NHS9 has one supported layout. Earlier NHS9 development layouts are deliberately
+unsupported; regenerate those artifacts from their source geometry. NHS8 remains
+readable through the existing legacy adapter. The schema revision marker is 6;
+other revisions and unknown required features are rejected.
+
+The root contains volume columns, metadata columns and a shared string pool.
+There are no legacy tables, placeholder vectors or alternative encodings.
+Volume IDs use uint64 differences modulo 2^64. Daughter volume references use
+uint32 differences modulo 2^32; daughter names use absolute dictionary indices.
+Volume names and sparse string overrides use delta-encoded dictionary indices.
+Offsets and metadata key columns use uint32 deltas. Repeated and descending
+references are valid; reconstructed offsets must be monotonic and in bounds.
+All current column vectors are required, including empty vectors.
+
+Prefix sharing
+--------------
+Each unique string stores a byte-prefix length relative to the preceding string,
+a suffix length and suffix bytes in one concatenated byte vector. Dictionary IDs
+follow deterministic catalog and metadata traversal, retaining reference-column
+locality. Prefixes operate on bytes, preserving Unicode and embedded nulls.
+
+Each unique metadata occurrence path likewise stores a prefix-component count
+relative to the preceding path and only its remaining uint64 components. Offset
+deltas delimit these suffixes. Metadata references retain their original indices.
+The decoder reconstructs full strings and paths before rebuilding the scene.
+
+The encoding preserves source IDs, names, daughter order, all sparse metadata and
+full double-precision transform bits. It performs no volume deduplication and
+never expands occurrences. Compression remains a single external zstd frame,
+using the unchanged default level 3.
+
+Bounds checks reject prefix overruns, suffix overruns, trailing string bytes,
+column-length mismatches and invalid references. Writer and reader both bound
+total reconstructed string bytes below the FlatBuffers buffer-size limit, and
+path components below that limit divided by sizeof(uint64_t). Arithmetic checks
+precede addition, including on 32-bit builds. No old NHS9 reader is retained.
+
+ODD findings
+------------
+The historical exporter was reproduced against today's ODD source; see
+odd-fixture-reproduction.txt. The historical file is 507,965 bytes, and the
+reproduced old exporter writes 512,217 bytes. All figures below use zstd level 3.
+
+Input                  Before prefix sharing   Current
+Direct DD4hep ODD                   1,013,444    358,128
+Historical NHS8 adapted to NHS9     2,373,056    427,089
+
+Both retain all 325,232 occurrences and reconstruct byte-identical checkpoint
+canonical data via an external copy of the previous writer. They then re-encode
+to identical current bytes. This checks catalog identities, exact transform bits,
+metadata presence and content, and daughter order; no semantic merges are used.
+The external comparison writer is not included in production or its test suite.
+
+This reaches the size target without rebuilding the in-memory semantic model.
+The previous dictionary reused whole strings but still stored many long names
+and full paths independently. Prefix sharing removes those repeated byte and
+component sequences, including FlatBuffer string-table overhead.
+
+Alternatives measured locally: sorting the string dictionary produced 409,680
+bytes for direct ODD and 408,260 for adapted ODD, with more write overhead.
+Pooling daughter-name/reference lists did not improve isolated column sizes;
+transform-list pooling had only a small benefit. Those changes were not retained.
+
+
+Timing and memory (native macOS, RelWithDebInfo)
+---------------------------------------------
+Five alternating fresh-process runs per representation, frozen checkpoint codec
+versus current codec, on the same scenes. Timer includes decode/validation,
+encode/validation and zstd compression, excluding file read and process startup.
+Peak RSS from macOS time includes the complete process. Medians:
+
+                     Direct before  Direct current  Adapted before  Adapted current
+Read ms                      111.36          110.98          184.48           195.71
+Write ms                     121.20          125.62          281.98           271.98
+Compress ms                    9.19            4.23           23.09             7.15
+Total ms                     240.24          241.37          493.59           474.26
+Peak RSS bytes          241,516,544     225,968,128     620,691,456      480,231,424
+
+Per-phase medians need not sum to the median total. These are local observations,
+not a CI performance guarantee.
+
+Validation
+----------
+All 650 native CTest checks and 668 DD4hep/TGeo-enabled test cases pass. Independent review found
+no correctness blockers. Exact checkpoint reconstruction and deterministic
+current round-trips pass for direct ODD, adapted ODD, CLD, ALLEGRO and both full
+IDEA inputs.
+
+Repository fixtures
+-------------------
+odd-nhs8.nhb.zst preserves the original 507,965-byte NHS8 fixture unchanged.
+odd.nhb.zst is its 427,089-byte NHS9 upgrade, retaining all 325,232 occurrences.
+Regenerate it with nodehammer upgrade -i odd-nhs8.nhb.zst -o odd.nhb.zst.

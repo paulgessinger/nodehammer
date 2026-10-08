@@ -1,0 +1,43 @@
+Shared geometry migration: review order
+======================================
+
+The implementation is split into three draft PRs, each based on the previous one.
+Review and merge them bottom-up; retarget the next PR after its base merges.
+
+1. #109 — expanded types and common catalogs
+   https://github.com/paulgessinger/nodehammer/pull/109
+   First establish selection reference tests, then move physical Scene/Node/NodeId
+   to ir::expanded. Shape/material declarations stay in semantic.hpp, and common
+   catalog operations stay in semantic.cpp. Daughter names participate in volume
+   deduplication so source paths cannot disappear. File format remains NHS8.
+
+2. #110 — canonical import and selection — based on #109
+   https://github.com/paulgessinger/nodehammer/pull/110
+   First review Scene, OccurrenceTree and SelectedOccurrences with the differential
+   tests. Then review TGeo/DD4hep source extraction, metadata attribution, lossless
+   NHS8 adaptation and normal pipeline integration. There is one import interface.
+   Selection returns canonical geometry; explicit expansion occurs at JSON export,
+   wedge and tessellation boundaries. This stage still writes NHS8 at the boundary.
+
+3. #107 — NHS9 format and upgrade command — based on #110
+   https://github.com/paulgessinger/nodehammer/pull/107
+   Review shared.fbs and the canonical FlatBuffer codec, then normal writer/reader
+   dispatch and compatibility tests. NHS8 reads warn through common diagnostics.
+   The existing CLI API gains upgrade; there is no separate executable. Worker
+   transport and ordinary ingestion transparently use the same codec.
+
+Scope and validation
+--------------------
+The final stack passes 647 native cases (32,937 assertions), 61 public API cases
+(294 assertions), and six ingestion/upgrade CTests. The earlier PR tips are tested
+independently. Three real NHS9 detector files re-encode byte-identically.
+
+The native benchmark is manual-only: build nodehammer_selection_bench explicitly,
+then use scripts/selection-bench.sh. It is excluded from default builds and CI.
+
+The ROOT quadrilateral-facet conversion fix remains separate (#108); FCC-ee
+configs and generated geometries stay in locally ignored analysis/fccee. ALLEGRO's
+DD4hep fix remains #106. Fully lazy tessellation, large-IDEA filter acceleration,
+encoding-size optimization and project-level upgrade are follow-ups. WASM timing
+requires an SDK environment. The format uses FlatBuffers and whole-file zstd;
+chunking remains deferred.

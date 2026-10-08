@@ -1,0 +1,23 @@
+file(MAKE_DIRECTORY "${WORK_DIR}")
+file(SHA256 "${INPUT}" before)
+execute_process(COMMAND "${CLI}" upgrade -i "${INPUT}" -o "${INPUT}"
+    RESULT_VARIABLE refused OUTPUT_VARIABLE out ERROR_VARIABLE err)
+file(SHA256 "${INPUT}" after)
+if(refused EQUAL 0 OR NOT before STREQUAL after OR NOT err MATCHES "must differ")
+    message(FATAL_ERROR "Upgrade failed to protect the input: ${err}")
+endif()
+set(output "${WORK_DIR}/upgraded.nhb.zst")
+execute_process(COMMAND "${CLI}" upgrade -i "${INPUT}" -o "${output}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE report ERROR_VARIABLE err)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Upgrade failed: ${err}")
+endif()
+execute_process(COMMAND "${CLI}" inspect --output-format json summary -i "${output}"
+    RESULT_VARIABLE result OUTPUT_VARIABLE report ERROR_VARIABLE err)
+if(NOT result EQUAL 0)
+    message(FATAL_ERROR "Readback failed: ${err}")
+endif()
+string(JSON count GET "${report}" nodes)
+if(NOT count EQUAL 99)
+    message(FATAL_ERROR "Legacy upgrade changed occurrence count or expanded the output")
+endif()

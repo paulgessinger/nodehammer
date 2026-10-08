@@ -1,0 +1,142 @@
+namespace nodehammer.shared_fbs;
+
+struct Vec3f {
+    x:float; y:float; z:float;
+}
+
+struct DVec3 {
+    x:double; y:double; z:double;
+}
+
+struct Triangle {
+    v0:DVec3;
+    v1:DVec3;
+    v2:DVec3;
+}
+
+struct Section {
+    z:double;
+    r_min:double;
+    r_max:double;
+}
+
+// --- Shape tables ---
+
+table BoxShape       { dx:double; dy:double; dz:double; }
+table TubeShape      { r_min:double; r_max:double; dz:double; phi_start:double; phi_delta:double; }
+table ConeShape      { r_min1:double; r_max1:double; r_min2:double; r_max2:double; dz:double; phi_start:double; phi_delta:double; }
+table TrdShape       { dx1:double; dx2:double; dy1:double; dy2:double; dz:double; }
+table ParaShape      { dx:double; dy:double; dz:double; alpha:double; theta:double; phi:double; }
+table PconShape      { phi_start:double; phi_delta:double; sections:[Section]; }
+table PgonShape      { phi_start:double; phi_delta:double; n_sides:int; sections:[Section]; }
+table TorusShape     { r_min:double; r_max:double; r_tor:double; phi_start:double; phi_delta:double; }
+table TessellatedShape { triangles:[Triangle]; }
+table BooleanUnion        { left:uint64; right:uint64; right_transform_index:uint32; }
+table BooleanIntersection { left:uint64; right:uint64; right_transform_index:uint32; }
+table BooleanSubtraction  { left:uint64; right:uint64; right_transform_index:uint32; }
+table UnknownShape   { original_type:string; }
+
+union ShapeData {
+    BoxShape,
+    TubeShape,
+    ConeShape,
+    TrdShape,
+    ParaShape,
+    PconShape,
+    PgonShape,
+    TorusShape,
+    TessellatedShape,
+    BooleanUnion,
+    BooleanIntersection,
+    BooleanSubtraction,
+    UnknownShape
+}
+
+table Shape {
+    id:uint64;
+    data:ShapeData;
+}
+
+// --- Material ---
+
+table Material {
+    id:uint64;
+    name:string;
+    has_color:bool;
+    color:Vec3f;
+    density:double;
+}
+
+// NHS9 stores source definitions and sparse occurrence metadata, never nodes.
+// Whole-file compression is external. Future container layouts get a new identifier.
+table Placement { name:string (required); log_vol_id:uint64; transform_index:uint32; }
+table Tag { key:string (required); value:string (required); }
+table TagSet { tags:[Tag] (required); }
+// Deltas are unsigned differences modulo 2^N, starting from zero.
+// Offset columns must reconstruct monotonic, in-bounds offsets.
+table IndexPairs {
+ key_deltas:[uint32] (required);
+ values:[uint32] (required);
+}
+table StringOverrides {
+ path_deltas:[uint32] (required);
+ value_index_deltas:[uint32] (required);
+}
+table MetadataColumns {
+ tag_sets:[TagSet] (required);
+ // Offsets contain an initial zero and one suffix end offset per unique path.
+ path_offset_deltas:[uint32] (required);
+ path_components:[uint64] (required);
+ // Each path reuses this many components of the preceding path.
+ path_prefix_lengths:[uint32] (required);
+ volume_tags:IndexPairs (required);
+ placement_volumes:[uint32] (required);
+ placement_daughters:[uint64] (required);
+ placement_tag_sets:[uint32] (required);
+ occurrence_tags:IndexPairs (required);
+ display_names:StringOverrides (required);
+ path_names:StringOverrides (required);
+ original_paths:StringOverrides (required);
+ degradation_paths:[uint32] (required);
+ degradation_flags:[uint64] (required);
+ default_source_system:string (required);
+ source_systems:StringOverrides (required);
+}
+table VolumeColumns {
+ // Preserve original IDs; references use catalog row + 1 (zero is invalid).
+ id_deltas:[uint64] (required);
+ name_index_deltas:[uint32] (required);
+ shapes:[uint32] (required);
+ materials:[uint32] (required);
+ daughter_offset_deltas:[uint32] (required);
+ // Absolute dictionary references compress repeated daughter names effectively.
+ daughter_name_indices:[uint32] (required);
+ daughter_volume_deltas:[uint32] (required);
+ daughter_transforms:[uint32] (required);
+}
+// Each string reuses prefix_lengths bytes of the preceding dictionary entry.
+// Concatenated suffixes preserve arbitrary bytes, including embedded nulls.
+table StringPool {
+ prefix_lengths:[uint32] (required);
+ suffix_lengths:[uint32] (required);
+ suffix_bytes:[ubyte] (required);
+}
+table SharedGeometry {
+ // Only revision 6 is supported; unreleased NHS9 layouts are not compatible.
+ schema_version:uint32;
+ required_features:uint64;
+ source_file:string (required);
+ root:Placement (required);
+ occurrence_count:uint64;
+ // Full 4x4 column-major double matrices, 16 consecutive doubles per entry.
+ transforms:[double] (required);
+ materials:[Material] (required);
+ shapes:[Shape] (required);
+ volumes:VolumeColumns (required);
+ metadata:MetadataColumns (required);
+ // Shared dictionary for absolute and delta-encoded string references.
+ strings:StringPool (required);
+}
+root_type SharedGeometry;
+file_identifier "NHS9";
+file_extension "nhb";

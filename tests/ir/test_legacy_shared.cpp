@@ -94,6 +94,11 @@ TEST_CASE("Legacy upgrade keeps actual topology and occurrence metadata", "[ir][
     auto selected = all.prune({rule});
     REQUIRE(selected.size() == 4);
     REQUIRE_FALSE(selected.contains({0, 0}));
+    const auto path =
+        std::filesystem::temp_directory_path() / "nodehammer-legacy-upgrade-test.nhb.zst";
+    semantic::writeFlatbuffer(g, path);
+    compare(s, semantic::readFlatbuffer(path));
+    std::filesystem::remove(path);
 }
 TEST_CASE("Legacy upgrade refuses malformed topology instead of dropping data",
           "[ir][shared][legacy]") {
@@ -137,4 +142,11 @@ TEST_CASE("Legacy NHS8 bytes adapt with all stored nodes selected", "[ir][shared
     stored.computeWorldTransforms();
     stored.computeOriginalPaths();
     compare(stored, decoded.scene);
+}
+
+TEST_CASE("NHS8 compatibility reads reseed canonical catalog IDs", "[legacy][shared]") {
+    auto restored = sceneFromBytes(legacy::nhs8::semanticSceneToBytes(makeExpandedScene()));
+    REQUIRE(restored.nextLogVolId().value == 6);
+    REQUIRE(restored.nextShapeId().value == 2);
+    REQUIRE(restored.nextMaterialId().value == 2);
 }
