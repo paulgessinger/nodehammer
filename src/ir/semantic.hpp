@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ankerl/unordered_dense.h>
+#include <diagnostics.hpp>
 #include <glm/glm.hpp>
 #include <ir/provenance.hpp>
 
@@ -34,12 +35,10 @@ template <typename Tag> struct StrongId {
 
 namespace nodehammer::ir::semantic {
 
-struct NodeTag {};
 struct LogVolTag {};
 struct ShapeTag {};
 struct MaterialTag {};
 
-using NodeId = StrongId<NodeTag>;
 using LogVolId = StrongId<LogVolTag>;
 using ShapeId = StrongId<ShapeTag>;
 using MaterialId = StrongId<MaterialTag>;
@@ -218,106 +217,21 @@ struct LogicalVolume {
     std::vector<DaughterPlacement> daughters;
 };
 
-// ── Node ──────────────────────────────────────────────────────────────────────
-
-struct Node {
-    NodeId id;
-    std::string name;
-    LogVolId logVolId;
-
-    glm::dmat4 localTransform{1.0}; ///< Relative to parent
-    glm::dmat4 worldTransform{1.0}; ///< Set by computeWorldTransforms()
-
-    std::optional<NodeId> parentId;
-    std::vector<NodeId> children;
-
-    /// Full path in the original source tree, e.g. "/world/ODD/PixelBarrel/sensor_0".
-    /// Set by computeOriginalPaths() before selection; preserved across hoisting.
-    std::string originalPath;
-
-    /// Free-form metadata tags (e.g. "subdetector"="tracker", "sensitive"="true")
-    std::map<std::string, std::string> tags;
-
-    std::string sourceSystem; ///< e.g. "dd4hep", "dd4hep/tgeo", "tgeo"
-    DegradationFlags degradation;
-};
-
-// ── Scene ─────────────────────────────────────────────────────────────────────
-
-class Scene {
-  public:
-    NodeId rootId;
-    std::string sourceFile; ///< Input file path (set by importer)
-
-    // Flat maps indexed by ID
-    ankerl::unordered_dense::map<NodeId, Node> nodes;
+// GeometryCatalogs are shared vocabulary, independent of either tree representation.
+struct GeometryCatalogs {
+    std::string sourceFile;
     ankerl::unordered_dense::map<LogVolId, LogicalVolume> logVols;
     ankerl::unordered_dense::map<ShapeId, Shape> shapes;
     ankerl::unordered_dense::map<MaterialId, SourceMaterial> materials;
-
-    /// Reseed the ID allocation counters so that nextXxxId() returns values
-    /// greater than every ID currently present in the maps. Deserializing
-    /// importers (JSON/FlatBuffer) populate the maps directly with pre-existing
-    /// IDs without advancing the counters; call this before allocating new IDs
-    /// on a loaded scene to avoid colliding with — and overwriting — them.
     void reseedIdCounters();
-
-    /// BFS pass: compose parent × local to set worldTransform on every node.
-    void computeWorldTransforms();
-
-    /// BFS pass: build originalPath from root for every reachable node.
-    void computeOriginalPaths();
-
-    /// Deduplicate shapes by value: shapes with identical parameters are merged
-    /// into a single canonical entry, and all referencing logical volumes are
-    /// updated.  Returns the number of shapes removed.
     std::size_t deduplicateShapes();
-
-    /// Deduplicate logical volumes: logVols with identical (shapeId, materialId)
-    /// are merged, and all referencing nodes are updated.
-    /// Returns the number of logical volumes removed.
-    std::size_t deduplicateLogVols();
-
-    /// Deduplicate materials: materials with identical (name, density, color)
-    /// are merged, and all referencing logical volumes are updated.
-    /// Returns the number of materials removed.
     std::size_t deduplicateMaterials();
-
-    /// BFS traversal from root; calls fn(const semantic::Node &) for every reachable node.
-    /// Guards on both a missing id and a repeat visit, so a dangling child id is
-    /// skipped rather than throwing from inside the traversal and a cycle
-    /// terminates rather than looping forever. Matches the guards in
-    /// `reachableNodes` (src/selection/selector.cpp).
-    template <typename Fn> void visitBFS(Fn &&fn) const {
-        if (nodes.empty() || !nodes.contains(rootId)) {
-            return;
-        }
-        std::unordered_set<NodeId> seen;
-        seen.reserve(nodes.size());
-        std::queue<NodeId> q;
-        q.push(rootId);
-        while (!q.empty()) {
-            const auto id = q.front();
-            q.pop();
-            const auto it = nodes.find(id);
-            if (it == nodes.end() || !seen.insert(id).second) {
-                continue;
-            }
-            fn(it->second);
-            for (const auto childId : it->second.children) {
-                q.push(childId);
-            }
-        }
-    }
-
-    // ID allocation
-    NodeId nextNodeId() { return NodeId{nextNodeId_++}; }
+    std::map<LogVolId, LogVolId> deduplicateVolumeDefinitions();
     LogVolId nextLogVolId() { return LogVolId{nextLogVolId_++}; }
     ShapeId nextShapeId() { return ShapeId{nextShapeId_++}; }
     MaterialId nextMaterialId() { return MaterialId{nextMaterialId_++}; }
 
   private:
-    uint64_t nextNodeId_{1};
     uint64_t nextLogVolId_{1};
     uint64_t nextShapeId_{1};
     uint64_t nextMaterialId_{1};

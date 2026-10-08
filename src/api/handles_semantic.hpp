@@ -18,7 +18,7 @@
 namespace nodehammer {
 
 struct SemanticScene::Impl {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 };
 
 // ── The members that mention an Impl ─────────────────────────────────────────
@@ -40,7 +40,7 @@ inline const SemanticScene::Impl &SemanticScene::impl() const {
 
 namespace api {
 
-[[nodiscard]] inline SemanticScene asHandle(ir::semantic::Scene scene) {
+[[nodiscard]] inline SemanticScene asHandle(ir::expanded::Scene scene) {
     return SemanticScene{
         std::make_shared<const SemanticScene::Impl>(SemanticScene::Impl{std::move(scene)})};
 }
@@ -58,7 +58,7 @@ namespace api {
 /// All this adds over `handle.impl()`, which throws on its own, is the verb
 /// name: an exception that says which call the caller got wrong, rather than
 /// only which type, is worth one wrapper.
-[[nodiscard]] inline const ir::semantic::Scene &sceneOrThrow(const SemanticScene &handle,
+[[nodiscard]] inline const ir::expanded::Scene &sceneOrThrow(const SemanticScene &handle,
                                                              std::string_view verb) {
     if (!handle.valid()) {
         throw Error{codes::kFatalApiInvalidHandle, "the semantic scene handle refers to nothing",

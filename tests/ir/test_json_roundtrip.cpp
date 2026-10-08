@@ -13,9 +13,9 @@ TEST_CASE("to_json: BoxShape serialization", "[ir][json]") {
     REQUIRE(j["dz"] == Catch::Approx(3.0));
 }
 
-TEST_CASE("to_json: semantic::Node serialization", "[ir][json]") {
-    nodehammer::ir::semantic::Node node;
-    node.id = nodehammer::ir::semantic::NodeId{42};
+TEST_CASE("to_json: expanded::Node serialization", "[ir][json]") {
+    nodehammer::ir::expanded::Node node;
+    node.id = nodehammer::ir::expanded::NodeId{42};
     node.name = "testNode";
     node.logVolId = nodehammer::ir::semantic::LogVolId{7};
     node.tags["subdetector"] = "tracker";
@@ -68,7 +68,7 @@ TEST_CASE("to_json: render::Node extras", "[ir][json]") {
     nodehammer::ir::render::Node node;
     node.id = nodehammer::ir::render::NodeId{1};
     node.name = "volume";
-    node.semanticNodeId = nodehammer::ir::semantic::NodeId{9};
+    node.semanticNodeId = nodehammer::ir::expanded::NodeId{9};
 
     SECTION("populated extras are emitted") {
         node.extras = nodehammer::ir::render::ExtrasMap::makeObject({{"detector", "tracker"}});

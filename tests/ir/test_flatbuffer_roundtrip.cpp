@@ -1,9 +1,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <detail/zstd_io.hpp>
+#include <ir/expanded/scene.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/fb/semantic/importer.hpp>
-#include <ir/semantic.hpp>
 #include <ir/semantic/importer.hpp>
 
 #include <chrono>
@@ -20,8 +20,8 @@ using Catch::Approx;
 namespace {
 
 /// Build a minimal scene with one root node, one logVol, one box shape, one material.
-ir::semantic::Scene makeMinimalScene() {
-    ir::semantic::Scene scene;
+ir::expanded::Scene makeMinimalScene() {
+    ir::expanded::Scene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{5.0, 10.0, 15.0}};
@@ -33,7 +33,7 @@ ir::semantic::Scene makeMinimalScene() {
     scene.logVols[lvId] = {lvId, "ironBox", shapeId, matId};
 
     auto nodeId = scene.nextNodeId();
-    ir::semantic::Node node;
+    ir::expanded::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;
@@ -89,7 +89,7 @@ TEST_CASE("FlatBuffer roundtrip: minimal scene", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     auto matId = scene.nextMaterialId();
     scene.materials[matId] = {matId, "air", std::nullopt, 0.001};
 
@@ -146,7 +146,7 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
     auto lvId = scene.nextLogVolId();
     scene.logVols[lvId] = {lvId, "rootLv", scene.shapes.begin()->first, matId};
     auto nodeId = scene.nextNodeId();
-    ir::semantic::Node node;
+    ir::expanded::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = lvId;
@@ -210,7 +210,7 @@ TEST_CASE("FlatBuffer roundtrip: all shape types", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, ir::semantic::BoxShape{1.0, 1.0, 1.0}};
@@ -223,7 +223,7 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
 
     // Root
     auto rootId = scene.nextNodeId();
-    ir::semantic::Node root;
+    ir::expanded::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = lvId;
@@ -244,7 +244,7 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
     childTransform[1][1] = std::cos(angle);
 
     auto childId = scene.nextNodeId();
-    ir::semantic::Node child;
+    ir::expanded::Node child;
     child.id = childId;
     child.name = "sensor_0";
     child.logVolId = lvId;
@@ -257,7 +257,7 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
 
     // Grandchild with identity transform
     auto grandchildId = scene.nextNodeId();
-    ir::semantic::Node grandchild;
+    ir::expanded::Node grandchild;
     grandchild.id = grandchildId;
     grandchild.name = "pixel_0";
     grandchild.logVolId = lvId;
@@ -273,7 +273,7 @@ TEST_CASE("FlatBuffer roundtrip: complex scene with hierarchy", "[ir][flatbuffer
     REQUIRE(restored.nodes.size() == 3);
     REQUIRE(restored.sourceFile == "/test/detector.xml");
 
-    auto findNodeIdByName = [&](std::string_view name) -> std::optional<ir::semantic::NodeId> {
+    auto findNodeIdByName = [&](std::string_view name) -> std::optional<ir::expanded::NodeId> {
         for (const auto &[id, node] : restored.nodes) {
             if (node.name == name) {
                 return id;
@@ -341,7 +341,7 @@ TEST_CASE("FlatBuffer: file identifier check", "[ir][flatbuffer]") {
 }
 
 TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffer]") {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
 
     auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId,
@@ -365,7 +365,7 @@ TEST_CASE("FlatBuffer roundtrip: logical volume with daughters", "[ir][flatbuffe
         {{.name = "sensor_phys", .logVolId = childLvId, .localTransform = placement}}};
 
     auto nodeId = scene.nextNodeId();
-    ir::semantic::Node node;
+    ir::expanded::Node node;
     node.id = nodeId;
     node.name = "root";
     node.logVolId = parentLvId;

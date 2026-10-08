@@ -1,6 +1,6 @@
 #include <ir/render_json.hpp>
 
-// The Render codec serializes glm vectors/matrices (glm_json), the semantic::NodeId
+// The Render codec serializes glm vectors/matrices (glm_json), the expanded::NodeId
 // back-reference and Provenance (both from the Semantic IR's codec). Pulling these
 // in here — rather than in render.hpp — is exactly what keeps the header lean.
 #include <detail/glm_json.hpp>

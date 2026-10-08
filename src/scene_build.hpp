@@ -2,8 +2,8 @@
 
 #include <config/config_ast.hpp>
 #include <diagnostics.hpp>
+#include <ir/expanded/scene.hpp>
 #include <ir/render.hpp>
-#include <ir/semantic.hpp>
 #include <tessellation/wedge_cut.hpp>
 
 #include <filesystem>
@@ -41,7 +41,7 @@ struct SceneBuildResult {
 /// when it cannot deliver, so a result that exists is a result that is ready.
 struct ScenePrepResult {
     config::NHConfig config;
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     DiagnosticList diags;
 };
 
@@ -66,7 +66,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 /// (matching the `convert --angle-cut` pipeline ordering), so the scene
 /// handed to tessellation already carries the Boolean-cut shapes.
 ScenePrepResult prepareSceneForTessellationFromInputs(
-    config::NHConfig config, ir::semantic::Scene scene,
+    config::NHConfig config, ir::expanded::Scene scene,
     std::optional<tessellation::WedgeCutParams> wedgeCut = std::nullopt);
 
 } // namespace nodehammer::pipeline

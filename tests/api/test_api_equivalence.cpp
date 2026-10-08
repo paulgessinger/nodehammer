@@ -92,7 +92,7 @@ unit_scale = 2.0
 
 /// A semantic scene with a tube (so `max_segments_circle` bites), a duplicate
 /// box (so dedup has work), and a node the selection rule drops.
-nh::ir::semantic::Scene sampleScene() {
+nh::ir::expanded::Scene sampleScene() {
     auto scene = nh::ir::SyntheticSceneBuilder::buildTubeInBox();
 
     // Two logical volumes with identical shape and material: dedup should merge
@@ -106,7 +106,7 @@ nh::ir::semantic::Scene sampleScene() {
             lvId, std::string{name} + "LV", shapeId, nh::ir::semantic::MaterialId{1}};
 
         const auto nodeId = scene.nextNodeId();
-        nh::ir::semantic::Node node;
+        nh::ir::expanded::Node node;
         node.id = nodeId;
         node.name = std::string{name};
         node.logVolId = lvId;

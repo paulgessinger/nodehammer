@@ -10,7 +10,7 @@
 // semantic_json.cpp.
 
 #include <detail/glm_json.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -71,10 +71,13 @@ void from_json(const nlohmann::json &j, DaughterPlacement &d);
 void to_json(nlohmann::json &j, const LogicalVolume &lv);
 void from_json(const nlohmann::json &j, LogicalVolume &lv);
 
+} // namespace nodehammer::ir::semantic
+
+namespace nodehammer::ir::expanded {
 void to_json(nlohmann::json &j, const Node &n);
 void from_json(const nlohmann::json &j, Node &n);
 
 void to_json(nlohmann::json &j, const Scene &sc);
 void from_json(const nlohmann::json &j, Scene &sc);
 
-} // namespace nodehammer::ir::semantic
+} // namespace nodehammer::ir::expanded

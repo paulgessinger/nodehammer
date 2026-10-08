@@ -9,7 +9,7 @@
 
 namespace nodehammer::ir {
 
-/// ISemanticImporter that reads a FlatBuffer-encoded semantic::Scene (.nhb/.nhb.zst).
+/// ISemanticImporter that reads a FlatBuffer-encoded expanded::Scene (.nhb/.nhb.zst).
 /// Format name: "nhb"   Extensions: "nhb", "nhb.zst"
 class FlatBufferImporter final : public ISemanticImporter {
   public:
@@ -21,7 +21,7 @@ class FlatBufferImporter final : public ISemanticImporter {
     /// (and as a `.zst` hint); zstd frames are also detected from their magic.
     /// The actual data comes from `bytes`. Used by the viewer build
     /// pipeline so geometry can flow straight from a project's resolved
-    /// bytes into a semantic::Scene without a filesystem round-trip.
+    /// bytes into a expanded::Scene without a filesystem round-trip.
     [[nodiscard]] static ImportResult importFromBytes(std::string_view filename,
                                                       std::span<const std::byte> bytes);
 };

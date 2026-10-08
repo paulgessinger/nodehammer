@@ -3,8 +3,8 @@
 #include <ankerl/unordered_dense.h>
 #include <detail/json_value.hpp> // ExtrasMap is an alias for detail::JsonValue
 #include <glm/glm.hpp>
+#include <ir/expanded/scene.hpp> // StrongId, expanded::NodeId
 #include <ir/provenance.hpp>
-#include <ir/semantic.hpp> // StrongId, semantic::NodeId
 
 // The JSON codec for these types lives in render_json.hpp / render_json.cpp so
 // this header stays free of the Semantic IR's codec and cheap to include.
@@ -108,8 +108,8 @@ struct Node {
     NodeId id;
     std::string name;
 
-    glm::mat4 localTransform{1.f}; ///< float: from semantic::Node::localTransform
-    glm::mat4 worldTransform{1.f}; ///< float: from semantic::Node::worldTransform
+    glm::mat4 localTransform{1.f}; ///< float: from expanded::Node::localTransform
+    glm::mat4 worldTransform{1.f}; ///< float: from expanded::Node::worldTransform
 
     std::optional<NodeId> parentId;
     std::vector<NodeId> children;
@@ -125,7 +125,7 @@ struct Node {
     std::vector<MeshBinding> lodProxyBindings;
 
     /// Back-reference to the semantic node that produced this render node
-    semantic::NodeId semanticNodeId;
+    expanded::NodeId semanticNodeId;
 
     /// Free-form metadata for export (e.g. glTF scene extras)
     ExtrasMap extras;

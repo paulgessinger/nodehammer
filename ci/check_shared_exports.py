@@ -287,7 +287,7 @@ SELF_TEST_CASES: list[tuple[str, str]] = [
     ("luaL_newstate", "leak"),
     # Property B: internal namespaces, caught by the src/ harvest.
     ("nodehammer::ir::render::Scene::clear()", "leak"),
-    ("nodehammer::ir::semantic::Scene::visitBFS()", "leak"),
+    ("nodehammer::ir::expanded::Scene::visitBFS()", "leak"),
     ("nodehammer::diagnostics::DiagnosticList::hasErrors() const", "leak"),
     ("nodehammer::config::keys::kExport", "leak"),
     ("nodehammer::viewer::ui::icon_font::glyphs", "leak"),

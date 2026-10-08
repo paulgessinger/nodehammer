@@ -86,7 +86,7 @@ ir::render::Scene makeScene() {
         ir::render::Node n;
         n.id = rootId;
         n.name = "root";
-        n.semanticNodeId = ir::semantic::NodeId{42};
+        n.semanticNodeId = ir::expanded::NodeId{42};
         scene.nodes[rootId] = n;
     }
     // Child with non-identity transforms + two mesh bindings.
@@ -107,7 +107,7 @@ ir::render::Scene makeScene() {
         // A coarse hull LOD proxy — must survive the round-trip or hull LOD is a
         // no-op in WASM (proxies cross the worker→viewer boundary as bytes).
         n.lodProxyBindings = {ir::render::MeshBinding{meshB, matBare}};
-        n.semanticNodeId = ir::semantic::NodeId{43};
+        n.semanticNodeId = ir::expanded::NodeId{43};
         scene.nodes[childId] = n;
         scene.nodes[rootId].children.push_back(childId);
     }
@@ -119,7 +119,7 @@ ir::render::Scene makeScene() {
         n.name = "grand";
         n.parentId = childId;
         n.meshBindings = {ir::render::MeshBinding{meshA, matBare}};
-        n.semanticNodeId = ir::semantic::NodeId{44};
+        n.semanticNodeId = ir::expanded::NodeId{44};
         scene.nodes[grandId] = n;
         scene.nodes[childId].children.push_back(grandId);
     }
@@ -264,7 +264,7 @@ TEST_CASE("Render FlatBuffer roundtrip: hierarchy, transforms, bindings",
     REQUIRE_FALSE(root->parentId.has_value());
     REQUIRE(root->children.size() == 1);
     REQUIRE(root->children[0] == child->id);
-    REQUIRE(root->semanticNodeId == ir::semantic::NodeId{42});
+    REQUIRE(root->semanticNodeId == ir::expanded::NodeId{42});
     REQUIRE(restored.rootId == root->id);
 
     // Child: parent link, transforms (column-major fidelity), two bindings.
@@ -284,7 +284,7 @@ TEST_CASE("Render FlatBuffer roundtrip: hierarchy, transforms, bindings",
     REQUIRE(child->lodProxyBindings[0].materialId.value != 0);
     // Nodes without proxies stay empty (default field absent in the buffer).
     REQUIRE(grand->lodProxyBindings.empty());
-    REQUIRE(child->semanticNodeId == ir::semantic::NodeId{43});
+    REQUIRE(child->semanticNodeId == ir::expanded::NodeId{43});
 
     // Grandchild: identity transform, parent link, single binding.
     REQUIRE(grand->parentId.has_value());

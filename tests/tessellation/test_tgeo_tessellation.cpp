@@ -8,7 +8,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <diagnostics.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 #include <ir/tgeo/semantic/shape_dispatch.hpp>
 #include <tessellation/primitive_tessellator.hpp>
 
@@ -50,7 +50,7 @@ struct DispatchResult {
 
 static DispatchResult dispatchAndTessellate(const TGeoShape *shape, const std::string &objName,
                                             const TessellationParams &params = {}) {
-    ir::semantic::Scene scene;
+    ir::expanded::Scene scene;
     DiagnosticList diags;
     const ir::semantic::ShapeId shapeId = dispatchTGeoShape(shape, scene, diags);
 

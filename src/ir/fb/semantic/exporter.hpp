@@ -8,7 +8,7 @@ class SemanticFlatbufferExporter final : public ISemanticExporter {
   public:
     [[nodiscard]] std::string_view formatName() const noexcept override;
     [[nodiscard]] std::vector<std::string> supportedExtensions() const override;
-    void write(const semantic::Scene &scene, const std::filesystem::path &path,
+    void write(const expanded::Scene &scene, const std::filesystem::path &path,
                const SemanticExportConfig &config) const override;
 };
 

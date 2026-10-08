@@ -16,7 +16,7 @@ std::vector<std::string> SemanticJsonExporter::supportedExtensions() const {
     return {"json", "json.zst"};
 }
 
-void SemanticJsonExporter::write(const semantic::Scene &scene, const std::filesystem::path &path,
+void SemanticJsonExporter::write(const expanded::Scene &scene, const std::filesystem::path &path,
                                  [[maybe_unused]] const SemanticExportConfig &config) const {
     try {
         nlohmann::json j = scene;

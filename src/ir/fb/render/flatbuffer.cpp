@@ -342,7 +342,7 @@ render::Scene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
                                                      render::MaterialId{bnd->material_id()}});
                 }
             }
-            node.semanticNodeId = semantic::NodeId{n->semantic_node_id()};
+            node.semanticNodeId = expanded::NodeId{n->semantic_node_id()};
             scene.nodes.emplace(node.id, std::move(node));
         }
     }

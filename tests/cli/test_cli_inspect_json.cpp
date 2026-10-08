@@ -18,8 +18,8 @@
 
 #include "cli_test_support.hpp"
 
+#include <ir/expanded/scene.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
-#include <ir/semantic.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -37,9 +37,9 @@ namespace fs = std::filesystem;
 namespace {
 
 /// A scene with two tagged children, so `tags` and `tree` have something to say.
-nodehammer::ir::semantic::Scene makeTaggedScene() {
+nodehammer::ir::expanded::Scene makeTaggedScene() {
     using namespace nodehammer::ir;
-    semantic::Scene scene;
+    expanded::Scene scene;
 
     const auto shapeId = scene.nextShapeId();
     scene.shapes[shapeId] = {shapeId, semantic::BoxShape{1.0, 2.0, 3.0}};
@@ -49,7 +49,7 @@ nodehammer::ir::semantic::Scene makeTaggedScene() {
     scene.logVols[lvId] = {lvId, "box", shapeId, matId};
 
     const auto rootId = scene.nextNodeId();
-    semantic::Node root;
+    expanded::Node root;
     root.id = rootId;
     root.name = "world";
     root.logVolId = lvId;
@@ -58,7 +58,7 @@ nodehammer::ir::semantic::Scene makeTaggedScene() {
 
     for (const auto *name : {"tracker", "calo"}) {
         const auto childId = scene.nextNodeId();
-        semantic::Node child;
+        expanded::Node child;
         child.id = childId;
         child.name = name;
         child.logVolId = lvId;

@@ -15,6 +15,7 @@ set(NH_INGEST_SOURCES
     src/api/diagnostics.cpp
     src/api/semantic_scene.cpp
     src/ir/semantic.cpp
+    src/ir/expanded/scene.cpp
     src/ir/fb/semantic/flatbuffer.cpp
     src/ir/fb/semantic/importer.cpp
 )

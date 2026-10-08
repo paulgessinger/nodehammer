@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ir/dd4hep/semantic/importer.hpp>
-#include <ir/semantic.hpp>
+#include <ir/expanded/scene.hpp>
 
 #include <DD4hep/Detector.h>
 
@@ -86,7 +86,7 @@ TEST_CASE("DD4hepImporter: all nodes reachable from root via BFS", "[import][dd4
     nodehammer::ir::DD4hepImporter imp;
     auto result = imp.import(kSimpleBox);
 
-    std::unordered_set<nodehammer::ir::semantic::NodeId> visited;
+    std::unordered_set<nodehammer::ir::expanded::NodeId> visited;
     result.scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
     REQUIRE(visited.size() == result.scene.nodes.size());
 }

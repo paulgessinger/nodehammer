@@ -24,9 +24,9 @@ namespace {
 
 // Walk the DD4hep DetElement tree and annotate the SemanticNodes
 // that were already created by the TGeo pass.
-void annotateDetElement(const dd4hep::DetElement &elem, semantic::Scene &scene,
+void annotateDetElement(const dd4hep::DetElement &elem, expanded::Scene &scene,
                         DiagnosticList &diags,
-                        const std::unordered_map<const TGeoNode *, semantic::NodeId> &nodeMap) {
+                        const std::unordered_map<const TGeoNode *, expanded::NodeId> &nodeMap) {
     const TGeoNode *geoNode = elem.placement().ptr();
     auto it = nodeMap.find(geoNode);
     if (it == nodeMap.end()) {
@@ -35,7 +35,7 @@ void annotateDetElement(const dd4hep::DetElement &elem, semantic::Scene &scene,
         return;
     }
 
-    semantic::Node &sn = scene.nodes[it->second];
+    expanded::Node &sn = scene.nodes[it->second];
 
     // Override name and sourceSystem with the richer DD4hep information.
     sn.name = elem.name();
@@ -60,12 +60,12 @@ void annotateDetElement(const dd4hep::DetElement &elem, semantic::Scene &scene,
 // This catches sensitive volumes that have no corresponding DetElement.
 //
 // We work via lvMap (TGeoVolume* → semantic::LogVolId) rather than nodeMap
-// (TGeoNode* → semantic::NodeId) because multiple SemanticNodes can originate
+// (TGeoNode* → expanded::NodeId) because multiple SemanticNodes can originate
 // from the same TGeoNode when a parent volume is placed more than once.
 // The nodeMap only stores the last such mapping, so iterating it would miss
 // most placements.  The lvMap is 1:1 and lets us tag every node whose
 // logical volume is sensitive.
-void tagSensitiveVolumes(semantic::Scene &scene,
+void tagSensitiveVolumes(expanded::Scene &scene,
                          const std::unordered_map<const TGeoVolume *, semantic::LogVolId> &lvMap) {
     // Step 1: collect the set of sensitive logVolIds.
     std::unordered_set<semantic::LogVolId> sensitiveLogVols;
@@ -110,7 +110,7 @@ struct QuietGuard {
 /// The three traversal passes shared by both entry points: TGeo tree walk,
 /// DD4hep sensitivity tagging, DD4hep DetElement annotation.
 ImportResult importFromDetector(dd4hep::Detector &detector, std::string sourceFile) {
-    // Pass 1: full TGeo tree traversal — every node gets a semantic::Node.
+    // Pass 1: full TGeo tree traversal — every node gets a expanded::Node.
     auto tr = traverseTGeoManager(&detector.manager(), std::move(sourceFile));
 
     // Pass 2: tag sensitivity on all volumes using DD4hep metadata.
