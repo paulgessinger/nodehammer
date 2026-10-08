@@ -271,20 +271,22 @@ NB_MODULE(_nodehammer, m) {
                 }
                 auto name = nb::cast<std::string>(key);
                 // Test bool before int: Python bool is an int subclass. No coercion.
-                if (nb::isinstance<nb::bool_>(value))
+                if (nb::isinstance<nb::bool_>(value)) {
                     options.emplace(name, nb::cast<bool>(value));
-                else if (nb::isinstance<nb::int_>(value)) {
+                } else if (nb::isinstance<nb::int_>(value)) {
                     const auto integer = PyLong_AsLongLong(value.ptr());
-                    if (PyErr_Occurred())
+                    if (PyErr_Occurred()) {
                         throw nb::python_error();
+                    }
                     options.emplace(name, static_cast<std::int64_t>(integer));
-                } else if (nb::isinstance<nb::float_>(value))
+                } else if (nb::isinstance<nb::float_>(value)) {
                     options.emplace(name, nb::cast<double>(value));
-                else if (nb::isinstance<nb::str>(value))
+                } else if (nb::isinstance<nb::str>(value)) {
                     options.emplace(name, nb::cast<std::string>(value));
-                else
+                } else {
                     throw nb::type_error(
                         "importer option values must be bool, int64, float, or str");
+                }
             }
             nb::gil_scoped_release unlocked;
             return nh::readSemantic(path,
