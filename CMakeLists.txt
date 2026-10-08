@@ -861,6 +861,16 @@ else()
     nh_apply_emscripten_exe_options(nodehammer)
 endif()
 
+# A separate process can safely own DD4hep's global detector. Never link this
+# entry point into the shared library or the in-process CLI dispatcher.
+if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
+    add_executable(nodehammer-dd4hep src/cli/dd4hep_main.cpp)
+    target_link_libraries(nodehammer-dd4hep PRIVATE nodehammer_lib DD4hep::DDCore)
+    nh_set_compiler_options(nodehammer-dd4hep)
+    install(TARGETS nodehammer-dd4hep
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT Runtime)
+endif()
+
 # ── gcc 15: a false positive on copying a vector<SelectionRule> ───────────────
 # Copying a `SelectionRule` copies a `PredicateExpr`, which is a `std::variant`
 # holding `shared_ptr`s for the compound predicates. At -O3, gcc 15 inlines the

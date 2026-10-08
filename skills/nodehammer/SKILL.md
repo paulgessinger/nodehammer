@@ -194,6 +194,22 @@ configuration, not a broken file and not a bug — the fix is a build with the
 backend enabled, never a different flag. Check with
 `nodehammer convert -i x.root -o /dev/null` and read the code, not the extension.
 
+**Some DD4hep plugins require the global detector.** ALLEGRO's k4geo readout
+segmentation is one example: the normal XML importer uses a private detector,
+but the plugin looks up constants through `Detector::getInstance()` and can
+terminate the process when it finds none. DD4hep-enabled native builds install
+a separate executable for this case:
+
+```bash
+nodehammer-dd4hep -i detector.xml -o detector.nhb.zst
+nodehammer convert -i detector.nhb.zst -c scene.toml -o detector.glb
+```
+
+Run it in the experiment's plugin environment as a separate process and check
+its exit code before using the output. It loads one geometry and writes NHB;
+selection and tessellation use the normal commands afterwards. It is not a
+`runCli` mode and does not replace an application's existing detector.
+
 **DD4hep XML has no extension of its own.** It is recognised by sniffing for
 `<lccdd` in the first 512 bytes, or by `--input-format dd4hep` when the sniff
 fails. A generic `.xml` that is not DD4hep will not resolve.

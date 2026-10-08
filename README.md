@@ -197,6 +197,34 @@ so a checkout is already live. That also means `skills install --scope project`
 *here* refuses without `--force`, which is the point: those links go to the
 source file, and writing through one would edit the tree.
 
+## DD4hep plugins that require the global detector
+
+Some detector plugins, including the ALLEGRO readout segmentation in k4geo,
+look up constants and geometry through `dd4hep::Detector::getInstance()`.
+The regular XML importer creates a private detector so library callers retain
+ownership of their own detector; those plugins therefore see a different,
+empty detector and may terminate the process.
+
+DD4hep-enabled native builds also install `nodehammer-dd4hep`. Run it as a
+separate process to load one compact using the default detector and save the
+semantic geometry:
+
+```bash
+nodehammer-dd4hep -i ALLEGRO_o1_v03.xml -o allegro.nhb.zst
+nodehammer convert -i allegro.nhb.zst -c scene.toml -o allegro.glb
+```
+
+Source the experiment's DD4hep/plugin environment first, just as for ordinary
+XML loading. This executable accepts `.nhb` and `.nhb.zst` outputs; selection,
+styling and tessellation remain in the normal processing commands. It writes
+all messages to stderr and returns nonzero if loading or writing fails. Each
+invocation starts with a fresh detector, and a plugin's `exit()` affects only
+that process. Programs can launch it as a subprocess and check the exit code
+before reading the output. It is not a new mode of `runCli` or `readSemantic`.
+
+Applications that already own a correctly constructed detector can continue to
+call `fromDD4hep(detector)` directly without loading XML or changing ownership.
+
 ## Building
 
 Dependencies are managed with [Conan](https://conan.io/); builds with CMake + Ninja.
