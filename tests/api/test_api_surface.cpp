@@ -1,3 +1,5 @@
+#include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <nodehammer/io.hpp>
 #include <nodehammer/nhb.hpp>
 #include <nodehammer/nhr.hpp>
@@ -45,8 +47,8 @@ fs::path caseDir(std::string_view name) {
 nh::SemanticScene boxScene() {
     const auto dir = caseDir("box");
     const auto nhb = dir / "box.nhb";
-    nh::detail::file_io::writeFile(
-        nhb, nh::ir::semanticSceneToBytes(nh::ir::SyntheticSceneBuilder::buildSingleBox()));
+    nh::detail::file_io::writeFile(nhb, nh::ir::semanticSceneToBytes(nh::ir::semantic::fromExpanded(
+                                            nh::ir::SyntheticSceneBuilder::buildSingleBox())));
     auto result = nh::readSemantic(nhb);
     REQUIRE(result.scene.valid());
     return std::move(result.scene);

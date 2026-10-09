@@ -1,7 +1,7 @@
 #pragma once
 
 #include <diagnostics.hpp>
-#include <ir/expanded/scene.hpp>
+#include <ir/semantic.hpp>
 
 #include <filesystem>
 #include <memory>
@@ -16,7 +16,7 @@ namespace nodehammer::ir {
 /// carries only what was observed about a scene that exists — an unknown shape, a missing material
 /// (docs/error-model.md).
 struct ImportResult {
-    expanded::Scene scene;
+    semantic::Scene scene;
     DiagnosticList diags;
 };
 

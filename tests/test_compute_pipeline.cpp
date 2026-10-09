@@ -1,3 +1,4 @@
+#include <ir/expanded/adapt.hpp>
 // Cross-toolchain coverage for the compute-worker pipeline body.
 //
 // nh_compute_build (src/web/compute_worker_main.cpp) is the C/EM_JS shell that
@@ -67,7 +68,8 @@ std::vector<std::byte> runComputePipeline(std::span<const std::byte> sceneBytes,
 } // namespace
 
 TEST_CASE("Compute pipeline: nested boxes -> NHR8 render bytes", "[compute][pipeline]") {
-    auto sceneBytes = semanticSceneToBytes(SyntheticSceneBuilder::buildNestedBoxes());
+    auto sceneBytes = semanticSceneToBytes(
+        nodehammer::ir::semantic::fromExpanded(SyntheticSceneBuilder::buildNestedBoxes()));
 
     auto renderBytes = runComputePipeline(std::as_bytes(std::span{sceneBytes}), "", std::nullopt);
     REQUIRE(!renderBytes.empty());
@@ -85,7 +87,8 @@ TEST_CASE("Compute pipeline: nested boxes -> NHR8 render bytes", "[compute][pipe
 }
 
 TEST_CASE("Compute pipeline: wedge cut path runs end-to-end", "[compute][pipeline]") {
-    auto sceneBytes = semanticSceneToBytes(SyntheticSceneBuilder::buildNestedBoxes());
+    auto sceneBytes = semanticSceneToBytes(
+        nodehammer::ir::semantic::fromExpanded(SyntheticSceneBuilder::buildNestedBoxes()));
 
     // Remove the first quadrant. We don't assert cut specifics (covered by the
     // wedge-cut tests) — only that the has_wedge branch completes and yields a

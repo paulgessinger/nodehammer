@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ir/expanded/scene.hpp>
 #include <ir/semantic/importer.hpp>
 
 #include <string_view>
@@ -15,7 +16,7 @@ namespace nodehammer::ir {
 /// Extended import result that also carries the TGeoNode → expanded::NodeId mapping
 /// built during tree traversal. Used by DD4hep to annotate nodes in a second pass.
 struct TGeoTraversalResult {
-    ImportResult result;
+    expanded::ImportResult result;
     std::unordered_map<const TGeoNode *, expanded::NodeId> nodeMap;
     std::unordered_map<const TGeoVolume *, semantic::LogVolId> lvMap;
 };
@@ -36,6 +37,8 @@ class TGeoImporter final : public ISemanticImporter {
 
     /// Traverse an already-constructed manager. Never touches gGeoManager.
     [[nodiscard]] ImportResult import(TGeoManager *mgr) const;
+    // Eager reference for differential tests; production import always returns canonical IR.
+    [[nodiscard]] expanded::ImportResult importExpanded(TGeoManager *mgr) const;
 };
 
 } // namespace nodehammer::ir

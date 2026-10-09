@@ -10,9 +10,12 @@
 #include <export_resolve.hpp>
 #include <filesystem>
 #include <format>
+#include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/render/exporter.hpp>
 #include <ir/semantic/exporter.hpp>
+#include <ir/semantic/flatbuffer.hpp>
 #include <ir/semantic/importer.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
 #include <print>
@@ -129,7 +132,7 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
     auto *strictOpt = sub->add_flag("--strict", "Treat warnings as errors");
     auto *timingOpt = sub->add_flag("--timing", "Print per-step wall-clock timings");
     auto *sizeReportOpt =
-        sub->add_flag("--size-report", "Print estimated FlatBuffer payload breakdown to stderr");
+        sub->add_flag("--size-report", "Print FlatBuffer size and definition counts to stderr");
     auto *syntheticBoxOpt =
         sub->add_flag("--synthetic-box", "Use a synthetic single-box scene instead of --input");
 
@@ -218,7 +221,8 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
             nodehammer::ir::ImportResult importResult;
             std::string importFmt;
             if (syntheticBoxOpt->count() > 0) {
-                importResult.scene = nodehammer::ir::SyntheticSceneBuilder::buildSingleBox();
+                importResult.scene = nodehammer::ir::semantic::fromExpanded(
+                    nodehammer::ir::SyntheticSceneBuilder::buildSingleBox());
                 importFmt = "synthetic";
             } else if (*inputOpt) {
                 nodehammer::detail::Timer importTimer;
@@ -264,6 +268,7 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
             // rebuilds the geometry, so an archive or a blob written from this
             // run should carry it.
             if (wedgeCutOpt->count() > 0) {
+                auto physical = nodehammer::ir::semantic::expand(importResult.scene);
                 auto _t = timings.scope("wedgecut");
                 std::vector<double> angles;
                 wedgeCutOpt->results(angles); // exactly 2 (enforced by expected(2))
@@ -273,8 +278,8 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
                 if (*wcMarginOpt) {
                     wcp.margin = wcMarginOpt->as<double>();
                 }
-                const auto wcStats =
-                    nodehammer::tessellation::applyWedgeCut(importResult.scene, wcp);
+                const auto wcStats = nodehammer::tessellation::applyWedgeCut(physical, wcp);
+                importResult.scene = nodehammer::ir::semantic::fromExpanded(physical);
                 say("Wedge cut [{:.1f}°,{:.1f}°]: {} cut ({} unique meshes), {} emptied, {} "
                     "kept, {} skipped, {} pruned",
                     wcp.startDeg, wcp.endDeg, wcStats.cut, wcStats.cutUnique, wcStats.emptied,
@@ -285,10 +290,12 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
             // report is asking for it. `-q` silences the running commentary, not
             // the thing somebody typed an option to get.
             if (sizeReportOpt->count() > 0) {
-                const auto report =
-                    nodehammer::ir::semanticFlatbufferSizeReport(importResult.scene);
-                std::print(stderr, "{}",
-                           nodehammer::ir::formatSemanticFlatbufferSizeReport(report));
+                const auto geometry = importResult.scene;
+                const auto bytes = nodehammer::ir::semantic::sceneToBytes(geometry);
+                std::print(stderr,
+                           "NHS8 FlatBuffer: {} bytes uncompressed; {} occurrences, "
+                           "{} canonical volume definitions\n",
+                           bytes.size(), geometry.validate(), geometry.logVols.size());
             }
 
             // ── Write whatever stops here ──────────────────────────────────────────
@@ -301,7 +308,7 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
                 target.semantic->write(importResult.scene, target.path,
                                        nodehammer::ir::SemanticExportConfig{});
                 timings.record(std::format("export[{}]", target.path), expTimer.elapsed());
-                say("  Nodes: {}  Shapes: {}  Materials: {}", importResult.scene.nodes.size(),
+                say("  Nodes: {}  Shapes: {}  Materials: {}", importResult.scene.nodeCount(),
                     importResult.scene.shapes.size(), importResult.scene.materials.size());
                 printWrittenOutputSizes(say, {std::filesystem::path{target.path}});
             }
@@ -316,7 +323,7 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options) {
             // ── Tessellate ─────────────────────────────────────────────────────────
             nodehammer::detail::Timer tessTimer;
             nodehammer::tessellation::TessellationPass pass{cfg};
-            auto tessResult = pass.lower(importResult.scene);
+            auto tessResult = pass.lower(nodehammer::ir::semantic::expand(importResult.scene));
             timings.record("tessellate", tessTimer.elapsed());
             printDiags(tessResult.diags);
             // Tessellation errors are partial results — a node without a mesh — so the

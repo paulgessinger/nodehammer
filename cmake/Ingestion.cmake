@@ -14,9 +14,13 @@ set(NH_INGEST_SOURCES
     src/version.cpp
     src/api/diagnostics.cpp
     src/api/semantic_scene.cpp
-    src/ir/semantic.cpp
     src/ir/expanded/scene.cpp
-    src/ir/fb/semantic/flatbuffer.cpp
+    src/ir/semantic/flatbuffer.cpp
+    src/ir/expanded/adapt.cpp
+    src/ir/semantic.cpp
+    src/ir/semantic/scene.cpp
+    src/ir/expanded/conversion.cpp
+    src/ir/legacy/nhs8.cpp
     src/ir/fb/semantic/importer.cpp
 )
 set(NH_INGEST_BACKEND_DEPS "")
@@ -26,6 +30,7 @@ if(NODEHAMMER_WITH_TGEO)
         find_package(ROOT REQUIRED COMPONENTS Geom)
     endif()
     list(APPEND NH_INGEST_SOURCES
+        src/ir/tgeo/semantic/shared_importer.cpp
         src/ir/tgeo/semantic/importer.cpp
         src/ir/tgeo/semantic/shape_dispatch.cpp)
     list(APPEND NH_INGEST_BACKEND_DEPS ROOT::Geom)
@@ -35,7 +40,8 @@ if(NODEHAMMER_WITH_DD4HEP)
     if(NOT TARGET DD4hep::DDCore)
         find_package(DD4hep REQUIRED)
     endif()
-    list(APPEND NH_INGEST_SOURCES src/ir/dd4hep/semantic/importer.cpp)
+    list(APPEND NH_INGEST_SOURCES src/ir/dd4hep/semantic/importer.cpp
+        src/ir/dd4hep/semantic/shared_importer.cpp)
     list(APPEND NH_INGEST_BACKEND_DEPS DD4hep::DDCore)
     list(APPEND NH_INGEST_DEFINES NH_WITH_DD4HEP=1)
 endif()

@@ -24,7 +24,7 @@ struct BuildPipeline::Impl {
     // scene is never mutated (invariant #5) and the copy runs off the caller's
     // hot path (native: on the worker thread; cooperative: after a paint).
     std::shared_ptr<const config::NHConfig> preset_config;
-    std::shared_ptr<const ir::expanded::Scene> preset_scene;
+    std::shared_ptr<const ir::semantic::Scene> preset_scene;
     std::optional<WedgeCutParams> wedge_cut;
 
     pipeline::ScenePrepResult prep;
@@ -51,7 +51,7 @@ BuildPipeline::BuildPipeline(BuildPipeline &&) noexcept = default;
 BuildPipeline &BuildPipeline::operator=(BuildPipeline &&) noexcept = default;
 
 void BuildPipeline::start(std::shared_ptr<const config::NHConfig> config,
-                          std::shared_ptr<const ir::expanded::Scene> scene,
+                          std::shared_ptr<const ir::semantic::Scene> scene,
                           std::optional<WedgeCutParams> wedgeCut) {
     impl_->preset_config = std::move(config);
     impl_->preset_scene = std::move(scene);

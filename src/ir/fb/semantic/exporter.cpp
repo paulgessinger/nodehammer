@@ -2,7 +2,9 @@
 
 #include <detail/zstd_io.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
+#include <ir/semantic/flatbuffer.hpp>
 
 #include <format>
 #include <span>
@@ -15,11 +17,11 @@ std::vector<std::string> SemanticFlatbufferExporter::supportedExtensions() const
     return {"nhb", "nhb.zst"};
 }
 
-void SemanticFlatbufferExporter::write(const expanded::Scene &scene,
+void SemanticFlatbufferExporter::write(const semantic::Scene &scene,
                                        const std::filesystem::path &path,
                                        [[maybe_unused]] const SemanticExportConfig &config) const {
     try {
-        auto bytes = semanticSceneToBytes(scene);
+        auto bytes = semantic::sceneToBytes(scene);
         detail::zstd_io::writeBytesToFile(path, std::as_bytes(std::span{bytes}),
                                           config.compressionLevel);
     } catch (const Error &) {

@@ -1,5 +1,8 @@
 add_executable(nodehammer_tests
     test_main.cpp
+    ir/test_occurrence_tree.cpp
+    ir/test_legacy_shared.cpp
+    ir/test_shared_geometry.cpp
     ir/test_semantic_ir.cpp
     ir/test_json_roundtrip.cpp
     ir/test_shape_variant.cpp
@@ -15,6 +18,7 @@ add_executable(nodehammer_tests
     import/test_synthetic_importer.cpp
     selection/test_predicate.cpp
     selection/test_selector.cpp
+    selection/test_occurrence_selector.cpp
     tessellation/test_primitive_tessellator.cpp
     tessellation/test_boolean_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
@@ -253,6 +257,7 @@ if(NODEHAMMER_WITH_TGEO)
 endif()
 
 if(NODEHAMMER_WITH_DD4HEP)
+    target_sources(nodehammer_tests PRIVATE import/test_shared_dd4hep.cpp)
     target_sources(nodehammer_tests PRIVATE import/test_dd4hep_importer.cpp)
     target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_DD4HEP=1)
 endif()
@@ -275,6 +280,13 @@ add_executable(nodehammer_bench bench_main.cpp)
 target_link_libraries(nodehammer_bench PRIVATE nodehammer_lib)
 nh_set_compiler_options(nodehammer_bench)
 nh_apply_emscripten_exe_options(nodehammer_bench)
+
+if(NOT EMSCRIPTEN)
+    # Local-only benchmark: build explicitly; excluded from default builds and CTest.
+    add_executable(nodehammer_selection_bench EXCLUDE_FROM_ALL selection_bench.cpp)
+    target_link_libraries(nodehammer_selection_bench PRIVATE nodehammer_lib)
+    nh_set_compiler_options(nodehammer_selection_bench)
+endif()
 
 include(CTest)
 # catch_discover_tests runs the test binary to enumerate cases. Under

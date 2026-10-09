@@ -86,7 +86,7 @@ class BuildController {
 
   private:
     void startBuild(std::shared_ptr<const config::NHConfig> config,
-                    std::shared_ptr<const ir::expanded::Scene> scene, std::string config_label,
+                    std::shared_ptr<const ir::semantic::Scene> scene, std::string config_label,
                     std::string geometry_label, std::optional<tessellation::WedgeCutParams> wedge,
                     const AngleCut &cut);
     void updateProgress();
@@ -103,7 +103,7 @@ class BuildController {
     // toggling / re-aiming the cut re-derives from uncut geometry without
     // re-walking the project.
     std::shared_ptr<const config::NHConfig> pristine_config_;
-    std::shared_ptr<const ir::expanded::Scene> pristine_scene_;
+    std::shared_ptr<const ir::semantic::Scene> pristine_scene_;
     std::string pristine_config_label_;
     std::string pristine_geometry_label_;
     /// Input hash of the last base scene we successfully tessellated. When a

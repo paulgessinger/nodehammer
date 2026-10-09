@@ -64,6 +64,11 @@ inline constexpr std::string_view kWarnImportNoMaterial = "NH0103";
 // asked or not — so it goes down the same channel as everything else and the
 // caller decides.
 inline constexpr std::string_view kDebugImportStats = "NH0104";
+// Partial fidelity: explicit detector metadata has no unique source occurrence.
+inline constexpr std::string_view kErrImportPlacementUnresolved = "NH0105";
+// An unplaced detector element is skipped, but its placed children are resolved
+// relative to the nearest already-resolved ancestor.
+inline constexpr std::string_view kWarnImportUnplacedAncestor = "NH0106";
 
 // ── Scene operations ──────────────────────────────────────────────────────────
 // Info: how much deduplication actually merged. Reported rather than discarded

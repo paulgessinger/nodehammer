@@ -1,6 +1,7 @@
 #include "cli_common.hpp"
 #include "pager.hpp"
 #include "run_internal.hpp"
+#include <ir/expanded/conversion.hpp>
 
 #include <CLI/CLI.hpp>
 #include <detail/markup.hpp>
@@ -68,7 +69,7 @@ std::string shapeTypeName(const nodehammer::ir::semantic::Shape &shape) {
 }
 
 /// Shape-type histogram, keyed by the same names the text summary prints.
-std::map<std::string, int> shapeHistogram(const nodehammer::ir::expanded::Scene &scene) {
+std::map<std::string, int> shapeHistogram(const nodehammer::ir::semantic::Scene &scene) {
     std::map<std::string, int> counts;
     for (const auto &[id, shape] : scene.shapes) {
         counts[shapeTypeName(shape)]++;
@@ -103,7 +104,7 @@ void printSummary(const nodehammer::ir::ImportResult &result, std::string_view f
     const auto [warnings, errors] = diagnosticCounts(result.diags);
 
     std::println("Format:    {}", formatName);
-    std::println("Nodes:     {}", result.scene.nodes.size());
+    std::println("Nodes:     {}", result.scene.nodeCount());
 
     std::string shapeStr;
     for (const auto &[name, count] : shapeCounts) {
@@ -142,7 +143,7 @@ nlohmann::json summaryJson(const nodehammer::ir::ImportResult &result,
         {"schema", kJsonSchema},
         {"kind", "summary"},
         {"format", formatName},
-        {"nodes", result.scene.nodes.size()},
+        {"nodes", result.scene.nodeCount()},
         {"shapes", shapeHistogram(result.scene)},
         {"materials", matNames},
         {"diagnostics", {{"warnings", warnings}, {"errors", errors}}},
@@ -151,104 +152,47 @@ nlohmann::json summaryJson(const nodehammer::ir::ImportResult &result,
 
 // ── Tree ───────────────────────────���───────────────────────────���─────────────
 
-void printTree(const nodehammer::ir::expanded::Scene &scene, int maxDepth,
+void printTree(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
                const std::string &filter, const nodehammer::detail::Console &con) {
-    if (scene.nodes.empty() || !scene.nodes.contains(scene.rootId)) {
-        return;
-    }
-
-    struct Entry {
-        nodehammer::ir::expanded::NodeId id;
-        int depth;
-        std::string prefix; // tree-drawing prefix
-        bool isLast;
-    };
-
-    // DFS via explicit stack for tree drawing.
-    std::vector<Entry> stack;
-    stack.push_back({scene.rootId, 0, "", true});
-
-    int printed = 0;
-    int filtered = 0;
-
-    while (!stack.empty()) {
-        auto [id, depth, prefix, isLast] = stack.back();
-        stack.pop_back();
-
-        if (!scene.nodes.contains(id)) {
-            continue;
-        }
-        const auto &node = scene.nodes.at(id);
-
-        // Check depth limit.
-        if (maxDepth >= 0 && depth > maxDepth) {
-            continue;
-        }
-
-        // Check filter.
-        bool show = true;
-        if (!filter.empty()) {
-            show = nodehammer::selection::matchGlob(filter, node.originalPath);
-        }
-
-        if (show) {
-            // Draw tree lines.
-            std::string line;
-            if (depth > 0) {
-                line = std::format("[dim]{}[/]", isLast ? "\\-- " : "|-- ");
+    uint64_t shown = 0, filtered = 0;
+    std::vector<bool> lastAtDepth;
+    nodehammer::ir::semantic::visit(scene, [&](const auto &node, bool last) {
+        const auto depth = node.id.size();
+        if (maxDepth >= 0 && depth > static_cast<std::size_t>(maxDepth))
+            return false;
+        lastAtDepth.resize(depth + 1);
+        lastAtDepth[depth] = last;
+        if (filter.empty() || nodehammer::selection::matchGlob(filter, node.originalPath)) {
+            std::string prefix;
+            for (std::size_t i = 1; i < depth; ++i)
+                prefix += lastAtDepth[i] ? "    " : "|   ";
+            if (depth)
+                prefix += last ? "\\-- " : "|-- ";
+            std::string annotations;
+            for (const auto &[k, v] : node.tags) {
+                if (!annotations.empty())
+                    annotations += ", ";
+                annotations += k + "=" + v;
             }
-            bool isLeaf = node.children.empty();
-            line += std::format("[bold]{}[/]", node.name);
-
-            // Annotations.
-            std::string ann;
-            if (!node.tags.empty()) {
-                for (const auto &[k, v] : node.tags) {
-                    if (!ann.empty()) {
-                        ann += "[dim],[/] ";
-                    }
-                    ann += std::format("[cyan]{}[/][dim]=[/][yellow]{}[/]", k, v);
-                }
+            if (!node.childCount) {
+                if (!annotations.empty())
+                    annotations += ", ";
+                annotations += "leaf";
+            } else if (maxDepth >= 0 && depth == static_cast<std::size_t>(maxDepth)) {
+                if (!annotations.empty())
+                    annotations += ", ";
+                annotations += std::format("{} children", node.childCount);
             }
-            int nChildren = static_cast<int>(node.children.size());
-            if (nChildren > 0 && maxDepth >= 0 && depth == maxDepth) {
-                if (!ann.empty()) {
-                    ann += "[dim],[/] ";
-                }
-                ann += std::format("[dim]{} children[/]", nChildren);
-            }
-            if (isLeaf) {
-                if (!ann.empty()) {
-                    ann += "[dim],[/] ";
-                }
-                ann += "[dim]leaf[/]";
-            }
-
-            // Colorize the prefix (tree lines).
-            std::string colorPrefix = std::format("[dim]{}[/]", prefix);
-
-            if (!ann.empty()) {
-                con.println("{}{}  [dim]\\[[/]{}[dim]][/]", colorPrefix, line, ann);
-            } else {
-                con.println("{}{}", colorPrefix, line);
-            }
-            ++printed;
-        } else {
+            con.println("{}{}{}", prefix, node.name,
+                        annotations.empty() ? "" : "  \\[" + annotations + "]");
+            ++shown;
+        } else
             ++filtered;
-        }
-
-        // Push children in reverse order so they come off the stack in order.
-        const std::string childPrefix = (depth > 0) ? prefix + (isLast ? "    " : "|   ") : "";
-        for (int i = static_cast<int>(node.children.size()) - 1; i >= 0; --i) {
-            bool childIsLast = (i == static_cast<int>(node.children.size()) - 1);
-            stack.push_back(
-                {node.children[static_cast<std::size_t>(i)], depth + 1, childPrefix, childIsLast});
-        }
-    }
-
-    if (!filter.empty()) {
-        con.println("[dim]({} shown, {} filtered)[/]", printed, filtered);
-    }
+        return maxDepth < 0 || depth < static_cast<std::size_t>(maxDepth);
+    });
+    if (!filter.empty())
+        con.println("({} shown, {} filtered)", shown, filtered);
+    return;
 }
 
 /// The same walk the text renderer does, emitted as a flat list.
@@ -257,54 +201,30 @@ void printTree(const nodehammer::ir::expanded::Scene &scene, int maxDepth,
 /// and greps this; nesting would make every such question a recursive descent,
 /// and the tree lines the text view draws are the only thing that needed the
 /// shape in the first place. The parent is recoverable from the path.
-nlohmann::json treeJson(const nodehammer::ir::expanded::Scene &scene, int maxDepth,
+nlohmann::json treeJson(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
                         const std::string &filter) {
     nlohmann::json nodes = nlohmann::json::array();
-    int shown = 0;
-    int filtered = 0;
+    uint64_t shown = 0;
+    uint64_t filtered = 0;
 
-    struct Entry {
-        nodehammer::ir::expanded::NodeId id;
-        int depth;
-    };
-    std::vector<Entry> stack;
-    if (!scene.nodes.empty() && scene.nodes.contains(scene.rootId)) {
-        stack.push_back({scene.rootId, 0});
-    }
-
-    while (!stack.empty()) {
-        const auto [id, depth] = stack.back();
-        stack.pop_back();
-        if (!scene.nodes.contains(id)) {
-            continue;
-        }
-        const auto &node = scene.nodes.at(id);
-        if (maxDepth >= 0 && depth > maxDepth) {
-            continue;
-        }
-
+    nodehammer::ir::semantic::visit(scene, [&](const auto &node, bool) {
+        const auto depth = node.id.size();
+        if (maxDepth >= 0 && depth > static_cast<std::size_t>(maxDepth))
+            return false;
         if (filter.empty() || nodehammer::selection::matchGlob(filter, node.originalPath)) {
-            nlohmann::json entry{
-                {"path", node.originalPath},
-                {"name", node.name},
-                {"depth", depth},
-                {"children", node.children.size()},
-                {"leaf", node.children.empty()},
-            };
-            if (!node.tags.empty()) {
+            nlohmann::json entry{{"path", node.originalPath},
+                                 {"name", node.name},
+                                 {"depth", depth},
+                                 {"children", node.childCount},
+                                 {"leaf", node.childCount == 0}};
+            if (!node.tags.empty())
                 entry["tags"] = node.tags;
-            }
             nodes.push_back(std::move(entry));
             ++shown;
-        } else {
+        } else
             ++filtered;
-        }
-
-        for (int i = static_cast<int>(node.children.size()) - 1; i >= 0; --i) {
-            stack.push_back({node.children[static_cast<std::size_t>(i)], depth + 1});
-        }
-    }
-
+        return maxDepth < 0 || depth < static_cast<std::size_t>(maxDepth);
+    });
     nlohmann::json doc{{"schema", kJsonSchema},
                        {"kind", "tree"},
                        {"shown", shown},
@@ -319,21 +239,20 @@ nlohmann::json treeJson(const nodehammer::ir::expanded::Scene &scene, int maxDep
 
 // ── Tags ──────────��───────────────────────────────���──────────────────────────
 
-void printTags(const nodehammer::ir::expanded::Scene &scene,
+void printTags(const nodehammer::ir::semantic::Scene &scene,
                const nodehammer::detail::Console &con) {
     // Collect unique tag keys and their value sets.
     std::map<std::string, std::set<std::string>> tagValues;
-    int nodesWithTags = 0;
-    for (const auto &[id, node] : scene.nodes) {
-        if (!node.tags.empty()) {
-            ++nodesWithTags;
-        }
-        for (const auto &[k, v] : node.tags) {
-            tagValues[k].insert(v);
-        }
-    }
+    uint64_t nodesWithTags = 0;
 
-    con.println("Nodes with tags: [bold]{}[/] / {}", nodesWithTags, scene.nodes.size());
+    nodehammer::ir::semantic::visit(scene, [&](const auto &node, bool) {
+        if (!node.tags.empty())
+            ++nodesWithTags;
+        for (const auto &[k, v] : node.tags)
+            tagValues[k].insert(v);
+        return true;
+    });
+    con.println("Nodes with tags: [bold]{}[/] / {}", nodesWithTags, scene.nodeCount());
     con.println("Unique tag keys: [bold]{}[/]", tagValues.size());
     con.println("");
 
@@ -366,18 +285,17 @@ void printTags(const nodehammer::ir::expanded::Scene &scene,
     }
 }
 
-nlohmann::json tagsJson(const nodehammer::ir::expanded::Scene &scene) {
+nlohmann::json tagsJson(const nodehammer::ir::semantic::Scene &scene) {
     std::map<std::string, std::set<std::string>> tagValues;
-    int nodesWithTags = 0;
-    for (const auto &[id, node] : scene.nodes) {
-        if (!node.tags.empty()) {
-            ++nodesWithTags;
-        }
-        for (const auto &[k, v] : node.tags) {
-            tagValues[k].insert(v);
-        }
-    }
+    uint64_t nodesWithTags = 0;
 
+    nodehammer::ir::semantic::visit(scene, [&](const auto &node, bool) {
+        if (!node.tags.empty())
+            ++nodesWithTags;
+        for (const auto &[k, v] : node.tags)
+            tagValues[k].insert(v);
+        return true;
+    });
     // Every value, however many there are. The text view samples five once a
     // key passes ten, which is a kindness to a reader and a lie to a parser --
     // and "what values does this key take" is most of why a caller asks.
@@ -387,8 +305,8 @@ nlohmann::json tagsJson(const nodehammer::ir::expanded::Scene &scene) {
     }
 
     return nlohmann::json{
-        {"schema", kJsonSchema},           {"kind", "tags"},
-        {"nodeCount", scene.nodes.size()}, {"nodesWithTags", nodesWithTags},
+        {"schema", kJsonSchema},          {"kind", "tags"},
+        {"nodeCount", scene.nodeCount()}, {"nodesWithTags", nodesWithTags},
         {"keys", std::move(keys)},
     };
 }
@@ -426,6 +344,7 @@ void registerCmdInspect(CLI::App &app, const CliOptions &options) {
     sumSub->callback([=, &options] {
         runOrReport("inspect summary", [&] {
             auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            printDiags(result.diags);
             if (formatOutOpt->as<std::string>() == "json") {
                 emitJson(summaryJson(result, fmt));
                 return;
@@ -445,6 +364,7 @@ void registerCmdInspect(CLI::App &app, const CliOptions &options) {
     treeSub->callback([=, &options] {
         runOrReport("inspect tree", [&] {
             auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            printDiags(result.diags);
             (void)fmt;
 
             int maxDepth = -1;
@@ -473,6 +393,7 @@ void registerCmdInspect(CLI::App &app, const CliOptions &options) {
     tagsSub->callback([=, &options] {
         runOrReport("inspect tags", [&] {
             auto [result, fmt] = importFrom(inputOpt, formatOpt);
+            printDiags(result.diags);
             (void)fmt;
 
             if (formatOutOpt->as<std::string>() == "json") {

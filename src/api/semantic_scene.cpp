@@ -11,15 +11,19 @@
 
 #include <detail/zstd_io.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
 #include <ir/fb/semantic/importer.hpp>
+#include <ir/semantic/flatbuffer.hpp>
 
 #if NH_WITH_TGEO
 #include <ir/tgeo/semantic/importer.hpp>
+#include <ir/tgeo/semantic/shared_importer.hpp>
 #endif
 
 #if NH_WITH_DD4HEP
 #include <ir/dd4hep/semantic/importer.hpp>
+#include <ir/dd4hep/semantic/shared_importer.hpp>
 #endif
 
 #include <exception>
@@ -30,7 +34,8 @@ namespace nodehammer {
 #if NH_WITH_TGEO
 SemanticResult fromTGeo(TGeoManager &manager) {
     try {
-        return api::asHandle(ir::TGeoImporter{}.import(&manager));
+        auto result = ir::semantic::importTGeo(&manager);
+        return api::asHandle(std::move(result));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
@@ -42,7 +47,9 @@ SemanticResult fromTGeo(TGeoManager &manager) {
 #if NH_WITH_DD4HEP
 SemanticResult fromDD4hep(dd4hep::Detector &detector) {
     try {
-        return api::asHandle(ir::DD4hepImporter{}.import(detector));
+        auto result = ir::semantic::importDD4hep(detector);
+        diagnostics::throwIfErrors(result.diags, "fromDD4hep");
+        return api::asHandle(std::move(result));
     } catch (const Error &) {
         throw;
     } catch (const std::exception &e) {
@@ -64,7 +71,7 @@ SemanticResult fromNhb(std::span<const std::byte> nhb) {
 std::vector<std::byte> toNhb(const SemanticScene &handle) {
     const auto &scene = api::sceneOrThrow(handle, "toNhb");
     try {
-        return ir::semanticSceneToBytes(scene);
+        return ir::semantic::sceneToBytes(scene);
     } catch (const std::exception &e) {
         api::rethrowAsError(e, codes::kFatalExportWriteFailed);
     }
@@ -73,7 +80,7 @@ std::vector<std::byte> toNhb(const SemanticScene &handle) {
 std::vector<std::byte> toNhbZstd(const SemanticScene &handle, int compressionLevel) {
     const auto &scene = api::sceneOrThrow(handle, "toNhbZstd");
     try {
-        return detail::zstd_io::compress(ir::semanticSceneToBytes(scene), compressionLevel);
+        return detail::zstd_io::compress(ir::semantic::sceneToBytes(scene), compressionLevel);
     } catch (const std::exception &e) {
         api::rethrowAsError(e, codes::kFatalExportWriteFailed);
     }
@@ -86,7 +93,7 @@ bool SemanticScene::valid() const noexcept { return impl_ != nullptr; }
 // are not members and have a caller to name.
 
 std::size_t SemanticScene::nodeCount() const noexcept {
-    return impl_ ? impl_->scene.nodes.size() : 0;
+    return impl_ ? static_cast<std::size_t>(impl_->occurrenceCount) : 0;
 }
 
 std::size_t SemanticScene::logVolCount() const noexcept {

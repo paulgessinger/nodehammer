@@ -66,7 +66,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 /// (matching the `convert --angle-cut` pipeline ordering), so the scene
 /// handed to tessellation already carries the Boolean-cut shapes.
 ScenePrepResult prepareSceneForTessellationFromInputs(
-    config::NHConfig config, ir::expanded::Scene scene,
+    config::NHConfig config, ir::semantic::Scene scene,
     std::optional<tessellation::WedgeCutParams> wedgeCut = std::nullopt);
 
 } // namespace nodehammer::pipeline

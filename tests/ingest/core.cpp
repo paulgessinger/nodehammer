@@ -1,6 +1,7 @@
 #include <nodehammer/nhb.hpp>
 
 #include <api/handles_semantic.hpp>
+#include <ir/expanded/adapt.hpp>
 #include <ir/expanded/scene.hpp>
 
 #include <cmath>
@@ -55,8 +56,8 @@ int main(int argc, char **argv) {
         require(std::abs(world[3][2] - 34.0) < 1e-12, "composed Z");
         require(world[0][1] == 1.0 && world[1][0] == -1.0, "composed rotation");
 
-        const auto handle = nodehammer::api::asHandle(std::move(scene));
-        require(handle.nodeCount() == 3 && handle.logVolCount() == 1, "scene counts");
+        const auto handle = nodehammer::api::asHandle(sem::fromExpanded(scene));
+        require(handle.nodeCount() == 3 && handle.logVolCount() == 3, "scene counts");
         const auto bytes = nodehammer::toNhb(handle);
         require(bytes.size() > 8, "serialized bytes");
         require(static_cast<char>(bytes[4]) == 'N' && static_cast<char>(bytes[5]) == 'H' &&

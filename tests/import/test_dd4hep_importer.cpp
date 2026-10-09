@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ir/dd4hep/semantic/importer.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/expanded/scene.hpp>
 
 #include <DD4hep/Detector.h>
@@ -27,7 +28,9 @@ TEST_CASE("DD4hepImporter: formatName and supportedExtensions", "[import][dd4hep
 
 TEST_CASE("DD4hepImporter: simple_box.xml -> no errors, sourceSystem dd4hep", "[import][dd4hep]") {
     nodehammer::ir::DD4hepImporter imp;
-    auto result = imp.import(kSimpleBox);
+    auto resultImport = imp.import(kSimpleBox);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
 
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE_FALSE(result.scene.nodes.empty());
@@ -38,7 +41,9 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> no errors, sourceSystem dd4hep", "[
 
 TEST_CASE("DD4hepImporter: simple_box.xml -> scene contains a BoxShape", "[import][dd4hep]") {
     nodehammer::ir::DD4hepImporter imp;
-    auto result = imp.import(kSimpleBox);
+    auto resultImport = imp.import(kSimpleBox);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
 
     bool hasBox = false;
     for (const auto &[id, s] : result.scene.shapes) {
@@ -52,7 +57,9 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> scene contains a BoxShape", "[impor
 
 TEST_CASE("DD4hepImporter: simple_box.xml -> subdetector tag propagated", "[import][dd4hep]") {
     nodehammer::ir::DD4hepImporter imp;
-    auto result = imp.import(kSimpleBox);
+    auto resultImport = imp.import(kSimpleBox);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
 
     // At least one node should carry the "subdetector" tag
     bool hasTag = false;
@@ -67,7 +74,9 @@ TEST_CASE("DD4hepImporter: simple_box.xml -> subdetector tag propagated", "[impo
 
 TEST_CASE("DD4hepImporter: sensitive_detector.xml -> sensitive tag set", "[import][dd4hep]") {
     nodehammer::ir::DD4hepImporter imp;
-    auto result = imp.import(kSensitiveDet);
+    auto resultImport = imp.import(kSensitiveDet);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
 
     REQUIRE_FALSE(result.diags.hasErrors());
 
@@ -84,7 +93,9 @@ TEST_CASE("DD4hepImporter: sensitive_detector.xml -> sensitive tag set", "[impor
 
 TEST_CASE("DD4hepImporter: all nodes reachable from root via BFS", "[import][dd4hep]") {
     nodehammer::ir::DD4hepImporter imp;
-    auto result = imp.import(kSimpleBox);
+    auto resultImport = imp.import(kSimpleBox);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
 
     std::unordered_set<nodehammer::ir::expanded::NodeId> visited;
     result.scene.visitBFS([&](const auto &node) { visited.insert(node.id); });
@@ -94,7 +105,9 @@ TEST_CASE("DD4hepImporter: all nodes reachable from root via BFS", "[import][dd4
 TEST_CASE("DD4hepImporter: import(Detector&) matches import(path) for simple_box.xml",
           "[import][dd4hep]") {
     nodehammer::ir::DD4hepImporter imp;
-    auto byPath = imp.import(kSimpleBox);
+    auto byPathImport = imp.import(kSimpleBox);
+    nodehammer::ir::expanded::ImportResult byPath{
+        nodehammer::ir::semantic::expand(byPathImport.scene), std::move(byPathImport.diags)};
 
     // The in-memory entry point: a Detector the caller already built, handed by
     // reference. fromCompact is still how it got built — DD4hep offers no
@@ -102,7 +115,10 @@ TEST_CASE("DD4hepImporter: import(Detector&) matches import(path) for simple_box
     // after this point, only the live Detector.
     auto detector = dd4hep::Detector::make_unique("");
     detector->fromCompact(kSimpleBox);
-    auto byDetector = imp.import(*detector);
+    auto byDetectorImport = imp.import(*detector);
+    nodehammer::ir::expanded::ImportResult byDetector{
+        nodehammer::ir::semantic::expand(byDetectorImport.scene),
+        std::move(byDetectorImport.diags)};
 
     REQUIRE_FALSE(byDetector.diags.hasErrors());
     REQUIRE(byDetector.scene.nodes.size() == byPath.scene.nodes.size());

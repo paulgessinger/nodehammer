@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ir/expanded/scene.hpp>
 #include <ir/semantic/importer.hpp>
 
 #include <string_view>
@@ -21,6 +22,8 @@ class DD4hepImporter final : public ISemanticImporter {
 
     /// Traverse an already-constructed `Detector`. Never loads a compact file.
     [[nodiscard]] ImportResult import(dd4hep::Detector &detector) const;
+    // Eager reference for differential tests.
+    [[nodiscard]] expanded::ImportResult importExpanded(dd4hep::Detector &detector) const;
 };
 
 } // namespace nodehammer::ir

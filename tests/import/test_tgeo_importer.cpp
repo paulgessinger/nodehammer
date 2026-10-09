@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/semantic.hpp>
 #include <ir/tgeo/semantic/importer.hpp>
 
@@ -37,7 +38,9 @@ TEST_CASE("TGeoImporter: TGeoBBox -> BoxShape", "[import][tgeo]") {
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     REQUIRE_FALSE(result.diags.hasErrors());
 
     bool found = false;
@@ -63,7 +66,9 @@ TEST_CASE("TGeoImporter: TGeoTube -> TubeShape", "[import][tgeo]") {
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     REQUIRE_FALSE(result.diags.hasErrors());
 
     bool found = false;
@@ -91,7 +96,9 @@ TEST_CASE("TGeoImporter: nested volumes -> correct parent-child hierarchy", "[im
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.scene.nodes.size() == 2);
 
@@ -117,7 +124,9 @@ TEST_CASE("TGeoImporter: same TGeoVolume placed twice -> one LV, two nodes", "[i
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     REQUIRE(result.scene.nodes.size() == 3);   // world + 2 placements
     REQUIRE(result.scene.logVols.size() == 2); // world LV + brick LV (deduplicated)
 }
@@ -139,7 +148,9 @@ TEST_CASE("TGeoImporter: TGeoCompositeShape -> BooleanUnion", "[import][tgeo]") 
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
 
     bool hasBool = false;
     for (const auto &[id, s] : result.scene.shapes) {
@@ -167,7 +178,9 @@ TEST_CASE("TGeoImporter: TGeoRotation -> localTransform rotation columns", "[imp
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     REQUIRE_FALSE(result.diags.hasErrors());
 
     const auto &root = result.scene.nodes.at(result.scene.rootId);
@@ -205,7 +218,9 @@ TEST_CASE("TGeoImporter: TGeoCombiTrans -> localTransform rotation and translati
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     REQUIRE_FALSE(result.diags.hasErrors());
 
     const auto &root = result.scene.nodes.at(result.scene.rootId);
@@ -240,7 +255,9 @@ TEST_CASE("TGeoImporter: worldTransform composes parent rotation with child tran
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     REQUIRE_FALSE(result.diags.hasErrors());
     REQUIRE(result.scene.nodes.size() == 3);
 
@@ -264,7 +281,9 @@ TEST_CASE("TGeoImporter: root worldTransform is identity", "[import][tgeo]") {
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     const auto &root = result.scene.nodes.at(result.scene.rootId);
     REQUIRE(root.worldTransform == glm::dmat4{1.0});
 }
@@ -278,7 +297,9 @@ TEST_CASE("TGeoImporter: sourceSystem is tgeo", "[import][tgeo]") {
     mgr->CloseGeometry();
 
     nodehammer::ir::TGeoImporter imp;
-    auto result = imp.import(gGeoManager);
+    auto resultImport = imp.import(gGeoManager);
+    nodehammer::ir::expanded::ImportResult result{
+        nodehammer::ir::semantic::expand(resultImport.scene), std::move(resultImport.diags)};
     const auto &root = result.scene.nodes.at(result.scene.rootId);
     REQUIRE(root.sourceSystem == "tgeo");
 }
