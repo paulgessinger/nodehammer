@@ -72,6 +72,7 @@ void compareWithExpanded(semantic::Scene &scene, const std::vector<SelectionRule
         REQUIRE(actual->degradation.bits == expected.degradation.bits);
         const auto &av = scene.logVols.at(actual->logVolId);
         const auto &ev = reference.logVols.at(expected.logVolId);
+        REQUIRE(av.name == ev.name);
         REQUIRE(av.shapeId == ev.shapeId);
         REQUIRE(av.materialId == ev.materialId);
         for (int c = 0; c < 4; ++c)
