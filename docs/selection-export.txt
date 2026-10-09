@@ -68,3 +68,40 @@ original-path exceptions, empty overrides and successive pruning. Hoisted siblin
 ordering differs in the pre-existing expanded reference, so that comparison
 matches children by original path while checking their selected parent and data.
 Non-hoisted comparisons retain exact sibling-order checks.
+
+IDEA o2 validation (2026-10-09)
+------------------------------
+The ordinary no-fibers selection removes capillary* subtrees plus the eight
+optical core/cladding materials from the full 265,922,033-occurrence input.
+Both old and new exports retain 3,024,113 occurrences and 9,578 shapes.
+
+Compared using the same NHS9 v2 column codec and whole-file zstd level 3:
+  Old selected output: 70,227,550 bytes (66.97 MiB)
+  New selected output: 32,847,756 bytes (31.33 MiB), 53.2 percent smaller
+  Full detector, default shape deduplication: 44,381,965 bytes (42.33 MiB)
+
+The selected scene now occupies less disk than the full detector. The new output
+retains 2,557,004 source-derived logical volumes; the old projector's subsequent
+deduplication reduced its flattened definitions to 337,632 but left expanded
+occurrence metadata. Default-aware deduplication can further reduce the new
+catalog; it is not necessary to fix the metadata expansion.
+
+The new selection executable uses the unchanged NHS9 v1 writer, followed by the
+size-reduction branch's normal upgrade command to encode v2. The old selected
+artifact was written directly by that v2 branch. Size comparisons therefore use
+one codec, while whole-process time/RSS comparisons would include different
+writers and are not controlled codec benchmarks. Selection traversal itself was
+135 seconds in this run (previous run: 151 seconds); these are single native
+observations, not WASM measurements or a stable performance claim.
+
+A paired streaming comparison checked all 3,024,113 retained occurrences:
+ordered child topology, occurrence names and original paths, effective tags,
+source-system/degradation values, recursive shape/material contents and exact
+local/world transform bits all match. New metadata has zero original-path
+records (old: 3,024,113), 96,893 source-system overrides (old: 3,024,113), and
+96,892 occurrence-tag overrides (old: 2,194,862), retaining volume defaults.
+
+Catalog volume labels differ at 483,248 occurrences: the old logical-volume
+deduplicator deliberately ignores its own volume name and substitutes the name
+of a representative definition. The new projection preserves source definition
+names. These labels are distinct from occurrence names, which are unchanged.
