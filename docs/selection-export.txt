@@ -1,0 +1,70 @@
+Shared selection export
+=======================
+
+Canonical selection export retains source-definition sharing after filtering.
+It does not create a logical volume or an occurrence-metadata record for every
+survivor. The file format and selection configuration are unchanged.
+
+Projection algorithm
+--------------------
+SelectedOccurrences first evaluates the ordinary rules and records the retained
+source occurrences. An iterative postorder traversal then constructs filtered
+logical volumes. A definition is reused when its original logical-volume ID,
+ordered daughter names, selected child definitions, exact local transforms and
+daughter placement-tag defaults match. Transform comparison is bitwise, including
+signed zero. Hash collisions are checked against the complete definition.
+
+Occurrence-specific filtering creates additional variants only where the retained
+daughter topology differs. The original volume ID remains part of the key: this
+operation preserves existing sharing rather than deduplicating unrelated source
+definitions. Source shape, material, volume name and volume-tag defaults remain
+attached to that source identity.
+
+One mutable source route, one output route and a depth stack replace the former
+per-survivor route map. Frames accumulate daughter lists for the active definitions;
+completed variants are interned and reused. Fully removed subtrees are skipped.
+Retained nodes with no retained descendants skip scanning their removed children.
+The traversal preserves source DFS sibling order, including hoisted children.
+
+Metadata and hoisting
+---------------------
+Volume and daughter-placement tag defaults stay on definitions. Only existing
+occurrence overrides are remapped: tags, display names, original paths, source
+systems and degradation. Explicit empty tag and source-system overrides retain
+their meaning. Advancing cursors consume the sparse maps in source DFS order.
+
+Hoisting rebases local transforms against the nearest retained ancestor's world
+transform. The incoming placement-tag default follows the hoisted placement.
+Dropped path-name segments are joined into the hoisted root's path-name override,
+whose string already permits path separators. Descendants therefore keep their
+imported paths without an exact original-path entry per descendant. Placement and
+display names remain separate. Exact original-path overrides apply only at their
+own occurrence and do not become inherited prefixes. Successive pruning retains
+these semantics.
+
+Limits and follow-up
+--------------------
+Selection still evaluates physical occurrences, and its selection bitset/rank
+index remains proportional to source occurrence count. Projection also visits
+retained occurrences and necessary removed ancestors; sharing the output does
+not make rule evaluation or traversal constant-time. Projection memory consists
+of the selection index, source/output catalogs, sparse metadata, cached unique
+variants and active traversal/daughter buffers. This is not a fixed memory bound:
+an unshared source, arbitrary occurrence-specific topology, or a huge unique
+daughter list can still require a large output and substantial working memory.
+
+The existing logical-volume deduplicator declines scenes with volume or placement
+tag defaults. Preserving those defaults can therefore prevent the subsequent
+deduplication previously enabled by flattening everything into occurrence tags.
+The exporter deliberately keeps that metadata intact. Context-aware deduplication
+of distinct source definitions is separate work if measurements justify it.
+
+Regression coverage
+--------------------
+tests/selection/test_shared_export.cpp compares effective geometry and metadata
+with the expanded selector, checks shared-definition counts and sparse override
+counts, and covers path-specific selection, rotated-parent hoisting, nested
+original-path exceptions, empty overrides and successive pruning. Hoisted sibling
+ordering differs in the pre-existing expanded reference, so that comparison
+matches children by original path while checking their selected parent and data.
+Non-hoisted comparisons retain exact sibling-order checks.
