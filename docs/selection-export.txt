@@ -1,0 +1,107 @@
+Shared selection export
+=======================
+
+Canonical selection export retains source-definition sharing after filtering.
+It does not create a logical volume or an occurrence-metadata record for every
+survivor. The file format and selection configuration are unchanged.
+
+Projection algorithm
+--------------------
+SelectedOccurrences first evaluates the ordinary rules and records the retained
+source occurrences. An iterative postorder traversal then constructs filtered
+logical volumes. A definition is reused when its original logical-volume ID,
+ordered daughter names, selected child definitions, exact local transforms and
+daughter placement-tag defaults match. Transform comparison is bitwise, including
+signed zero. Hash collisions are checked against the complete definition.
+
+Occurrence-specific filtering creates additional variants only where the retained
+daughter topology differs. The original volume ID remains part of the key: this
+operation preserves existing sharing rather than deduplicating unrelated source
+definitions. Source shape, material, volume name and volume-tag defaults remain
+attached to that source identity.
+
+One mutable source route, one output route and a depth stack replace the former
+per-survivor route map. Frames accumulate daughter lists for the active definitions;
+completed variants are interned and reused. Fully removed subtrees are skipped.
+Retained nodes with no retained descendants skip scanning their removed children.
+The traversal preserves source DFS sibling order, including hoisted children.
+
+Metadata and hoisting
+---------------------
+Volume and daughter-placement tag defaults stay on definitions. Only existing
+occurrence overrides are remapped: tags, display names, original paths, source
+systems and degradation. Explicit empty tag and source-system overrides retain
+their meaning. Advancing cursors consume the sparse maps in source DFS order.
+
+Hoisting rebases local transforms against the nearest retained ancestor's world
+transform. The incoming placement-tag default follows the hoisted placement.
+Dropped path-name segments are joined into the hoisted root's path-name override,
+whose string already permits path separators. Descendants therefore keep their
+imported paths without an exact original-path entry per descendant. Placement and
+display names remain separate. Exact original-path overrides apply only at their
+own occurrence and do not become inherited prefixes. Successive pruning retains
+these semantics.
+
+Limits and follow-up
+--------------------
+Selection still evaluates physical occurrences, and its selection bitset/rank
+index remains proportional to source occurrence count. Projection also visits
+retained occurrences and necessary removed ancestors; sharing the output does
+not make rule evaluation or traversal constant-time. Projection memory consists
+of the selection index, source/output catalogs, sparse metadata, cached unique
+variants and active traversal/daughter buffers. This is not a fixed memory bound:
+an unshared source, arbitrary occurrence-specific topology, or a huge unique
+daughter list can still require a large output and substantial working memory.
+
+The existing logical-volume deduplicator declines scenes with volume or placement
+tag defaults. Preserving those defaults can therefore prevent the subsequent
+deduplication previously enabled by flattening everything into occurrence tags.
+The exporter deliberately keeps that metadata intact. Context-aware deduplication
+of distinct source definitions is separate work if measurements justify it.
+
+Regression coverage
+--------------------
+tests/selection/test_shared_export.cpp compares effective geometry and metadata
+with the expanded selector, checks shared-definition counts and sparse override
+counts, and covers path-specific selection, rotated-parent hoisting, nested
+original-path exceptions, empty overrides and successive pruning. Hoisted sibling
+ordering differs in the pre-existing expanded reference, so that comparison
+matches children by original path while checking their selected parent and data.
+Non-hoisted comparisons retain exact sibling-order checks.
+
+IDEA o2 validation (2026-10-09)
+------------------------------
+The ordinary no-fibers selection removes capillary* subtrees plus the eight
+optical core/cladding materials from the full 265,922,033-occurrence input.
+Both old and new exports retain 3,024,113 occurrences and 9,578 shapes.
+
+Compared using the same NHS9 v2 column codec and whole-file zstd level 3:
+  Old selected output: 70,227,550 bytes (66.97 MiB)
+  New selected output: 32,847,756 bytes (31.33 MiB), 53.2 percent smaller
+  Full detector, default shape deduplication: 44,381,965 bytes (42.33 MiB)
+
+The selected scene now occupies less disk than the full detector. The new output
+retains 2,557,004 source-derived logical volumes; the old projector's subsequent
+deduplication reduced its flattened definitions to 337,632 but left expanded
+occurrence metadata. Default-aware deduplication can further reduce the new
+catalog; it is not necessary to fix the metadata expansion.
+
+The new selection executable uses the unchanged NHS9 v1 writer, followed by the
+size-reduction branch's normal upgrade command to encode v2. The old selected
+artifact was written directly by that v2 branch. Size comparisons therefore use
+one codec, while whole-process time/RSS comparisons would include different
+writers and are not controlled codec benchmarks. Selection traversal itself was
+135 seconds in this run (previous run: 151 seconds); these are single native
+observations, not WASM measurements or a stable performance claim.
+
+A paired streaming comparison checked all 3,024,113 retained occurrences:
+ordered child topology, occurrence names and original paths, effective tags,
+source-system/degradation values, recursive shape/material contents and exact
+local/world transform bits all match. New metadata has zero original-path
+records (old: 3,024,113), 96,893 source-system overrides (old: 3,024,113), and
+96,892 occurrence-tag overrides (old: 2,194,862), retaining volume defaults.
+
+Catalog volume labels differ at 483,248 occurrences: the old logical-volume
+deduplicator deliberately ignores its own volume name and substitutes the name
+of a representative definition. The new projection preserves source definition
+names. These labels are distinct from occurrence names, which are unchanged.

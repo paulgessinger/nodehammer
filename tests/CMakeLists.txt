@@ -20,6 +20,7 @@ add_executable(nodehammer_tests
     selection/test_predicate.cpp
     selection/test_selector.cpp
     selection/test_occurrence_selector.cpp
+    selection/test_shared_export.cpp
     tessellation/test_primitive_tessellator.cpp
     tessellation/test_boolean_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
