@@ -1,0 +1,151 @@
+NHB format evolution: shared FlatBuffers and legacy compatibility
+================================================================
+Decisions (2026-10-08)
+----------------------
+Retain FlatBuffers and whole-file zstd compression. NHS9 contains shared source
+volumes, ordered daughter placements, shapes, materials and sparse metadata; no
+expanded physical tree or materialization cache is written. Chunking is deferred
+until measurements justify it. A future container can have a distinct identifier;
+no per-chunk compression or directory is required by the current schema.
+
+schemas/semantic.fbs retains NHS8 wire meanings. schemas/shared.fbs is a separate
+namespace and NHS9 root. NHS9 has a schema version and required-feature mask;
+unsupported versions/features fail clearly instead of guessing. Optional additive
+fields can evolve under the same semantic version where their absence is safe.
+The single FlatBuffer size bound still applies to the compact source definitions.
+Whole-file compression cannot remove that bound. It is not a bound on the number
+of physical occurrences represented by those definitions.
+
+Internal representations
+------------------------
+ir::semantic::Scene is the canonical source graph: GeometryCatalogs, root placement and
+sparse Metadata. GeometryCatalogs contain shapes, materials and volume definitions only;
+there is no expanded-node map to populate accidentally. OccurrenceTree lives in
+ir::semantic and SelectedOccurrences lives in selection, without experimental
+namespaces.
+
+ir::expanded::Scene and Node name the physical processing representation. Normal
+import, selection and pipeline inputs use semantic::Scene directly. There is one
+ISemanticImporter::import entry point, with no alternate processing-import API or
+runtime representation flag. Explicit expand calls sit at JSON export,
+tessellation and wedge-cut boundaries. Selection projects retained occurrences
+into canonical definitions without constructing physical Nodes. fromExpanded is
+the adapter for legacy files, JSON and physical processing results.
+
+The frozen NHS8 codec lives in ir::legacy::nhs8 (src/ir/legacy/nhs8.*).
+The NHS9 codec lives in ir::semantic (src/ir/semantic/flatbuffer.*).
+Wire schema names, identifiers and layout are unchanged by this namespace move.
+Normal byte/worker transport always writes NHS9; only explicit calls to the legacy
+codec write NHS8, and they require a materialized expanded scene.
+
+Compatibility and upgrade
+-------------------------
+sceneFromBytes accepts raw or whole-file-zstd NHS8/NHS9, dispatches after
+decompression, verifies the selected schema, then validates the resulting graph.
+readFlatbuffer uses the same path for files. The decoder reconstructs legacy
+world transforms and original paths using the existing NHS8 load behavior before
+adapting it. Legacy loading may allocate the whole expanded scene temporarily;
+that is accepted for already-supported files.
+
+fromExpanded treats actual stored nodes and their children as authoritative.
+It starts with one definition per node, shares shapes/materials, copies local
+transforms, preserves child order/names and retains tags, source-system provenance,
+degradation flags and any supplied original paths. Selection initially keeps all
+stored nodes. It does not regenerate children from old logical-volume daughter
+lists or deduplicate occurrence definitions. Malformed/disconnected trees fail
+rather than dropping nodes. Node/logical-volume numeric IDs are not a persistent
+cross-format identity contract. Original paths absent from NHS8 cannot be recovered
+from pre-export history; the existing NHS8 reader already reconstructs them.
+
+The frozen 99-node MDI NHS8 fixture predates the migration. Never regenerate it
+using a new writer to make a regression pass. Synthetic tests exercise filtered
+occurrences of one original logical volume, rotated transforms, duplicate names,
+hoisted original paths, per-occurrence metadata and malformed topology. New-codec
+tests cover large physical counts without expansion, full metadata, 64-bit IDs,
+all shape kinds, exact transforms and malformed/unsupported files.
+
+CLI and pipeline integration
+----------------------------
+The standard CLI and its library entry point use the same commands:
+
+  nodehammer convert -i detector.xml -o detector.nhb.zst
+  nodehammer upgrade -i legacy.nhb.zst -o upgraded.nhb.zst
+  nodehammer inspect --output-format json summary -i upgraded.nhb.zst
+  nodehammer convert -i upgraded.nhb.zst -c scene.toml -o selected.glb
+
+upgrade refuses an output that aliases its input and keeps every stored occurrence.
+It does not run a config or infer prior filter history. There is no separate helper
+executable. Standard NHB file/API writers produce NHS9; readers accept NHS8/NHS9.
+The explicit internal NHS8 codec remains for compatibility tests and legacy tools.
+Successful NHS8 ingestion returns warning NH0107 through the common diagnostic
+channel, including project/viewer byte input. Files still load normally; the
+existing convert --strict policy treats the warning as fatal. The explicit upgrade
+command does not warn about the legacy input it was asked to migrate. NHS9 reads
+do not produce this warning. The notice identifies embedded project geometry
+without implying that upgrade currently accepts .nhproj archives.
+
+The ingestion SDK and full library share the NHS9 implementation. File-based
+TGeo/DD4hep pipeline imports preserve shared source definitions; the low-level eager
+importer entry points remain available for reference tests. Public fromTGeo and
+fromDD4hep also preserve sharing. The canonical Scene owns its definitions and metadata. Public handles retain an
+immutable scene; processing copies it when a transformation is requested.
+
+Inspect summary and depth-limited tree queries do not expand the physical tree.
+Selection evaluates the shared graph and projects retained occurrences into the
+canonical scene. Existing tessellation then expands that selected scene. No-filter NHB conversion remains shared.
+JSON export, tessellation and wedge cuts materialize their input when needed; an
+unfiltered export of hundreds of millions of occurrences can still exhaust memory.
+Tags inspection traverses occurrences without retaining an expanded tree.
+
+The shared reader also serves the viewer and its compute-worker transport. This
+connects the format to the existing pipeline; it does not make tessellation lazy or
+solve the outstanding full-geometry selection performance problem. Shared-source
+logical-volume deduplication is conservatively skipped to preserve metadata keys;
+shape/material deduplication remains available.
+
+Validation and initial measurements
+------------------------------------
+Integrated pipeline checks: 647 native cases (32,937 assertions), 61 public API
+cases (294 assertions), and six ingestion/upgrade CTests pass. The common viewer
+build pipeline is covered with shared input, with and without selection. The
+normal CLI imports the DD4hep simple-box fixture and preserves a billion-occurrence
+synthetic source through inspect and NHB-to-NHB conversion without expansion.
+
+Normal CLI conversion of the full IDEA_o1_v03 NHS9 with its simplified config keeps
+16,242 of 260,245,099 occurrences. The final observed run took 0.97 s to import,
+134.76 s for selection/materialization and 136.20 s overall; filtering is still
+slow. The output is 1,042,749 bytes compressed. This is an end-to-end observation
+on this machine, not a WASM timing or an isolated statistical benchmark.
+Logs are retained locally in analysis/fccee/cli-integration.
+
+IR/selection/occurrence/API/import/DD4hep/shared regression tests cover the new
+representation. The native CTest shared_geometry_legacy_upgrade checks
+input protection, NHS8-to-NHS9 upgrade and a canonical readback. Three
+real NHS9 files decode and re-encode to byte-identical compressed files. ALLEGRO's
+simplified config still selects 528 occurrences without retaining a full physical tree.
+
+Model          Physical occurrences   NHS9 zstd bytes    Raw FlatBuffer bytes
+ALLEGRO_o1_v01                94,998         1,413,092               9,872,816
+IDEA_o1_v03              260,245,099        23,174,533             140,397,424
+IDEA_o2_v01              265,922,033       127,792,808             644,534,592
+
+Native readback wall time (includes decompression, reconstruction and validation):
+Model                         NHS9       NHS9 peak RSS KiB
+ALLEGRO_o1_v01                0.11 s                 72,248
+IDEA_o1_v03                   1.10 s                558,268
+IDEA_o2_v01                   5.54 s              2,697,396
+
+These are single native observations, not isolated statistical benchmarks or WASM
+measurements. Encoding size and readback memory are not yet tuned. Column layout,
+pooling, definition deduplication and eventual chunking should be evaluated
+separately with representative measurements.
+
+Artifacts and hashes: analysis/fccee/flatbuffers-full/manifest.json. Full source
+files remain separate from the partial NHS8 files used by the existing pipeline.
+
+The million-occurrence native differential benchmark remains correct. Median
+dryRun times (expanded/shared, ms; three samples after one warmup):
+  tag: 395.58 / 81.94
+  scope_order: 511.17 / 132.87
+  hoist: 290.42 / 100.46
+Local report: analysis/fccee/selection-native-nhs9-million.json.

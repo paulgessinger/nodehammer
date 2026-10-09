@@ -1,3 +1,5 @@
+// Legacy NHS8 schema: retained for existing files. New shared geometry uses
+// shared.fbs (NHS9). Do not repurpose fields or change their wire meanings.
 namespace nodehammer.fbs;
 
 struct Vec3f {

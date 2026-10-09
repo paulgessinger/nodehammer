@@ -69,6 +69,8 @@ inline constexpr std::string_view kErrImportPlacementUnresolved = "NH0105";
 // An unplaced detector element is skipped, but its placed children are resolved
 // relative to the nearest already-resolved ancestor.
 inline constexpr std::string_view kWarnImportUnplacedAncestor = "NH0106";
+// Non-fatal compatibility notice for successfully loaded NHS8 geometry.
+inline constexpr std::string_view kWarnImportLegacyNhb = "NH0107";
 
 // ── Scene operations ──────────────────────────────────────────────────────────
 // Info: how much deduplication actually merged. Reported rather than discarded

@@ -121,6 +121,7 @@ int runWith(std::span<const std::string_view> args, const CliOptions &options,
     app.fallthrough();
 
     registerCmdConvert(app, effective);
+    registerCmdUpgrade(app, effective);
     registerCmdInspect(app, effective);
     registerCmdConfig(app, effective);
     // Before `extra`: the native half extends the subcommand this registers, so

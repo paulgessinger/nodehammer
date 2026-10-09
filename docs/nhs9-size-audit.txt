@@ -1,0 +1,70 @@
+NHS8 size optimizations applicable to NHS9 (2026-10-08)
+======================================================
+
+Historical implementation references
+-----------------------------------
+2d30247: column-oriented nodes, transform/string pooling.
+0b73885: narrower IDs, transform references and degradation flags.
+664e0ca: remap node IDs to row order, omit redundant IDs.
+1c6ab78: adapt index columns between uint16 and uint32.
+062cd48: consolidated design notes (including split transform pools,
+         frequency-ranked strings and locality ordering).
+The current NHS8 implementation is in src/ir/legacy/nhs8.cpp.
+
+Current NHS9 baseline
+---------------------
+The structural saving is removal of the expanded node payload. It already pools
+identical full transforms, uses shared strings and interned tag sets, and applies
+whole-file zstd. It still uses uint64 catalog IDs/references, table-per-placement
+storage, uint64 occurrence-path components, and 16-double transform rows. This is
+a correctness baseline, not a transfer of all the NHS8 encoding optimizations.
+
+Recommended carry-over, in measurement order
+--------------------------------------------
+1. Split transform pools: store unique 3x3 linear components and translations,
+   with pairs of indices. This retains doubles, including scale/shear; do not
+   replace matrices with rotations-only/quaternions. An affine transform needs
+   12 variable doubles rather than 16. Preserve the current exact-bit contract,
+   including signed zero, or explicitly decide how constant-row bits are treated.
+   For a million distinct translations sharing one linear component, the raw
+   payload is roughly 24 MB translations + 8 MB uint32 index pairs + 72 bytes,
+   versus 128 MB of full matrices, before FlatBuffers overhead and compression.
+   If every component is unique, 12 doubles + two uint32 indices is 104 bytes
+   per row, versus 128 today. Repeated components determine the larger saving.
+
+2. Dense catalog references: remap volume/shape/material references to row indices
+   and use uint32. A million uint64 references consume 8 MB; uint32 consumes 4 MB.
+   This can coexist with an optional uint64 source-ID column if preserving original
+   numeric IDs is required. NHS9 tests currently preserve large IDs, so an ID policy
+   must be explicit before replacing them. Physical occurrence counts stay uint64:
+   those counts can exceed the number of stored definitions by orders of magnitude.
+
+3. Column-oriented daughter placements: concatenate names, volume references and
+   transform indices; use per-volume ranges to recover ordered daughter lists.
+   This removes per-placement table overhead and makes adaptive uint16/uint32
+   columns useful. Merely narrowing one field inside a table may save little
+   because object alignment and offsets remain. Two-byte indices require checked
+   capacity thresholds, with four-byte fallback; never truncate large catalogs.
+
+4. Apply the same approach to sparse metadata references and path components.
+   Daughter indices are bounded by stored vectors, unlike total occurrence count.
+   Tag-set references can be width-adaptive. Shared strings exist already;
+   explicit frequency-ranked dictionaries may further help whole-file compression.
+
+5. Reorder catalog rows for locality after measuring the above. Preserve daughter
+   order: occurrence identities are paths of daughter indices. Arbitrarily sorting
+   daughters would silently retarget metadata and change traversal order.
+
+No direct carry-over
+--------------------
+NHS8 parent-only node columns and implicit node IDs address storage that NHS9 no
+longer writes. Reintroducing those columns would defeat the structural change.
+
+Measurement contract
+--------------------
+Measure raw FlatBuffer bytes, whole-file zstd bytes, read/write wall time and peak
+RSS on the same full ALLEGRO/IDEA geometries. Payload arithmetic above is not a
+prediction of compressed file savings or in-memory catalog size. Check semantic
+and metadata equivalence, malformed/overflow inputs, and native/wasm portability.
+Treat wire-layout changes as separate review stages, with compatibility/version
+handling chosen explicitly for any already-generated NHS9 files.

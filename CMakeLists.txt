@@ -302,6 +302,7 @@ set(NH_CORE_SOURCES
     src/cli/cmd_convert.cpp
     src/cli/cmd_inspect.cpp
     src/cli/cmd_config.cpp
+    src/cli/cmd_upgrade.cpp
 )
 
 # ── Application sources ───────────────────────────────────────────────────────

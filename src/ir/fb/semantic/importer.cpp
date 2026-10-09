@@ -14,7 +14,16 @@ namespace {
 ImportResult decode(std::span<const std::byte> raw, std::string_view source) {
     ImportResult result;
     result.scene = semanticSceneFromBytes(raw);
-    (void)source;
+    // Diagnose only successfully decoded legacy input, independently of filename
+    // and compression. The library returns diagnostics; callers decide how to show them.
+    if (raw.size() >= 8 && std::memcmp(raw.data() + 4, "NHS8", 4) == 0) {
+        result.diags.warn(codes::kWarnImportLegacyNhb,
+                          "Loaded legacy NHS8 geometry; it remains supported. "
+                          "Use 'nodehammer upgrade -i old.nhb.zst -o new.nhb.zst' "
+                          "to migrate a standalone geometry to NHS9. "
+                          "For .nhproj input, this warning refers to the embedded geometry.",
+                          source);
+    }
     return result;
 }
 } // namespace
