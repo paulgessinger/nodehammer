@@ -208,7 +208,6 @@ ImportResult DD4hepImporter::import(const std::filesystem::path &path) const {
     }
 
     try {
-        QuietGuard quiet;
         auto detector = dd4hep::Detector::make_unique("");
         detector->fromCompact(path.string());
         auto result = semantic::importDD4hep(*detector, path.string());
