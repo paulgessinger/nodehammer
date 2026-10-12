@@ -397,6 +397,11 @@ std::size_t SelectedOccurrences::storageBytes() const {
 
 OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::SelectionRule> &rules,
                                                  bool hoist) const {
+    // Prototype proofs and hash caches only amortize on reused definitions.
+    // Mostly unique geometry uses the reference evaluator, avoiding an extra
+    // graph-wide proof pass. Division keeps the eligibility check overflow-safe.
+    const bool optimize =
+        options_.optimizeSharedEvaluation && index_->total / 2 >= index_->volumeOrder.size();
     struct Rule {
         config::SelectionAction action;
         Predicate predicate;
@@ -409,17 +414,18 @@ OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::Selec
     for (const auto &rule : rules) {
         compiled.push_back(
             {rule.action,
-             options_.optimizeSharedEvaluation ? compileCachedPredicate(rule.predicate)
-                                               : compilePredicate(rule.predicate),
+             optimize ? compileCachedPredicate(rule.predicate) : compilePredicate(rule.predicate),
              rule.scope ? std::optional{makePathGlobPredicate(*rule.scope)} : std::nullopt,
-             compileLocal(rule.predicate), compileSubtree(rule.predicate),
-             rule.scope ? std::optional{compilePathSubtree(*rule.scope)} : std::nullopt});
+             optimize ? compileLocal(rule.predicate) : LocalPredicate{},
+             optimize ? compileSubtree(rule.predicate) : SubtreePredicate{},
+             optimize && rule.scope ? std::optional{compilePathSubtree(*rule.scope)}
+                                    : std::nullopt});
     }
     // Postorder proofs are reusable across occurrences of the same definition.
     // Only explicit drops qualify: a keep forced down by an ancestor must still
     // be visited to preserve exact orphan diagnostics and their order.
     std::unordered_map<ir::semantic::LogVolId, bool> droppedDescendants;
-    if (options_.optimizeSharedEvaluation) {
+    if (optimize) {
         droppedDescendants.reserve(index_->volumeOrder.size());
         const auto &source = index_->tree.sourceScene();
         for (const auto volume : index_->volumeOrder) {
@@ -470,7 +476,7 @@ OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::Selec
             std::string_view parentName) {
             ++result.evaluatedOccurrenceCount_;
             auto action = config::SelectionAction::KeepIf;
-            if (options_.optimizeSharedEvaluation) {
+            if (optimize) {
                 for (auto it = compiled.rbegin(); it != compiled.rend(); ++it) {
                     if ((!it->scope || (*it->scope)(view)) && it->predicate(view)) {
                         action = it->action;
@@ -509,7 +515,7 @@ OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::Selec
         },
         [&](std::string_view prefix, const OccurrenceId &id, ir::semantic::LogVolId volume,
             uint64_t begin, uint64_t end) {
-            if (!options_.optimizeSharedEvaluation)
+            if (!optimize)
                 return false;
             if (droppedDescendants.at(volume) && !index_->tree.hasPredicateOverridesBelow(id)) {
                 result.skippedOccurrenceCount_ +=
