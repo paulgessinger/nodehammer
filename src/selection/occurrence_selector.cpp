@@ -6,9 +6,178 @@
 #include <bit>
 #include <format>
 #include <limits>
+#include <type_traits>
 #include <unordered_map>
 
 namespace nodehammer::selection {
+namespace {
+// An evaluation-local bound: caching never grows with physical occurrences.
+constexpr std::size_t predicateCacheLimit = 4096;
+
+Predicate compileCachedPredicate(const config::PredicateExpr &expr) {
+    return std::visit(
+        [](const auto &node) -> Predicate {
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, config::NameGlobPredicate> ||
+                          std::is_same_v<T, config::MaterialGlobPredicate>) {
+                auto predicate = compilePredicate(config::PredicateExpr{node});
+                return [predicate = std::move(predicate),
+                        cache = std::unordered_map<std::string_view, bool>{}](
+                           const NodeView &view) mutable {
+                    const auto key = [&] {
+                        if constexpr (std::is_same_v<T, config::NameGlobPredicate>)
+                            return view.name;
+                        else
+                            return view.materialName;
+                    }();
+                    if (const auto found = cache.find(key); found != cache.end())
+                        return found->second;
+                    const bool value = predicate(view);
+                    if (cache.size() < predicateCacheLimit)
+                        cache.emplace(key, value);
+                    return value;
+                };
+            } else if constexpr (std::is_same_v<T, config::TagPredicate>) {
+                auto predicate = makeTagPredicate(node.key, node.value);
+                return [predicate = std::move(predicate),
+                        cache =
+                            std::unordered_map<const std::map<std::string, std::string> *, bool>{}](
+                           const NodeView &view) mutable {
+                    if (const auto found = cache.find(view.tags); found != cache.end())
+                        return found->second;
+                    const bool value = predicate(view);
+                    if (cache.size() < predicateCacheLimit)
+                        cache.emplace(view.tags, value);
+                    return value;
+                };
+            } else if constexpr (std::is_same_v<T, std::shared_ptr<config::AndPredicate>> ||
+                                 std::is_same_v<T, std::shared_ptr<config::OrPredicate>>) {
+                std::vector<Predicate> operands;
+                for (const auto &operand : node->operands)
+                    operands.push_back(compileCachedPredicate(operand));
+                if constexpr (std::is_same_v<T, std::shared_ptr<config::AndPredicate>>)
+                    return makeAndPredicate(std::move(operands));
+                else
+                    return makeOrPredicate(std::move(operands));
+            } else if constexpr (std::is_same_v<T, std::shared_ptr<config::NotPredicate>>) {
+                return makeNotPredicate(compileCachedPredicate(node->operand));
+            } else {
+                // Paths and current leaf state are always evaluated per occurrence.
+                return compilePredicate(config::PredicateExpr{node});
+            }
+        },
+        expr.data);
+}
+
+// nullopt means unknown, never a guessed match. The argument is a common prefix
+// of every path in the candidate subtree (including the trailing parent slash).
+using SubtreePredicate = std::function<std::optional<bool>(std::string_view)>;
+SubtreePredicate compilePathSubtree(std::string pattern) {
+    const auto star = pattern.find('*');
+    const std::string literal = pattern.substr(0, star);
+    const bool suffix = pattern.ends_with("**");
+    auto predicate = makePathGlobPredicate(pattern);
+    return [literal, suffix, exact = star == std::string::npos,
+            predicate = std::move(predicate)](std::string_view prefix) -> std::optional<bool> {
+        if (!literal.starts_with(prefix) && !prefix.starts_with(literal))
+            return false;
+        if (exact && !literal.starts_with(prefix))
+            return false;
+        // A successful trailing ** consumes any extension of this prefix. Using
+        // the established matcher preserves its optional slash semantics.
+        if (suffix && predicate(NodeView{{}, prefix, {}, false, nullptr}))
+            return true;
+        return std::nullopt;
+    };
+}
+SubtreePredicate compileSubtree(const config::PredicateExpr &expr) {
+    return std::visit(
+        [](const auto &node) -> SubtreePredicate {
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, config::PathGlobPredicate>) {
+                return compilePathSubtree(node.pattern);
+            } else if constexpr (std::is_same_v<T, config::BoolPredicate>) {
+                return
+                    [value = node.value](std::string_view) -> std::optional<bool> { return value; };
+            } else if constexpr (std::is_same_v<T, std::shared_ptr<config::NotPredicate>>) {
+                return [operand = compileSubtree(node->operand)](
+                           std::string_view prefix) -> std::optional<bool> {
+                    const auto value = operand(prefix);
+                    return value ? std::optional{!*value} : std::nullopt;
+                };
+            } else if constexpr (std::is_same_v<T, std::shared_ptr<config::AndPredicate>> ||
+                                 std::is_same_v<T, std::shared_ptr<config::OrPredicate>>) {
+                constexpr bool conjunction =
+                    std::is_same_v<T, std::shared_ptr<config::AndPredicate>>;
+                std::vector<SubtreePredicate> operands;
+                for (const auto &operand : node->operands)
+                    operands.push_back(compileSubtree(operand));
+                return [operands = std::move(operands),
+                        conjunction](std::string_view prefix) -> std::optional<bool> {
+                    bool unknown = false;
+                    for (const auto &operand : operands) {
+                        const auto value = operand(prefix);
+                        if (!value)
+                            unknown = true;
+                        else if (*value != conjunction)
+                            return !conjunction;
+                    }
+                    return unknown ? std::nullopt : std::optional{conjunction};
+                };
+            } else {
+                return [](std::string_view) -> std::optional<bool> { return std::nullopt; };
+            }
+        },
+        expr.data);
+}
+// A local proof ignores path and leaf state; the latter may change after a
+// previous filter. The caller guards occurrence-specific name and tag overrides.
+using LocalPredicate = std::function<std::optional<bool>(const NodeView &)>;
+LocalPredicate compileLocal(const config::PredicateExpr &expr) {
+    return std::visit(
+        [](const auto &node) -> LocalPredicate {
+            using T = std::decay_t<decltype(node)>;
+            if constexpr (std::is_same_v<T, config::PathGlobPredicate>) {
+                return [](const NodeView &) -> std::optional<bool> { return std::nullopt; };
+            } else if constexpr (std::is_same_v<T, config::BoolPredicate>) {
+                return
+                    [value = node.value](const NodeView &) -> std::optional<bool> { return value; };
+            } else if constexpr (std::is_same_v<T, std::shared_ptr<config::NotPredicate>>) {
+                return [operand = compileLocal(node->operand)](
+                           const NodeView &view) -> std::optional<bool> {
+                    const auto value = operand(view);
+                    return value ? std::optional{!*value} : std::nullopt;
+                };
+            } else if constexpr (std::is_same_v<T, std::shared_ptr<config::AndPredicate>> ||
+                                 std::is_same_v<T, std::shared_ptr<config::OrPredicate>>) {
+                constexpr bool conjunction =
+                    std::is_same_v<T, std::shared_ptr<config::AndPredicate>>;
+                std::vector<LocalPredicate> operands;
+                for (const auto &operand : node->operands)
+                    operands.push_back(compileLocal(operand));
+                return [operands = std::move(operands),
+                        conjunction](const NodeView &view) -> std::optional<bool> {
+                    bool unknown = false;
+                    for (const auto &operand : operands) {
+                        const auto value = operand(view);
+                        if (!value)
+                            unknown = true;
+                        else if (*value != conjunction)
+                            return !conjunction;
+                    }
+                    return unknown ? std::nullopt : std::optional{conjunction};
+                };
+            } else if constexpr (std::is_same_v<T, config::IsLeafPredicate>) {
+                return [](const NodeView &) -> std::optional<bool> { return std::nullopt; };
+            } else {
+                return [predicate = compileCachedPredicate(config::PredicateExpr{node})](
+                           const NodeView &view) -> std::optional<bool> { return predicate(view); };
+            }
+        },
+        expr.data);
+}
+} // namespace
+
 namespace detail {
 using namespace ir::semantic;
 
@@ -51,6 +220,7 @@ struct OccurrenceIndex {
     std::unordered_map<LogVolId, uint64_t> counts;
     std::unordered_map<LogVolId, std::vector<uint64_t>> childOffsets;
     uint64_t total{};
+    std::vector<LogVolId> volumeOrder;
 
     explicit OccurrenceIndex(OccurrenceTree &input) : tree(input) {
         // Memoized postorder over prototypes: no physical tree expansion, no
@@ -68,6 +238,7 @@ struct OccurrenceIndex {
             const auto &daughters = volumes.at(frame.id).daughters;
             if (frame.next == daughters.size()) {
                 counts.emplace(frame.id, frame.count);
+                volumeOrder.push_back(frame.id);
                 std::vector<uint64_t> offsets;
                 offsets.reserve(daughters.size());
                 uint64_t offset = 1;
@@ -113,7 +284,8 @@ struct OccurrenceIndex {
     // Predicate traversal builds one reusable path, with O(depth) stack/identity.
     // Absent intermediate ancestors are traversed only to reach hoisted survivors.
     // Visitor returns this node's effective drop disposition for the next level.
-    template <class Visitor> void walk(const OccurrenceMask *present, Visitor &&visitor) const {
+    template <class Visitor, class Skip>
+    void walk(const OccurrenceMask *present, Visitor &&visitor, Skip &&skip) const {
         struct Frame {
             LogVolId volume;
             std::string_view name;
@@ -154,6 +326,14 @@ struct OccurrenceIndex {
                     frame.parentDropped =
                         visitor(frame.ordinal, view, frame.parentDropped, frame.parentName);
                     frame.parentName = view.name;
+                }
+                if (!volume.daughters.empty()) {
+                    path.push_back('/');
+                    const bool skipChildren =
+                        skip(path, id, frame.volume, frame.ordinal + 1, frame.end);
+                    path.pop_back();
+                    if (skipChildren)
+                        frame.nextChild = volume.daughters.size();
                 }
             }
             if (frame.nextChild == volume.daughters.size()) {
@@ -221,49 +401,149 @@ OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::Selec
         config::SelectionAction action;
         Predicate predicate;
         std::optional<Predicate> scope;
+        LocalPredicate local;
+        SubtreePredicate subtree;
+        std::optional<SubtreePredicate> subtreeScope;
     };
     std::vector<Rule> compiled;
     for (const auto &rule : rules) {
         compiled.push_back(
-            {rule.action, compilePredicate(rule.predicate),
-             rule.scope ? std::optional{makePathGlobPredicate(*rule.scope)} : std::nullopt});
+            {rule.action,
+             options_.optimizeSharedEvaluation ? compileCachedPredicate(rule.predicate)
+                                               : compilePredicate(rule.predicate),
+             rule.scope ? std::optional{makePathGlobPredicate(*rule.scope)} : std::nullopt,
+             compileLocal(rule.predicate), compileSubtree(rule.predicate),
+             rule.scope ? std::optional{compilePathSubtree(*rule.scope)} : std::nullopt});
+    }
+    // Postorder proofs are reusable across occurrences of the same definition.
+    // Only explicit drops qualify: a keep forced down by an ancestor must still
+    // be visited to preserve exact orphan diagnostics and their order.
+    std::unordered_map<ir::semantic::LogVolId, bool> droppedDescendants;
+    if (options_.optimizeSharedEvaluation) {
+        droppedDescendants.reserve(index_->volumeOrder.size());
+        const auto &source = index_->tree.sourceScene();
+        for (const auto volume : index_->volumeOrder) {
+            bool allDrop = true;
+            const auto &daughters = source.logVols.at(volume).daughters;
+            for (std::size_t i = 0; i < daughters.size() && allDrop; ++i) {
+                const auto &daughter = daughters[i];
+                if (!droppedDescendants.at(daughter.logVolId)) {
+                    allDrop = false;
+                    break;
+                }
+                const auto &child = source.logVols.at(daughter.logVolId);
+                const auto material = source.materials.find(child.materialId);
+                const NodeView view{
+                    daughter.name,
+                    {},
+                    material == source.materials.end() ? std::string_view{} : material->second.name,
+                    false,
+                    &index_->tree.defaultTagsFor(daughter.logVolId, std::pair{volume, i})};
+                unsigned actions = 1;
+                for (const auto &rule : compiled) {
+                    auto matches = rule.local(view);
+                    if (rule.subtreeScope) {
+                        const auto scope = (*rule.subtreeScope)("");
+                        if (scope == false || matches == false)
+                            matches = false;
+                        else if (!scope || !matches)
+                            matches = std::nullopt;
+                    }
+                    const unsigned action = rule.action == config::SelectionAction::DropIf ? 2 : 1;
+                    if (matches == true)
+                        actions = action;
+                    else if (!matches)
+                        actions |= action;
+                }
+                allDrop = actions == 2;
+            }
+            droppedDescendants.emplace(volume, allDrop);
+        }
     }
     OccurrenceEvaluation result;
     result.index_ = index_;
     result.inputCount_ = size();
     result.mask_ = std::make_shared<detail::OccurrenceMask>(index_->total);
-    index_->walk(mask_.get(), [&](uint64_t ordinal, const NodeView &view, bool parentDropped,
-                                  std::string_view parentName) {
-        auto action = config::SelectionAction::KeepIf;
-        for (const auto &rule : compiled) {
-            if ((!rule.scope || (*rule.scope)(view)) && rule.predicate(view)) {
-                action = rule.action;
-            }
-        }
-        bool drop = action == config::SelectionAction::DropIf;
-        if (!hoist && parentDropped && !drop) {
-            // Each present occurrence is visited once and the root cannot be
-            // an orphan, so both counters remain below the checked source count.
-            ++result.orphanWarningCount_;
-            if (!options_.orphanDiagnosticLimit ||
-                result.orphanWarningCount_ <= *options_.orphanDiagnosticLimit) {
-                result.diags_.warn(
-                    codes::kWarnSelectionOrphan,
-                    std::format("node '{}' kept but parent '{}' dropped -- forcing drop", view.name,
-                                parentName),
-                    std::string{view.name});
+    index_->walk(
+        mask_.get(),
+        [&](uint64_t ordinal, const NodeView &view, bool parentDropped,
+            std::string_view parentName) {
+            ++result.evaluatedOccurrenceCount_;
+            auto action = config::SelectionAction::KeepIf;
+            if (options_.optimizeSharedEvaluation) {
+                for (auto it = compiled.rbegin(); it != compiled.rend(); ++it) {
+                    if ((!it->scope || (*it->scope)(view)) && it->predicate(view)) {
+                        action = it->action;
+                        break;
+                    }
+                }
             } else {
-                // Do not allocate or format a per-occurrence message after the
-                // detail budget is exhausted.
-                ++result.omittedOrphanDiagnosticCount_;
+                for (const auto &rule : compiled) {
+                    if ((!rule.scope || (*rule.scope)(view)) && rule.predicate(view))
+                        action = rule.action;
+                }
             }
-            drop = true;
-        }
-        if (!drop) {
-            result.mask_->set(ordinal);
-        }
-        return drop;
-    });
+            bool drop = action == config::SelectionAction::DropIf;
+            if (!hoist && parentDropped && !drop) {
+                // Each present occurrence is visited once and the root cannot be
+                // an orphan, so both counters remain below the checked source count.
+                ++result.orphanWarningCount_;
+                if (!options_.orphanDiagnosticLimit ||
+                    result.orphanWarningCount_ <= *options_.orphanDiagnosticLimit) {
+                    result.diags_.warn(
+                        codes::kWarnSelectionOrphan,
+                        std::format("node '{}' kept but parent '{}' dropped -- forcing drop",
+                                    view.name, parentName),
+                        std::string{view.name});
+                } else {
+                    // Do not allocate or format a per-occurrence message after the
+                    // detail budget is exhausted.
+                    ++result.omittedOrphanDiagnosticCount_;
+                }
+                drop = true;
+            }
+            if (!drop) {
+                result.mask_->set(ordinal);
+            }
+            return drop;
+        },
+        [&](std::string_view prefix, const OccurrenceId &id, ir::semantic::LogVolId volume,
+            uint64_t begin, uint64_t end) {
+            if (!options_.optimizeSharedEvaluation)
+                return false;
+            if (droppedDescendants.at(volume) && !index_->tree.hasPredicateOverridesBelow(id)) {
+                result.skippedOccurrenceCount_ +=
+                    mask_ ? mask_->rank(end) - mask_->rank(begin) : end - begin;
+                return true;
+            }
+            if (index_->tree.hasOriginalPathsBelow(id))
+                return false;
+            // Last matching rule wins. Unknown matches add a possible action;
+            // known matches replace all earlier possibilities.
+            unsigned actions = 1; // Keep
+            for (const auto &rule : compiled) {
+                auto matches = rule.subtree(prefix);
+                if (rule.subtreeScope) {
+                    const auto scope = (*rule.subtreeScope)(prefix);
+                    if (scope == false || matches == false)
+                        matches = false;
+                    else if (!scope || !matches)
+                        matches = std::nullopt;
+                }
+                const unsigned action = rule.action == config::SelectionAction::DropIf ? 2 : 1;
+                if (matches == true)
+                    actions = action;
+                else if (!matches)
+                    actions |= action;
+            }
+            if (actions != 2)
+                return false;
+            // Every omitted node explicitly drops: no orphan diagnostics are lost,
+            // even when hoisting is disabled or a prior selection removed ancestors.
+            result.skippedOccurrenceCount_ +=
+                mask_ ? mask_->rank(end) - mask_->rank(begin) : end - begin;
+            return true;
+        });
     if (result.omittedOrphanDiagnosticCount_ != 0) {
         result.diags_.warn(codes::kWarnSelectionOrphan,
                            std::format("{} additional orphan warnings omitted (detail limit {}); "

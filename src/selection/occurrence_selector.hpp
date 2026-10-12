@@ -19,11 +19,15 @@ struct OccurrenceSelectionOptions {
     // nullopt explicitly requests every detail. The default bounds retained
     // orphan messages; exact warning counts are independent of this limit.
     std::optional<uint64_t> orphanDiagnosticLimit{1024};
+    // Internal reference switch for differential tests and local benchmarks.
+    bool optimizeSharedEvaluation{true};
 };
 
 class OccurrenceEvaluation {
   public:
     [[nodiscard]] uint64_t keptCount() const;
+    [[nodiscard]] uint64_t evaluatedOccurrenceCount() const { return evaluatedOccurrenceCount_; }
+    [[nodiscard]] uint64_t skippedOccurrenceCount() const { return skippedOccurrenceCount_; }
     [[nodiscard]] uint64_t droppedCount() const;
     [[nodiscard]] bool contains(const OccurrenceId &id) const;
     [[nodiscard]] const DiagnosticList &diagnostics() const { return diags_; }
@@ -38,6 +42,8 @@ class OccurrenceEvaluation {
     std::shared_ptr<const detail::OccurrenceIndex> index_;
     std::shared_ptr<detail::OccurrenceMask> mask_;
     uint64_t inputCount_{};
+    uint64_t evaluatedOccurrenceCount_{};
+    uint64_t skippedOccurrenceCount_{};
     DiagnosticList diags_;
     uint64_t orphanWarningCount_{};
     uint64_t omittedOrphanDiagnosticCount_{};
