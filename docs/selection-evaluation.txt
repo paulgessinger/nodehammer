@@ -1,0 +1,56 @@
+Shared selection evaluation
+===========================
+
+Selection rules and the file format are unchanged. The evaluator avoids repeated
+predicate work and skips descendants only when their final action is provably an
+explicit drop. It never infers that dropping an ancestor makes all later keep
+rules irrelevant.
+
+Mechanism
+---------
+Rules are checked in reverse order, stopping at the last matching rule. Name and
+material predicate leaves cache at most 4096 distinct string results; tag leaves
+cache at most 4096 immutable tag-map identities. Caches live for one evaluation.
+Path and current leaf predicates remain occurrence-dependent.
+
+A postorder pass over reachable definitions proves whether every descendant is
+explicitly dropped. Unknown path, scope and current leaf predicates conservatively
+retain all possible actions. A later keep invalidates a proof whenever it could
+match. Sparse display-name and tag overrides block definition proofs only for the
+affected ancestor subtrees. A separate path-prefix proof supports trailing **;
+exact original-path overrides beneath a candidate prevent this shortcut.
+
+Skipping only explicit drops preserves orphan warning counts, message order and
+bounded diagnostic summaries. The existing occurrence mask still represents
+individual retained identities, so successive filters, hoisting and lazy
+materialization keep their semantics. No expanded tree is constructed.
+
+When the source has fewer than two occurrences per reachable definition on
+average, evaluation uses the ordinary traversal. This avoids paying for reusable
+proofs and predicate caches when there is too little structural reuse.
+
+Validation
+----------
+test_selection_cache.cpp compares membership and diagnostics against the retained
+reference evaluator across ordered rules, scopes, overrides, hoisting, bounded
+warnings, successive filters and deterministic generated rule sequences. A
+million-occurrence fixture checks skipped/evaluated counters and zero
+materializations, including a single exceptional keep.
+
+Local benchmark
+---------------
+Build the existing nodehammer_selection_bench target explicitly in Release:
+
+  cmake --build BUILD --target nodehammer_selection_bench
+  scripts/selection-bench.sh BUILD/tests/nodehammer_selection_bench \
+    --file INPUT.nhb.zst CONFIG.toml 3
+
+Append "reference" for the unoptimized evaluator in the same binary. JSON reports
+load, tree creation and index construction separately from each dryRun. Runs use
+the same unfiltered view but fresh evaluation caches. Peak RSS is cumulative
+process high-water, including setup. This target remains excluded from default
+builds and CTest; no benchmark timing gate is added to CI.
+
+Native results are a relative WASM proxy, not a browser latency claim. Export and
+tessellation are outside these measurements. The interactive ODD viewer remains
+a separate acceptance gate.
