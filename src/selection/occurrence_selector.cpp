@@ -3,8 +3,6 @@
 #include <diagnostic_codes.hpp>
 #include <selection/predicate.hpp>
 
-#include <glm/gtc/matrix_inverse.hpp>
-
 #include <bit>
 #include <format>
 #include <limits>
@@ -330,9 +328,18 @@ SelectedOccurrence SelectedOccurrences::materialize(const OccurrenceId &id) cons
             parent.resize(nearest);
         }
         if (parent != originalParent) {
-            result.localTransform =
-                glm::affineInverse(index_->tree.materialize(parent)->worldTransform) *
-                result.source->worldTransform;
+            // Compose the original local chain. Inverting world transforms
+            // introduces placement-dependent roundoff, so repeated assemblies
+            // no longer have identical mesh-cache keys after hoisting.
+            result.localTransform = glm::dmat4{1.0};
+            auto volume = index_->tree.rootPlacement().logVolId;
+            for (std::size_t depth = 0; depth < id.size(); ++depth) {
+                const auto &edge =
+                    index_->tree.sourceScene().logVols.at(volume).daughters.at(id[depth]);
+                if (depth >= parent.size())
+                    result.localTransform *= edge.localTransform;
+                volume = edge.logVolId;
+            }
         }
         result.parentId = std::move(parent);
     }
