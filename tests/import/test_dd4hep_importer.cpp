@@ -137,10 +137,10 @@ TEST_CASE("DD4hep selection paths agree with NHB readback", "[import][dd4hep]") 
     const auto bytes = nodehammer::ir::semanticSceneToBytes(direct.scene);
     const auto readback = nodehammer::ir::FlatBufferImporter::importFromBytes("box.nhb", bytes);
     std::unordered_set<std::string> directPaths, readbackPaths;
-    for (const auto &[id, node] : direct.scene.nodes) {
+    for (const auto &[id, node] : nodehammer::ir::semantic::expand(direct.scene).nodes) {
         directPaths.insert(node.originalPath);
     }
-    for (const auto &[id, node] : readback.scene.nodes) {
+    for (const auto &[id, node] : nodehammer::ir::semantic::expand(readback.scene).nodes) {
         readbackPaths.insert(node.originalPath);
     }
     REQUIRE(directPaths.contains("/world"));
