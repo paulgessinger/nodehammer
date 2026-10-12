@@ -2,8 +2,6 @@
 #include <selection/occurrence_selector.hpp>
 #include <selection/selector.hpp>
 
-#include <glm/gtc/matrix_inverse.hpp>
-
 #include <bit>
 #include <optional>
 #include <unordered_map>
@@ -182,7 +180,11 @@ DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &ru
                 if (frame.keptParent)
                     outputRoute.push_back(stack[*frame.keptParent].daughters.size());
                 if (hoisted) {
-                    frame.local = glm::affineInverse(stack[*frame.keptParent].world) * frame.world;
+                    // Keep repeated assemblies bit-identical in their retained
+                    // parent's frame, independent of the parent's world placement.
+                    frame.local = glm::dmat4{1.0};
+                    for (std::size_t i = *frame.keptParent + 1; i < stack.size(); ++i)
+                        frame.local *= stack[i].placement->localTransform;
                     // pathNames are arbitrary imported path strings. Joining the
                     // dropped segments at this root preserves descendant paths
                     // too, without changing raw placement or display names.
