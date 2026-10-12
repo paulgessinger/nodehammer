@@ -1,0 +1,433 @@
+# ILD_FCCee_v01 — k4geo 00-24 (Key4hep 2026-04-08)
+# Source: FCCee/ILD_FCCee/compact/ILD_FCCee_v01/ILD_FCCee_v01.xml
+# Use with analysis/fccee/geometry/ILD_FCCee_v01.nhb.zst.
+# ROOT/DD4hep native length unit in this build is cm; exports below use metres.
+# Simplified: sensitive silicon tracker placements, calorimeter/muon/drift envelopes,
+# and physical beam-line parts. Envelopes are display proxies, not material-budget models.
+# Fine calorimeter sampling, tracker support/services, wires and straws are omitted.
+
+hoist_orphans = true
+deduplicate_shapes = true
+
+[materials.vertex]
+base_color = "#E6B422"
+metallic = 0.15
+roughness = 0.55
+
+[materials.tracker]
+base_color = "#33B8B0"
+metallic = 0.15
+roughness = 0.55
+
+[materials.drift]
+base_color = "#65C7C2"
+metallic = 0.15
+roughness = 0.55
+
+[materials.ecal]
+base_color = "#E65B50"
+metallic = 0.15
+roughness = 0.55
+
+[materials.hcal]
+base_color = "#A75CB3"
+metallic = 0.15
+roughness = 0.55
+
+[materials.muon]
+base_color = "#527ED1"
+metallic = 0.15
+roughness = 0.55
+
+[materials.magnet]
+base_color = "#85919E"
+metallic = 0.15
+roughness = 0.55
+
+[materials.beam]
+base_color = "#ADB5BD"
+metallic = 0.15
+roughness = 0.55
+
+[materials.other]
+base_color = "#8EAD88"
+metallic = 0.15
+roughness = 0.55
+
+[materials.silicon]
+base_color = "#52B8A8"
+metallic = 0.35
+roughness = 0.35
+
+[materials.metal]
+base_color = "#A9AFB8"
+metallic = 0.8
+roughness = 0.4
+
+[materials.carbon]
+base_color = "#414852"
+metallic = 0.15
+roughness = 0.7
+
+[materials.scintillator]
+base_color = "#ED9D45"
+roughness = 0.5
+
+[materials.gas]
+base_color = "#68BCC218"
+alpha_mode = "blend"
+roughness = 0.7
+
+[export.gltf]
+unit_scale = 0.01
+bake_unit_scale = true
+
+[export.obj]
+unit_scale = 0.01
+
+[defaults.tessellation]
+max_segments_circle = 24
+fallback = "fail"
+skip_geometry = true
+
+[[selection_rules]]
+drop_if = 'true'
+
+# Keep subsystem headings to preserve a useful selection tree.
+[[selection_rules]]
+keep_if = [
+  'path ~= "/world"',
+  'path ~= "/world/CompSol"',
+  'path ~= "/world/ScreenSol"',
+  'path ~= "/world/Beampipe_STL"',
+  'path ~= "/world/Beampipe_crotch_STL"',
+  'path ~= "/world/Gold_STL"',
+  'path ~= "/world/Paraffin_STL"',
+  'path ~= "/world/Water_STL"',
+  'path ~= "/world/Tungsten_STL"',
+  'path ~= "/world/QC1"',
+  'path ~= "/world/LumiCal"',
+  'path ~= "/world/LumiCalInstrumentation"',
+  'path ~= "/world/LumiCalCooling"',
+  'path ~= "/world/LumiCalBackShield"',
+  'path ~= "/world/Vertex"',
+  'path ~= "/world/InnerTrackers"',
+  'path ~= "/world/TPC"',
+  'path ~= "/world/SET"',
+  'path ~= "/world/EcalBarrel"',
+  'path ~= "/world/EcalEndcap"',
+  'path ~= "/world/EcalPlug"',
+  'path ~= "/world/HcalBarrel"',
+  'path ~= "/world/HcalEndcap"',
+  'path ~= "/world/HcalRing"',
+  'path ~= "/world/YokeBarrel"',
+  'path ~= "/world/YokeEndcap"',
+  'path ~= "/world/Coil"',
+  'path ~= "/world/SServices00"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "/world/CompSol/tube_CompSol_0"',
+  'path ~= "/world/CompSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_0"',
+  'path ~= "/world/ScreenSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_2"',
+  'path ~= "/world/ScreenSol/tube_CompSol_3"',
+  'path ~= "/world/Gold_STL/envelope_0/\"Solid1<stl_0"',
+  'path ~= "/world/Paraffin_STL/envelope_0/\"Solid2<stl_0"',
+  'path ~= "/world/Water_STL/envelope_0/\"Componente1\"_0"',
+  'path ~= "/world/Tungsten_STL/envelope_0/ASCII_0"',
+  'path ~= "/world/QC1/tube_QC1L1u_0"',
+  'path ~= "/world/QC1/tube_QC1L1u_1"',
+  'path ~= "/world/QC1/tube_QC1L1d_2"',
+  'path ~= "/world/QC1/tube_QC1L1d_3"',
+  'path ~= "/world/QC1/tube_QC1L2u_4"',
+  'path ~= "/world/QC1/tube_QC1L2u_5"',
+  'path ~= "/world/QC1/tube_QC1L2d_6"',
+  'path ~= "/world/QC1/tube_QC1L2d_7"',
+  'path ~= "/world/QC1/tube_QC1L3u_8"',
+  'path ~= "/world/QC1/tube_QC1L3u_9"',
+  'path ~= "/world/QC1/tube_QC1L3d_10"',
+  'path ~= "/world/QC1/tube_QC1L3d_11"',
+  'path ~= "/world/QC1/tube_QC2L1u_12"',
+  'path ~= "/world/QC1/tube_QC2L1u_13"',
+  'path ~= "/world/QC1/tube_QC2L1d_14"',
+  'path ~= "/world/QC1/tube_QC2L1d_15"',
+  'path ~= "/world/QC1/tube_QC2L2u_16"',
+  'path ~= "/world/QC1/tube_QC2L2u_17"',
+  'path ~= "/world/QC1/tube_QC2L2d_18"',
+  'path ~= "/world/QC1/tube_QC2L2d_19"',
+  'path ~= "/world/LumiCal/Calorimeter1"',
+  'path ~= "/world/LumiCal/Calorimeter2"',
+  'path ~= "/world/TPC"',
+  'path ~= "/world/EcalBarrel"',
+  'path ~= "/world/EcalEndcap"',
+  'path ~= "/world/EcalPlug"',
+  'path ~= "/world/HcalBarrel"',
+  'path ~= "/world/HcalEndcap"',
+  'path ~= "/world/HcalRing"',
+  'path ~= "/world/YokeBarrel"',
+  'path ~= "/world/YokeEndcap"',
+  'path ~= "/world/Coil"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_0"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_1"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_2"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_3"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_4"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_5"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_6"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_7"',
+  'path ~= "/world/SServices00/containerLogical_0_8"',
+  'path ~= "/world/SServices00/containerLogical_0_9"',
+  'path ~= "/world/SServices00/containerLogical_0_10"',
+  'path ~= "/world/SServices00/containerLogical_0_11"',
+  'path ~= "/world/SServices00/containerLogical_0_12"',
+  'path ~= "/world/SServices00/containerLogical_0_13"',
+  'path ~= "/world/SServices00/containerLogical_0_14"',
+  'path ~= "/world/SServices00/containerLogical_0_15"',
+  'path ~= "/world/SServices00/containerLogical_1_16"',
+  'path ~= "/world/SServices00/containerLogical_1_17"',
+  'path ~= "/world/SServices00/containerLogical_1_18"',
+  'path ~= "/world/SServices00/containerLogical_1_19"',
+  'path ~= "/world/SServices00/containerLogical_1_20"',
+  'path ~= "/world/SServices00/containerLogical_1_21"',
+  'path ~= "/world/SServices00/containerLogical_1_22"',
+  'path ~= "/world/SServices00/containerLogical_1_23"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_24"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_26"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_28"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_30"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_32"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_34"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_36"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_38"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_25"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_27"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_29"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_31"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_33"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_35"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_37"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_39"',
+  'path ~= "/world/Beampipe_STL" || path ~= "/world/Beampipe_STL/**"',
+  'path ~= "/world/Beampipe_crotch_STL" || path ~= "/world/Beampipe_crotch_STL/**"',
+  'path ~= "/world/LumiCalInstrumentation" || path ~= "/world/LumiCalInstrumentation/**"',
+  'path ~= "/world/LumiCalCooling" || path ~= "/world/LumiCalCooling/**"',
+  'path ~= "/world/LumiCalBackShield" || path ~= "/world/LumiCalBackShield/**"',
+  'path ~= "/world/Vertex/**" && tag.sensitive == "true"',
+  'path ~= "/world/InnerTrackers/**" && tag.sensitive == "true"',
+  'path ~= "/world/SET/**" && tag.sensitive == "true"',
+]
+
+[[rules]]
+match = 'path ~= "/world/CompSol" || path ~= "/world/CompSol/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/ScreenSol" || path ~= "/world/ScreenSol/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/Beampipe_STL" || path ~= "/world/Beampipe_STL/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/Beampipe_crotch_STL" || path ~= "/world/Beampipe_crotch_STL/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/Gold_STL" || path ~= "/world/Gold_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/Paraffin_STL" || path ~= "/world/Paraffin_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/Water_STL" || path ~= "/world/Water_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/Tungsten_STL" || path ~= "/world/Tungsten_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/QC1" || path ~= "/world/QC1/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/LumiCal" || path ~= "/world/LumiCal/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "/world/LumiCalInstrumentation" || path ~= "/world/LumiCalInstrumentation/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/LumiCalCooling" || path ~= "/world/LumiCalCooling/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/LumiCalBackShield" || path ~= "/world/LumiCalBackShield/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/Vertex" || path ~= "/world/Vertex/**"'
+material = "vertex"
+
+[[rules]]
+match = 'path ~= "/world/InnerTrackers" || path ~= "/world/InnerTrackers/**"'
+material = "tracker"
+
+[[rules]]
+match = 'path ~= "/world/TPC" || path ~= "/world/TPC/**"'
+material = "drift"
+
+[[rules]]
+match = 'path ~= "/world/SET" || path ~= "/world/SET/**"'
+material = "tracker"
+
+[[rules]]
+match = 'path ~= "/world/EcalBarrel" || path ~= "/world/EcalBarrel/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "/world/EcalEndcap" || path ~= "/world/EcalEndcap/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "/world/EcalPlug" || path ~= "/world/EcalPlug/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "/world/HcalBarrel" || path ~= "/world/HcalBarrel/**"'
+material = "hcal"
+
+[[rules]]
+match = 'path ~= "/world/HcalEndcap" || path ~= "/world/HcalEndcap/**"'
+material = "hcal"
+
+[[rules]]
+match = 'path ~= "/world/HcalRing" || path ~= "/world/HcalRing/**"'
+material = "hcal"
+
+[[rules]]
+match = 'path ~= "/world/YokeBarrel" || path ~= "/world/YokeBarrel/**"'
+material = "muon"
+
+[[rules]]
+match = 'path ~= "/world/YokeEndcap" || path ~= "/world/YokeEndcap/**"'
+material = "muon"
+
+[[rules]]
+match = 'path ~= "/world/Coil" || path ~= "/world/Coil/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/SServices00" || path ~= "/world/SServices00/**"'
+material = "other"
+
+# Render these exact, observed envelope solids.
+[[rules]]
+match = [
+  'path ~= "/world/CompSol/tube_CompSol_0"',
+  'path ~= "/world/CompSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_0"',
+  'path ~= "/world/ScreenSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_2"',
+  'path ~= "/world/ScreenSol/tube_CompSol_3"',
+  'path ~= "/world/Gold_STL/envelope_0/\"Solid1<stl_0"',
+  'path ~= "/world/Paraffin_STL/envelope_0/\"Solid2<stl_0"',
+  'path ~= "/world/Water_STL/envelope_0/\"Componente1\"_0"',
+  'path ~= "/world/Tungsten_STL/envelope_0/ASCII_0"',
+  'path ~= "/world/QC1/tube_QC1L1u_0"',
+  'path ~= "/world/QC1/tube_QC1L1u_1"',
+  'path ~= "/world/QC1/tube_QC1L1d_2"',
+  'path ~= "/world/QC1/tube_QC1L1d_3"',
+  'path ~= "/world/QC1/tube_QC1L2u_4"',
+  'path ~= "/world/QC1/tube_QC1L2u_5"',
+  'path ~= "/world/QC1/tube_QC1L2d_6"',
+  'path ~= "/world/QC1/tube_QC1L2d_7"',
+  'path ~= "/world/QC1/tube_QC1L3u_8"',
+  'path ~= "/world/QC1/tube_QC1L3u_9"',
+  'path ~= "/world/QC1/tube_QC1L3d_10"',
+  'path ~= "/world/QC1/tube_QC1L3d_11"',
+  'path ~= "/world/QC1/tube_QC2L1u_12"',
+  'path ~= "/world/QC1/tube_QC2L1u_13"',
+  'path ~= "/world/QC1/tube_QC2L1d_14"',
+  'path ~= "/world/QC1/tube_QC2L1d_15"',
+  'path ~= "/world/QC1/tube_QC2L2u_16"',
+  'path ~= "/world/QC1/tube_QC2L2u_17"',
+  'path ~= "/world/QC1/tube_QC2L2d_18"',
+  'path ~= "/world/QC1/tube_QC2L2d_19"',
+  'path ~= "/world/LumiCal/Calorimeter1"',
+  'path ~= "/world/LumiCal/Calorimeter2"',
+  'path ~= "/world/TPC"',
+  'path ~= "/world/EcalBarrel"',
+  'path ~= "/world/EcalEndcap"',
+  'path ~= "/world/EcalPlug"',
+  'path ~= "/world/HcalBarrel"',
+  'path ~= "/world/HcalEndcap"',
+  'path ~= "/world/HcalRing"',
+  'path ~= "/world/YokeBarrel"',
+  'path ~= "/world/YokeEndcap"',
+  'path ~= "/world/Coil"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_0"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_1"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_2"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_3"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_4"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_5"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_6"',
+  'path ~= "/world/SServices00/EcalBarrelServicesContainerLogical_7"',
+  'path ~= "/world/SServices00/containerLogical_0_8"',
+  'path ~= "/world/SServices00/containerLogical_0_9"',
+  'path ~= "/world/SServices00/containerLogical_0_10"',
+  'path ~= "/world/SServices00/containerLogical_0_11"',
+  'path ~= "/world/SServices00/containerLogical_0_12"',
+  'path ~= "/world/SServices00/containerLogical_0_13"',
+  'path ~= "/world/SServices00/containerLogical_0_14"',
+  'path ~= "/world/SServices00/containerLogical_0_15"',
+  'path ~= "/world/SServices00/containerLogical_1_16"',
+  'path ~= "/world/SServices00/containerLogical_1_17"',
+  'path ~= "/world/SServices00/containerLogical_1_18"',
+  'path ~= "/world/SServices00/containerLogical_1_19"',
+  'path ~= "/world/SServices00/containerLogical_1_20"',
+  'path ~= "/world/SServices00/containerLogical_1_21"',
+  'path ~= "/world/SServices00/containerLogical_1_22"',
+  'path ~= "/world/SServices00/containerLogical_1_23"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_24"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_26"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_28"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_30"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_32"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_34"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_36"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZMinus_38"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_25"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_27"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_29"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_31"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_33"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_35"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_37"',
+  'path ~= "/world/SServices00/ServicesHcalModuleZPlus_39"',
+]
+[rules.tessellation]
+skip_geometry = false
+
+# Retain actual sensor and beam-line solids; no synthetic assembly boxes.
+[[rules]]
+match = [
+  'path ~= "/world/Vertex/**" && tag.sensitive == "true"',
+  'path ~= "/world/InnerTrackers/**" && tag.sensitive == "true"',
+  'path ~= "/world/SET/**" && tag.sensitive == "true"',
+  '(path ~= "/world/Beampipe_STL" || path ~= "/world/Beampipe_STL/**") && !(material ~= "Air" || material ~= "Vacuum" || material ~= "dummy")',
+  '(path ~= "/world/Beampipe_crotch_STL" || path ~= "/world/Beampipe_crotch_STL/**") && !(material ~= "Air" || material ~= "Vacuum" || material ~= "dummy")',
+  '(path ~= "/world/LumiCalInstrumentation" || path ~= "/world/LumiCalInstrumentation/**") && !(material ~= "Air" || material ~= "Vacuum" || material ~= "dummy")',
+  '(path ~= "/world/LumiCalCooling" || path ~= "/world/LumiCalCooling/**") && !(material ~= "Air" || material ~= "Vacuum" || material ~= "dummy")',
+  '(path ~= "/world/LumiCalBackShield" || path ~= "/world/LumiCalBackShield/**") && !(material ~= "Air" || material ~= "Vacuum" || material ~= "dummy")',
+]
+[rules.tessellation]
+skip_geometry = false

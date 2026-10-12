@@ -1,0 +1,225 @@
+# FCCee_o1_v06 — k4geo 00-24 (Key4hep 2026-04-08)
+# Source: FCCee/CLD/compact/FCCee_o1_v06/FCCee_o1_v06.xml
+# Use with analysis/fccee/geometry/FCCee_o1_v06.nhb.zst.
+# ROOT/DD4hep native length unit in this build is cm; exports below use metres.
+# Detailed: retain all placements and material layers; no merging or face removal.
+# Suppress non-sensitive air/vacuum and synthetic assembly boxes, not their children.
+
+hoist_orphans = false
+deduplicate_shapes = true
+
+[materials.vertex]
+base_color = "#E6B422"
+metallic = 0.15
+roughness = 0.55
+
+[materials.tracker]
+base_color = "#33B8B0"
+metallic = 0.15
+roughness = 0.55
+
+[materials.drift]
+base_color = "#65C7C2"
+metallic = 0.15
+roughness = 0.55
+
+[materials.ecal]
+base_color = "#E65B50"
+metallic = 0.15
+roughness = 0.55
+
+[materials.hcal]
+base_color = "#A75CB3"
+metallic = 0.15
+roughness = 0.55
+
+[materials.muon]
+base_color = "#527ED1"
+metallic = 0.15
+roughness = 0.55
+
+[materials.magnet]
+base_color = "#85919E"
+metallic = 0.15
+roughness = 0.55
+
+[materials.beam]
+base_color = "#ADB5BD"
+metallic = 0.15
+roughness = 0.55
+
+[materials.other]
+base_color = "#8EAD88"
+metallic = 0.15
+roughness = 0.55
+
+[materials.silicon]
+base_color = "#52B8A8"
+metallic = 0.35
+roughness = 0.35
+
+[materials.metal]
+base_color = "#A9AFB8"
+metallic = 0.8
+roughness = 0.4
+
+[materials.carbon]
+base_color = "#414852"
+metallic = 0.15
+roughness = 0.7
+
+[materials.scintillator]
+base_color = "#ED9D45"
+roughness = 0.5
+
+[materials.gas]
+base_color = "#68BCC218"
+alpha_mode = "blend"
+roughness = 0.7
+
+[export.gltf]
+unit_scale = 0.01
+bake_unit_scale = true
+
+[export.obj]
+unit_scale = 0.01
+
+[defaults.tessellation]
+max_segments_circle = 64
+fallback = "fail"
+merge_descendants = false
+drop_coincident_faces = false
+average_material_stack = false
+
+[[selection_rules]]
+keep_if = 'true'
+
+[[rules]]
+match = 'path ~= "/world/BeBeampipe" || path ~= "/world/BeBeampipe/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/BeamPipe" || path ~= "/world/BeamPipe/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/BeamPipeShield" || path ~= "/world/BeamPipeShield/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/BeamPipeShield_noRot" || path ~= "/world/BeamPipeShield_noRot/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/HOMAbsorber" || path ~= "/world/HOMAbsorber/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/HOMAbsorbers_PunchThrough" || path ~= "/world/HOMAbsorbers_PunchThrough/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/CompSol" || path ~= "/world/CompSol/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/ScreenSol" || path ~= "/world/ScreenSol/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/LumiCal" || path ~= "/world/LumiCal/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "/world/LumiCalInstrumentation" || path ~= "/world/LumiCalInstrumentation/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/LumiCalCooling" || path ~= "/world/LumiCalCooling/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/LumiCalBackShield" || path ~= "/world/LumiCalBackShield/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/Vertex" || path ~= "/world/Vertex/**"'
+material = "vertex"
+
+[[rules]]
+match = 'path ~= "/world/InnerTrackers" || path ~= "/world/InnerTrackers/**"'
+material = "tracker"
+
+[[rules]]
+match = 'path ~= "/world/OuterTrackers" || path ~= "/world/OuterTrackers/**"'
+material = "tracker"
+
+[[rules]]
+match = 'path ~= "/world/ECalBarrel" || path ~= "/world/ECalBarrel/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "/world/ECalEndcap" || path ~= "/world/ECalEndcap/**"'
+material = "ecal"
+
+[[rules]]
+match = 'path ~= "/world/HCalBarrel" || path ~= "/world/HCalBarrel/**"'
+material = "hcal"
+
+[[rules]]
+match = 'path ~= "/world/HCalEndcaps" || path ~= "/world/HCalEndcaps/**"'
+material = "hcal"
+
+[[rules]]
+match = 'path ~= "/world/Solenoid" || path ~= "/world/Solenoid/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/YokeBarrel" || path ~= "/world/YokeBarrel/**"'
+material = "muon"
+
+[[rules]]
+match = 'path ~= "/world/YokeEndcap" || path ~= "/world/YokeEndcap/**"'
+material = "muon"
+
+[[rules]]
+match = [
+  'material ~= "Silicon"',
+]
+material = "silicon"
+
+[[rules]]
+match = [
+  'material ~= "Aluminium"',
+  'material ~= "Aluminum"',
+  'material ~= "Copper"',
+  'material ~= "Gold"',
+  'material ~= "Iron"',
+  'material ~= "Steel235"',
+  'material ~= "Tungsten"',
+]
+material = "metal"
+
+[[rules]]
+match = [
+  'material ~= "CarbonFiber"',
+  'material ~= "CarbonFiber_25D"',
+]
+material = "carbon"
+
+[[rules]]
+match = [
+  'material ~= "Polystyrene"',
+]
+material = "scintillator"
+
+[[rules]]
+match = [
+  'material ~= "RPCGasDefault"',
+]
+material = "gas"
+
+[[rules]]
+match = 'path ~= "/world" || ((material ~= "Air" || material ~= "Vacuum" || material ~= "beam" || material ~= "dummy") && !(tag.sensitive == "true"))'
+[rules.tessellation]
+skip_geometry = true

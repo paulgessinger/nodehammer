@@ -1,0 +1,227 @@
+# MDI_o1_CADBased_v01 — k4geo 00-24 (Key4hep 2026-04-08)
+# Source: FCCee/MDI/compact/MDI_o1_CADBased_v01/MDI_standalone_o1_v01.xml
+# Use with analysis/fccee/geometry/MDI_o1_CADBased_v01.nhb.zst.
+# ROOT/DD4hep native length unit in this build is cm; exports below use metres.
+# Simplified: sensitive silicon tracker placements, calorimeter/muon/drift envelopes,
+# and physical beam-line parts. Envelopes are display proxies, not material-budget models.
+# Fine calorimeter sampling, tracker support/services, wires and straws are omitted.
+
+hoist_orphans = true
+deduplicate_shapes = true
+
+[materials.vertex]
+base_color = "#E6B422"
+metallic = 0.15
+roughness = 0.55
+
+[materials.tracker]
+base_color = "#33B8B0"
+metallic = 0.15
+roughness = 0.55
+
+[materials.drift]
+base_color = "#65C7C2"
+metallic = 0.15
+roughness = 0.55
+
+[materials.ecal]
+base_color = "#E65B50"
+metallic = 0.15
+roughness = 0.55
+
+[materials.hcal]
+base_color = "#A75CB3"
+metallic = 0.15
+roughness = 0.55
+
+[materials.muon]
+base_color = "#527ED1"
+metallic = 0.15
+roughness = 0.55
+
+[materials.magnet]
+base_color = "#85919E"
+metallic = 0.15
+roughness = 0.55
+
+[materials.beam]
+base_color = "#ADB5BD"
+metallic = 0.15
+roughness = 0.55
+
+[materials.other]
+base_color = "#8EAD88"
+metallic = 0.15
+roughness = 0.55
+
+[materials.silicon]
+base_color = "#52B8A8"
+metallic = 0.35
+roughness = 0.35
+
+[materials.metal]
+base_color = "#A9AFB8"
+metallic = 0.8
+roughness = 0.4
+
+[materials.carbon]
+base_color = "#414852"
+metallic = 0.15
+roughness = 0.7
+
+[materials.scintillator]
+base_color = "#ED9D45"
+roughness = 0.5
+
+[materials.gas]
+base_color = "#68BCC218"
+alpha_mode = "blend"
+roughness = 0.7
+
+[export.gltf]
+unit_scale = 0.01
+bake_unit_scale = true
+
+[export.obj]
+unit_scale = 0.01
+
+[defaults.tessellation]
+max_segments_circle = 24
+fallback = "fail"
+skip_geometry = true
+
+[[selection_rules]]
+drop_if = 'true'
+
+# Keep subsystem headings to preserve a useful selection tree.
+[[selection_rules]]
+keep_if = [
+  'path ~= "/world"',
+  'path ~= "/world/Beampipe_STL"',
+  'path ~= "/world/Beampipe_crotch_STL"',
+  'path ~= "/world/Gold_STL"',
+  'path ~= "/world/Paraffin_STL"',
+  'path ~= "/world/Water_STL"',
+  'path ~= "/world/Tungsten_STL"',
+  'path ~= "/world/CompSol"',
+  'path ~= "/world/ScreenSol"',
+  'path ~= "/world/QC1"',
+]
+
+[[selection_rules]]
+keep_if = [
+  'path ~= "/world/Gold_STL/envelope_0/\"Solid1<stl_0"',
+  'path ~= "/world/Paraffin_STL/envelope_0/\"Solid2<stl_0"',
+  'path ~= "/world/Water_STL/envelope_0/\"Componente1\"_0"',
+  'path ~= "/world/Tungsten_STL/envelope_0/ASCII_0"',
+  'path ~= "/world/CompSol/tube_CompSol_0"',
+  'path ~= "/world/CompSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_0"',
+  'path ~= "/world/ScreenSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_2"',
+  'path ~= "/world/ScreenSol/tube_CompSol_3"',
+  'path ~= "/world/QC1/tube_QC1L1u_0"',
+  'path ~= "/world/QC1/tube_QC1L1u_1"',
+  'path ~= "/world/QC1/tube_QC1L1d_2"',
+  'path ~= "/world/QC1/tube_QC1L1d_3"',
+  'path ~= "/world/QC1/tube_QC1L2u_4"',
+  'path ~= "/world/QC1/tube_QC1L2u_5"',
+  'path ~= "/world/QC1/tube_QC1L2d_6"',
+  'path ~= "/world/QC1/tube_QC1L2d_7"',
+  'path ~= "/world/QC1/tube_QC1L3u_8"',
+  'path ~= "/world/QC1/tube_QC1L3u_9"',
+  'path ~= "/world/QC1/tube_QC1L3d_10"',
+  'path ~= "/world/QC1/tube_QC1L3d_11"',
+  'path ~= "/world/QC1/tube_QC2L1u_12"',
+  'path ~= "/world/QC1/tube_QC2L1u_13"',
+  'path ~= "/world/QC1/tube_QC2L1d_14"',
+  'path ~= "/world/QC1/tube_QC2L1d_15"',
+  'path ~= "/world/QC1/tube_QC2L2u_16"',
+  'path ~= "/world/QC1/tube_QC2L2u_17"',
+  'path ~= "/world/QC1/tube_QC2L2d_18"',
+  'path ~= "/world/QC1/tube_QC2L2d_19"',
+  'path ~= "/world/Beampipe_STL" || path ~= "/world/Beampipe_STL/**"',
+  'path ~= "/world/Beampipe_crotch_STL" || path ~= "/world/Beampipe_crotch_STL/**"',
+]
+
+[[rules]]
+match = 'path ~= "/world/Beampipe_STL" || path ~= "/world/Beampipe_STL/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/Beampipe_crotch_STL" || path ~= "/world/Beampipe_crotch_STL/**"'
+material = "beam"
+
+[[rules]]
+match = 'path ~= "/world/Gold_STL" || path ~= "/world/Gold_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/Paraffin_STL" || path ~= "/world/Paraffin_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/Water_STL" || path ~= "/world/Water_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/Tungsten_STL" || path ~= "/world/Tungsten_STL/**"'
+material = "other"
+
+[[rules]]
+match = 'path ~= "/world/CompSol" || path ~= "/world/CompSol/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/ScreenSol" || path ~= "/world/ScreenSol/**"'
+material = "magnet"
+
+[[rules]]
+match = 'path ~= "/world/QC1" || path ~= "/world/QC1/**"'
+material = "other"
+
+# Render these exact, observed envelope solids.
+[[rules]]
+match = [
+  'path ~= "/world/Gold_STL/envelope_0/\"Solid1<stl_0"',
+  'path ~= "/world/Paraffin_STL/envelope_0/\"Solid2<stl_0"',
+  'path ~= "/world/Water_STL/envelope_0/\"Componente1\"_0"',
+  'path ~= "/world/Tungsten_STL/envelope_0/ASCII_0"',
+  'path ~= "/world/CompSol/tube_CompSol_0"',
+  'path ~= "/world/CompSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_0"',
+  'path ~= "/world/ScreenSol/tube_CompSol_1"',
+  'path ~= "/world/ScreenSol/tube_CompSol_2"',
+  'path ~= "/world/ScreenSol/tube_CompSol_3"',
+  'path ~= "/world/QC1/tube_QC1L1u_0"',
+  'path ~= "/world/QC1/tube_QC1L1u_1"',
+  'path ~= "/world/QC1/tube_QC1L1d_2"',
+  'path ~= "/world/QC1/tube_QC1L1d_3"',
+  'path ~= "/world/QC1/tube_QC1L2u_4"',
+  'path ~= "/world/QC1/tube_QC1L2u_5"',
+  'path ~= "/world/QC1/tube_QC1L2d_6"',
+  'path ~= "/world/QC1/tube_QC1L2d_7"',
+  'path ~= "/world/QC1/tube_QC1L3u_8"',
+  'path ~= "/world/QC1/tube_QC1L3u_9"',
+  'path ~= "/world/QC1/tube_QC1L3d_10"',
+  'path ~= "/world/QC1/tube_QC1L3d_11"',
+  'path ~= "/world/QC1/tube_QC2L1u_12"',
+  'path ~= "/world/QC1/tube_QC2L1u_13"',
+  'path ~= "/world/QC1/tube_QC2L1d_14"',
+  'path ~= "/world/QC1/tube_QC2L1d_15"',
+  'path ~= "/world/QC1/tube_QC2L2u_16"',
+  'path ~= "/world/QC1/tube_QC2L2u_17"',
+  'path ~= "/world/QC1/tube_QC2L2d_18"',
+  'path ~= "/world/QC1/tube_QC2L2d_19"',
+]
+[rules.tessellation]
+skip_geometry = false
+
+# Retain actual sensor and beam-line solids; no synthetic assembly boxes.
+[[rules]]
+match = [
+  '(path ~= "/world/Beampipe_STL" || path ~= "/world/Beampipe_STL/**") && !(material ~= "Air" || material ~= "dummy")',
+  '(path ~= "/world/Beampipe_crotch_STL" || path ~= "/world/Beampipe_crotch_STL/**") && !(material ~= "Air" || material ~= "dummy")',
+]
+[rules.tessellation]
+skip_geometry = false

@@ -1,0 +1,32 @@
+Full IDEA processing follow-up
+==============================
+These configs were authored against the reduced NHS8 outputs in the local
+analysis/fccee/geometry directory. IDEA_o1_v03 and IDEA_o2_v01 omit large
+fiber/capillary calorimeter internals. Their detailed configs retain the
+remaining geometry and explicitly tagged envelope proxies; they are not
+complete full-detail models. Preserve that distinction when distributing them.
+
+The reduced exporter tagged boundaries with omitted_calorimeter_internals=true
+and the root with partial_geometry=true. Local *.omissions.json files record
+boundaries and counts. Those geometry files/reports are not part of this branch.
+
+As of 2026-10-12, shared import/storage and selection are separate PR work:
+- #109 separates expanded nodes and common catalogs.
+- #110 introduces canonical shared import/selection.
+- #107 adds NHS9 FlatBuffers with NHS8 read compatibility.
+- #111 preserves sharing in selected exports.
+- #113 accelerates selection of discarded repeated subtrees.
+
+Full IDEA o1/o2 contain about 260/266 million occurrences. Expanding these
+occurrences exhausts memory, and NHS8 serialization can exceed the FlatBuffers
+single-buffer limit before whole-file compression. Full shared NHS9 exports
+exist locally, but replacing the reduced inputs requires checking the authored
+selections and envelope assumptions against those inputs and validating
+end-to-end tessellation and rendering. These configs do not automatically
+remove fibers from arbitrary full inputs.
+
+PR #113 measures full IDEA o2 fiber/capillary removal at 2.68 seconds native
+selection-only. Nonempty rules retaining fibers still visit retained occurrences;
+bulk retention remains future work. No WASM timing or interactive viewer
+acceptance is claimed. Rendering/picking integration and full-detail mesh
+output remain separate from restoring this config collection.
