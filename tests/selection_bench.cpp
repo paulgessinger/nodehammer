@@ -1,5 +1,7 @@
 // Selection-only baseline. Fixture construction and scene copies are outside timers.
 // prune() includes its own evaluation: do not subtract dryRun() to infer prune cost.
+#include <config/config_loader.hpp>
+#include <ir/semantic/flatbuffer.hpp>
 #include <selection/occurrence_selector.hpp>
 #include <selection/selector.hpp>
 
@@ -9,6 +11,7 @@
 #include <algorithm>
 #include <charconv>
 #include <chrono>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -297,10 +300,70 @@ nlohmann::json runShared(const nodehammer::ir::expanded::Scene &source, const Sc
              "expanded correctness reference also consume memory. RSS includes all of them."}};
 }
 
+// Real-file mode keeps decoding and index setup outside the selection timer.
+// Each dryRun starts from the same unfiltered view, with fresh predicate caches.
+nlohmann::json runFile(const char *inputPath, const char *configPath, std::size_t runs,
+                       bool optimized) {
+    auto start = Clock::now();
+    const auto seconds = [&] {
+        return std::chrono::duration<double>(Clock::now() - start).count();
+    };
+    std::ifstream input(inputPath, std::ios::binary);
+    require(bool(input), "cannot open geometry input");
+    std::vector<uint8_t> bytes((std::istreambuf_iterator<char>(input)), {});
+    auto scene = sceneFromBytes(std::as_bytes(std::span{bytes}));
+    bytes.clear();
+    bytes.shrink_to_fit();
+    const auto loadSeconds = seconds();
+    auto config = ConfigLoader::loadFromFile(configPath).config;
+    start = Clock::now();
+    auto tree = scene.makeTree(0);
+    const auto treeSeconds = seconds();
+    selection::OccurrenceSelectionOptions options;
+    options.optimizeSharedEvaluation = optimized;
+    start = Clock::now();
+    selection::SelectedOccurrences selected{*tree, options};
+    const auto indexSeconds = seconds();
+    nlohmann::json result{{"input", inputPath},
+                          {"config", configPath},
+                          {"optimized", optimized},
+                          {"load_seconds", loadSeconds},
+                          {"tree_seconds", treeSeconds},
+                          {"index_seconds", indexSeconds},
+                          {"occurrences", selected.size()},
+                          {"rule_count", config.selection.size()},
+                          {"runs", nlohmann::json::array()}};
+    for (std::size_t run = 0; run < runs; ++run) {
+        start = Clock::now();
+        auto evaluation = selected.dryRun(config.selection, config.hoistOrphans);
+        const auto duration = seconds();
+        result["runs"].push_back({{"seconds", duration},
+                                  {"kept", evaluation.keptCount()},
+                                  {"dropped", evaluation.droppedCount()},
+                                  {"orphan_warnings", evaluation.orphanWarningCount()},
+                                  {"diagnostics", evaluation.diagnostics().items().size()},
+                                  {"evaluated_occurrences", evaluation.evaluatedOccurrenceCount()},
+                                  {"skipped_occurrences", evaluation.skippedOccurrenceCount()}});
+    }
+    result["process_peak_rss_bytes"] = peakRss();
+    result["rss_note"] = "Cumulative process high-water, including decoding, tree and index setup.";
+    result["materializations"] = tree->materializationCount();
+    return result;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
     try {
+        if (argc > 1 && std::string_view{argv[1]} == "--file") {
+            if (argc < 4 || argc > 6 || (argc == 6 && std::string_view{argv[5]} != "reference"))
+                throw std::runtime_error(
+                    "usage: nodehammer_selection_bench --file INPUT CONFIG [runs] [reference]");
+            std::cout
+                << runFile(argv[2], argv[3], argc > 4 ? positive(argv[4]) : 3, argc < 6).dump(2)
+                << '\n';
+            return 0;
+        }
         if (argc > 5) {
             throw std::runtime_error(
                 "usage: nodehammer_selection_bench [modules] [fibers] [runs] [warmups]");

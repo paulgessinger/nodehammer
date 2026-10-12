@@ -5,6 +5,9 @@
 #
 # Usage: scripts/selection-bench.sh <binary> [modules=256] [fibers=1024] [runs=5] [warmups=1]
 # Example: scripts/selection-bench.sh build/key4hep/build/Release/tests/nodehammer_selection_bench > selection.json
+# Real geometry (setup and selection timed separately):
+#   scripts/selection-bench.sh <binary> --file INPUT.nhb.zst CONFIG.toml 3
+# Append reference to disable shared optimizations for a same-build comparison.
 # Each invocation is a fresh process; process_peak_rss_bytes is cumulative across
 # scenarios and includes scene copying and correctness checks, not just selection.
 set -euo pipefail
