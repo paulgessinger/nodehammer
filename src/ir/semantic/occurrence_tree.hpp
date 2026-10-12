@@ -2,6 +2,7 @@
 
 #include <ir/semantic.hpp>
 
+#include <algorithm>
 #include <list>
 #include <memory>
 #include <stdexcept>
@@ -65,6 +66,14 @@ class OccurrenceTree {
             }
         }
         return value;
+    }
+
+    // Exact overrides on the subtree root do not affect its descendants.
+    [[nodiscard]] bool hasPredicateOverridesBelow(const OccurrenceId &id) const {
+        return hasDescendant(tags_, id) || hasDescendant(displayNames_, id);
+    }
+    [[nodiscard]] bool hasOriginalPathsBelow(const OccurrenceId &id) const {
+        return hasDescendant(originalPaths_, id);
     }
 
     void setOriginalPath(const OccurrenceId &id, std::string path) {
@@ -169,6 +178,12 @@ class OccurrenceTree {
         if (auto it = tags_.find(id); it != tags_.end()) {
             return *tagSets_.at(it->second);
         }
+        return defaultTagsFor(volume, placement);
+    }
+    // Shared defaults only; deliberately excludes even a root occurrence override.
+    [[nodiscard]] const OccurrenceTags &
+    defaultTagsFor(LogVolId volume,
+                   std::optional<std::pair<LogVolId, std::size_t>> placement = std::nullopt) const {
         const auto vol = volumeTags_.find(volume);
         const auto edge = placement ? placementTags_.find(*placement) : placementTags_.end();
         if (vol == volumeTags_.end() && edge == placementTags_.end()) {
@@ -242,6 +257,11 @@ class OccurrenceTree {
     }
 
   private:
+    template <class Map> static bool hasDescendant(const Map &values, const OccurrenceId &id) {
+        const auto it = values.upper_bound(id);
+        return it != values.end() && it->first.size() > id.size() &&
+               std::equal(id.begin(), id.end(), it->first.begin());
+    }
     using PlacementKey = std::pair<LogVolId, std::size_t>;
     [[nodiscard]] std::pair<LogVolId, std::optional<PlacementKey>>
     locate(const OccurrenceId &id) const {
