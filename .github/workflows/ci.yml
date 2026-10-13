@@ -1132,29 +1132,35 @@ jobs:
           draft: false
 
   lcg:
-    name: LCG 109 (el9-gcc15-opt)
+    name: Key4hep FCC-ee (TGeo/DD4hep)
+    timeout-minutes: 90
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Mount CVMFS
         uses: cvmfs-contrib/github-action-cvmfs@72f2a8d366043978d6aebee154bc9ed321c2f2a8 # v5.6
+        with:
+          cvmfs_repositories: "sft.cern.ch,sft-nightlies.cern.ch,geant4.cern.ch,sw.hsf.org"
 
       - name: Restore Conan cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.conan2/p
-          key: conan-lcg109-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
+          key: conan-key4hep-20260408-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
           restore-keys: |
-            conan-lcg109-${{ hashFiles('conanfile.py') }}-
-            conan-lcg109-
+            conan-key4hep-20260408-${{ hashFiles('conanfile.py') }}-
+            conan-key4hep-20260408-
 
-      - name: Build and test in LCG view
+      - name: Build, test and convert FCC-ee in Key4hep
         uses: aidasoft/run-lcg-view@b4da52e1c5ccb70a60ad4e7216de0a90664d5849 # v6.0.2
         with:
-          release-platform: "LCG_109/x86_64-el9-gcc15-opt"
-          ccache-key: ccache-lcg109
+          container: el9
+          view-path: /cvmfs/sw.hsf.org/key4hep
+          setup-script: "setup.sh -r 2026-04-08"
+          ccache-key: ccache-key4hep-20260408
           run: |
+            set -euo pipefail
             export CONAN_HOME=$(pwd)/.conan2
             curl -LsSf https://astral.sh/uv/0.11.7/install.sh | sh
             source "$HOME/.local/bin/env"
@@ -1171,10 +1177,23 @@ jobs:
             ci/verify-shared-install.sh stage
             # Separate configure: this must succeed without discovering any of
             # the full build's processing or application dependencies.
-            bash ci/verify-ingest.sh build/ingestion-lcg \
+            bash ci/verify-ingest.sh build/ingestion-key4hep \
               -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
+            python3 -m unittest discover -s ci -p "test_fccee.py"
+            python3 ci/fccee.py
 
-      # blubb
+      - name: Upload FCC-ee diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fccee-results
+          path: |
+            build/fccee-results/**/*.json
+            build/fccee-results/**/*.toml
+            build/fccee-results/**/*.log
+            build/fccee-results/**/*.stdout
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Fix Conan cache ownership
         if: always()
@@ -1185,4 +1204,4 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ github.workspace }}/.conan2/p
-          key: conan-lcg109-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
+          key: conan-key4hep-20260408-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
