@@ -866,7 +866,9 @@ endif()
 
 # Global-detector opt-in and exit warning belong only to the native CLI.
 if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
-    target_sources(nodehammer PRIVATE src/cli/cmd_dd4hep_native.cpp)
+    nh_backend_objects(nodehammer_dd4hep_native_objs src/cli/cmd_dd4hep_native.cpp)
+    target_compile_definitions(nodehammer_dd4hep_native_objs PRIVATE NH_STATIC)
+    target_sources(nodehammer PRIVATE $<TARGET_OBJECTS:nodehammer_dd4hep_native_objs>)
     target_link_libraries(nodehammer PRIVATE DD4hep::DDCore)
 endif()
 

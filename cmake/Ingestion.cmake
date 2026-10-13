@@ -71,8 +71,10 @@ add_custom_command(OUTPUT ${NH_SHARED_GENERATED}
     VERBATIM)
 add_custom_target(nodehammer_semantic_generate DEPENDS ${NH_SEMANTIC_GENERATED} ${NH_SHARED_GENERATED})
 
-function(nh_ingest_objects target)
-    add_library(${target} OBJECT EXCLUDE_FROM_ALL ${NH_INGEST_SOURCES})
+# ROOT-facing adapters and tests share the ingestion language boundary. Do not
+# link nodehammer_lib here: its C++23 interface requirement would raise the floor.
+function(nh_backend_objects target)
+    add_library(${target} OBJECT EXCLUDE_FROM_ALL ${ARGN})
     set_target_properties(${target} PROPERTIES
         CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
     if(NOT EMSCRIPTEN)
@@ -80,9 +82,9 @@ function(nh_ingest_objects target)
     endif()
     add_dependencies(${target} nodehammer_semantic_generate)
     target_include_directories(${target} PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_BINARY_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_BINARY_DIR}/include
+        ${PROJECT_SOURCE_DIR}/src)
     target_include_directories(${target} SYSTEM PRIVATE ${NH_FBS_GENERATED_DIR})
     # Retain header packages' transitive compile requirements (including any
     # definitions supplied by the embedding project). The object consumers
@@ -97,6 +99,10 @@ function(nh_ingest_objects target)
     target_compile_definitions(${target} PRIVATE ${NH_INGEST_DEFINES})
     nh_set_compiler_options(${target})
     nh_set_visibility(${target})
+endfunction()
+
+function(nh_ingest_objects target)
+    nh_backend_objects(${target} ${NH_INGEST_SOURCES})
 endfunction()
 
 nh_ingest_objects(nodehammer_ingest_objs)

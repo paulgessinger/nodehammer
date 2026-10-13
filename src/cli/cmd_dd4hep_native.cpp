@@ -1,10 +1,11 @@
 // Native-executable policy: redirect plugin output and explain premature
 // process exit during XML loading. Never linked into the callable CLI or the SDK.
-#include "cli_common.hpp"
+#include "run_internal.hpp"
 
-#include <ir/dd4hep/semantic/importer.hpp>
+#include <diagnostic_codes.hpp>
 
-#include <DD4hep/Detector.h>
+#include <ir/semantic/importer.hpp>
+
 #include <DD4hep/Printout.h>
 #include <TError.h>
 

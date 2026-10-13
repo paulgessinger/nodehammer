@@ -253,18 +253,25 @@ if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
     target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_TGEO=1)
 endif()
 
+set(_nh_backend_tests "")
 if(NODEHAMMER_WITH_TGEO)
-    target_sources(nodehammer_tests PRIVATE import/test_tgeo_importer.cpp)
-    target_sources(nodehammer_tests PRIVATE tessellation/test_tgeo_tessellation.cpp)
-    target_compile_definitions(nodehammer_tests PRIVATE
-        NODEHAMMER_TESS_OBJ_DIR="${CMAKE_BINARY_DIR}/tessellation_obj"
-    )
+    list(APPEND _nh_backend_tests import/test_tgeo_importer.cpp)
+    list(APPEND _nh_backend_tests tessellation/test_tgeo_tessellation.cpp)
 endif()
 
 if(NODEHAMMER_WITH_DD4HEP)
-    target_sources(nodehammer_tests PRIVATE import/test_shared_dd4hep.cpp)
-    target_sources(nodehammer_tests PRIVATE import/test_dd4hep_importer.cpp)
+    list(APPEND _nh_backend_tests import/test_shared_dd4hep.cpp)
+    list(APPEND _nh_backend_tests import/test_dd4hep_importer.cpp)
     target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_DD4HEP=1)
+endif()
+
+if(_nh_backend_tests)
+    nh_backend_objects(nodehammer_backend_test_objs ${_nh_backend_tests})
+    target_compile_definitions(nodehammer_backend_test_objs PRIVATE NH_STATIC NH_WITH_TGEO=1
+        NODEHAMMER_FIXTURES_DIR="${CMAKE_SOURCE_DIR}/fixtures"
+        NODEHAMMER_TESS_OBJ_DIR="${CMAKE_BINARY_DIR}/tessellation_obj")
+    target_link_libraries(nodehammer_backend_test_objs PRIVATE Catch2::Catch2 manifold::manifold)
+    target_sources(nodehammer_tests PRIVATE $<TARGET_OBJECTS:nodehammer_backend_test_objs>)
 endif()
 
 nh_set_compiler_options(nodehammer_tests)
@@ -392,6 +399,9 @@ if(NODEHAMMER_BUILD_SHARED)
         public/test_public_semantic_scene.cpp
     )
 
+    set_target_properties(nodehammer_public_tests PROPERTIES
+        CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+
     # No nodehammer_lib, no fixtures directory, no TinyGLTF: this suite reaches
     # the library only through <nodehammer/*.hpp>, and it builds every input it
     # needs through the API itself. The include path still *reaches* src/ —
@@ -441,18 +451,25 @@ endif()
 
 # Link the test factory into the real native CLI; no external k4geo is needed.
 if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
+    nh_backend_objects(nodehammer_dd4hep_plugin_objs cli/dd4hep_global_plugin.cpp)
+    # DD4hep's plugin registry compares RTTI across the executable/DSO boundary.
+    # Preserve the plugin's default visibility, unlike internal importer objects.
+    set_target_properties(nodehammer_dd4hep_plugin_objs PROPERTIES
+        CXX_VISIBILITY_PRESET default VISIBILITY_INLINES_HIDDEN OFF)
     add_executable(nodehammer_dd4hep_probe
         ${PROJECT_SOURCE_DIR}/src/cli/main.cpp
-        ${PROJECT_SOURCE_DIR}/src/cli/cmd_dd4hep_native.cpp
-        cli/dd4hep_global_plugin.cpp)
+        $<TARGET_OBJECTS:nodehammer_dd4hep_native_objs>
+        $<TARGET_OBJECTS:nodehammer_dd4hep_plugin_objs>)
     target_link_libraries(nodehammer_dd4hep_probe PRIVATE nodehammer_lib DD4hep::DDCore)
     target_compile_options(nodehammer_dd4hep_probe PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNH_WITH_VIEWER>
         $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNH_WITH_VIEWER>)
     nh_set_compiler_options(nodehammer_dd4hep_probe)
+    nh_backend_objects(nodehammer_dd4hep_host_objs cli/dd4hep_native_host.cpp)
+    target_compile_definitions(nodehammer_dd4hep_host_objs PRIVATE NH_STATIC)
     add_executable(nodehammer_dd4hep_native_host
-        cli/dd4hep_native_host.cpp
-        ${PROJECT_SOURCE_DIR}/src/cli/cmd_dd4hep_native.cpp)
+        $<TARGET_OBJECTS:nodehammer_dd4hep_host_objs>
+        $<TARGET_OBJECTS:nodehammer_dd4hep_native_objs>)
     target_link_libraries(nodehammer_dd4hep_native_host PRIVATE nodehammer_lib DD4hep::DDCore)
     nh_set_compiler_options(nodehammer_dd4hep_native_host)
     add_test(NAME dd4hep_native_import COMMAND ${CMAKE_COMMAND}
