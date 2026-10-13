@@ -7,6 +7,8 @@
 
 namespace nodehammer::tessellation {
 
+struct OccurrenceOverrides;
+
 /// Cooperative, iterator-driven version of `TessellationPass::lower`. The
 /// pass walks reachable occurrences lazily (or accepts an already expanded tree); this lets the
 /// caller spread that walk across multiple `advance()` calls so the main
@@ -30,7 +32,8 @@ class TessellationJob {
     void start(const config::NHConfig &config, const ir::expanded::Scene &scene);
 
     /// Traverse shared geometry directly; no expanded semantic tree is allocated.
-    void start(const config::NHConfig &config, const ir::semantic::Scene &scene);
+    void start(const config::NHConfig &config, const ir::semantic::Scene &scene,
+               const OccurrenceOverrides *overrides = nullptr);
 
     /// Process pending semantic nodes for up to `budget_ns` of wall-clock
     /// time. The atomic unit is one outer-BFS iteration (one semantic

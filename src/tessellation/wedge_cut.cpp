@@ -1,3 +1,4 @@
+#include <tessellation/occurrence_nodes.hpp>
 #include <tessellation/wedge_cut.hpp>
 
 #include <detail/overloaded.hpp>
@@ -146,10 +147,11 @@ Aabb transformAabb(const Aabb &a, const glm::dmat4 &m) {
     return out;
 }
 
-Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::expanded::Scene &scene,
+Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::GeometryCatalogs &scene,
                int depth);
 
-Aabb localAabbById(ir::semantic::ShapeId id, const ir::expanded::Scene &scene, int depth) {
+Aabb localAabbById(ir::semantic::ShapeId id, const ir::semantic::GeometryCatalogs &scene,
+                   int depth) {
     auto it = scene.shapes.find(id);
     if (it == scene.shapes.end()) {
         return Aabb{};
@@ -157,7 +159,7 @@ Aabb localAabbById(ir::semantic::ShapeId id, const ir::expanded::Scene &scene, i
     return localAabb(it->second.data, scene, depth);
 }
 
-Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::expanded::Scene &scene,
+Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::GeometryCatalogs &scene,
                int depth) {
     if (depth > kMaxBoolDepth) {
         return Aabb{};
@@ -307,7 +309,40 @@ struct CutKeyHash {
 struct WedgeCutJob::Impl {
     enum class Phase : std::uint8_t { Idle, Bounds, Classify, Prune };
 
-    ir::expanded::Scene *scene{nullptr};
+    ir::semantic::GeometryCatalogs *scene{nullptr};
+    ir::expanded::Scene *expanded{nullptr};
+    std::unique_ptr<OccurrenceNodes> occurrences;
+    OccurrenceOverrides *overrides{nullptr};
+    // One bit per occurrence, rather than a node/transform/string tree.
+    std::vector<bool> subtreeGeom;
+
+    std::size_t nodeCount() const {
+        return occurrences ? static_cast<std::size_t>(occurrences->size()) : nodeIds.size();
+    }
+    ir::expanded::NodeId nodeId(std::size_t index) const {
+        return occurrences ? ir::expanded::NodeId{index + 1} : nodeIds[index];
+    }
+    void setVolume(ir::expanded::NodeId id, ir::semantic::LogVolId volume) {
+        if (overrides) {
+            overrides->volumes[id] = volume;
+        } else {
+            expanded->nodes.at(id).logVolId = volume;
+        }
+    }
+    void setGeometry(ir::expanded::NodeId id, bool value) {
+        if (occurrences) {
+            subtreeGeom[static_cast<std::size_t>(id.value)] = value;
+        } else {
+            hasOwnGeom[id] = value;
+        }
+    }
+    OccurrenceNodes::Geometry geometryAt(ir::expanded::NodeId id) const {
+        if (occurrences) {
+            return occurrences->geometryAt(id);
+        }
+        const auto &node = expanded->nodes.at(id);
+        return {node.logVolId, node.worldTransform, node.parentId.value_or(ir::expanded::NodeId{})};
+    }
 
     double startRad{0.0};
     double endRad{0.0};
@@ -352,17 +387,13 @@ struct WedgeCutJob::Impl {
 
     // ── Pass 1 (per node): grow the global radius/z bounds. ──────────────────
     void stepBounds(ir::expanded::NodeId id) {
-        const auto nit = scene->nodes.find(id);
-        if (nit == scene->nodes.end()) {
-            return;
-        }
-        const ir::expanded::Node &node = nit->second;
-        const auto lvIt = scene->logVols.find(node.logVolId);
+        const auto node = geometryAt(id);
+        const auto lvIt = scene->logVols.find(node.volume);
         if (lvIt == scene->logVols.end()) {
             return;
         }
         const Aabb world =
-            transformAabb(localAabbById(lvIt->second.shapeId, *scene, 0), node.worldTransform);
+            transformAabb(localAabbById(lvIt->second.shapeId, *scene, 0), node.world);
         if (!world.valid) {
             return;
         }
@@ -415,12 +446,8 @@ struct WedgeCutJob::Impl {
     // scene.shapes / scene.logVols. Fields read from the (reference-returning)
     // maps are copied out before any insert that could rehash them.
     void stepClassify(ir::expanded::NodeId id) {
-        const auto nit = scene->nodes.find(id);
-        if (nit == scene->nodes.end()) {
-            return;
-        }
-        ir::expanded::Node &node = nit->second;
-        const auto lvIt = scene->logVols.find(node.logVolId);
+        const auto node = geometryAt(id);
+        const auto lvIt = scene->logVols.find(node.volume);
         if (lvIt == scene->logVols.end()) {
             return;
         }
@@ -431,43 +458,51 @@ struct WedgeCutJob::Impl {
         const Aabb local = localAabbById(origShapeId, *scene, 0);
         if (!local.valid) {
             ++stats.skipped;
-            hasOwnGeom[id] = false; // unbounded shapes produce no tessellatable mesh
+            setGeometry(id, false); // unbounded shapes produce no tessellatable mesh
             return;
         }
-        const Aabb world = transformAabb(local, node.worldTransform);
+        const Aabb world = transformAabb(local, node.world);
 
         if (aabbArcInsideRemoved(world.lo, world.hi, startRad, removedWidth)) {
             // Fully inside the removed sector → render nothing.
-            node.logVolId = emptyLvId;
+            setVolume(id, emptyLvId);
             ++stats.emptied;
-            hasOwnGeom[id] = false;
+            setGeometry(id, false);
         } else if (aabbArcInsideKept(world.lo, world.hi, startRad, removedWidth)) {
             // Fully inside the kept sector → leave shared (instanced).
             ++stats.kept;
-            hasOwnGeom[id] = true;
+            setGeometry(id, true);
         } else {
             // Straddles the boundary → boolean-subtraction cut. Reuse an existing
             // cut shape when this placement's (shape, local-frame wedge) matches
             // one already created, so instanced copies needing the same cut stay
             // instanced; otherwise create a fresh cut shape in this local frame.
-            const CutKey key{origShapeId.value, planeSignature(planeStart, node.worldTransform),
-                             planeSignature(planeEnd, node.worldTransform)};
+            const CutKey key{origShapeId.value, planeSignature(planeStart, node.world),
+                             planeSignature(planeEnd, node.world)};
             ++stats.cut;
             if (auto it = cutCache.find(key); it != cutCache.end()) {
-                node.logVolId = it->second;
+                setVolume(id, it->second);
             } else {
                 const ir::semantic::ShapeId cutShapeId = scene->nextShapeId();
+                auto cutTransform = glm::inverse(node.world);
+                if (occurrences) {
+                    // The source is affine. General 4x4 inversion can round the
+                    // homogeneous 1 away from exactly 1; keep the canonical
+                    // affine invariant without changing its geometric 3x4 part.
+                    cutTransform[0][3] = cutTransform[1][3] = cutTransform[2][3] = 0.0;
+                    cutTransform[3][3] = 1.0;
+                }
                 scene->shapes[cutShapeId] = ir::semantic::Shape{
-                    cutShapeId, ir::semantic::BooleanSubtraction{
-                                    origShapeId, wedgeId, glm::inverse(node.worldTransform)}};
+                    cutShapeId,
+                    ir::semantic::BooleanSubtraction{origShapeId, wedgeId, cutTransform}};
                 const ir::semantic::LogVolId cutLvId = scene->nextLogVolId();
                 scene->logVols[cutLvId] =
                     ir::semantic::LogicalVolume{cutLvId, lvName + "_wedgecut", cutShapeId, origMat};
                 cutCache.emplace(key, cutLvId);
-                node.logVolId = cutLvId;
+                setVolume(id, cutLvId);
                 ++stats.cutUnique;
             }
-            hasOwnGeom[id] = true;
+            setGeometry(id, true);
         }
     }
 
@@ -476,14 +511,46 @@ struct WedgeCutJob::Impl {
     // keeps the render tree clean and, importantly, prevents merge_descendants
     // parents (e.g. a stave entirely inside the removed wedge) from being asked
     // to merge an all-empty set of children (which would emit NH0505).
-    void runPrune() {
-        if (!scene->nodes.contains(scene->rootId)) {
+    bool pruneUpward{true};
+    void stepCanonicalPrune() {
+        if (pruneUpward) {
+            if (idx > 1) {
+                const auto parent =
+                    occurrences->geometryAt(ir::expanded::NodeId{idx}, false).parent;
+                if (subtreeGeom[idx]) {
+                    subtreeGeom[static_cast<std::size_t>(parent.value)] = true;
+                }
+                --idx;
+                return;
+            }
+            overrides->pruned.resize(nodeCount() + 1, false);
+            pruneUpward = false;
+            idx = 2;
+        }
+        if (idx > nodeCount()) {
+            done = true;
             return;
         }
-        ankerl::unordered_dense::map<ir::expanded::NodeId, bool> subtreeGeom;
+        const auto parent = occurrences->geometryAt(ir::expanded::NodeId{idx}, false).parent;
+        const bool remove =
+            overrides->pruned[static_cast<std::size_t>(parent.value)] ||
+            (!subtreeGeom[idx] && subtreeGeom[static_cast<std::size_t>(parent.value)]);
+        overrides->pruned[idx] = remove;
+        if (remove) {
+            overrides->volumes.erase(ir::expanded::NodeId{idx});
+            ++stats.pruned;
+        }
+        ++idx;
+    }
+
+    void runPrune() {
+        if (!expanded->nodes.contains(expanded->rootId)) {
+            return;
+        }
+        ankerl::unordered_dense::map<ir::expanded::NodeId, bool> expandedSubtreeGeom;
         auto computeGeom = [&](auto &&self, ir::expanded::NodeId nid) -> bool {
-            const auto it = scene->nodes.find(nid);
-            if (it == scene->nodes.end()) {
+            const auto it = expanded->nodes.find(nid);
+            if (it == expanded->nodes.end()) {
                 return false;
             }
             // Default to "has geometry" for nodes we never classified (e.g. logVol
@@ -492,37 +559,37 @@ struct WedgeCutJob::Impl {
             for (const auto childId : it->second.children) {
                 g = self(self, childId) || g;
             }
-            subtreeGeom[nid] = g;
+            expandedSubtreeGeom[nid] = g;
             return g;
         };
-        computeGeom(computeGeom, scene->rootId);
+        computeGeom(computeGeom, expanded->rootId);
 
         // Collect maximal empty subtree roots: an empty node whose parent keeps
         // geometry. (The root itself is never removed.)
         std::vector<ir::expanded::NodeId> removalRoots;
-        for (const auto &[id, geom] : subtreeGeom) {
-            if (geom || id == scene->rootId) {
+        for (const auto &[id, geom] : expandedSubtreeGeom) {
+            if (geom || id == expanded->rootId) {
                 continue;
             }
-            const auto nit = scene->nodes.find(id);
-            if (nit == scene->nodes.end() || !nit->second.parentId) {
+            const auto nit = expanded->nodes.find(id);
+            if (nit == expanded->nodes.end() || !nit->second.parentId) {
                 continue;
             }
-            const auto pit = subtreeGeom.find(*nit->second.parentId);
-            if (pit != subtreeGeom.end() && pit->second) {
+            const auto pit = expandedSubtreeGeom.find(*nit->second.parentId);
+            if (pit != expandedSubtreeGeom.end() && pit->second) {
                 removalRoots.push_back(id);
             }
         }
 
         for (const auto rootOfEmpty : removalRoots) {
-            const auto nit = scene->nodes.find(rootOfEmpty);
-            if (nit == scene->nodes.end()) {
+            const auto nit = expanded->nodes.find(rootOfEmpty);
+            if (nit == expanded->nodes.end()) {
                 continue;
             }
             // Detach from parent.
             if (nit->second.parentId) {
-                auto pit = scene->nodes.find(*nit->second.parentId);
-                if (pit != scene->nodes.end()) {
+                auto pit = expanded->nodes.find(*nit->second.parentId);
+                if (pit != expanded->nodes.end()) {
                     auto &kids = pit->second.children;
                     kids.erase(std::remove(kids.begin(), kids.end(), rootOfEmpty), kids.end());
                 }
@@ -532,14 +599,14 @@ struct WedgeCutJob::Impl {
             while (!stack.empty()) {
                 const auto cur = stack.back();
                 stack.pop_back();
-                const auto cit = scene->nodes.find(cur);
-                if (cit == scene->nodes.end()) {
+                const auto cit = expanded->nodes.find(cur);
+                if (cit == expanded->nodes.end()) {
                     continue;
                 }
                 for (const auto childId : cit->second.children) {
                     stack.push_back(childId);
                 }
-                scene->nodes.erase(cit);
+                expanded->nodes.erase(cit);
                 ++stats.pruned;
             }
         }
@@ -557,6 +624,7 @@ void WedgeCutJob::start(ir::expanded::Scene &scene, const WedgeCutParams &params
     impl_ = std::make_unique<Impl>();
     Impl &im = *impl_;
     im.scene = &scene;
+    im.expanded = &scene;
     im.startRad = params.startDeg * kPi / 180.0;
     im.endRad = params.endDeg * kPi / 180.0;
     im.removedWidth = sectorSpan(im.startRad, im.endRad);
@@ -584,6 +652,32 @@ void WedgeCutJob::start(ir::expanded::Scene &scene, const WedgeCutParams &params
     im.idx = 0;
 }
 
+void WedgeCutJob::start(ir::semantic::Scene &scene, const WedgeCutParams &params,
+                        OccurrenceOverrides &overrides) {
+    impl_ = std::make_unique<Impl>();
+    overrides = {};
+    Impl &im = *impl_;
+    im.scene = &scene;
+    im.overrides = &overrides;
+    im.startRad = params.startDeg * kPi / 180.0;
+    im.endRad = params.endDeg * kPi / 180.0;
+    im.removedWidth = sectorSpan(im.startRad, im.endRad);
+    im.margin = params.margin;
+    im.started = true;
+    if (im.removedWidth < 1e-6 || im.removedWidth > kTau - 1e-6) {
+        im.done = true;
+        return;
+    }
+    scene.reseedIdCounters();
+    im.occurrences = std::make_unique<OccurrenceNodes>(scene);
+    if (im.occurrences->size() >= std::numeric_limits<std::size_t>::max()) {
+        throw std::length_error("wedge occurrence mask exceeds addressable size");
+    }
+    im.subtreeGeom.resize(im.nodeCount() + 1, true);
+    im.total.store(im.nodeCount(), std::memory_order_relaxed);
+    im.phase = Impl::Phase::Bounds;
+}
+
 bool WedgeCutJob::advance(std::uint64_t budget_ns) {
     Impl &im = *impl_;
     if (!im.started) {
@@ -602,27 +696,31 @@ bool WedgeCutJob::advance(std::uint64_t budget_ns) {
     while (!im.done) {
         switch (im.phase) {
         case Impl::Phase::Bounds:
-            if (im.idx >= im.nodeIds.size()) {
+            if (im.idx >= im.nodeCount()) {
                 im.finishBounds(); // builds the cutter + flips to Classify, or finishes
                 return im.done;
             } else {
-                im.stepBounds(im.nodeIds[im.idx]);
+                im.stepBounds(im.nodeId(im.idx));
                 ++im.idx;
             }
             break;
         case Impl::Phase::Classify:
-            if (im.idx >= im.nodeIds.size()) {
+            if (im.idx >= im.nodeCount()) {
                 im.phase = Impl::Phase::Prune;
                 return false;
             } else {
-                im.stepClassify(im.nodeIds[im.idx]);
+                im.stepClassify(im.nodeId(im.idx));
                 ++im.idx;
                 im.processed.fetch_add(1, std::memory_order_relaxed);
             }
             break;
         case Impl::Phase::Prune:
-            im.runPrune(); // single slice — may exceed the budget, like a big node
-            im.done = true;
+            if (im.occurrences) {
+                im.stepCanonicalPrune();
+            } else {
+                im.runPrune(); // expanded reference path
+                im.done = true;
+            }
             break;
         case Impl::Phase::Idle:
             im.done = true;
@@ -665,6 +763,15 @@ std::size_t WedgeCutJob::boundedPlacements() const {
 WedgeCutStats applyWedgeCut(ir::expanded::Scene &scene, const WedgeCutParams &params) {
     WedgeCutJob job;
     job.start(scene, params);
+    while (!job.advance(std::numeric_limits<std::uint64_t>::max())) {
+    }
+    return job.take();
+}
+
+WedgeCutStats applyWedgeCut(ir::semantic::Scene &scene, const WedgeCutParams &params,
+                            OccurrenceOverrides &overrides) {
+    WedgeCutJob job;
+    job.start(scene, params, overrides);
     while (!job.advance(std::numeric_limits<std::uint64_t>::max())) {
     }
     return job.take();

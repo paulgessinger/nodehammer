@@ -58,7 +58,7 @@ ir::expanded::Scene makeStraddlingScene() {
     return scene;
 }
 
-bool hasBooleanSubtraction(const ir::expanded::Scene &scene) {
+bool hasBooleanSubtraction(const ir::semantic::GeometryCatalogs &scene) {
     for (const auto &[id, shape] : scene.shapes) {
         (void)id;
         if (std::holds_alternative<ir::semantic::BooleanSubtraction>(shape.data)) {
@@ -79,8 +79,7 @@ NHConfig noDedupConfig() {
 TEST_CASE("prepareScene: no wedge param leaves geometry uncut", "[scene_build][wedgecut]") {
     auto prep = prepareSceneForTessellationFromInputs(
         noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()));
-    CHECK_FALSE(
-        hasBooleanSubtraction(prep.cutScene ? *prep.cutScene : ir::semantic::expand(prep.scene)));
+    CHECK_FALSE(hasBooleanSubtraction(prep.scene));
 }
 
 TEST_CASE("prepareScene: wedge param applies the Boolean cut", "[scene_build][wedgecut]") {
@@ -88,15 +87,14 @@ TEST_CASE("prepareScene: wedge param applies the Boolean cut", "[scene_build][we
         noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()),
         WedgeCutParams{0.0, 90.0});
     // The straddling box becomes a BooleanSubtraction(box, wedge) shape.
-    CHECK(hasBooleanSubtraction(prep.cutScene ? *prep.cutScene : ir::semantic::expand(prep.scene)));
+    CHECK(hasBooleanSubtraction(prep.scene));
 }
 
 TEST_CASE("prepareScene: degenerate wedge is a no-op", "[scene_build][wedgecut]") {
     auto prep = prepareSceneForTessellationFromInputs(
         noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()),
         WedgeCutParams{45.0, 45.0});
-    CHECK_FALSE(
-        hasBooleanSubtraction(prep.cutScene ? *prep.cutScene : ir::semantic::expand(prep.scene)));
+    CHECK_FALSE(hasBooleanSubtraction(prep.scene));
 }
 
 TEST_CASE("prepareScene: hoisted repeated assemblies retain mesh sharing",

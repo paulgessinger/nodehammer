@@ -2,7 +2,10 @@
 
 #include <config/config_ast.hpp>
 #include <diagnostics.hpp>
+#include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/expanded/scene.hpp>
+#include <tessellation/occurrence_nodes.hpp>
 #include <tessellation/tessellation_pass.hpp>
 #include <tessellation/wedge_cut.hpp>
 
@@ -471,4 +474,106 @@ TEST_CASE("wedge cut: an emptied Boolean inside a merge group is not a failure",
     REQUIRE(rn);
     REQUIRE(rn->meshBindings.size() == 1);
     CHECK(meshNonEmpty(result.scene, rn->meshBindings[0].meshId));
+}
+
+TEST_CASE("canonical wedge: occurrence edits match expanded cuts and retain shared topology",
+          "[tessellation][wedgecut][canonical]") {
+    auto source = ir::semantic::fromExpanded(makeScene().scene);
+    // Reuse a complete subtree at a rotated placement, with metadata on just
+    // one occurrence. One prototype must support different physical cuts.
+    const auto assembly = source.root.logVolId;
+    const auto root = source.nextLogVolId();
+    source.logVols[root] = source.logVols.at(assembly);
+    source.logVols[root].id = root;
+    source.logVols[root].daughters = {
+        {"first", assembly, glm::dmat4{1.0}},
+        {"second", assembly, glm::rotate(glm::dmat4{1.0}, 1.1, glm::dvec3{0, 0, 1})}};
+    source.root.logVolId = root;
+    source.metadata = {};
+    source.metadata.displayNames[{1, 2}] = "renamed";
+    source.metadata.originalPaths[{1, 2}] = "/source/renamed";
+    source.metadata.tagSets.push_back({{"region", "tagged"}});
+    source.metadata.occurrenceTags[{1, 2}] = 0;
+    source.metadata.sourceSystems[{1, 2}] = "test";
+    const auto originalCount = source.nodeCount();
+
+    for (const auto params : {WedgeCutParams{0, 90}, WedgeCutParams{355, 5},
+                              WedgeCutParams{10, 300}, WedgeCutParams{45, 45}}) {
+        CAPTURE(params.startDeg, params.endDeg);
+        auto canonical = source;
+        auto expanded = ir::semantic::expand(source);
+        const auto expected = applyWedgeCut(expanded, params);
+        OccurrenceOverrides overrides;
+        WedgeCutJob job;
+        job.start(canonical, params, overrides);
+        while (!job.advance(1)) {
+        }
+        const auto actual = job.take();
+        CHECK(actual.cut == expected.cut);
+        CHECK(actual.cutUnique == expected.cutUnique);
+        CHECK(actual.emptied == expected.emptied);
+        CHECK(actual.kept == expected.kept);
+        CHECK(actual.skipped == expected.skipped);
+        CHECK(actual.pruned == expected.pruned);
+        CHECK(canonical.nodeCount() == originalCount);
+        for (const auto &[id, volume] : source.logVols) {
+            REQUIRE(canonical.logVols.at(id).daughters.size() == volume.daughters.size());
+            for (std::size_t i = 0; i < volume.daughters.size(); ++i) {
+                CHECK(canonical.logVols.at(id).daughters[i].logVolId ==
+                      volume.daughters[i].logVolId);
+            }
+        }
+        OccurrenceNodes nodes{canonical, &overrides};
+        for (uint64_t id = 1; id <= originalCount; ++id) {
+            const ir::expanded::NodeId nid{id};
+            REQUIRE(nodes.contains(nid) == expanded.nodes.contains(nid));
+            if (!nodes.contains(nid)) {
+                continue;
+            }
+            const auto node = nodes.at(nid);
+            const auto &ref = expanded.nodes.at(nid);
+            CHECK(node.children == ref.children);
+            CHECK(node.worldTransform == ref.worldTransform);
+            CHECK(node.name == ref.name);
+            CHECK(node.originalPath == ref.originalPath);
+            CHECK(node.tags == ref.tags);
+            CHECK(node.sourceSystem == ref.sourceSystem);
+        }
+        for (bool merge : {false, true}) {
+            NHConfig cfg;
+            if (merge) {
+                Rule rule;
+                rule.match = PredicateExpr{NameGlobPredicate{"*"}};
+                rule.tessellation = Rule::Tessellation{};
+                rule.tessellation->mergeDescendants = true;
+                cfg.rules.push_back(rule);
+            }
+            TessellationPass pass{cfg};
+            const auto result = pass.lower(canonical, &overrides);
+            const auto reference = pass.lower(expanded);
+            REQUIRE_FALSE(result.diags.hasErrors());
+            REQUIRE_FALSE(reference.diags.hasErrors());
+            REQUIRE(result.scene.nodes.size() == reference.scene.nodes.size());
+            for (const auto &[id, node] : result.scene.nodes) {
+                (void)id;
+                const auto *ref = findBySemId(reference.scene, node.semanticNodeId);
+                REQUIRE(ref != nullptr);
+                REQUIRE(node.meshBindings.size() == ref->meshBindings.size());
+                CHECK(node.worldTransform == ref->worldTransform);
+                for (std::size_t i = 0; i < node.meshBindings.size(); ++i) {
+                    const auto &mesh = result.scene.meshAssets.at(node.meshBindings[i].meshId);
+                    const auto &refMesh =
+                        reference.scene.meshAssets.at(ref->meshBindings[i].meshId);
+                    REQUIRE(mesh.indices == refMesh.indices);
+                    REQUIRE(mesh.vertices.size() == refMesh.vertices.size());
+                    for (std::size_t j = 0; j < mesh.vertices.size(); ++j) {
+                        CHECK(glm::length(mesh.vertices[j].position -
+                                          refMesh.vertices[j].position) < 1e-4f);
+                        CHECK(glm::length(mesh.vertices[j].normal - refMesh.vertices[j].normal) <
+                              1e-4f);
+                    }
+                }
+            }
+        }
+    }
 }

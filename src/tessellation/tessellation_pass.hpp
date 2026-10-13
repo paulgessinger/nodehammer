@@ -7,6 +7,8 @@
 
 namespace nodehammer::tessellation {
 
+struct OccurrenceOverrides;
+
 struct TessellationPassResult {
     ir::render::Scene scene;
     DiagnosticList diags;
@@ -34,7 +36,8 @@ class TessellationPass {
     [[nodiscard]] TessellationPassResult lower(const ir::expanded::Scene &scene) const;
 
     /// Traverse shared geometry directly; no expanded semantic tree is allocated.
-    [[nodiscard]] TessellationPassResult lower(const ir::semantic::Scene &scene) const;
+    [[nodiscard]] TessellationPassResult
+    lower(const ir::semantic::Scene &scene, const OccurrenceOverrides *overrides = nullptr) const;
 
   private:
     const config::NHConfig &config_;
