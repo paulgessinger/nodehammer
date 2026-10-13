@@ -28,10 +28,20 @@ struct SceneBuildJob::Impl {
     // only the mirror.
     std::atomic<Phase> worker_phase{Phase::Preparing};
 
-    // The shared build core. Owned and driven entirely by the worker thread
-    // while running; the main thread only samples the progress counters (the
-    // same tolerated cross-thread read the previous inline jobs had) and the
-    // atomic phase mirror above.
+    std::atomic<std::size_t> tess_total{0}, tess_processed{0};
+    std::atomic<std::size_t> cut_total{0}, cut_processed{0};
+
+    // The main thread reads only mirrors: start() replaces nested job storage,
+    // so even their atomic counters cannot safely be sampled through pipe.
+    void publishProgress() {
+        tess_total.store(pipe.tessellationTotal(), std::memory_order_relaxed);
+        tess_processed.store(pipe.tessellationProcessed(), std::memory_order_relaxed);
+        cut_total.store(pipe.wedgeCutTotal(), std::memory_order_relaxed);
+        cut_processed.store(pipe.wedgeCutProcessed(), std::memory_order_relaxed);
+        worker_phase.store(pipe.phase(), std::memory_order_relaxed);
+    }
+
+    // Owned and driven entirely by the worker while running.
     ::nodehammer::tessellation::BuildPipeline pipe;
 
     // Diagnostic labels for the pre-build log. The byte-driven build job
@@ -81,6 +91,10 @@ void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::config::NHConfig> 
 
     impl_->done.store(false, std::memory_order_release);
     impl_->worker_phase.store(Phase::Preparing, std::memory_order_relaxed);
+    impl_->tess_total = 0;
+    impl_->tess_processed = 0;
+    impl_->cut_total = 0;
+    impl_->cut_processed = 0;
     impl_->state = Impl::State::Running;
     logPreBuild(impl_->config_label, impl_->geometry_label);
     impl_->worker = std::thread([impl = impl_.get()] {
@@ -91,13 +105,12 @@ void SceneBuildJob::start(std::shared_ptr<const ::nodehammer::config::NHConfig> 
         impl->pipe.start(std::move(impl->preset_config), std::move(impl->preset_scene),
                          impl->wedge_cut);
         while (!impl->pipe.advance(kNativeSliceNs)) {
-            impl->worker_phase.store(impl->pipe.phase(), std::memory_order_relaxed);
+            impl->publishProgress();
         }
-        impl->worker_phase.store(impl->pipe.phase(), std::memory_order_relaxed);
+        impl->publishProgress();
         // Leave the finished pipeline intact and only publish `done`. The main
         // thread drains the result via pipe.take() after it joins the worker
-        // (see SceneBuildJob::take), so the progress getters that sample
-        // tess_job/wedge_job can never race with take()'s reset of those jobs.
+        // (see SceneBuildJob::take). UI progress uses only atomic mirrors.
         impl->done.store(true, std::memory_order_release);
     });
 }
@@ -122,8 +135,7 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
 ::nodehammer::pipeline::SceneBuildResult SceneBuildJob::take() {
     // Only reached after poll() observed `done` and joined the worker, so
     // draining the pipeline here — which resets its nested wedge/tess jobs —
-    // runs single-threaded and cannot race with the worker or the progress
-    // getters that sample those jobs while the build is Running.
+    // runs single-threaded and cannot race with the worker.
     ::nodehammer::pipeline::SceneBuildResult out = impl_->pipe.take();
     impl_->state = Impl::State::Idle;
     impl_->config_label.clear();
@@ -131,11 +143,19 @@ bool SceneBuildJob::poll(uint64_t /*budget_ns*/) {
     return out;
 }
 
-size_t SceneBuildJob::tessellationTotal() const { return impl_->pipe.tessellationTotal(); }
-size_t SceneBuildJob::tessellationProcessed() const { return impl_->pipe.tessellationProcessed(); }
+size_t SceneBuildJob::tessellationTotal() const {
+    return impl_->tess_total.load(std::memory_order_relaxed);
+}
+size_t SceneBuildJob::tessellationProcessed() const {
+    return impl_->tess_processed.load(std::memory_order_relaxed);
+}
 
-size_t SceneBuildJob::wedgeCutTotal() const { return impl_->pipe.wedgeCutTotal(); }
-size_t SceneBuildJob::wedgeCutProcessed() const { return impl_->pipe.wedgeCutProcessed(); }
+size_t SceneBuildJob::wedgeCutTotal() const {
+    return impl_->cut_total.load(std::memory_order_relaxed);
+}
+size_t SceneBuildJob::wedgeCutProcessed() const {
+    return impl_->cut_processed.load(std::memory_order_relaxed);
+}
 
 SceneBuildJob::Phase SceneBuildJob::phase() const {
     switch (impl_->state) {

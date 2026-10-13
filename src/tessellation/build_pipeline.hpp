@@ -22,8 +22,9 @@ namespace nodehammer::tessellation {
 ///
 /// The five lockstep invariants that used to be enforced only by discipline now
 /// live here once: the wedge is always deferred to a `WedgeCutJob` (never run
-/// inline in prep); phases advance `Preparing → Cutting → Tessellating →
-/// Finalizing`; the wedge counters count placements and the tessellation
+/// inline in prep); each preparation/sweep transition yields before doing
+/// the next stage's work; the wedge counters count placements (bounds or
+/// classification, according to the phase) and the tessellation
 /// counters count nodes; the result-packaging tail appends the tessellation
 /// diagnostics to prep's and hands the scene back whatever they say, since a
 /// node the pass could not mesh is a partial result rather than a failed build
@@ -41,9 +42,9 @@ class BuildPipeline {
     /// `SceneBuildJob::Phase` order and the worker's `kPreparing=1 …
     /// kFinalizing=4` wire codes, so the phase-enum alias and the JS boundary
     /// keep their existing values. `Queued` is an internal pre-prep state (the
-    /// first `advance()` burns one frame before running prep) and sits at the
-    /// end so it doesn't disturb those pinned values; UI treats it as
-    /// `Preparing`.
+    /// first `advance()` burns one frame before running prep); UI treats it as
+    /// `Preparing`. Additional preparation/sweep phases are appended so they
+    /// don't disturb the pinned values.
     enum class Phase : std::uint8_t {
         Idle = 0,
         Preparing = 1,
@@ -52,6 +53,10 @@ class BuildPipeline {
         Finalizing = 4,
         Done = 5,
         Queued = 6,
+        PreparingCut = 7,
+        Bounds = 8,
+        PreparingTessellation = 9,
+        Pruning = 10,
     };
 
     BuildPipeline();

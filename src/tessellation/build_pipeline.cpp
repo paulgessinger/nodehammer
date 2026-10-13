@@ -100,31 +100,38 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         }
         s.preset_config.reset();
         s.preset_scene.reset();
-        if (s.wedge_cut) {
-            s.prep.cutScene = ir::semantic::expand(s.prep.scene);
-            s.prep.scene = {};
-            s.wedge_job.start(*s.prep.cutScene, *s.wedge_cut);
-            s.phase = Phase::Cutting;
-            if (s.wedge_job.advance(budget_ns)) {
-                (void)s.wedge_job.take();
-                s.tess_job.start(s.prep.config, *s.prep.cutScene);
-                s.phase = Phase::Tessellating;
-            }
-            return false;
-        }
-        s.tess_job.start(s.prep.config, s.prep.scene);
-        s.phase = Phase::Tessellating;
-        if (s.tess_job.advance(budget_ns)) {
-            s.phase = Phase::Finalizing;
-        }
+        s.phase = s.wedge_cut ? Phase::PreparingCut : Phase::PreparingTessellation;
         return false;
     }
+    case Phase::PreparingCut:
+        s.prep.cutScene = ir::semantic::expand(s.prep.scene);
+        s.prep.scene = {};
+        s.wedge_job.start(*s.prep.cutScene, *s.wedge_cut);
+        s.phase = Phase::Bounds;
+        return false;
+    case Phase::Bounds:
     case Phase::Cutting:
+    case Phase::Pruning:
         if (s.wedge_job.advance(budget_ns)) {
             (void)s.wedge_job.take();
-            s.tess_job.start(s.prep.config, *s.prep.cutScene);
-            s.phase = Phase::Tessellating;
+            s.phase = Phase::PreparingTessellation;
+        } else if (s.wedge_job.computingBounds()) {
+            s.phase = Phase::Bounds;
+        } else if (s.wedge_job.pruning()) {
+            s.phase = Phase::Pruning;
+        } else {
+            s.phase = Phase::Cutting;
         }
+        return false;
+    case Phase::PreparingTessellation:
+        // Indexing and the effective-node counting pass have no cheap total.
+        // Publish this stage before start() performs that synchronous work.
+        if (s.prep.cutScene) {
+            s.tess_job.start(s.prep.config, *s.prep.cutScene);
+        } else {
+            s.tess_job.start(s.prep.config, s.prep.scene);
+        }
+        s.phase = Phase::Tessellating;
         return false;
     case Phase::Tessellating:
         if (s.tess_job.advance(budget_ns)) {
@@ -166,7 +173,8 @@ std::size_t BuildPipeline::tessellationProcessed() const {
 }
 std::size_t BuildPipeline::wedgeCutTotal() const { return impl_->wedge_job.totalPlacements(); }
 std::size_t BuildPipeline::wedgeCutProcessed() const {
-    return impl_->wedge_job.processedPlacements();
+    return impl_->phase == Phase::Bounds ? impl_->wedge_job.boundedPlacements()
+                                         : impl_->wedge_job.processedPlacements();
 }
 
 } // namespace nodehammer::tessellation

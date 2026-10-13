@@ -64,8 +64,8 @@ void BuildController::startBuild(std::shared_ptr<const config::NHConfig> config,
                std::move(geometry_label), wedge);
     in_progress_ = true;
     if (notifications_ != nullptr) {
-        progress_handle_ =
-            notifications_->startProgress(building_cut_ ? "Applying cut..." : "Tessellating...");
+        progress_handle_ = notifications_->startProgress("Preparing scene...");
+        updateProgress();
     }
 }
 
@@ -73,22 +73,35 @@ void BuildController::updateProgress() {
     if (progress_handle_ == 0 || notifications_ == nullptr) {
         return;
     }
-    std::string label;
-    float frac = 0.0f;
-    if (job_.phase() == SceneBuildJob::Phase::Cutting) {
-        // Cooperative wedge cut — bar the placement-classification sweep.
+    std::string label = "Preparing scene...";
+    float frac = -1.0f;
+    const auto phase = job_.phase();
+    if (phase == SceneBuildJob::Phase::Bounds || phase == SceneBuildJob::Phase::Cutting) {
         const auto total = job_.wedgeCutTotal();
         const auto processed = job_.wedgeCutProcessed();
-        frac = total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
-        label = total > 0 ? std::format("Applying cut ({}/{} placements)", processed, total)
-                          : std::string{"Applying cut..."};
-    } else {
+        const auto stage =
+            phase == SceneBuildJob::Phase::Bounds ? "Calculating cut bounds" : "Applying cut";
+        label = stage;
+        if (total > 0) {
+            frac = static_cast<float>(processed) / static_cast<float>(total);
+            label = std::format("{} ({}/{} placements)", stage, processed, total);
+        }
+    } else if (phase == SceneBuildJob::Phase::Tessellating) {
         const auto total = job_.tessellationTotal();
         const auto processed = job_.tessellationProcessed();
-        frac = total > 0 ? static_cast<float>(processed) / static_cast<float>(total) : 0.0f;
+        label = "Tessellating...";
         if (total > 0) {
+            frac = static_cast<float>(processed) / static_cast<float>(total);
             label = std::format("Tessellating ({}/{} nodes)", processed, total);
         }
+    } else if (phase == SceneBuildJob::Phase::PreparingCut) {
+        label = "Preparing cut geometry...";
+    } else if (phase == SceneBuildJob::Phase::PreparingTessellation) {
+        label = "Preparing tessellation...";
+    } else if (phase == SceneBuildJob::Phase::Pruning) {
+        label = "Removing cut subtrees...";
+    } else if (phase == SceneBuildJob::Phase::Finalizing) {
+        label = "Finalizing scene...";
     }
     notifications_->updateProgress(progress_handle_, frac, label);
 }

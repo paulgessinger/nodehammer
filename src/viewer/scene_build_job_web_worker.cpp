@@ -267,10 +267,14 @@ class WorkerBackend final : public IWebBackend {
         return activeBuildPhase() == 3 ? static_cast<std::size_t>(nh_worker_processed()) : 0;
     }
     std::size_t wedgeCutTotal() const override {
-        return activeBuildPhase() == 2 ? static_cast<std::size_t>(nh_worker_total()) : 0;
+        return (activeBuildPhase() == 2 || activeBuildPhase() == 8)
+                   ? static_cast<std::size_t>(nh_worker_total())
+                   : 0;
     }
     std::size_t wedgeCutProcessed() const override {
-        return activeBuildPhase() == 2 ? static_cast<std::size_t>(nh_worker_processed()) : 0;
+        return (activeBuildPhase() == 2 || activeBuildPhase() == 8)
+                   ? static_cast<std::size_t>(nh_worker_processed())
+                   : 0;
     }
 
     SceneBuildJob::Phase phase() const override {
@@ -287,6 +291,14 @@ class WorkerBackend final : public IWebBackend {
                 return SceneBuildJob::Phase::Tessellating;
             case 4:
                 return SceneBuildJob::Phase::Finalizing;
+            case 7:
+                return SceneBuildJob::Phase::PreparingCut;
+            case 8:
+                return SceneBuildJob::Phase::Bounds;
+            case 9:
+                return SceneBuildJob::Phase::PreparingTessellation;
+            case 10:
+                return SceneBuildJob::Phase::Pruning;
             default:
                 return SceneBuildJob::Phase::Preparing;
             }

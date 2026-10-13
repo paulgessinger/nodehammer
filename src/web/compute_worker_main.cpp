@@ -53,7 +53,16 @@ using namespace nodehammer::config;
 
 // Phase codes posted to the main thread; the JS side maps them to labels.
 // Ordered to mirror BuildPipeline::Phase (Preparing/Cutting/Tessellating/Finalizing).
-enum Phase : int { kPreparing = 1, kCutting = 2, kTessellating = 3, kFinalizing = 4 };
+enum Phase : int {
+    kPreparing = 1,
+    kCutting = 2,
+    kTessellating = 3,
+    kFinalizing = 4,
+    kPreparingCut = 7,
+    kBounds = 8,
+    kPreparingTessellation = 9,
+    kPruning = 10
+};
 
 // The wire codes cross a JS boundary so they can't just be the enum, but they
 // must stay bound to it: a future reorder of BuildPipeline::Phase then becomes a
@@ -62,6 +71,15 @@ static_assert(kPreparing == static_cast<int>(BuildPipeline::Phase::Preparing));
 static_assert(kCutting == static_cast<int>(BuildPipeline::Phase::Cutting));
 static_assert(kTessellating == static_cast<int>(BuildPipeline::Phase::Tessellating));
 static_assert(kFinalizing == static_cast<int>(BuildPipeline::Phase::Finalizing));
+
+static_assert(kPreparingCut == static_cast<int>(BuildPipeline::Phase::PreparingCut));
+
+static_assert(kBounds == static_cast<int>(BuildPipeline::Phase::Bounds));
+
+static_assert(kPreparingTessellation ==
+              static_cast<int>(BuildPipeline::Phase::PreparingTessellation));
+
+static_assert(kPruning == static_cast<int>(BuildPipeline::Phase::Pruning));
 
 // Off-thread, so the slice budget only governs how often we emit progress (not
 // frame responsiveness). ~50 ms keeps postMessage traffic light while still
@@ -197,17 +215,22 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
     // yield far more often than that on a coarsened worker clock (see
     // kClockCheckStride in tessellation_pass.cpp/wedge_cut.cpp), and a
     // postMessage per yield would bury the main thread on a large scene.
+    std::size_t next_bounds = 0;
     std::size_t next_cut = 0;
     std::size_t next_tess = 0;
     while (!pipe.advance(kSliceNs)) {
         switch (pipe.phase()) {
+        case BuildPipeline::Phase::Bounds:
         case BuildPipeline::Phase::Cutting: {
+            const bool bounds = pipe.phase() == BuildPipeline::Phase::Bounds;
+            auto &next = bounds ? next_bounds : next_cut;
             const std::size_t processed = pipe.wedgeCutProcessed();
             const std::size_t total = pipe.wedgeCutTotal();
-            if (processed >= next_cut) {
-                nh_compute_emit_progress(kCutting, static_cast<double>(processed),
+            if (processed >= next) {
+                nh_compute_emit_progress(bounds ? kBounds : kCutting,
+                                         static_cast<double>(processed),
                                          static_cast<double>(total));
-                next_cut = processed + std::max<std::size_t>(1, total / kProgressUpdates);
+                next = processed + std::max<std::size_t>(1, total / kProgressUpdates);
             }
             break;
         }
@@ -221,6 +244,11 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
             }
             break;
         }
+        case BuildPipeline::Phase::PreparingCut:
+        case BuildPipeline::Phase::PreparingTessellation:
+        case BuildPipeline::Phase::Pruning:
+            nh_compute_emit_progress(static_cast<int>(pipe.phase()), 0, 0);
+            break;
         case BuildPipeline::Phase::Finalizing:
             nh_compute_emit_progress(kFinalizing, 0, 0);
             break;

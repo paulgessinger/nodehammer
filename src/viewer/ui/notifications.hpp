@@ -59,7 +59,8 @@ class Notifications : public LogSink {
     /// other notification.
     ProgressHandle startProgress(std::string_view message);
 
-    /// Advance the bar. `fraction` is clamped to [0,1]. If `message` is
+    /// Advance the bar. Negative `fraction` shows indeterminate activity;
+    /// otherwise it is clamped to [0,1]. If `message` is
     /// non-empty it replaces the toast's text (useful for "(50/100
     /// nodes)" updates each frame). Calls with an unknown handle are
     /// silently ignored — convenient when wiring poll-driven producers.
