@@ -11,6 +11,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci-gate:
+    name: CI gate
+    # Require this one check in branch protection. List every validation job
+    # directly so a skipped dependency cannot hide a failed prerequisite.
+    # Publishing and deployment only run after merge/on tags, so stay outside
+    # the PR gate. Add new validation jobs to this list.
+    needs: [lint, build, wheels, sdist, web-wheel, web-pair, bench-summary, web-runtime-merge, pages, lcg]
+    if: always()
+    runs-on: ubuntu-slim
+    permissions: {}
+    steps:
+      - name: Require every validation job to succeed
+        env:
+          JOB_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$JOB_RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          echo "$JOB_RESULTS" | jq -e 'all(.[]; .result == "success")' > /dev/null || {
+            echo "::error::Every required CI job must succeed (including all matrix legs)."
+            exit 1
+          }
+
   lint:
     name: prek
     runs-on: ubuntu-slim
