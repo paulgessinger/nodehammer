@@ -118,17 +118,20 @@ def internal_namespaces(source_dir: Path) -> set[str]:
 
 def defined_dynamic_symbols(library: Path) -> list[str]:
     """Demangled names of everything the .so defines in its dynamic table."""
-    raw = subprocess.run(
-        ["nm", "--dynamic", "--defined-only", "--extern-only", "--format=just-symbols",
+    # POSIX output works with older binutils and elfutils nm (as exposed by
+    # Key4hep), too. Keep names mangled so whitespace separates the fields.
+    output = subprocess.run(
+        ["nm", "--dynamic", "--defined-only", "--extern-only", "--format=posix",
          str(library)],
         check=True,
-        capture_output=True,
+        stdout=subprocess.PIPE,
         text=True,
-    ).stdout.split()
+    ).stdout
+    raw = [line.split()[0] for line in output.splitlines() if line.strip()]
     if not raw:
         return []
     demangled = subprocess.run(
-        ["c++filt"], input="\n".join(raw), check=True, capture_output=True, text=True
+        ["c++filt"], input="\n".join(raw), check=True, stdout=subprocess.PIPE, text=True
     ).stdout.splitlines()
     return [s.strip() for s in demangled if s.strip()]
 
