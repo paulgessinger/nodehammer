@@ -38,12 +38,14 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Sce
         scene.deduplicateLogVols();
     }
 
-    prep.scene = ir::semantic::expand(scene);
+    prep.scene = std::move(scene);
 
     // Azimuthal wedge cut runs after dedup so cut shapes that share an
     // identical local-frame cut stay instanced (mirrors the convert CLI).
     if (wedgeCut) {
-        (void)tessellation::applyWedgeCut(prep.scene, *wedgeCut);
+        prep.cutScene = ir::semantic::expand(prep.scene);
+        prep.scene = {};
+        (void)tessellation::applyWedgeCut(*prep.cutScene, *wedgeCut);
     }
 
     return prep;

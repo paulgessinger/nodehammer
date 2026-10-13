@@ -81,7 +81,7 @@ RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
     const auto &input = api::sceneOrThrow(scene, "tessellate");
     const auto &cfg = api::documentOf(config);
     const tessellation::TessellationPass pass{cfg};
-    auto result = pass.lower(ir::semantic::expand(input));
+    auto result = pass.lower(input);
     // Errors and a usable scene genuinely coexist here: NH0500 reports an
     // unknown shape and leaves that one node without a mesh binding, and the
     // rest of the scene is still a scene. Returning it is what lets a caller
@@ -107,7 +107,7 @@ RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     }
 
     const tessellation::TessellationPass pass{cfg};
-    auto result = pass.lower(ir::semantic::expand(working));
+    auto result = pass.lower(working);
     diags.append(result.diags);
     // Tessellation errors come back *with* the scene — see `tessellate`.
     return RenderResult{api::asHandle(std::move(result.scene)), std::move(diags)};

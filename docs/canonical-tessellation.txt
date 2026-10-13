@@ -1,0 +1,74 @@
+Canonical tessellation
+======================
+
+TessellationPass and TessellationJob now accept semantic::Scene directly.
+The CLI, public tessellate/build API, and viewer BuildPipeline use that path
+when no boolean wedge is requested. Shared geometry catalogs are borrowed,
+not copied into an expanded scene.
+
+OccurrenceNodes indexes subtree sizes and daughter preorder offsets once per
+reachable volume definition. A lookup resolves one occurrence's transforms,
+source path, display name and effective metadata on demand. Its numeric IDs
+match expand() exactly, including repeated siblings with identical names.
+No persistent expanded semantic node map, per-occurrence path index or
+per-occurrence transform array is allocated. The source stays immutable for
+the lifetime of a cooperative job.
+
+The existing tessellation implementation handles both inputs. Expanded input
+borrows node references; canonical input holds only temporary node snapshots.
+Primitive/boolean mesh caches, merged-mesh signatures, material/extras rules,
+coincident-face removal and render hierarchy semantics remain shared.
+
+Scope and remaining costs
+-------------------------
+Render nodes and meshes still need storage. The BFS queue, merge-descendant
+work lists and output-node mapping can also grow with physical occurrences.
+This is not a promise of constant memory for rendering a large detector.
+Rule evaluation and the progress-count traversal still visit occurrences;
+merge-cache lookup still follows descendant rule resolution.
+
+Boolean wedge cutting mutates individual placements and still uses the
+expanded path. BuildPipeline expands only when a wedge is requested, releases
+the canonical preparation copy, then runs the existing cut and tessellation
+jobs. Removing that expansion is a separate follow-up.
+
+Validation and reproduction
+---------------------------
+Regression coverage compares canonical and expanded render JSON and diagnostics,
+checks repeated identities and sparse metadata, and retains pipeline wedge and
+hoisting tests. A 41-definition binary prototype graph with 2^41-1 occurrences
+checks random access to the final node without enumerating the graph.
+
+Build the optional native benchmark with:
+
+  cmake --build --preset conan-relwithdebinfo --target nodehammer_tessellation_bench
+
+Run each mode in a fresh process, alternating modes:
+
+  build/RelWithDebInfo/tests/nodehammer_tessellation_bench \
+    odd.nhb.zst fixtures/configs/odd.toml canonical
+  build/RelWithDebInfo/tests/nodehammer_tessellation_bench \
+    odd.nhb.zst fixtures/configs/odd.toml expanded
+
+An optional fourth argument writes render JSON for exact output comparison.
+Timing covers direct lowering versus expand + lowering, after identical import,
+selection and deduplication. Peak RSS is whole-process high-water, including
+those preparation stages. JSON export is outside both measurements. These are
+local native measurements, not browser or interactive wedge latency claims.
+
+ODD results (macOS arm64, RelWithDebInfo, five alternating fresh-process runs)
+---------------------------------------------------------------------------
+                         Expanded baseline    Direct canonical
+Median lowering time            1468.25 ms          1188.48 ms
+Median process peak RSS        810,958,848         588,791,808 bytes
+
+Direct lowering is 19.1% faster and uses 27.4% less whole-process peak RSS in
+this comparison. Both produce 1,299 render nodes, 699 mesh assets and 296,660
+asset triangles. Full render JSON is byte-identical (SHA256):
+2ca3dcd6585d5200ece91140d82e3e2e169484b0857845faf2fe8c743441b6d7
+
+Raw runs: measurements/canonical-tessellation.json.
+All 654 native CTest checks pass. Tessellation, build-pipeline, scene-preparation
+and public build translation units compile with em++ and -Werror. This was a
+compile-only WASM check using available dependency headers; the stale local
+WASM dependency cache prevents treating it as a complete linked browser build.

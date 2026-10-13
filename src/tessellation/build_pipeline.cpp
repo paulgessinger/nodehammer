@@ -1,3 +1,4 @@
+#include <ir/expanded/conversion.hpp>
 #include <tessellation/build_pipeline.hpp>
 
 #include <tessellation/tessellation_job.hpp>
@@ -100,11 +101,13 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         s.preset_config.reset();
         s.preset_scene.reset();
         if (s.wedge_cut) {
-            s.wedge_job.start(s.prep.scene, *s.wedge_cut);
+            s.prep.cutScene = ir::semantic::expand(s.prep.scene);
+            s.prep.scene = {};
+            s.wedge_job.start(*s.prep.cutScene, *s.wedge_cut);
             s.phase = Phase::Cutting;
             if (s.wedge_job.advance(budget_ns)) {
                 (void)s.wedge_job.take();
-                s.tess_job.start(s.prep.config, s.prep.scene);
+                s.tess_job.start(s.prep.config, *s.prep.cutScene);
                 s.phase = Phase::Tessellating;
             }
             return false;
@@ -119,7 +122,7 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
     case Phase::Cutting:
         if (s.wedge_job.advance(budget_ns)) {
             (void)s.wedge_job.take();
-            s.tess_job.start(s.prep.config, s.prep.scene);
+            s.tess_job.start(s.prep.config, *s.prep.cutScene);
             s.phase = Phase::Tessellating;
         }
         return false;

@@ -1,4 +1,5 @@
 #include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
 // Cross-toolchain coverage for the compute-worker pipeline body.
 //
 // nh_compute_build (src/web/compute_worker_main.cpp) is the C/EM_JS shell that
@@ -47,16 +48,17 @@ std::vector<std::byte> runComputePipeline(std::span<const std::byte> sceneBytes,
     ScenePrepResult prep = prepareSceneForTessellationFromInputs(
         std::move(loaded.config), std::move(imported.scene), std::nullopt);
 
+    auto physical = ir::semantic::expand(prep.scene);
     if (wedge) {
         WedgeCutJob job;
-        job.start(prep.scene, *wedge);
+        job.start(physical, *wedge);
         while (!job.advance(std::numeric_limits<std::uint64_t>::max())) {
         }
         (void)job.take();
     }
 
     TessellationJob tess;
-    tess.start(prep.config, prep.scene);
+    tess.start(prep.config, physical);
     while (!tess.advance(std::numeric_limits<std::uint64_t>::max())) {
     }
     TessellationPassResult result = tess.take();

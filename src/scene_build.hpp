@@ -43,7 +43,9 @@ struct SceneBuildResult {
 /// when it cannot deliver, so a result that exists is a result that is ready.
 struct ScenePrepResult {
     config::NHConfig config;
-    ir::expanded::Scene scene;
+    ir::semantic::Scene scene;
+    // Only boolean wedge cutting still requires an expanded mutable tree.
+    std::optional<ir::expanded::Scene> cutScene;
     DiagnosticList diags;
 };
 
@@ -67,7 +69,8 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 ///
 /// When `wedgeCut` is set, an azimuthal wedge cut is applied after dedup
 /// (matching the `convert --angle-cut` pipeline ordering), so the scene
-/// handed to tessellation already carries the Boolean-cut shapes.
+/// in `cutScene` carries the Boolean-cut shapes. Without a wedge, `scene`
+/// stays canonical and tessellation traverses its shared definitions directly.
 ScenePrepResult prepareSceneForTessellationFromInputs(
     config::NHConfig config, ir::semantic::Scene scene,
     std::optional<tessellation::WedgeCutParams> wedgeCut = std::nullopt);

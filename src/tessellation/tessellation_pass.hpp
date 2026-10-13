@@ -12,9 +12,9 @@ struct TessellationPassResult {
     DiagnosticList diags;
 };
 
-/// Lowers a expanded::Scene to a render::Scene.
+/// Lowers a canonical or expanded scene to a render::Scene.
 ///
-/// For each reachable expanded::Node (BFS from root):
+/// For each reachable occurrence (BFS from root):
 ///   1. Creates a corresponding render::Node (preserving hierarchy and transforms).
 ///   2. Tessellates the node's shape using the first matching Rule with tessellation settings
 ///      (or defaults if none match).
@@ -32,6 +32,9 @@ class TessellationPass {
     explicit TessellationPass(const config::NHConfig &config);
 
     [[nodiscard]] TessellationPassResult lower(const ir::expanded::Scene &scene) const;
+
+    /// Traverse shared geometry directly; no expanded semantic tree is allocated.
+    [[nodiscard]] TessellationPassResult lower(const ir::semantic::Scene &scene) const;
 
   private:
     const config::NHConfig &config_;

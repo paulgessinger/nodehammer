@@ -293,6 +293,12 @@ if(NOT EMSCRIPTEN)
     nh_set_compiler_options(nodehammer_selection_bench)
 endif()
 
+if(UNIX AND NOT EMSCRIPTEN)
+    add_executable(nodehammer_tessellation_bench EXCLUDE_FROM_ALL tessellation_bench.cpp)
+    target_link_libraries(nodehammer_tessellation_bench PRIVATE nodehammer_lib)
+    nh_set_compiler_options(nodehammer_tessellation_bench)
+endif()
+
 include(CTest)
 # catch_discover_tests runs the test binary to enumerate cases. Under
 # cross-compile the binary is a .js file that needs `node` as emulator, and

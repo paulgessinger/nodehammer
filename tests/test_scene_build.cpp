@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
 
 #include <ir/semantic/occurrence_tree.hpp>
 #include <scene_build.hpp>
@@ -78,7 +79,8 @@ NHConfig noDedupConfig() {
 TEST_CASE("prepareScene: no wedge param leaves geometry uncut", "[scene_build][wedgecut]") {
     auto prep = prepareSceneForTessellationFromInputs(
         noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()));
-    CHECK_FALSE(hasBooleanSubtraction(prep.scene));
+    CHECK_FALSE(
+        hasBooleanSubtraction(prep.cutScene ? *prep.cutScene : ir::semantic::expand(prep.scene)));
 }
 
 TEST_CASE("prepareScene: wedge param applies the Boolean cut", "[scene_build][wedgecut]") {
@@ -86,14 +88,15 @@ TEST_CASE("prepareScene: wedge param applies the Boolean cut", "[scene_build][we
         noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()),
         WedgeCutParams{0.0, 90.0});
     // The straddling box becomes a BooleanSubtraction(box, wedge) shape.
-    CHECK(hasBooleanSubtraction(prep.scene));
+    CHECK(hasBooleanSubtraction(prep.cutScene ? *prep.cutScene : ir::semantic::expand(prep.scene)));
 }
 
 TEST_CASE("prepareScene: degenerate wedge is a no-op", "[scene_build][wedgecut]") {
     auto prep = prepareSceneForTessellationFromInputs(
         noDedupConfig(), nodehammer::ir::semantic::fromExpanded(makeStraddlingScene()),
         WedgeCutParams{45.0, 45.0});
-    CHECK_FALSE(hasBooleanSubtraction(prep.scene));
+    CHECK_FALSE(
+        hasBooleanSubtraction(prep.cutScene ? *prep.cutScene : ir::semantic::expand(prep.scene)));
 }
 
 TEST_CASE("prepareScene: hoisted repeated assemblies retain mesh sharing",
@@ -104,8 +107,9 @@ TEST_CASE("prepareScene: hoisted repeated assemblies retain mesh sharing",
     const ShapeId shape{1};
     scene.materials.emplace(material, SourceMaterial{material, "Silicon", std::nullopt, 2.33});
     scene.shapes.emplace(shape, Shape{shape, BoxShape{1, 2, 3}});
-    for (uint64_t i = 1; i <= 5; ++i)
+    for (uint64_t i = 1; i <= 5; ++i) {
         scene.logVols.emplace(LogVolId{i}, LogicalVolume{LogVolId{i}, "volume", shape, material});
+    }
     scene.root = {"world", LogVolId{1}, glm::dmat4{1.0}};
     const auto gap = glm::rotate(glm::translate(glm::dmat4{1.0}, glm::dvec3{1.3, 2.7, 0.4}), 0.37,
                                  glm::dvec3{0, 0, 1});
@@ -145,23 +149,26 @@ TEST_CASE("prepareScene: hoisted repeated assemblies retain mesh sharing",
     REQUIRE_FALSE(prep.diags.hasErrors());
     const auto expectedLocal = gap * inner * sensor;
     std::size_t sensors = 0;
-    for (const auto &[id, node] : prep.scene.nodes) {
+    const auto physical = ir::semantic::expand(prep.scene);
+    for (const auto &[id, node] : physical.nodes) {
         (void)id;
-        if (node.name != "sensor")
+        if (node.name != "sensor") {
             continue;
+        }
         REQUIRE(node.parentId.has_value());
-        const auto &parent = prep.scene.nodes.at(*node.parentId);
+        const auto &parent = physical.nodes.at(*node.parentId);
         const auto index = static_cast<std::size_t>(parent.name.back() - '0');
         const auto expected = original->materialize({index, 0, 0, 0});
         const auto selectedNode = selected.materialize({index, 0, 0, 0});
         CHECK(node.originalPath == expected->originalPath);
-        for (int col = 0; col < 4; ++col)
+        for (int col = 0; col < 4; ++col) {
             for (int row = 0; row < 4; ++row) {
                 CHECK(node.localTransform[col][row] == expectedLocal[col][row]);
                 CHECK(selectedNode.localTransform[col][row] == expectedLocal[col][row]);
                 CHECK(std::abs(node.worldTransform[col][row] - expected->worldTransform[col][row]) <
                       1e-10);
             }
+        }
         ++sensors;
     }
     CHECK(sensors == 3);
