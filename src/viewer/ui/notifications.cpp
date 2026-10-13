@@ -113,7 +113,7 @@ void Notifications::updateProgress(ProgressHandle handle, float fraction,
     if (t == nullptr || t->kind != Kind::Progress) {
         return;
     }
-    t->progress = std::clamp(fraction, 0.0f, 1.0f);
+    t->progress = fraction < 0.0f ? -1.0f : std::clamp(fraction, 0.0f, 1.0f);
     if (!message.empty()) {
         t->message.assign(message);
     }
@@ -281,7 +281,12 @@ void Notifications::render() {
         // finishProgress flips the kind to Success.
         if (t.kind == Kind::Progress) {
             ImGui::NewLine();
-            ImGui::ProgressBar(t.progress, ImVec2(-FLT_MIN, 0.f));
+            if (t.progress < 0.0f) {
+                ImGui::ProgressBar(-1.f - static_cast<float>(ImGui::GetTime()),
+                                   ImVec2(-FLT_MIN, 0.f), "");
+            } else {
+                ImGui::ProgressBar(t.progress, ImVec2(-FLT_MIN, 0.f));
+            }
         }
 
         const bool window_hovered = ImGui::IsWindowHovered();

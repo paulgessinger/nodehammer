@@ -181,9 +181,16 @@ TEST_CASE("BuildPipeline: phase and counter progression", "[build_pipeline]") {
 
     // Every phase in canonical order appears, monotonically.
     const std::vector<BuildPipeline::Phase> expected{
-        BuildPipeline::Phase::Queued,     BuildPipeline::Phase::Preparing,
-        BuildPipeline::Phase::Cutting,    BuildPipeline::Phase::Tessellating,
-        BuildPipeline::Phase::Finalizing, BuildPipeline::Phase::Done,
+        BuildPipeline::Phase::Queued,
+        BuildPipeline::Phase::Preparing,
+        BuildPipeline::Phase::PreparingCut,
+        BuildPipeline::Phase::Bounds,
+        BuildPipeline::Phase::Cutting,
+        BuildPipeline::Phase::Pruning,
+        BuildPipeline::Phase::PreparingTessellation,
+        BuildPipeline::Phase::Tessellating,
+        BuildPipeline::Phase::Finalizing,
+        BuildPipeline::Phase::Done,
     };
     // Filter `seen` down to first-occurrence order and compare.
     std::vector<BuildPipeline::Phase> firsts;
@@ -257,4 +264,43 @@ TEST_CASE("BuildPipeline: degenerate and absent wedge skip Cutting", "[build_pip
         REQUIRE(r.scene != nullptr);
         REQUIRE(fingerprint(*r.scene) == fingerprint(reference));
     }
+}
+
+TEST_CASE("BuildPipeline: preparation stages yield before expensive job initialization",
+          "[build_pipeline]") {
+    const auto scene = std::make_shared<const ir::semantic::Scene>(
+        ir::semantic::fromExpanded(SyntheticSceneBuilder::buildNestedBoxes()));
+    BuildPipeline pipe;
+    SECTION("tessellation") {
+        pipe.start(emptyConfig(), scene);
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE(pipe.phase() == BuildPipeline::Phase::Preparing);
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE(pipe.phase() == BuildPipeline::Phase::PreparingTessellation);
+        REQUIRE(pipe.tessellationTotal() == 0);
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE(pipe.phase() == BuildPipeline::Phase::Tessellating);
+        REQUIRE(pipe.tessellationTotal() > 0);
+        REQUIRE(pipe.tessellationProcessed() == 0);
+    }
+    SECTION("cut bounds") {
+        pipe.start(emptyConfig(), scene, WedgeCutParams{.startDeg = 0, .endDeg = 90});
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE(pipe.phase() == BuildPipeline::Phase::PreparingCut);
+        REQUIRE(pipe.wedgeCutTotal() == 0);
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE(pipe.phase() == BuildPipeline::Phase::Bounds);
+        REQUIRE(pipe.wedgeCutTotal() > 0);
+        REQUIRE(pipe.wedgeCutProcessed() == 0);
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE(pipe.phase() == BuildPipeline::Phase::Cutting);
+        REQUIRE(pipe.wedgeCutProcessed() == 0);
+        REQUIRE_FALSE(pipe.advance(kSpin));
+        REQUIRE(pipe.phase() == BuildPipeline::Phase::Pruning);
+        REQUIRE(pipe.wedgeCutProcessed() == pipe.wedgeCutTotal());
+    }
+    while (!pipe.advance(kSpin)) {
+    }
+    REQUIRE(pipe.take().scene != nullptr);
 }

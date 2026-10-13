@@ -104,6 +104,12 @@ class WedgeCutJob {
     [[nodiscard]] std::size_t totalPlacements() const;
     [[nodiscard]] std::size_t processedPlacements() const;
 
+    /// Stage feedback; sample on the thread driving advance(). Each stage
+    /// transition yields so the caller can publish it before the next sweep.
+    [[nodiscard]] bool computingBounds() const;
+    [[nodiscard]] bool pruning() const;
+    [[nodiscard]] std::size_t boundedPlacements() const;
+
   private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

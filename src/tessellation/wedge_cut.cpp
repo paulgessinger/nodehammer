@@ -604,6 +604,7 @@ bool WedgeCutJob::advance(std::uint64_t budget_ns) {
         case Impl::Phase::Bounds:
             if (im.idx >= im.nodeIds.size()) {
                 im.finishBounds(); // builds the cutter + flips to Classify, or finishes
+                return im.done;
             } else {
                 im.stepBounds(im.nodeIds[im.idx]);
                 ++im.idx;
@@ -612,6 +613,7 @@ bool WedgeCutJob::advance(std::uint64_t budget_ns) {
         case Impl::Phase::Classify:
             if (im.idx >= im.nodeIds.size()) {
                 im.phase = Impl::Phase::Prune;
+                return false;
             } else {
                 im.stepClassify(im.nodeIds[im.idx]);
                 ++im.idx;
@@ -650,6 +652,12 @@ std::size_t WedgeCutJob::totalPlacements() const {
 }
 std::size_t WedgeCutJob::processedPlacements() const {
     return impl_->processed.load(std::memory_order_relaxed);
+}
+
+bool WedgeCutJob::computingBounds() const { return impl_->phase == Impl::Phase::Bounds; }
+bool WedgeCutJob::pruning() const { return impl_->phase == Impl::Phase::Prune; }
+std::size_t WedgeCutJob::boundedPlacements() const {
+    return computingBounds() ? impl_->idx : totalPlacements();
 }
 
 // ── applyWedgeCut (run-to-completion shim) ────────────────────────────────────
