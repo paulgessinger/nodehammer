@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared CI helper used by .github/workflows/ci.yml (build matrix + LCG job).
+# Shared CI helper used by .github/workflows/ci.yml (build matrix + Key4hep backend job).
 #
 # Dispatcher style so each CI step keeps its own log block while the
 # kind → conan/cmake-preset mapping lives in one place.
