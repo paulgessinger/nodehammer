@@ -1,0 +1,53 @@
+Canonical wedge cutting — local ODD comparison, 2026-10-13
+
+Scope
+-----
+The viewer BuildPipeline and prepareSceneForTessellationFromInputs now apply
+wedge cuts directly to canonical occurrences. The source daughter graph stays
+unchanged. Cut geometry is appended to the catalogs; an occurrence-ID overlay
+stores volume substitutions and one pruning bit per occurrence. Tessellation
+consumes that overlay, including filtered child lists for merge_descendants.
+Bounds/classification/pruning iterate in budgeted slices and retain the single
+progress notification from the preceding commit.
+
+The expanded overload remains as a differential reference and for the existing
+CLI convert --angle-cut semantic-export path. The overlay is transient and is
+not serialized as NHS9: converting that CLI path requires folding occurrence
+edits into exportable shared definitions. No fixture or codec changes here.
+
+Validation
+----------
+656 native CTest checks pass. The canonical/expanded differential test covers
+shared rotated subtrees, metadata, wraparound and wide cuts, degenerate cuts,
+pruning and merged descendants; it compares actual vertices, normals and indices.
+Changed web translation units compile with Emscripten and -Werror (compile-only;
+not a complete linked web-runtime build).
+
+ODD methodology
+---------------
+RelWithDebInfo, macOS arm64. Same odd.nhb.zst and fixtures/configs/odd.toml.
+Three fresh processes per mode, alternating execution order. Timed interval
+starts after common validate/select/dedup preparation. The expanded reference
+includes expansion then drops the canonical input, matching the old viewer.
+Both modes cut [0,163] degrees before tessellation. Peak RSS includes import
+and common preparation. Render JSON writing and mesh checksums are outside the
+timed interval; RSS is sampled before checksumming/export.
+
+Invocation:
+  build/RelWithDebInfo/tests/nodehammer_tessellation_bench \
+    odd.nhb.zst fixtures/configs/odd.toml canonical-cut /tmp/canonical-cut.json
+  build/RelWithDebInfo/tests/nodehammer_tessellation_bench \
+    odd.nhb.zst fixtures/configs/odd.toml expanded-cut /tmp/expanded-cut.json
+
+Median                                Expanded       Canonical
+Cut preparation (including expansion)  706.414 ms     371.032 ms
+Cut plus tessellation                 1500.839 ms    1536.861 ms
+Peak RSS                           799,948,800 B   620,085,248 B
+
+Cut preparation is 47.5% faster and peak RSS is 22.5% lower. Total time is
+2.4% higher in this small sample; this is not an end-to-end speedup claim.
+
+All runs: 861 render nodes, 2459 meshes, 537488 triangles, no tessellation errors.
+Full vertex/normal/index checksum: 7011088141618867510 in both modes, all runs.
+Render JSON (including topology, transforms and material bindings) is byte-identical.
+The large JSON outputs and per-run measurement files remain outside the repository.

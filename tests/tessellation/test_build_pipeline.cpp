@@ -1,4 +1,5 @@
 #include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
 // Unit coverage for BuildPipeline — the core primitive that unifies the four
 // hand-copied `prep → wedge → tessellate` build sequences (native worker,
 // web-cooperative, web-worker, synchronous). Because BuildPipeline lives in
@@ -80,10 +81,13 @@ std::shared_ptr<const NHConfig> emptyConfig() { return std::make_shared<const NH
 ir::render::Scene referenceBuild(const ir::expanded::Scene &scene,
                                  std::optional<WedgeCutParams> wedge) {
     ScenePrepResult prep =
-        prepareSceneForTessellationFromInputs(NHConfig{}, ir::semantic::fromExpanded(scene), wedge);
+        prepareSceneForTessellationFromInputs(NHConfig{}, ir::semantic::fromExpanded(scene));
+    auto physical = ir::semantic::expand(prep.scene);
+    if (wedge) {
+        (void)applyWedgeCut(physical, *wedge);
+    }
     TessellationPass pass{prep.config};
-    TessellationPassResult tess =
-        prep.cutScene ? pass.lower(*prep.cutScene) : pass.lower(prep.scene);
+    TessellationPassResult tess = pass.lower(physical);
     REQUIRE_FALSE(tess.diags.hasErrors());
     return std::move(tess.scene);
 }

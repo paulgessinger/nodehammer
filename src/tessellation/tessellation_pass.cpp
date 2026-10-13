@@ -715,7 +715,7 @@ struct TessellationJob::Impl {
     }
     glm::dmat4 childLocalTransform(const ir::expanded::Node &parent, std::size_t index) const {
         if (occurrences) {
-            return scene->logVols.at(parent.logVolId).daughters.at(index).localTransform;
+            return occurrences->childLocalTransform(parent, index);
         }
         return expanded->nodes.at(parent.children.at(index)).localTransform;
     }
@@ -1575,13 +1575,14 @@ void TessellationJob::start(const config::NHConfig &config, const ir::expanded::
     impl_->initialize();
 }
 
-void TessellationJob::start(const config::NHConfig &config, const ir::semantic::Scene &scene) {
+void TessellationJob::start(const config::NHConfig &config, const ir::semantic::Scene &scene,
+                            const OccurrenceOverrides *overrides) {
     // std::atomic members make Impl non-copyable; replace the unique_ptr
     // wholesale to reset the job between runs.
     impl_ = std::make_unique<Impl>();
     impl_->config = &config;
     impl_->scene = &scene;
-    impl_->occurrences = std::make_unique<OccurrenceNodes>(scene);
+    impl_->occurrences = std::make_unique<OccurrenceNodes>(scene, overrides);
     impl_->rootId = ir::expanded::NodeId{1};
     impl_->initialize();
 }
@@ -1722,9 +1723,10 @@ TessellationPassResult TessellationPass::lower(const ir::expanded::Scene &scene)
     return job.take();
 }
 
-TessellationPassResult TessellationPass::lower(const ir::semantic::Scene &scene) const {
+TessellationPassResult TessellationPass::lower(const ir::semantic::Scene &scene,
+                                               const OccurrenceOverrides *overrides) const {
     TessellationJob job;
-    job.start(config_, scene);
+    job.start(config_, scene, overrides);
     while (!job.advance(std::numeric_limits<uint64_t>::max())) {
         // job.advance never returns false unless the queue still has work
         // *and* we hit a budget; with budget=max we'll always complete in

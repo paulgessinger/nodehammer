@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ir/expanded/scene.hpp>
+#include <tessellation/occurrence_overrides.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -64,6 +65,11 @@ struct WedgeCutStats {
 /// CLI/viewer summarise them — the pass itself emits no diagnostics.
 [[nodiscard]] WedgeCutStats applyWedgeCut(ir::expanded::Scene &scene, const WedgeCutParams &params);
 
+/// Canonical variant: appends cut geometry to the catalogs and records occurrence
+/// edits separately, without changing shared daughters or allocating a node tree.
+[[nodiscard]] WedgeCutStats applyWedgeCut(ir::semantic::Scene &scene, const WedgeCutParams &params,
+                                          OccurrenceOverrides &overrides);
+
 /// Cooperative, iterator-driven version of `applyWedgeCut`. The cut walks every
 /// placement twice — once to size the cutting solid, once to classify and
 /// rewrite it — plus a final prune sweep; this class lets the caller spread that
@@ -88,6 +94,11 @@ class WedgeCutJob {
     /// Initialise the job: validate the sector, recompute world transforms and
     /// snapshot the placement list. `scene` is mutated as the job advances.
     void start(ir::expanded::Scene &scene, const WedgeCutParams &params);
+
+    /// Canonical source topology remains unchanged. The job resets overrides;
+    /// scene and overrides must both outlive the job and subsequent tessellation.
+    void start(ir::semantic::Scene &scene, const WedgeCutParams &params,
+               OccurrenceOverrides &overrides);
 
     /// Apply the cut to pending placements for up to `budget_ns` of wall-clock
     /// time. The atomic unit is one placement (classification plus any cut-shape
