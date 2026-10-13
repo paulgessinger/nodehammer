@@ -82,7 +82,8 @@ ir::render::Scene referenceBuild(const ir::expanded::Scene &scene,
     ScenePrepResult prep =
         prepareSceneForTessellationFromInputs(NHConfig{}, ir::semantic::fromExpanded(scene), wedge);
     TessellationPass pass{prep.config};
-    TessellationPassResult tess = pass.lower(prep.scene);
+    TessellationPassResult tess =
+        prep.cutScene ? pass.lower(*prep.cutScene) : pass.lower(prep.scene);
     REQUIRE_FALSE(tess.diags.hasErrors());
     return std::move(tess.scene);
 }

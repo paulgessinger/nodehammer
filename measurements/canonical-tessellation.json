@@ -1,0 +1,120 @@
+{
+  "input": "odd.nhb.zst",
+  "config": "fixtures/configs/odd.toml",
+  "runs": [
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1149.493333,
+      "mode": "canonical",
+      "nodes": 1299,
+      "peak_rss_bytes": 583630848,
+      "triangles": 296660,
+      "run": 1
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1460.513833,
+      "mode": "expanded",
+      "nodes": 1299,
+      "peak_rss_bytes": 807157760,
+      "triangles": 296660,
+      "run": 1
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1523.362959,
+      "mode": "expanded",
+      "nodes": 1299,
+      "peak_rss_bytes": 810958848,
+      "triangles": 296660,
+      "run": 2
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1216.705542,
+      "mode": "canonical",
+      "nodes": 1299,
+      "peak_rss_bytes": 589185024,
+      "triangles": 296660,
+      "run": 2
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1138.052667,
+      "mode": "canonical",
+      "nodes": 1299,
+      "peak_rss_bytes": 588791808,
+      "triangles": 296660,
+      "run": 3
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1463.395792,
+      "mode": "expanded",
+      "nodes": 1299,
+      "peak_rss_bytes": 806617088,
+      "triangles": 296660,
+      "run": 3
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1468.246166,
+      "mode": "expanded",
+      "nodes": 1299,
+      "peak_rss_bytes": 825999360,
+      "triangles": 296660,
+      "run": 4
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1201.894042,
+      "mode": "canonical",
+      "nodes": 1299,
+      "peak_rss_bytes": 595492864,
+      "triangles": 296660,
+      "run": 4
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1188.475708,
+      "mode": "canonical",
+      "nodes": 1299,
+      "peak_rss_bytes": 587825152,
+      "triangles": 296660,
+      "run": 5
+    },
+    {
+      "errors": false,
+      "meshes": 699,
+      "milliseconds": 1484.471833,
+      "mode": "expanded",
+      "nodes": 1299,
+      "peak_rss_bytes": 812941312,
+      "triangles": 296660,
+      "run": 5
+    }
+  ],
+  "medians": {
+    "canonical": {
+      "milliseconds": 1188.475708,
+      "peak_rss_bytes": 588791808
+    },
+    "expanded": {
+      "milliseconds": 1468.246166,
+      "peak_rss_bytes": 810958848
+    }
+  },
+  "render_sha256": {
+    "canonical": "2ca3dcd6585d5200ece91140d82e3e2e169484b0857845faf2fe8c743441b6d7",
+    "expanded": "2ca3dcd6585d5200ece91140d82e3e2e169484b0857845faf2fe8c743441b6d7"
+  }
+}

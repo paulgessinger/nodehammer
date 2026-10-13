@@ -323,7 +323,7 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options, ir::ImporterRe
             // ── Tessellate ─────────────────────────────────────────────────────────
             nodehammer::detail::Timer tessTimer;
             nodehammer::tessellation::TessellationPass pass{cfg};
-            auto tessResult = pass.lower(nodehammer::ir::semantic::expand(importResult.scene));
+            auto tessResult = pass.lower(importResult.scene);
             timings.record("tessellate", tessTimer.elapsed());
             printDiags(tessResult.diags);
             // Tessellation errors are partial results — a node without a mesh — so the

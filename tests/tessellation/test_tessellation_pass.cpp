@@ -1,7 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/adapt.hpp>
+#include <ir/expanded/conversion.hpp>
+#include <ir/render_json.hpp>
 #include <ir/synthetic/semantic/importer.hpp>
+#include <tessellation/occurrence_nodes.hpp>
 #include <tessellation/primitive_tessellator.hpp>
+#include <tessellation/tessellation_job.hpp>
 #include <tessellation/tessellation_pass.hpp>
 
 #include <limits>
@@ -658,8 +663,9 @@ TEST_CASE("TessellationPass: UnknownShape emits error diagnostic", "[tessellatio
     REQUIRE(result.diags.hasErrors());
     bool hasErr = false;
     for (const auto &d : result.diags.items()) {
-        if (d.code == codes::kErrTessUnknownShape)
+        if (d.code == codes::kErrTessUnknownShape) {
             hasErr = true;
+        }
     }
     REQUIRE(hasErr);
 }
@@ -673,4 +679,109 @@ TEST_CASE("TessellationPass: empty scene produces empty result", "[tessellation]
     REQUIRE(result.scene.nodes.empty());
     REQUIRE(result.scene.meshAssets.empty());
     REQUIRE_FALSE(result.diags.hasErrors());
+}
+
+// The expanded path is deliberately kept as an independent traversal oracle.
+
+TEST_CASE("Canonical tessellation matches expanded geometry and diagnostics",
+          "[tessellation][canonical]") {
+    for (const auto &expanded : {makeSingleBoxScene(), makeNestedBoxScene(), makeBooleanScene(),
+                                 makeUnknownShapeScene()}) {
+        const auto source = ir::semantic::fromExpanded(expanded);
+        for (const auto fallback :
+             {BooleanFallback::Skip, BooleanFallback::BBox, BooleanFallback::Fail}) {
+            NHConfig config;
+            config.tessellationDefaults.fallback = fallback;
+            const auto physical = ir::semantic::expand(source);
+            const auto expected = TessellationPass{config}.lower(physical);
+            TessellationJob job;
+            job.start(config, source);
+            while (!job.advance(0)) {
+            }
+            const auto actual = job.take();
+            CHECK(nlohmann::json(actual.scene) == nlohmann::json(expected.scene));
+            REQUIRE(actual.diags.items().size() == expected.diags.items().size());
+            for (std::size_t i = 0; i < actual.diags.items().size(); ++i) {
+                CHECK(actual.diags.items()[i].code == expected.diags.items()[i].code);
+                CHECK(actual.diags.items()[i].message == expected.diags.items()[i].message);
+            }
+        }
+    }
+}
+
+TEST_CASE("Canonical occurrence lookup preserves repeated identities and sparse metadata",
+          "[tessellation][canonical]") {
+    auto source = ir::semantic::fromExpanded(makeNestedBoxScene());
+    const auto originalRoot = source.root.logVolId;
+    const auto wrapper = source.nextLogVolId();
+    source.logVols.emplace(
+        wrapper, ir::semantic::LogicalVolume{
+                     wrapper,
+                     "wrapper",
+                     source.logVols.at(originalRoot).shapeId,
+                     source.logVols.at(originalRoot).materialId,
+                     {{"same", originalRoot, glm::translate(glm::dmat4{1}, glm::dvec3{2, 0, 0})},
+                      {"same", originalRoot, glm::translate(glm::dmat4{1}, glm::dvec3{0, 3, 0})}}});
+    source.root = {"root", wrapper};
+    source.metadata = {};
+    source.metadata.displayNames[{1}] = "renamed";
+    source.metadata.originalPaths[{1}] = "/original/path";
+    source.metadata.tagSets = {{{"test", "yes"}}};
+    source.metadata.occurrenceTags[{1}] = 0;
+    const auto physical = ir::semantic::expand(source);
+    OccurrenceNodes nodes{source};
+    for (const auto &[id, expected] : physical.nodes) {
+        const auto actual = nodes.at(id);
+        CHECK(actual.id == expected.id);
+        CHECK(actual.parentId == expected.parentId);
+        CHECK(actual.children == expected.children);
+        CHECK(actual.name == expected.name);
+        CHECK(actual.originalPath == expected.originalPath);
+        CHECK(actual.tags == expected.tags);
+        CHECK(actual.localTransform == expected.localTransform);
+        CHECK(actual.worldTransform == expected.worldTransform);
+    }
+    NHConfig config;
+    Rule merge;
+    merge.match = PredicateExpr{NameGlobPredicate{"same"}};
+    merge.tessellation.emplace();
+    merge.tessellation->mergeDescendants = true;
+    config.rules.push_back(merge);
+    Rule skip;
+    skip.match = PredicateExpr{TagPredicate{"test", "yes"}};
+    skip.tessellation.emplace();
+    skip.tessellation->skipGeometry = true;
+    config.rules.push_back(skip);
+    CHECK(nlohmann::json(TessellationPass{config}.lower(source).scene) ==
+          nlohmann::json(TessellationPass{config}.lower(physical).scene));
+}
+
+TEST_CASE("Canonical tessellation accepts an empty scene", "[tessellation][canonical]") {
+    NHConfig config;
+    CHECK(TessellationPass{config}.lower(ir::semantic::Scene{}).scene.nodes.empty());
+}
+
+TEST_CASE("Canonical node lookup indexes definitions rather than physical occurrences",
+          "[tessellation][canonical]") {
+    auto source = ir::semantic::fromExpanded(makeSingleBoxScene());
+    auto child = source.root.logVolId;
+    const auto shape = source.logVols.at(child).shapeId;
+    const auto material = source.logVols.at(child).materialId;
+    for (int level = 0; level < 40; ++level) {
+        const auto parent = source.nextLogVolId();
+        source.logVols.emplace(
+            parent, ir::semantic::LogicalVolume{
+                        parent, "branch", shape, material, {{"left", child}, {"right", child}}});
+        child = parent;
+    }
+    source.root = {"root", child};
+    const auto count = source.nodeCount();
+    REQUIRE(count == (uint64_t{1} << 41) - 1);
+    OccurrenceNodes nodes{source};
+    const auto last = nodes.at(ir::expanded::NodeId{count});
+    CHECK(last.name == "right");
+    CHECK(last.children.empty());
+    CHECK(last.parentId == ir::expanded::NodeId{count - 2});
+    CHECK_FALSE(nodes.contains(ir::expanded::NodeId{count + 1}));
+    CHECK_THROWS_AS(nodes.at(ir::expanded::NodeId{0}), std::out_of_range);
 }
