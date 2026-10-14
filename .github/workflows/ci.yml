@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
+      - uses: j178/prek-action@1382ad72dea72f9d53832f2bcb65b3e87a947204 # v3.0.1
 
   build:
     name: ${{ matrix.artifact-name }}
@@ -94,7 +94,7 @@ jobs:
         run: brew untap aws/tap || true
 
       - name: Install CMake and Ninja
-        uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+        uses: lukka/get-cmake@a89e43e22a96abafcd7a62db652a65ecd33052c9 # v4.4.4
 
       - name: Install GCC 14 and viewer deps (Linux)
         if: runner.os == 'Linux'
@@ -299,7 +299,7 @@ jobs:
         run: ci/build.sh test ${{ matrix.kind }}
 
       - name: Install hyperfine
-        uses: taiki-e/install-action@83ac0ad63c0167e6f06796fab0fce28db1bf3db0 # v2.87.22
+        uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2.87.26
         with:
           tool: hyperfine
 
@@ -308,7 +308,7 @@ jobs:
         run: ci/bench.sh ${{ matrix.kind }} ${{ matrix.artifact-name }}
 
       - name: Upload bench
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bench-${{ matrix.artifact-name }}
           path: bench.json
@@ -345,7 +345,7 @@ jobs:
           fi
 
       - name: Upload archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact-name }}
           path: ${{ matrix.artifact-name }}.${{ runner.os == 'Windows' && 'zip' || 'tar.gz' }}
@@ -444,12 +444,12 @@ jobs:
           save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Download the web wheel the built wheel will require
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nodehammer-web-wheel
           path: dist-web
 
-      - uses: pypa/cibuildwheel@e090b81e30c4d855ea63bf4b6e59204c09a101ae # v4.2.1
+      - uses: pypa/cibuildwheel@adba99c781d3746d38b3a09b1cf797965bcb7fe6 # v4.3.0
         env:
           CIBW_ONLY: ${{ matrix.identifier }}
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.value }}
@@ -478,7 +478,7 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-wheel-${{ matrix.identifier }}-${{ github.run_id }}
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: wheel-${{ matrix.identifier }}
           path: wheelhouse/*.whl
@@ -532,7 +532,7 @@ jobs:
           SETUPTOOLS_SCM_OVERRIDES_FOR_NODEHAMMER='{local_scheme = "no-local-version"}' \
             uv build --sdist --out-dir dist
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sdist
           path: dist/*.tar.gz
@@ -567,7 +567,7 @@ jobs:
           enable-cache: false
 
       - name: Download the web runtime
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nodehammer-wasm32
           path: wasm-artifact
@@ -639,7 +639,7 @@ jobs:
           print(f"nodehammer-web {__version__}: {len(RUNTIME_FILES)} files in {runtime}")
           EOF
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Not `wheel-*`: the publish jobs sweep that pattern into one directory
           # for a single upload, and this is a different PyPI project that has to
@@ -674,13 +674,13 @@ jobs:
           enable-cache: false
 
       - name: Download the platform wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: wheel-cp312-manylinux_x86_64
           path: dist
 
       - name: Download the web wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nodehammer-web-wheel
           path: dist
@@ -769,13 +769,13 @@ jobs:
       # leak or rotate.
       id-token: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: wheel-*
           path: dist
           merge-multiple: true
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sdist
           path: dist
@@ -785,7 +785,7 @@ jobs:
       # is uploaded under its own. Merging both into dist/ would put two names in
       # one upload.
       - name: Download the web wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nodehammer-web-wheel
           path: dist-web
@@ -833,13 +833,13 @@ jobs:
       # attestations come along by default.
       id-token: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: wheel-*
           path: dist
           merge-multiple: true
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: sdist
           path: dist
@@ -849,7 +849,7 @@ jobs:
       # is uploaded under its own. Merging both into dist/ would put two names in
       # one upload.
       - name: Download the web wheel
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nodehammer-web-wheel
           path: dist-web
@@ -877,7 +877,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download bench artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: bench-results
           pattern: bench-*
@@ -909,13 +909,13 @@ jobs:
       # runtime -- the same friction the Python side rejected when it made
       # nodehammer-web a default dependency rather than an extra.
       - name: Download the platform archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ matrix.artifact }}
           path: platform
 
       - name: Download the web runtime
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nodehammer-wasm32
           path: wasm-artifact
@@ -983,7 +983,7 @@ jobs:
       # publishing the one without a runtime. The wasm artifact is untouched, so
       # the Pages job (which stages from it) is unaffected.
       - name: Replace the platform archive
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: ${{ steps.overlay.outputs.archive }}
@@ -999,7 +999,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download wasm build
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nodehammer-wasm32
           path: wasm-artifact
@@ -1037,7 +1037,7 @@ jobs:
       # this artifact is the only way to look at what would be published.
       - name: Upload site artifact
         if: github.ref != 'refs/heads/main'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pages-site
           path: _site
@@ -1090,7 +1090,7 @@ jobs:
       contents: write
     steps:
       - name: Download all binaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
 
@@ -1184,7 +1184,7 @@ jobs:
 
       - name: Upload FCC-ee diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fccee-results
           path: |
