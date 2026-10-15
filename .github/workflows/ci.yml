@@ -459,7 +459,7 @@ jobs:
           NH_CONAN_CACHE_ARCHIVE: ${{ runner.os == 'Linux' && format('/host{0}/.cache/conan/dependencies.tgz', github.workspace) || format('{0}/.cache/conan/dependencies.tgz', github.workspace) }}
           # Report this build's compiler reuse from inside the Linux container.
           CIBW_BEFORE_BUILD_LINUX: ccache --zero-stats
-          CIBW_BEFORE_TEST_LINUX: ccache --show-stats --verbose
+          CIBW_BEFORE_TEST_LINUX: ccache --show-stats
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.value }}
           # find-links, not --no-index: the test environment still needs an
           # index for `test-requires`. It only has to be *possible* to satisfy
