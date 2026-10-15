@@ -138,3 +138,59 @@ TEST_CASE("boolean tessellator: IDEA cone sectors are watertight",
         }
     }
 }
+
+// Detector supports can contain long chains of drilled holes. A fixed depth
+// cutoff rejected sPHENIX's MVTX end wheel (34 nested boolean operations).
+TEST_CASE("boolean tessellator: deep operand graph preserves the cut volume",
+          "[tessellation][boolean][manifold]") {
+    ir::expanded::Scene scene;
+    const auto box = scene.nextShapeId();
+    scene.shapes[box] = {box, ir::semantic::BoxShape{10.0, 10.0, 10.0}};
+    const auto hole = scene.nextShapeId();
+    scene.shapes[hole] = {hole, ir::semantic::BoxShape{1.0, 1.0, 1.0}};
+    auto previous = box;
+    glm::dmat4 transform{1.0};
+    transform[3][0] = 3.0;
+    for (int i = 0; i < 128; ++i) {
+        const auto id = scene.nextShapeId();
+        scene.shapes[id] = {id, ir::semantic::BooleanSubtraction{previous, hole, transform}};
+        previous = id;
+    }
+    // Both sides share the deep operand graph; this is a DAG, not a cycle.
+    const auto root = ir::semantic::BooleanUnion{previous, previous, glm::dmat4{1.0}};
+    PrimitiveTessellator tess;
+    auto out = tessellateBooleanShape(root, scene, tess, kDefault);
+    REQUIRE(out.succeeded);
+    REQUIRE(out.diags.empty());
+    REQUIRE_FALSE(out.vertices.empty());
+    DiagnosticList diags;
+    auto solid = meshToManifold(out, diags, "deep cut");
+    REQUIRE(solid.has_value());
+    CHECK(std::abs(solid->Volume() - (8000.0 - 8.0)) < 1e-5);
+}
+
+TEST_CASE("boolean tessellator: invalid nested operands do not fall back to primitives",
+          "[tessellation][boolean][manifold]") {
+    ir::expanded::Scene scene;
+    const auto box = scene.nextShapeId();
+    scene.shapes[box] = {box, ir::semantic::BoxShape{1.0, 1.0, 1.0}};
+    const auto nested = scene.nextShapeId();
+    std::string expected;
+    SECTION("cycle") {
+        scene.shapes[nested] = {nested, ir::semantic::BooleanUnion{box, nested, glm::dmat4{1.0}}};
+        expected = "cycle in boolean operands";
+    }
+    SECTION("missing operand") {
+        const auto missing = scene.nextShapeId();
+        scene.shapes[nested] = {nested,
+                                ir::semantic::BooleanSubtraction{box, missing, glm::dmat4{1.0}}};
+        expected = "not found in scene";
+    }
+    const auto root = ir::semantic::BooleanUnion{nested, box, glm::dmat4{1.0}};
+    PrimitiveTessellator tess;
+    auto out = tessellateBooleanShape(root, scene, tess, kDefault);
+    CHECK_FALSE(out.succeeded);
+    CHECK(out.vertices.empty());
+    REQUIRE(out.diags.size() == 1);
+    CHECK(out.diags.begin()->message.find(expected) != std::string::npos);
+}
