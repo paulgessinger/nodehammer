@@ -100,15 +100,20 @@ bool matchGlobCore(std::string_view pattern, std::string_view text) {
 // Precompiled form of a glob pattern, analyzed once at predicate-build time.
 struct CompiledGlob {
     enum class Kind {
-        MatchAll,         // pattern is "*", "**", or any string of consecutive '*'
-        Literal,          // pattern has no '*' → equality check
-        PrefixDoubleStar, // pattern is "<LITERAL>**" with nothing after → starts_with check
-        Contains,         // pattern is "**<LITERAL>**" → text.find(LITERAL) check
-        General,          // full two-pointer matcher with precomputed literal segments
+        MatchAll,            // pattern is "*", "**", or any string of consecutive '*'
+        Literal,             // pattern has no '*' → equality check
+        PrefixDoubleStar,    // pattern is "<LITERAL>**" with nothing after → starts_with check
+        SuffixDoubleStar,    // pattern is "**[/]<LITERAL>" → ends_with check
+        LastSegmentContains, // pattern is "**[/]<SEGMENT>*"
+        Contains,            // pattern is "**<LITERAL>**" → text.find(LITERAL) check
+        General,             // full two-pointer matcher with precomputed literal segments
     };
 
     Kind kind{Kind::General};
     std::string pattern;                    // held for General and Literal; storage for segments
+    std::string_view prefix;                // anchored literal before the first wildcard
+    std::string_view leading;               // first required literal after a leading double star
+    std::string_view suffix;                // anchored literal after the last wildcard
     std::string_view literal;               // for Literal / PrefixDoubleStar
     std::vector<std::string_view> segments; // for General fast-reject (views into pattern)
 };
@@ -170,6 +175,27 @@ std::shared_ptr<const CompiledGlob> compileGlob(std::string pattern) {
         }
     }
 
+    // A leading '**' imposes no prefix constraint. Its optional slash is
+    // consumed by matchGlobCore, so these forms are suffix/last-segment tests,
+    // not segment-boundary tests ("**/foo" also matches "xfoo").
+    if (pattern.starts_with("**")) {
+        const std::size_t start = pattern.size() > 2 && pattern.at(2) == '/' ? 3 : 2;
+        const auto tail = std::string_view{pattern}.substr(start);
+        if (tail.find('*') == std::string_view::npos) {
+            g->kind = CompiledGlob::Kind::SuffixDoubleStar;
+            g->pattern = std::move(pattern);
+            g->literal = std::string_view{g->pattern}.substr(start);
+            return g;
+        }
+        if (tail.size() > 1 && tail.back() == '*' &&
+            tail.substr(0, tail.size() - 1).find_first_of("*/") == std::string_view::npos) {
+            g->kind = CompiledGlob::Kind::LastSegmentContains;
+            g->pattern = std::move(pattern);
+            g->literal = std::string_view{g->pattern}.substr(start, tail.size() - 1);
+            return g;
+        }
+    }
+
     // General case: precompute literal segments for fast-reject. Rejecting
     // mismatched (pattern, text) pairs via text.find is a big net win here —
     // removing this step regressed wasm runtime 2–3× in practice, because most
@@ -177,6 +203,12 @@ std::shared_ptr<const CompiledGlob> compileGlob(std::string pattern) {
     g->kind = CompiledGlob::Kind::General;
     g->pattern = std::move(pattern);
     std::string_view p{g->pattern};
+    g->prefix = p.substr(0, p.find('*'));
+    if (p.starts_with("**")) {
+        const std::size_t start = p.size() > 2 && p.at(2) == '/' ? 3 : 2;
+        const auto end = p.find('*', start);
+        g->leading = p.substr(start, end == std::string_view::npos ? end : end - start);
+    }
     std::size_t i = 0;
     while (i < p.size()) {
         if (p[i] == '*') {
@@ -194,6 +226,11 @@ std::shared_ptr<const CompiledGlob> compileGlob(std::string pattern) {
         while (i < p.size() && p[i] != '*') {
             ++i;
         }
+        if (i == p.size()) {
+            // The optional slash after '**' was consumed above; it must not
+            // become a required suffix (e.g. '**/a' also matches 'a').
+            g->suffix = p.substr(start);
+        }
         if (i - start > 1) {
             g->segments.push_back(p.substr(start, i - start));
         }
@@ -209,10 +246,37 @@ bool matchCompiledGlob(const CompiledGlob &g, std::string_view text) {
         return text == g.literal;
     case CompiledGlob::Kind::PrefixDoubleStar:
         return text.starts_with(g.literal);
+    case CompiledGlob::Kind::SuffixDoubleStar:
+        return text.ends_with(g.literal);
+    case CompiledGlob::Kind::LastSegmentContains: {
+        const auto slash = text.rfind('/');
+        if (slash != std::string_view::npos) {
+            text.remove_prefix(slash + 1);
+        }
+        return text.find(g.literal) != std::string_view::npos;
+    }
     case CompiledGlob::Kind::Contains:
         return text.find(g.literal) != std::string_view::npos;
     case CompiledGlob::Kind::General:
+        // Most rule/node pairs differ at their anchored ends. Reject them
+        // before scanning the whole detector path for internal literals.
+        if (!text.starts_with(g.prefix) || !text.ends_with(g.suffix)) {
+            return false;
+        }
+        if (!g.leading.empty()) {
+            const auto start = text.find(g.leading);
+            if (start == std::string_view::npos) {
+                return false;
+            }
+            // No match can begin before this first required literal. Keep all
+            // later candidates so the general matcher can still backtrack.
+            text.remove_prefix(start);
+        }
         for (const auto &seg : g.segments) {
+            if (seg.data() == g.prefix.data() || seg.data() == g.suffix.data() ||
+                seg.data() == g.leading.data()) {
+                continue;
+            }
             if (text.find(seg) == std::string_view::npos) {
                 return false;
             }

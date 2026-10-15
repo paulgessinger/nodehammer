@@ -32,6 +32,7 @@
 #include <emscripten/emscripten.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -114,6 +115,33 @@ EM_JS(void, nh_compute_emit_error, (const char *msg), {
 });
 // clang-format on
 
+// Only profiling builds collect timings; the callback is local to the Node
+// harness and does not add messages to the production worker protocol.
+#ifdef NH_COMPUTE_PROFILING
+// clang-format off
+EM_JS(void, nh_compute_timing, (const char *stage, double ms), {
+    if (typeof globalThis['nhComputeTiming'] === 'function') {
+        globalThis['nhComputeTiming'](UTF8ToString(stage), ms);
+    }
+});
+EM_JS(void, nh_compute_diagnostic, (int severity, const char *code, const char *message), {
+    if (typeof globalThis['nhComputeDiagnostic'] === 'function') {
+        globalThis['nhComputeDiagnostic'](severity, UTF8ToString(code), UTF8ToString(message));
+    }
+});
+// clang-format on
+void profileDiagnostics(const DiagnosticList &diags) {
+    for (const auto &d : diags) {
+        nh_compute_diagnostic(static_cast<int>(d.severity), d.code.c_str(), d.message.c_str());
+    }
+}
+struct ComputeTimer {
+    const char *stage;
+    double start{emscripten_get_now()};
+    ~ComputeTimer() { nh_compute_timing(stage, emscripten_get_now() - start); }
+};
+#endif
+
 /// The worker's one exit for a failure: this side of `postMessage` has no
 /// caller to unwind to, so an `Error` becomes a message (docs/error-model.md).
 void reportFailure(const Error &e, const char *what) {
@@ -160,12 +188,21 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
         *out_len = 0;
     }
 
+#ifdef NH_COMPUTE_PROFILING
+    ComputeTimer total_timer{"total"};
+#endif
     ComputeCache &c = cache();
 
     // (Re)seed the cache when new scene bytes arrive; otherwise require a hit.
     if (scene_bytes != nullptr && scene_len > 0) {
+#ifdef NH_COMPUTE_PROFILING
+        ComputeTimer input_timer{"input_decode_config_cache"};
+#endif
         ImportResult imported;
         try {
+#ifdef NH_COMPUTE_PROFILING
+            ComputeTimer decode_timer{"decode"};
+#endif
             imported = FlatBufferImporter::importFromBytes(
                 "scene.nhb", std::as_bytes(std::span{scene_bytes, scene_len}));
         } catch (const Error &e) {
@@ -177,6 +214,9 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
         // carries no include, and the worker has no filesystem to root one at.
         config::ConfigResult loaded;
         try {
+#ifdef NH_COMPUTE_PROFILING
+            ComputeTimer config_timer{"config"};
+#endif
             loaded = ConfigLoader::loadFromString(config_toml != nullptr ? config_toml : "",
                                                   "<worker-config>");
         } catch (const Error &e) {
@@ -187,6 +227,10 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
                 (std::string{"compute: failed to parse config: "} + e.what()).c_str());
             return nullptr;
         }
+#ifdef NH_COMPUTE_PROFILING
+        profileDiagnostics(imported.diags);
+        profileDiagnostics(loaded.diags);
+#endif
         c.scene = std::move(imported.scene);
         c.config = std::move(loaded.config);
         c.epoch = epoch;
@@ -218,7 +262,21 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
     std::size_t next_bounds = 0;
     std::size_t next_cut = 0;
     std::size_t next_tess = 0;
-    while (!pipe.advance(kSliceNs)) {
+#ifdef NH_COMPUTE_PROFILING
+    std::array<double, 11> stage_ms{};
+#endif
+    while (true) {
+#ifdef NH_COMPUTE_PROFILING
+        const auto phase = static_cast<std::size_t>(pipe.phase());
+        const double begin = emscripten_get_now();
+#endif
+        const bool done = pipe.advance(kSliceNs);
+#ifdef NH_COMPUTE_PROFILING
+        stage_ms.at(phase) += emscripten_get_now() - begin;
+#endif
+        if (done) {
+            break;
+        }
         switch (pipe.phase()) {
         case BuildPipeline::Phase::Bounds:
         case BuildPipeline::Phase::Cutting: {
@@ -257,13 +315,27 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
             break;
         }
     }
+#ifdef NH_COMPUTE_PROFILING
+    constexpr std::array<const char *, 11> names{
+        "idle",   "prepare",     "cut",    "tessellate",           "finalize", "done",
+        "queued", "prepare_cut", "bounds", "prepare_tessellation", "prune"};
+    for (std::size_t i = 0; i < stage_ms.size(); ++i) {
+        nh_compute_timing(names.at(i), stage_ms.at(i));
+    }
+#endif
     SceneBuildResult result = pipe.take();
+#ifdef NH_COMPUTE_PROFILING
+    profileDiagnostics(result.diags);
+#endif
     if (result.failure) {
         reportFailure(*result.failure, "compute: build failed");
         return nullptr;
     }
 
     nh_compute_emit_progress(kFinalizing, 0, 0);
+#ifdef NH_COMPUTE_PROFILING
+    const double serialize_start = emscripten_get_now();
+#endif
     std::vector<std::byte> bytes = renderSceneToBytes(*result.scene);
     auto *buffer = static_cast<std::uint8_t *>(std::malloc(bytes.size()));
     if (buffer == nullptr) {
@@ -274,6 +346,9 @@ std::uint8_t *nh_compute_build(std::uint32_t epoch, const std::uint8_t *scene_by
     if (out_len != nullptr) {
         *out_len = static_cast<std::uint32_t>(bytes.size());
     }
+#ifdef NH_COMPUTE_PROFILING
+    nh_compute_timing("serialize_and_copy", emscripten_get_now() - serialize_start);
+#endif
     return buffer;
 }
 

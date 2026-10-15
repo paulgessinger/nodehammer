@@ -110,8 +110,10 @@ class Definitions {
 } // namespace
 
 DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &rules, bool hoist) {
-    if (scene.nodeCount() == 0)
+    if (scene.logVols.empty() && scene.root.logVolId.value == 0) {
         return {};
+    }
+    // makeTree validates non-empty scenes; do not repeat it via nodeCount().
     auto tree = scene.makeTree(0);
     const selection::SelectedOccurrences original{*tree};
     const auto selected = original.prune(rules, hoist);
@@ -141,7 +143,6 @@ DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &ru
         const DaughterPlacement *placement;
         std::optional<std::size_t> keptParent;
         TagDefault incomingTags;
-        glm::dmat4 world{1.0};
         glm::dmat4 local{1.0};
         std::vector<DaughterPlacement> daughters;
         std::vector<TagDefault> daughterTags;
@@ -152,12 +153,10 @@ DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &ru
         bool entered{};
         bool kept{};
         Frame(const DaughterPlacement *edge, std::optional<std::size_t> parent, TagDefault tags,
-              const glm::dmat4 &worldTransform, const glm::dmat4 &localTransform)
-            : placement(edge), keptParent(parent), incomingTags(tags), world(worldTransform),
-              local(localTransform) {}
+              const glm::dmat4 &localTransform)
+            : placement(edge), keptParent(parent), incomingTags(tags), local(localTransform) {}
     };
-    std::vector<Frame> stack{{&scene.root, std::nullopt, std::nullopt, scene.root.localTransform,
-                              scene.root.localTransform}};
+    std::vector<Frame> stack{{&scene.root, std::nullopt, std::nullopt, scene.root.localTransform}};
     OccurrenceId sourceRoute, outputRoute;
     while (!stack.empty()) {
         auto &frame = stack.back();
@@ -216,9 +215,8 @@ DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &ru
             const auto index = frame.next++;
             const auto &child = daughters[index];
             const auto parent = frame.kept ? std::optional{stack.size() - 1} : frame.keptParent;
-            const auto world = frame.world * child.localTransform;
             sourceRoute.push_back(index);
-            stack.push_back({&child, parent, placementDefault(scene.metadata, volume, index), world,
+            stack.push_back({&child, parent, placementDefault(scene.metadata, volume, index),
                              child.localTransform});
             continue;
         }

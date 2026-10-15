@@ -257,6 +257,10 @@ class OccurrenceTree {
     }
 
   private:
+    // makeTree validates the whole scene once, then initializes its metadata
+    // in bulk. Interactive setters retain their per-edit validation.
+    friend struct Scene;
+
     template <class Map> static bool hasDescendant(const Map &values, const OccurrenceId &id) {
         const auto it = values.upper_bound(id);
         return it != values.end() && it->first.size() > id.size() &&

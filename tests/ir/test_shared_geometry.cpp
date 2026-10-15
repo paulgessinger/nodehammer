@@ -239,3 +239,46 @@ TEST_CASE("Shared imported path segments invalidate descendants but preserve pin
     tree->clearCache();
     REQUIRE(tree->materialize({0, 0})->originalPath == "/detector/corrected/sensor");
 }
+
+TEST_CASE("Bulk tree metadata preserves tag identities and remains editable", "[ir][shared]") {
+    auto geometry = repeatedGeometry();
+    geometry.metadata.tagSets = {
+        {{"unused", "yes"}}, {{"kind", "sensor"}}, {{"kind", "sensor"}}, {}};
+    geometry.metadata.volumeTags.emplace(LogVolId{3}, 2);
+    geometry.metadata.placementTags.emplace(PlacementKey{LogVolId{2}, 0}, 1);
+    geometry.metadata.occurrenceTags.emplace(OccurrenceId{0, 0}, 3);
+    geometry.metadata.originalPaths.emplace(OccurrenceId{0, 0}, "/imported/sensor");
+    auto tree = geometry.makeTree(2);
+    const auto before = tree->materialize({0, 0});
+    REQUIRE(before->tags.empty());
+    REQUIRE(before->originalPath == "/imported/sensor");
+    REQUIRE(tree->materialize({1, 0})->tags.at("kind") == "sensor");
+    tree->setTags({0, 0}, {{"edited", "yes"}});
+    REQUIRE(tree->materialize({0, 0})->tags.at("edited") == "yes");
+    REQUIRE(before->tags.empty());
+    tree->clearTagOverride({0, 0});
+    REQUIRE(tree->materialize({0, 0})->tags.at("kind") == "sensor");
+    REQUIRE(geometry.metadata.occurrenceTags.at(OccurrenceId{0, 0}) == 3);
+    REQUIRE_THROWS(tree->setOriginalPath({0, 99}, "/invalid"));
+    REQUIRE_THROWS(tree->setTags({0, 99}, {}));
+}
+
+TEST_CASE("Metadata validation reuses only matching route prefixes", "[ir][shared]") {
+    auto geometry = repeatedGeometry();
+    geometry.logVols.at(LogVolId{1}).daughters.push_back({"leaf", LogVolId{3}});
+    geometry.metadata.displayNames = {{{0, 0}, "a"}, {{0, 1}, "b"}, {{1, 1}, "c"}, {{2}, "d"}};
+    // Validation moves backwards at this map boundary, then descends again.
+    geometry.metadata.originalPaths = {{{}, "/root"}, {{0}, "/first"}, {{1, 0}, "/second"}};
+    SECTION("valid siblings, ancestors, and metadata map boundaries") {
+        REQUIRE(geometry.validate() == 8);
+        REQUIRE(geometry.makeTree()->materialize({1, 0})->originalPath == "/second");
+    }
+    SECTION("a reused prefix must not hide an invalid child") {
+        geometry.metadata.originalPaths.emplace(OccurrenceId{1, 99}, "/bad");
+        REQUIRE_THROWS(geometry.validate());
+    }
+    SECTION("a sibling with a different prototype must be checked") {
+        geometry.metadata.originalPaths.emplace(OccurrenceId{2, 0}, "/bad");
+        REQUIRE_THROWS(geometry.makeTree());
+    }
+}
