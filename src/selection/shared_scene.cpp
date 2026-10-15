@@ -1,6 +1,6 @@
-#include <ir/expanded/conversion.hpp>
 #include <selection/occurrence_selector.hpp>
 #include <selection/selector.hpp>
+#include <selection/shared_scene.hpp>
 
 #include <bit>
 #include <optional>

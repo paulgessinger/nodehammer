@@ -4,6 +4,7 @@
 #include <ir/semantic/flatbuffer.hpp>
 #include <ir/semantic/occurrence_tree.hpp>
 #include <selection/selector.hpp>
+#include <selection/shared_scene.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 
