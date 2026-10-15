@@ -417,7 +417,8 @@ list(APPEND NH_CORE_DEPS ${NH_INGEST_BACKEND_DEPS})
 list(APPEND NH_CORE_DEFINES ${NH_INGEST_DEFINES})
 
 if(NODEHAMMER_WITH_GEANT4)
-    find_package(Geant4 REQUIRED)
+    find_package(Geant4 REQUIRED COMPONENTS gdml)
+    list(APPEND NH_CORE_SOURCES src/ir/geant4/semantic/importer.cpp)
     # Geant4 exports plain variables rather than imported targets, so unlike
     # every other backend its include directories do not ride along with the
     # link and have to be named separately.

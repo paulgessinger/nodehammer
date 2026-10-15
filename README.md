@@ -22,7 +22,7 @@ real time with a physically-based pipeline, natively or straight in the
 browser.
 
 ```
-   TGeo / DD4hep ── (GDML/Geant4, GeoModel: planned)
+   TGeo / DD4hep / GDML (Geant4) ── (GeoModel: planned)
               │
               ▼
     Semantic scene graph (.nhb / .nhb.zst)
@@ -50,8 +50,10 @@ versus what's on the roadmap.
 
 ### ✅ Implemented
 
-- **Importers**: ROOT/TGeo and DD4hep, each independently switchable at
-  build time (`NODEHAMMER_WITH_TGEO`, `NODEHAMMER_WITH_DD4HEP`).
+- **Importers**: ROOT/TGeo, DD4hep, and GDML through Geant4, switchable at
+  build time (`NODEHAMMER_WITH_TGEO`, `NODEHAMMER_WITH_DD4HEP`,
+  `NODEHAMMER_WITH_GEANT4`). See [GDML import](docs/gdml-import.md) for coverage
+  and Homebrew build instructions.
 - **Exporters**: glTF/GLB and OBJ (render IR), plus the native `.nhb`/`.nhb.zst`
   FlatBuffers semantic-scene container — a documented, zstd-compressible
   [on-disk format](docs/nhb-format.txt).
@@ -86,8 +88,6 @@ versus what's on the roadmap.
 
 ### 🚧 Planned / in progress
 
-- **GDML/Geant4 importer** — CMake option and library wiring exist
-  (`NODEHAMMER_WITH_GEANT4`); the actual importer isn't written yet.
 - **GeoModel importer** — CMake option declared only; no implementation.
 - **Windows viewer verification** — the D3D11 backend builds and passes CI's
   headless tests, but the maintainer has no Windows machine to manually
@@ -282,7 +282,7 @@ Key CMake options:
 | `NODEHAMMER_WITH_VIEWER` | Build the sokol/Dear ImGui interactive viewer | ✅ |
 | `NODEHAMMER_WITH_TGEO` | ROOT/TGeo importer | ✅ |
 | `NODEHAMMER_WITH_DD4HEP` | DD4hep importer | ✅ |
-| `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | 🚧 links Geant4 only, no importer yet |
+| `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | ✅ GDML via Geant4 (requires GDML support) |
 | `NODEHAMMER_WITH_GEOMODEL` | GeoModel importer | 🚧 declared only |
 | `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary | ✅ |
 | `NODEHAMMER_BUILD_SHARED` | Also build and install `libnodehammer` and `libnodehammer_ingest` + the public headers + a CMake package config | 🚧 packaging works; the API it exposes is still being written |
