@@ -181,7 +181,7 @@ jobs:
           enable-cache: false
 
       - name: Install Conan
-        run: uv tool install conan
+        run: uv tool install conan==2.30.0
 
       # One interpreter for both halves: CMake builds the extension against it
       # and ctest runs pytest with it, so there is no way for the module to be
@@ -199,15 +199,16 @@ jobs:
         run: |
           conan profile detect --force
           cp ~/.conan2/profiles/default ./.conan-profile-snapshot
+          conan --version >> ./.conan-profile-snapshot
 
+      # Use exact configuration keys to avoid accumulating obsolete packages.
+      # Bump the cache epoch (v3) if dependency/toolchain changes outside these inputs.
       - name: Restore Conan cache
+        id: conan-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.conan2/p
-          key: conan-${{ matrix.artifact-name }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot', 'profiles/emscripten') }}-${{ github.run_id }}
-          restore-keys: |
-            conan-${{ matrix.artifact-name }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot', 'profiles/emscripten') }}-
-            conan-${{ matrix.artifact-name }}-
+          path: .cache/conan/dependencies.tgz
+          key: conan-v3-2.30.0-${{ matrix.artifact-name }}-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', '.conan-profile-snapshot', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py') }}
 
       - name: Set up ccache
         uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
@@ -224,14 +225,20 @@ jobs:
 
       - name: Conan install
         shell: bash
+        env:
+          NH_CONAN_CACHE_ARCHIVE: ${{ github.workspace }}/.cache/conan/dependencies.tgz
         run: ci/build.sh conan-install ${{ matrix.kind }} -o viewer=True
 
+      - name: Check Conan archive and cache pruning behavior
+        if: matrix.artifact-name == 'nodehammer-linux-x86_64'
+        run: python3 -m unittest discover -s ci -p test_conan_cache.py -v
+
       - name: Save Conan cache
-        if: always() && github.ref == 'refs/heads/main'
+        if: success() && github.ref == 'refs/heads/main' && steps.conan-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.conan2/p
-          key: conan-${{ matrix.artifact-name }}-${{ hashFiles('conanfile.py', '.conan-profile-snapshot', 'profiles/emscripten') }}-${{ github.run_id }}
+          path: .cache/conan/dependencies.tgz
+          key: conan-v3-2.30.0-${{ matrix.artifact-name }}-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', '.conan-profile-snapshot', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py') }}
 
       - name: Configure
         shell: bash
@@ -399,25 +406,22 @@ jobs:
       - name: Point Conan and ccache at cacheable directories
         if: runner.os == 'Linux'
         shell: bash
-        # On Linux the dependencies (and now the compile itself) happen *inside*
-        # the container, so each cache has to live on the other side of the
-        # /host mount cibuildwheel provides or it dies with the container. macOS
-        # needs nothing here: before-all and the build both run on the host, so
-        # Conan and ccache already write to the home directory cached below.
+        # Linux builds inside a container. Keep Conan's package paths stable
+        # across restores for compiler-cache reuse, and persist ccache via /host.
+        # The graph archive has its own /host path on the cibuildwheel step.
+        # macOS builds on the host and uses the default home directories.
         run: |
           echo "CONAN_HOME=/host${HOME}/.conan2" >> "$GITHUB_ENV"
           echo "CCACHE_DIR=/host${HOME}/.cache/ccache" >> "$GITHUB_ENV"
 
-      # Keyed on conanfile.py alone, with no run id — unlike the caches in the
-      # build job. Those grow run to run and want a fresh entry each time; this
-      # one is a fixed dependency set that only changes when the recipe does, so
-      # a content key writes once and is reused until the recipe moves. That also
-      # keeps three more ~250 MB blobs from churning against the repository's
-      # cache quota, which one open PR has exhausted before (#51).
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Immutable dependency caches: one compact snapshot per configuration.
+      # No broad fallback: it would carry obsolete packages into new snapshots.
+      - name: Restore Conan cache
+        id: conan-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.conan2/p
-          key: conan-wheel-${{ matrix.identifier }}-${{ hashFiles('conanfile.py') }}
+          path: .cache/conan/dependencies.tgz
+          key: conan-v3-2.30.0-wheel-${{ matrix.identifier }}-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/cli11/**', 'ci/conan-cache.py', 'pyproject.toml', '.github/workflows/ci.yml') }}
 
       # ccache itself, unlike the Conan cache above, grows run to run the same
       # way the build job's does -- a run-id key plus prefix restore-keys, only
@@ -452,6 +456,10 @@ jobs:
       - uses: pypa/cibuildwheel@adba99c781d3746d38b3a09b1cf797965bcb7fe6 # v4.3.0
         env:
           CIBW_ONLY: ${{ matrix.identifier }}
+          NH_CONAN_CACHE_ARCHIVE: ${{ runner.os == 'Linux' && format('/host{0}/.cache/conan/dependencies.tgz', github.workspace) || format('{0}/.cache/conan/dependencies.tgz', github.workspace) }}
+          # Report this build's compiler reuse from inside the Linux container.
+          CIBW_BEFORE_BUILD_LINUX: ccache --zero-stats
+          CIBW_BEFORE_TEST_LINUX: ccache --show-stats --verbose
           SETUPTOOLS_SCM_PRETEND_VERSION: ${{ steps.version.outputs.value }}
           # find-links, not --no-index: the test environment still needs an
           # index for `test-requires`. It only has to be *possible* to satisfy
@@ -469,7 +477,14 @@ jobs:
       # save. Same workaround the LCG job already carries for the same reason.
       - name: Fix cache ownership
         if: always() && runner.os == 'Linux'
-        run: sudo chown -R "$USER" "$HOME/.conan2" "$HOME/.cache/ccache" || true
+        run: sudo chown -R "$USER" "$HOME/.conan2" "$HOME/.cache/ccache" "${{ github.workspace }}/.cache/conan" || true
+
+      - name: Save Conan cache
+        if: success() && github.ref == 'refs/heads/main' && steps.conan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/conan/dependencies.tgz
+          key: conan-v3-2.30.0-wheel-${{ matrix.identifier }}-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/cli11/**', 'ci/conan-cache.py', 'pyproject.toml', '.github/workflows/ci.yml') }}
 
       - name: Save ccache
         if: always() && runner.os == 'Linux' && github.ref == 'refs/heads/main'
@@ -1144,13 +1159,22 @@ jobs:
           cvmfs_repositories: "sft.cern.ch,sft-nightlies.cern.ch,geant4.cern.ch,sw.hsf.org"
 
       - name: Restore Conan cache
+        id: conan-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/.conan2/p
-          key: conan-key4hep-20260408-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
+          path: .cache/conan/dependencies.tgz
+          key: conan-v3-2.30.0-key4hep-20260408-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py', '.github/workflows/ci.yml') }}
+
+      # The container action's built-in cache is immutable for a whole day.
+      # Use a separate workspace directory so its restore cannot overwrite this
+      # newer snapshot; the workspace is mounted at the same path in the container.
+      - name: Restore Key4hep ccache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ github.workspace }}/.ccache-key4hep
+          key: ccache-key4hep-v2-20260408-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            conan-key4hep-20260408-${{ hashFiles('conanfile.py') }}-
-            conan-key4hep-20260408-
+            ccache-key4hep-v2-20260408-
 
       - name: Build, test and convert FCC-ee in Key4hep
         uses: aidasoft/run-lcg-view@b4da52e1c5ccb70a60ad4e7216de0a90664d5849 # v6.0.2
@@ -1164,9 +1188,13 @@ jobs:
             export CONAN_HOME=$(pwd)/.conan2
             curl -LsSf https://astral.sh/uv/0.11.7/install.sh | sh
             source "$HOME/.local/bin/env"
-            uv tool install conan
+            uv tool install conan==2.30.0
             conan profile detect --force
+            export NH_CONAN_CACHE_ARCHIVE="$PWD/.cache/conan/dependencies.tgz"
             ci/build.sh conan-install native
+            export CCACHE_DIR="$PWD/.ccache-key4hep"
+            ccache --set-config=max_size=500M
+            ccache --zero-stats
             # Conan caches compiled dependency packages. Enable ccache only
             # afterwards to avoid also caching their object files. Inherit the
             # launchers in nodehammer and the independent SDK/ingestion builds;
@@ -1208,13 +1236,20 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-      - name: Fix Conan cache ownership
+      - name: Fix cache ownership
         if: always()
-        run: sudo chown -R "$USER" "${{ github.workspace }}/.conan2" || true
+        run: sudo chown -R "$USER" "${{ github.workspace }}/.conan2" "${{ github.workspace }}/.ccache-key4hep" "${{ github.workspace }}/.cache/conan" || true
 
-      - name: Save Conan cache
-        if: always() && github.ref == 'refs/heads/main'
+      - name: Save Key4hep ccache
+        if: success() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ${{ github.workspace }}/.conan2/p
-          key: conan-key4hep-20260408-${{ hashFiles('conanfile.py') }}-${{ github.run_id }}
+          path: ${{ github.workspace }}/.ccache-key4hep
+          key: ccache-key4hep-v2-20260408-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save Conan cache
+        if: success() && github.ref == 'refs/heads/main' && steps.conan-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/conan/dependencies.tgz
+          key: conan-v3-2.30.0-key4hep-20260408-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py', '.github/workflows/ci.yml') }}
