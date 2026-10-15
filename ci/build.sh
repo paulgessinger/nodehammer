@@ -56,7 +56,7 @@ case "$cmd" in
     conan export recipes/implot --version=1.0.0
     conan export recipes/nfd --version=1.3.0
     conan export recipes/sokol-shdc --version=2026.06.13
-    conan install . --build=missing "${conan_args[@]}" "$@"
+    python3 ci/conan-cache.py . --build=missing "${conan_args[@]}" "$@"
     ;;
   configure)
     cmake --preset "$preset" \

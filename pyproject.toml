@@ -195,10 +195,10 @@ test-command = "pytest {project}/tests/python -q"
 # at all. Keep the version in step with conanfile.py, the Justfile and ci/build.sh.
 before-all = [
     "dnf install -y ccache",
-    "python3 -m pip install conan",
+    "python3 -m pip install conan==2.30.0",
     "conan profile detect --force",
     "conan export {project}/recipes/cli11 --version=2.7.2",
-    "conan install {project} -of /tmp/conan -s build_type=Release -s:a compiler.cppstd=23 --build=missing",
+    "python3 {project}/ci/conan-cache.py {project} -of /tmp/conan -s build_type=Release -s:a compiler.cppstd=23 --build=missing",
 ]
 
 # cibuildwheel copies the project into the container *without* .git, so
@@ -208,7 +208,7 @@ before-all = [
 # CONAN_HOME and CCACHE_DIR ride along so CI can point them at directories under
 # cibuildwheel's /host mount, which is the only way either cache survives the
 # container. Unset locally, where the container's own defaults are fine.
-environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION", "CONAN_HOME", "CCACHE_DIR"]
+environment-pass = ["SETUPTOOLS_SCM_PRETEND_VERSION", "CONAN_HOME", "CCACHE_DIR", "NH_CONAN_CACHE_ARCHIVE"]
 
 [tool.cibuildwheel.linux.environment]
 CMAKE_TOOLCHAIN_FILE = "/tmp/conan/build/Release/generators/conan_toolchain.cmake"
@@ -227,9 +227,9 @@ CMAKE_ARGS = "-DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=c
 # The cli11 export is the Linux list's, for the same reason and against the same
 # CONAN_HOME -- uvx gives each invocation a fresh environment, not a fresh cache.
 before-all = [
-    "uvx conan profile detect --force",
-    "uvx conan export {project}/recipes/cli11 --version=2.7.2",
-    "uvx conan install {project} -of /tmp/nh-conan -s build_type=Release -s:a compiler.cppstd=23 -s os.version=13.3 --build=missing",
+    "uvx --from conan==2.30.0 conan profile detect --force",
+    "uvx --from conan==2.30.0 conan export {project}/recipes/cli11 --version=2.7.2",
+    "uv run --no-project --with conan==2.30.0 python {project}/ci/conan-cache.py {project} -of /tmp/nh-conan -s build_type=Release -s:a compiler.cppstd=23 -s os.version=13.3 --build=missing",
 ]
 
 [tool.cibuildwheel.macos.environment]
