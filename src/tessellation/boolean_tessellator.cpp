@@ -10,14 +10,10 @@
 #include <map>
 #include <numbers>
 #include <optional>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace nodehammer::tessellation {
-
-namespace {
-
-constexpr int kMaxRecursionDepth = 32;
-
-} // namespace
 
 // ── Mesh conversion helpers (public) ─────────────────────────────────────────
 
@@ -264,83 +260,103 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::semantic::Sha
         shape);
 }
 
-// ── Recursive resolution ────────────────────────────────────────────────────
+// ── Operand resolution ──────────────────────────────────────────────────────
 
-/// Recursively resolve a shape ID to a Manifold.
-/// For primitives: tries Manifold built-in, falls back to tessellator.
-/// For booleans: recurses into operands.
+/// Evaluate the operand graph in postorder without limiting valid tree depth.
+/// Cache shared operands and reject cycles before invoking Manifold.
 std::optional<manifold::Manifold> resolveAndTessellate(ir::semantic::ShapeId shapeId,
                                                        const ir::semantic::GeometryCatalogs &scene,
                                                        const ITessellator &tessellator,
                                                        const TessellationParams &params,
-                                                       DiagnosticList &diags, int depth) {
-    if (depth > kMaxRecursionDepth) {
-        diags.warn(codes::kWarnTessBooleanManifoldFail,
-                   std::format("boolean recursion depth exceeded (max {})", kMaxRecursionDepth));
-        return std::nullopt;
-    }
-
-    if (!scene.shapes.contains(shapeId)) {
-        diags.warn(codes::kWarnTessBooleanManifoldFail,
-                   std::format("shape ID {} not found in scene", shapeId.value));
-        return std::nullopt;
-    }
-
-    const auto &shapeData = scene.shapes.at(shapeId).data;
-
-    // Boolean shapes: recurse
-    auto handleBoolean = [&](const auto &boolShape) -> std::optional<manifold::Manifold> {
-        auto left =
-            resolveAndTessellate(boolShape.left, scene, tessellator, params, diags, depth + 1);
-        if (!left) {
-            return std::nullopt;
-        }
-        auto right =
-            resolveAndTessellate(boolShape.right, scene, tessellator, params, diags, depth + 1);
-        if (!right) {
-            return std::nullopt;
-        }
-
-        // Apply right operand transform
-        if (boolShape.rightTransform != glm::dmat4{1.0}) {
-            *right = right->Transform(toManifoldTransform(boolShape.rightTransform));
-        }
-
-        using T = std::decay_t<decltype(boolShape)>;
-        if constexpr (std::is_same_v<T, ir::semantic::BooleanUnion>) {
-            return *left + *right;
-        } else if constexpr (std::is_same_v<T, ir::semantic::BooleanSubtraction>) {
-            return *left - *right;
-        } else if constexpr (std::is_same_v<T, ir::semantic::BooleanIntersection>) {
-            return *left ^ *right;
-        }
+                                                       DiagnosticList &diags) {
+    using ShapeId = ir::semantic::ShapeId;
+    struct Frame {
+        ShapeId id;
+        bool finish = false;
     };
+    std::vector<Frame> pending{{shapeId}};
+    std::unordered_set<ShapeId> active;
+    std::unordered_map<ShapeId, manifold::Manifold> resolved;
 
-    {
-        using detail::overloaded;
-        auto boolResult = std::visit(
-            overloaded{
-                [&](const ir::semantic::BooleanUnion &s) { return handleBoolean(s); },
-                [&](const ir::semantic::BooleanSubtraction &s) { return handleBoolean(s); },
-                [&](const ir::semantic::BooleanIntersection &s) { return handleBoolean(s); },
-                [](const auto &) -> std::optional<manifold::Manifold> { return std::nullopt; },
-            },
-            shapeData);
-        if (boolResult) {
-            return boolResult;
+    while (!pending.empty()) {
+        const auto [id, finish] = pending.back();
+        pending.pop_back();
+        if (resolved.contains(id)) {
+            continue;
         }
-    }
+        if (!scene.shapes.contains(id)) {
+            diags.warn(codes::kWarnTessBooleanManifoldFail,
+                       std::format("shape ID {} not found in scene", id.value));
+            return std::nullopt;
+        }
+        const auto &data = scene.shapes.at(id).data;
+        std::optional<std::pair<ShapeId, ShapeId>> operands;
+        std::visit(
+            detail::overloaded{
+                [&](const ir::semantic::BooleanUnion &s) { operands = {{s.left, s.right}}; },
+                [&](const ir::semantic::BooleanSubtraction &s) { operands = {{s.left, s.right}}; },
+                [&](const ir::semantic::BooleanIntersection &s) { operands = {{s.left, s.right}}; },
+                [](const auto &) {}},
+            data);
+        if (operands && !finish) {
+            if (!active.insert(id).second) {
+                diags.warn(codes::kWarnTessBooleanManifoldFail,
+                           std::format("cycle in boolean operands at shape ID {}", id.value));
+                return std::nullopt;
+            }
+            pending.push_back({id, true});
+            pending.push_back({operands->second});
+            pending.push_back({operands->first});
+            continue;
+        }
 
-    // Primitive shape: try Manifold built-in first
-    auto builtin = shapeToManifoldBuiltin(shapeData, params);
-    if (builtin) {
-        return builtin;
+        std::optional<manifold::Manifold> result;
+        if (operands) {
+            auto combine = [&](const auto &s) -> manifold::Manifold {
+                const auto &left = resolved.at(s.left);
+                auto right = resolved.at(s.right);
+                if (s.rightTransform != glm::dmat4{1.0}) {
+                    right = right.Transform(toManifoldTransform(s.rightTransform));
+                }
+                using T = std::decay_t<decltype(s)>;
+                if constexpr (std::is_same_v<T, ir::semantic::BooleanUnion>) {
+                    return left + right;
+                } else if constexpr (std::is_same_v<T, ir::semantic::BooleanSubtraction>) {
+                    return left - right;
+                } else {
+                    return left ^ right;
+                }
+            };
+            result = std::visit(
+                detail::overloaded{
+                    [&](const ir::semantic::BooleanUnion &s) { return combine(s); },
+                    [&](const ir::semantic::BooleanSubtraction &s) { return combine(s); },
+                    [&](const ir::semantic::BooleanIntersection &s) { return combine(s); },
+                    [](const auto &) { return manifold::Manifold{}; }},
+                data);
+            active.erase(id);
+        } else {
+            result = shapeToManifoldBuiltin(data, params);
+            if (!result) {
+                auto mesh = tessellator.tessellate(data, params);
+                diags.append(mesh.diags);
+                result = meshToManifold(mesh, diags, std::format("shape/{}", id.value));
+            }
+        }
+        if (!result) {
+            return std::nullopt;
+        }
+        // Force evaluation here so Manifold does not accumulate its own deep
+        // lazy expression tree, and stop on the first invalid operation.
+        if (result->Status() != manifold::Manifold::Error::NoError) {
+            diags.warn(codes::kWarnTessBooleanManifoldFail,
+                       std::format("boolean operand shape {} failed (status {})", id.value,
+                                   static_cast<int>(result->Status())));
+            return std::nullopt;
+        }
+        resolved.emplace(id, std::move(*result));
     }
-
-    // Fall back to our tessellator → convert mesh to Manifold
-    auto tessOut = tessellator.tessellate(shapeData, params);
-    diags.append(tessOut.diags);
-    return meshToManifold(tessOut, diags, std::format("shape/{}", shapeId.value));
+    return resolved.at(shapeId);
 }
 
 } // namespace
@@ -373,17 +389,17 @@ TessellationOutput tessellateBooleanShape(const ir::semantic::ShapeVariant &shap
     TessellationOutput result;
     result.succeeded = false; // only overwritten when an actual boolean is processed
 
-    // Extract the boolean shape and resolve recursively.
+    // Extract the boolean shape and resolve its operand graphs.
     auto processBoolean = [&](const auto &boolShape) -> TessellationOutput {
         TessellationOutput out;
         auto left =
-            resolveAndTessellate(boolShape.left, scene, primitiveTessellator, params, out.diags, 0);
+            resolveAndTessellate(boolShape.left, scene, primitiveTessellator, params, out.diags);
         if (!left) {
             out.succeeded = false;
             return out;
         }
-        auto right = resolveAndTessellate(boolShape.right, scene, primitiveTessellator, params,
-                                          out.diags, 0);
+        auto right =
+            resolveAndTessellate(boolShape.right, scene, primitiveTessellator, params, out.diags);
         if (!right) {
             out.succeeded = false;
             return out;
