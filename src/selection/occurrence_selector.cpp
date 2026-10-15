@@ -217,8 +217,11 @@ struct OccurrenceMask {
 
 struct OccurrenceIndex {
     OccurrenceTree &tree;
-    std::unordered_map<LogVolId, uint64_t> counts;
-    std::unordered_map<LogVolId, std::vector<uint64_t>> childOffsets;
+    // These indexes are immutable after construction; no references need to
+    // survive insertion. Dense tables avoid per-definition node allocations
+    // and pointer chasing in the per-occurrence lookup path.
+    ankerl::unordered_dense::map<LogVolId, uint64_t> counts;
+    ankerl::unordered_dense::map<LogVolId, std::vector<uint64_t>> childOffsets;
     uint64_t total{};
     std::vector<LogVolId> volumeOrder;
 
@@ -232,7 +235,7 @@ struct OccurrenceIndex {
         };
         const auto &volumes = tree.sourceScene().logVols;
         std::vector<Frame> stack{{tree.rootPlacement().logVolId}};
-        std::unordered_set<LogVolId> active{stack.back().id};
+        ankerl::unordered_dense::set<LogVolId> active{stack.back().id};
         while (!stack.empty()) {
             auto &frame = stack.back();
             const auto &daughters = volumes.at(frame.id).daughters;

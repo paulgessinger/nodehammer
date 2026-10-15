@@ -144,17 +144,16 @@ include(GNUInstallDirs)
 include(cmake/PublicBackendHeaders.cmake)
 # Profiling flags are additive on top of any build type (Release, RelWithDebInfo,
 # Debug). Same interface across native and wasm; the flags differ per toolchain:
-# Clang/GCC get -g + frame pointers; MSVC gets /Zi + /Oy-; emscripten gets
-# --profiling-funcs on top so wasm function names survive the linker.
+# Native builds get debug information and frame pointers. Emscripten needs
+# function names only: DWARF would limit Binaryen optimizations in Release.
 if(NODEHAMMER_PROFILING)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    if(EMSCRIPTEN)
+        add_link_options(--profiling-funcs)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         add_compile_options(-g -fno-omit-frame-pointer)
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         add_compile_options(/Zi /Oy-)
         add_link_options(/DEBUG)
-    endif()
-    if(EMSCRIPTEN)
-        add_link_options(--profiling-funcs)
     endif()
 endif()
 
@@ -835,6 +834,9 @@ if(NODEHAMMER_WITH_VIEWER)
         # src/web/compute_worker.js — see nh_compute_build.
         add_executable(nodehammer-compute src/web/compute_worker_main.cpp)
         target_link_libraries(nodehammer-compute PRIVATE nodehammer_lib)
+        if(NODEHAMMER_PROFILING)
+            target_compile_definitions(nodehammer-compute PRIVATE NH_COMPUTE_PROFILING=1)
+        endif()
         nh_apply_emscripten_compute_options(nodehammer-compute)
         nh_set_compiler_options(nodehammer-compute)
     else()
