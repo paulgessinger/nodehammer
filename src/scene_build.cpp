@@ -3,9 +3,8 @@
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <diagnostic_codes.hpp>
-#include <ir/expanded/conversion.hpp>
 #include <ir/semantic/importer.hpp>
-#include <selection/selector.hpp>
+#include <selection/shared_scene.hpp>
 #include <tessellation/build_pipeline.hpp>
 #include <tessellation/tessellation_pass.hpp>
 #include <tessellation/wedge_cut.hpp>

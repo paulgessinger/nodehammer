@@ -1,5 +1,4 @@
 #include <diagnostic_codes.hpp>
-#include <ir/expanded/conversion.hpp>
 #include <selection/predicate.hpp>
 #include <selection/selector.hpp>
 
