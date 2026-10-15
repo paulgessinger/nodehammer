@@ -7,6 +7,8 @@
 
 #include <manifold/manifold.h>
 
+#include <array>
+#include <cmath>
 #include <numbers>
 
 using namespace nodehammer;
@@ -98,4 +100,41 @@ TEST_CASE("boolean tessellator: partial tube subtraction clears the named sector
     }
     CHECK_FALSE(anyInRemoved); // first quadrant cleared
     CHECK(anyInOpposite);      // opposite quadrant retained
+}
+
+// IDEA's Ta shields are hollow cone sectors, including a sector crossing 2*pi.
+// Rendering alone did not expose their missing radial faces; Boolean cuts did.
+TEST_CASE("boolean tessellator: IDEA cone sectors are watertight",
+          "[tessellation][boolean][manifold]") {
+    PrimitiveTessellator tess;
+    const std::array<semantic::ConeShape, 8> shields{{
+        {1.989, 2.789, 3.30266, 4.80266, 34.57, 5.689773361501514, 1.1868238913561442},
+        {1.666, 1.676, 1.989, 2.789, 8.5, 5.689773361501514, 1.1868238913561442},
+        {2.179, 2.879, 3.30266, 4.80266, 29.57, 0.5934119456780721, 0.6283185307179586},
+        {2.179, 2.879, 3.30266, 4.80266, 29.57, 5.078908123303498, 0.6108652381980153},
+        // Solid sector, both apex orientations, and unchanged full sweep.
+        {0, 2, 0, 3, 4, 0, kPi / 2},
+        {0, 2, 0, 0, 4, 1, kPi / 2},
+        {0, 0, 0, 2, 4, 1, kPi / 2},
+        {0, 2, 0, 3, 4, 1, 2 * kPi},
+    }};
+    for (const auto &shape : shields) {
+        for (const int segments : {24, 64}) {
+            CAPTURE(shape.phiStart, shape.phiDelta, segments);
+            TessellationParams params;
+            params.maxSegmentsCircle = segments;
+            const auto mesh = tess.tessellate(semantic::ShapeVariant{shape}, params);
+            DiagnosticList diags;
+            const auto solid = meshToManifold(mesh, diags, "IDEA shield");
+            REQUIRE(solid.has_value());
+            CHECK(solid->Status() == manifold::Manifold::Error::NoError);
+            // Exact volume of the polygonal frustum sector (not the smooth cone).
+            const auto radii = [](double a, double b) { return a * a + a * b + b * b; };
+            const double expected =
+                segments * std::sin(shape.phiDelta / segments) * shape.dz / 3 *
+                (radii(shape.rMax1, shape.rMax2) - radii(shape.rMin1, shape.rMin2));
+            CHECK(std::abs(solid->Volume() - expected) < expected * 1e-4);
+            CHECK_FALSE(diags.hasErrors());
+        }
+    }
 }
