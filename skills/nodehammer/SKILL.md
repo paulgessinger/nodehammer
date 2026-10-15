@@ -183,8 +183,14 @@ produces, because it terminates.
 
 **The importable set is smaller than the file types people assume.** Built in
 unconditionally: `.nhb` / `.nhb.zst`, `.json` / `.json.zst`, and the synthetic
-generator. Compile-time gated: `.root` (TGeo) and DD4hep XML. There is **no GDML
-importer** — a `.gdml` path will not resolve however you spell `--input-format`.
+generator. Compile-time gated: `.root` (TGeo), DD4hep XML, and `.gdml` through
+Geant4 (`--input-format gdml`). GDML requires `NODEHAMMER_WITH_GEANT4=ON` and a
+Geant4 installation with GDML support. It uses `G4GDMLParser`, converts lengths
+to centimetres, preserves shared volumes and `copyNumber` tags, and keeps
+booleans analytic. Other solids use Geant4 polyhedra when no direct mapping
+exists. Replicas and parameterisations are rejected explicitly. Schema validation
+is disabled so a remote GDML schema is not needed. Geant4 material/element tables
+remain process-owned; repeated imports can grow those tables.
 
 **Heavy importers are compile-time options, not runtime ones.** `NODEHAMMER_WITH_TGEO`,
 `NODEHAMMER_WITH_DD4HEP`, `NODEHAMMER_WITH_GEANT4`, `NODEHAMMER_WITH_GEOMODEL` are

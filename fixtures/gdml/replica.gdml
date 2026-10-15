@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<gdml>
+  <define>
+    <constant name="length" value="20"/>
+  </define>
+  <materials>
+    <element name="TestHydrogen" formula="H" Z="1"><atom value="1.00794"/></element>
+    <material name="TestMaterial"><D value="0.25" unit="g/cm3"/><fraction n="1" ref="TestHydrogen"/></material>
+  </materials>
+  <solids>
+    <box name="worldBox" x="2" y="2" z="2" lunit="m"/>
+    <box name="childBox" x="length" y="40" z="60" lunit="mm"/>
+    <tube name="hole" rmin="0" rmax="5" z="100" startphi="0" deltaphi="360" aunit="deg" lunit="mm"/>
+    <subtraction name="cut"><first ref="childBox"/><second ref="hole"/><position x="3" y="0" z="0" unit="mm"/><rotation x="0" y="90" z="0" unit="deg"/></subtraction>
+    <xtru name="extruded" lunit="mm">
+      <twoDimVertex x="-10" y="-10"/><twoDimVertex x="10" y="-10"/><twoDimVertex x="10" y="10"/><twoDimVertex x="-10" y="10"/>
+      <section zOrder="0" zPosition="-10" xOffset="0" yOffset="0" scalingFactor="1"/>
+      <section zOrder="1" zPosition="10" xOffset="0" yOffset="0" scalingFactor="1"/>
+    </xtru>
+  </solids>
+  <structure>
+    <volume name="child"><materialref ref="TestMaterial"/><solidref ref="childBox"/></volume>
+    <volume name="boolean"><materialref ref="TestMaterial"/><solidref ref="cut"/></volume>
+    <volume name="mesh"><materialref ref="TestMaterial"/><solidref ref="extruded"/></volume>
+    <volume name="world">
+      <materialref ref="TestMaterial"/><solidref ref="worldBox"/>
+      <replicavol number="2"><volumeref ref="child"/><replicate_along_axis><direction x="1"/><width value="100" unit="cm"/><offset value="0" unit="cm"/></replicate_along_axis></replicavol>
+    </volume>
+  </structure>
+  <setup name="Default" version="1.0"><world ref="world"/></setup>
+</gdml>

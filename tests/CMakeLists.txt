@@ -253,6 +253,11 @@ if(NODEHAMMER_WITH_TGEO OR NODEHAMMER_WITH_DD4HEP)
     target_compile_definitions(nodehammer_tests PRIVATE NH_WITH_TGEO=1)
 endif()
 
+if(NODEHAMMER_WITH_GEANT4)
+    target_sources(nodehammer_tests PRIVATE import/test_gdml_importer.cpp)
+    target_include_directories(nodehammer_tests SYSTEM PRIVATE ${Geant4_INCLUDE_DIRS})
+endif()
+
 set(_nh_backend_tests "")
 if(NODEHAMMER_WITH_TGEO)
     list(APPEND _nh_backend_tests import/test_tgeo_importer.cpp)
