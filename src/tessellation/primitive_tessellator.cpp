@@ -504,6 +504,38 @@ TessellationOutput tessellateCone(const ir::semantic::ConeShape &s, const Tessel
             }
         }
     }
+    // Partial sweeps need radial faces at both ends. Without them the cone
+    // looks plausible when rendered but is an open mesh, invalid for Booleans.
+    if (std::abs(dphi - 2.0f * kPi) >= 1e-4f) {
+        for (int side = 0; side < 2; ++side) {
+            // Reuse the wall's exact endpoint arithmetic so vertices weld.
+            const float a = angle(side == 0 ? 0 : segs);
+            const float ca = std::cos(a), sa = std::sin(a);
+            const glm::vec3 n = side == 0 ? glm::vec3{sa, -ca, 0} : glm::vec3{-sa, ca, 0};
+            const ir::render::Vertex innerBot{{rMin1 * ca, rMin1 * sa, -hz}, n};
+            const ir::render::Vertex outerBot{{rMax1 * ca, rMax1 * sa, -hz}, n};
+            const ir::render::Vertex outerTop{{rMax2 * ca, rMax2 * sa, hz}, n};
+            const ir::render::Vertex innerTop{{rMin2 * ca, rMin2 * sa, hz}, n};
+            const auto triangle = [&](const auto &v0, const auto &v1, const auto &v2) {
+                if (side == 0)
+                    appendTriangle(out, v0, v1, v2);
+                else
+                    appendTriangle(out, v2, v1, v0);
+            };
+            // At a cone apex (or a closed annular end), the face is triangular.
+            if (rMin1 == rMax1) {
+                if (rMin2 != rMax2)
+                    triangle(innerBot, outerTop, innerTop);
+            } else if (rMin2 == rMax2) {
+                triangle(innerBot, outerBot, outerTop);
+            } else if (side == 0) {
+                appendQuad(out, innerBot, outerBot, outerTop, innerTop);
+            } else {
+                appendQuad(out, innerTop, outerTop, outerBot, innerBot);
+            }
+        }
+    }
+
     return out;
 }
 
