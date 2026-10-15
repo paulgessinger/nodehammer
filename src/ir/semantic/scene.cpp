@@ -46,6 +46,7 @@ void shapeGraph(const GeometryCatalogs &scene) {
         std::vector<ShapeId> children;
         std::size_t next{};
     };
+    std::vector<Frame> stack;
     for (const auto &[id, shape] : scene.shapes) {
         if (id != shape.id) {
             throw std::invalid_argument("shared shape key/id mismatch");
@@ -53,7 +54,7 @@ void shapeGraph(const GeometryCatalogs &scene) {
         if (done.contains(id)) {
             continue;
         }
-        std::vector<Frame> stack{{id, operands(shape)}};
+        stack.push_back({id, operands(shape)});
         active.insert(id);
         while (!stack.empty()) {
             auto &frame = stack.back();
@@ -88,6 +89,7 @@ uint64_t volumeGraph(const GeometryCatalogs &scene, LogVolId root) {
         std::size_t next{};
         uint64_t count{1};
     };
+    std::vector<Frame> stack;
     for (const auto &[id, volume] : scene.logVols) {
         if (id != volume.id) {
             throw std::invalid_argument("shared volume key/id mismatch");
@@ -95,7 +97,7 @@ uint64_t volumeGraph(const GeometryCatalogs &scene, LogVolId root) {
         if (counts.contains(id)) {
             continue;
         }
-        std::vector<Frame> stack{{id}};
+        stack.push_back({id});
         active.insert(id);
         while (!stack.empty()) {
             auto &frame = stack.back();

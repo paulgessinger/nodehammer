@@ -19,10 +19,9 @@ namespace nodehammer::tessellation {
 struct BuildPipeline::Impl {
     Phase phase{Phase::Idle};
 
-    // Inputs held as shared_ptr<const>; prep takes its deep copy lazily on the
-    // first Preparing advance (never in start()), so the caller's pristine
-    // scene is never mutated (invariant #5) and the copy runs off the caller's
-    // hot path (native: on the worker thread; cooperative: after a paint).
+    // Inputs stay immutable. On the first Preparing advance, selection projects
+    // directly into a separate result; unfiltered inputs are copied. This work
+    // stays off the caller's hot path (worker thread or after a paint).
     std::shared_ptr<const config::NHConfig> preset_config;
     std::shared_ptr<const ir::semantic::Scene> preset_scene;
     std::optional<WedgeCutParams> wedge_cut;
@@ -77,8 +76,8 @@ bool BuildPipeline::advance(std::uint64_t budget_ns) {
         return false;
     case Phase::Preparing: {
         // Deferred-wedge prep (invariant #1): the wedge is always run as a
-        // separate WedgeCutJob below, never inline in prep. Prep copies its
-        // inputs by value, so the pristine scene stays untouched (invariant #5).
+        // separate WedgeCutJob below, never inline in prep. Prep builds an owned
+        // result, so the pristine source stays untouched (invariant #5).
         //
         // This is the boundary the doctrine's asynchronous carve-out describes:
         // prep throws, and there is no caller here to unwind to — `advance` is

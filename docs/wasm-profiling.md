@@ -122,3 +122,40 @@ and 41,816,400 bytes with the wedge. Linear-memory capacity remained 667.31 MiB.
 The complete WASM suite passed 557 test cases / 113,359 assertions, including an
 independent exhaustive glob comparison, metadata identity/edit regressions, and
 invalid canonical occurrence inputs.
+
+### Full IDEA input and immutable selection
+
+On 2026-10-15, the same toolchain and host measured the full 261.83 MiB
+`IDEA_o2_v01.nhb` with the existing standalone simplified display config. No
+native preselection was used; the config retains 16,390 render nodes. Each fresh
+measurement below used a separate Node process, without CPU sampling.
+
+| Scenario | Previous fresh (4 GiB limit) | New fresh, three runs | New cached median, five runs |
+|---|---:|---:|---:|
+| Uncut | 12.548 s | 8.819–9.159 s | 4.749 s |
+| Wedge 0–90°, skip fallback | 13.079 s | 8.996–9.758 s | 5.167 s |
+
+The previous shipping 2 GiB module exhausted memory during preparation. The new
+module retains that limit and reaches 1.718 GiB of linear-memory capacity, versus
+3.011 GiB in the diagnostic 4 GiB baseline. Capacity is not peak live allocation.
+Whole-process Node RSS is about 2.1 GiB; this does not establish a sub-2-GiB
+whole-browser footprint. Times cover the compute call, including decoding and
+tessellation, but exclude disk reads, download and display.
+
+Selection now projects directly from the immutable cached source into an owned
+result, avoiding a full logical-volume copy before filtering. Unfiltered inputs
+still copy the source. Exact catalog reservation, omission of empty leaf-offset
+entries and reuse of validation stacks reduce allocations. WASM dense tables
+hash strong IDs directly into 64 bits; subtree-drop proofs use a dense table.
+
+All fresh/cached render hashes match the previous baseline. The wedge test uses
+an explicit `fallback = "skip"` config and omits eight problematic shield nodes,
+as in the baseline. The strict config's non-manifold shield failure remains
+unresolved. These results describe the simplified display, not tessellation of
+every calorimeter fiber.
+
+ODD output hashes also remain identical. Its fresh times are now 4.243 s uncut
+and 5.484 s with the wedge; cached medians over three runs are 3.364 s and
+4.861 s, respectively. The complete WASM suite passes 559 tests / 113,376
+assertions, including source immutability, selection equivalence, hoisting,
+keep-all, root-removal failure and empty-input checks.

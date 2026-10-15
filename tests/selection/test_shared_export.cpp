@@ -190,3 +190,44 @@ TEST_CASE("Selection export keeps original descendant paths across a hoisted sub
     compareWithExpanded(
         scene, {drop(PathGlobPredicate{"/world/importedModule/importedSensor/importedLeaf"})});
 }
+
+TEST_CASE("Immutable selection preserves its source and matches in-place selection",
+          "[selection][shared-export]") {
+    const auto source = repeatedExportScene(3);
+    const auto originalBytes = sceneToBytes(source);
+    std::vector<SelectionRule> rules;
+    bool hoist = false;
+    SECTION("filter daughters") { rules = {drop(NameGlobPredicate{"fiber"})}; }
+    SECTION("hoist children") {
+        rules = {drop(NameGlobPredicate{"module0"})};
+        hoist = true;
+    }
+    SECTION("keep everything") {}
+    SECTION("reject root removal") {
+        DiagnosticList diags;
+        rules = {drop(NameGlobPredicate{"world"})};
+        REQUIRE_THROWS(semantic::selectCopy(source, rules, false, diags));
+        REQUIRE(sceneToBytes(source) == originalBytes);
+        return;
+    }
+    auto expected = source;
+    const auto expectedDiags = semantic::select(expected, rules, hoist);
+    DiagnosticList diags;
+    auto actual = semantic::selectCopy(source, rules, hoist, diags);
+    REQUIRE(diags.hasErrors() == expectedDiags.hasErrors());
+    REQUIRE(sceneToBytes(actual) == sceneToBytes(expected));
+    REQUIRE(sceneToBytes(source) == originalBytes);
+    actual.root.name = "edited-result";
+    actual.materials.at(MaterialId{1}).name = "edited-material";
+    actual.metadata.tagSets.at(0).insert_or_assign("edited", "yes");
+    REQUIRE(sceneToBytes(source) == originalBytes);
+}
+
+TEST_CASE("Immutable selection accepts an empty scene", "[selection][shared-export]") {
+    const semantic::Scene source;
+    DiagnosticList diags;
+    const auto result = semantic::selectCopy(source, {}, false, diags);
+    REQUIRE_FALSE(diags.hasErrors());
+    REQUIRE(result.nodeCount() == 0);
+    REQUIRE(source.nodeCount() == 0);
+}
