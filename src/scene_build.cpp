@@ -3,6 +3,7 @@
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <diagnostic_codes.hpp>
+#include <ir/expanded/conversion.hpp>
 #include <ir/semantic/importer.hpp>
 #include <selection/selector.hpp>
 #include <tessellation/build_pipeline.hpp>
@@ -17,7 +18,7 @@
 namespace nodehammer::pipeline {
 
 ScenePrepResult
-prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Scene scene,
+prepareSceneForTessellationFromInputs(config::NHConfig config, const ir::semantic::Scene &source,
                                       std::optional<tessellation::WedgeCutParams> wedgeCut) {
     ScenePrepResult prep;
     prep.config = std::move(config);
@@ -26,9 +27,14 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, ir::semantic::Sce
     prep.diags.append(validDiags);
     diagnostics::throwIfErrors(validDiags, "prepareSceneForTessellation");
 
+    ir::semantic::Scene scene;
     if (!prep.config.selection.empty()) {
-        selection::SelectionEngine sel{prep.config.selection, prep.config.hoistOrphans};
-        prep.diags.append(sel.prune(scene));
+        DiagnosticList selectionDiags;
+        scene = ir::semantic::selectCopy(source, prep.config.selection, prep.config.hoistOrphans,
+                                         selectionDiags);
+        prep.diags.append(selectionDiags);
+    } else {
+        scene = source;
     }
 
     if (prep.config.deduplicateShapes) {

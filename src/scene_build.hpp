@@ -59,7 +59,9 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
                                      const std::filesystem::path &geometry_path,
                                      const SemanticReadOptions &options = {});
 
-/// Run validate + select + dedup against an already-parsed config and
+/// Run validate + select + dedup against an immutable source, projecting selection
+/// into an owned result without first copying the complete source. With no
+/// selection, copy the source before mutation. Accepts an already-parsed config and
 /// already-imported semantic scene. Used by the viewer's BuildSession,
 /// which has done the resolve + parse + import dance against bytes
 /// pulled from a `ProjectFs`. No filesystem access. The result's
@@ -71,7 +73,7 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 /// carries the Boolean-cut shapes in its catalogs and per-occurrence changes
 /// in `cutOverrides`. Tessellation traverses shared definitions directly.
 ScenePrepResult prepareSceneForTessellationFromInputs(
-    config::NHConfig config, ir::semantic::Scene scene,
+    config::NHConfig config, const ir::semantic::Scene &source,
     std::optional<tessellation::WedgeCutParams> wedgeCut = std::nullopt);
 
 } // namespace nodehammer::pipeline

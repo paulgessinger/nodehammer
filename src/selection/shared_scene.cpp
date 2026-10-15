@@ -109,7 +109,10 @@ class Definitions {
 
 } // namespace
 
-DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &rules, bool hoist) {
+// A disengaged result means the original topology is retained (or selection failed).
+static std::optional<Scene> projectSelection(const Scene &scene,
+                                             const std::vector<config::SelectionRule> &rules,
+                                             bool hoist, DiagnosticList &diags) {
     if (scene.logVols.empty() && scene.root.logVolId.value == 0) {
         return {};
     }
@@ -117,13 +120,9 @@ DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &ru
     auto tree = scene.makeTree(0);
     const selection::SelectedOccurrences original{*tree};
     const auto selected = original.prune(rules, hoist);
-    auto diags = selected.diagnostics();
-    if (diags.hasErrors())
-        return diags;
-    if (selected.size() == original.size()) {
-        scene.collectGarbage();
-        return diags;
-    }
+    diags = selected.diagnostics();
+    if (diags.hasErrors() || selected.size() == original.size())
+        return std::nullopt;
 
     Scene result;
     result.sourceFile = scene.sourceFile;
@@ -237,8 +236,28 @@ DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &ru
     }
     result.collectGarbage();
     result.reseedIdCounters();
-    scene = std::move(result);
+    return result;
+}
+
+DiagnosticList select(Scene &scene, const std::vector<config::SelectionRule> &rules, bool hoist) {
+    DiagnosticList diags;
+    auto result = projectSelection(scene, rules, hoist, diags);
+    if (result)
+        scene = std::move(*result);
+    else if (!diags.hasErrors() && !scene.logVols.empty())
+        scene.collectGarbage();
     return diags;
+}
+
+Scene selectCopy(const Scene &scene, const std::vector<config::SelectionRule> &rules, bool hoist,
+                 DiagnosticList &diags) {
+    auto result = projectSelection(scene, rules, hoist, diags);
+    if (result)
+        return std::move(*result);
+    auto copy = scene;
+    if (!diags.hasErrors() && !copy.logVols.empty())
+        copy.collectGarbage();
+    return copy;
 }
 } // namespace nodehammer::ir::semantic
 

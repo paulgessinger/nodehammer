@@ -543,6 +543,8 @@ void decodeColumns(const fbs::SharedGeometry *fb, Scene &scene) {
     equalColumns(n, &names, v->shapes(), v->materials());
     equalColumns(d, &daughterVolumes, v->daughter_transforms());
     checkOffsets(&offsets, n, d);
+    // Validated columns give the exact catalog size; avoid repeated reallocations.
+    scene.logVols.reserve(n);
     auto volumeId = [&](uint32_t index) {
         if (index == 0 || index > n)
             throw std::runtime_error("NHS9: invalid volume reference");
@@ -723,6 +725,8 @@ Scene sceneFromBytes(std::span<const std::byte> bytes) {
                                            decodeTransform(fb->transforms(), p->transform_index())};
     };
     result.root = placement(fb->root());
+    scene.materials.reserve(fb->materials()->size());
+    scene.shapes.reserve(fb->shapes()->size());
     for (const auto *m : *fb->materials()) {
         semantic::SourceMaterial value{semantic::MaterialId{m->id()},
                                        m->name() ? m->name()->str() : "", std::nullopt,

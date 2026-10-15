@@ -53,6 +53,21 @@ template <typename Tag> struct std::hash<nodehammer::ir::StrongId<Tag>> {
     }
 };
 
+#ifdef __EMSCRIPTEN__
+// Dense tables need a full 64-bit hash. On wasm32, routing IDs through
+// std::hash<uint64_t> first truncates to size_t and then mixes again. SplitMix64
+// supplies all 64 bits directly using ordinary WASM integer operations.
+template <typename Tag> struct ankerl::unordered_dense::hash<nodehammer::ir::StrongId<Tag>> {
+    using is_avalanching = void;
+    uint64_t operator()(nodehammer::ir::StrongId<Tag> id) const noexcept {
+        uint64_t value = id.value + UINT64_C(0x9e3779b97f4a7c15);
+        value = (value ^ (value >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+        value = (value ^ (value >> 27)) * UINT64_C(0x94d049bb133111eb);
+        return value ^ (value >> 31);
+    }
+};
+#endif
+
 namespace nodehammer::ir::semantic {
 
 // ── Shape types ───────────────────────────────────────────────────────────────

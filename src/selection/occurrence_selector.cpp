@@ -234,6 +234,8 @@ struct OccurrenceIndex {
             uint64_t count{1};
         };
         const auto &volumes = tree.sourceScene().logVols;
+        counts.reserve(volumes.size());
+        volumeOrder.reserve(volumes.size());
         std::vector<Frame> stack{{tree.rootPlacement().logVolId}};
         ankerl::unordered_dense::set<LogVolId> active{stack.back().id};
         while (!stack.empty()) {
@@ -249,7 +251,10 @@ struct OccurrenceIndex {
                     offsets.push_back(offset);
                     offset += counts.at(daughter.logVolId);
                 }
-                childOffsets.emplace(frame.id, std::move(offsets));
+                // Only ancestors have child offsets. Millions of leaf volumes
+                // need a count, but no empty vector entry in this table.
+                if (!offsets.empty())
+                    childOffsets.emplace(frame.id, std::move(offsets));
                 active.erase(frame.id);
                 stack.pop_back();
                 continue;
@@ -427,7 +432,7 @@ OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::Selec
     // Postorder proofs are reusable across occurrences of the same definition.
     // Only explicit drops qualify: a keep forced down by an ancestor must still
     // be visited to preserve exact orphan diagnostics and their order.
-    std::unordered_map<ir::semantic::LogVolId, bool> droppedDescendants;
+    ankerl::unordered_dense::map<ir::semantic::LogVolId, bool> droppedDescendants;
     if (optimize) {
         droppedDescendants.reserve(index_->volumeOrder.size());
         const auto &source = index_->tree.sourceScene();
