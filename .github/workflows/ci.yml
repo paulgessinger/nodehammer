@@ -223,6 +223,19 @@ jobs:
           # for. Same posture as the Conan and Emscripten caches around it.
           save: ${{ github.ref == 'refs/heads/main' }}
 
+      # Installed SDK headers are SYSTEM includes. Ignoring them can reuse a
+      # consumer object with an older generated version.hpp. A new namespace
+      # also bypasses old direct-mode manifests that omitted those headers.
+      - name: Configure header-aware ccache
+        shell: bash
+        run: |
+          echo "CCACHE_NAMESPACE=system-headers-v1" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime,pch_defines,locale,clang_index_store" >> "$GITHUB_ENV"
+
+      - name: Check installed-header cache invalidation
+        if: matrix.artifact-name == 'nodehammer-linux-x86_64'
+        run: python3 -m unittest discover -s ci -p test_ccache_headers.py -v
+
       - name: Conan install
         shell: bash
         env:
@@ -255,7 +268,7 @@ jobs:
           CCACHE_COMPILERCHECK: content
           CCACHE_BASEDIR: ${{ github.workspace }}
           CCACHE_NOHASHDIR: "1"
-          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines,system_headers,locale,clang_index_store
+          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines,locale,clang_index_store
         run: ci/build.sh build ${{ matrix.kind }}
 
       - name: ccache post-build stats
@@ -347,7 +360,7 @@ jobs:
           CCACHE_COMPILERCHECK: content
           CCACHE_BASEDIR: ${{ github.workspace }}
           CCACHE_NOHASHDIR: "1"
-          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines,system_headers,locale,clang_index_store
+          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines,locale,clang_index_store
         run: bash ci/verify-ingest.sh build/ingestion-ci
 
       - name: Package archive
@@ -1217,10 +1230,11 @@ jobs:
             # Match the build matrix's normalization for restored dependencies
             # and compiler paths. Set these inside the container so every
             # configure/build subprocess inherits the same cache policy.
+            export CCACHE_NAMESPACE=system-headers-v1
             export CCACHE_COMPILERCHECK=content
             export CCACHE_BASEDIR="$PWD"
             export CCACHE_NOHASHDIR=1
-            export CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime,pch_defines,system_headers,locale,clang_index_store
+            export CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime,pch_defines,locale,clang_index_store
             ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
             ci/build.sh build native
             ci/build.sh test native -j4
