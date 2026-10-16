@@ -1,7 +1,7 @@
 # GeoModel SQLite import
 
 Build with `NODEHAMMER_WITH_GEOMODEL=ON` and an installed GeoModelCore/GeoModelIO.
-The current prototype requires GeoModel 6.29.0 or later and is validated against 6.29.0, with GCC 15 and C++20
+The current prototype requires GeoModel 6.29.0 or later and is validated against 6.29.0, with GCC 14/15 and C++20
 for ingestion. It reuses the experiment's GeoModel libraries; it does not fetch
 or build another GeoModel. GeoModelRead currently accompanies this optional backend
 in both the full and ingestion builds. Athena integration and a public in-memory
@@ -16,6 +16,19 @@ The format name is `geomodel`; extensions are `.db`, `.sqlite`, `.sqlite3`.
 The loader checks the SQLite header and GeoModel tables, then delegates graph
 reconstruction to `GeoModelIO::ReadGeoModel`. The shared internal conversion
 entry point is `ir::importGeoModel(const GeoVPhysVol&, source)`.
+
+## CI coverage
+
+The Key4hep job also tests GeoModel. GeoModel is not supplied by that stack:
+`ci/build-geomodel.sh` builds GeoModelCore and GeoModelIO from the pinned 6.29.0
+commit with Key4hep's compiler and dependencies. The job enables all three
+backends (TGeo, DD4hep and GeoModel) in the full build and in the separate
+C++20 ingestion-library build, including installed and embedded consumers.
+
+The GeoModel tests create small SQLite fixtures during the run. They cover
+conversion, opaque-shape policy, NHB round-trips and deferred trap tessellation;
+CI does not download an ATLAS detector snapshot or require Athena. The existing
+FCC-ee conversion remains the TGeo/DD4hep integration test.
 
 ## Fidelity
 

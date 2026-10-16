@@ -24,7 +24,7 @@ cmake -DPREFIX="$build/stage" -DBUILD_DIR="$build/components" -DHAS_SHARED=OFF \
 # Backend choices must match the library. Read the cache rather than guess from
 # the machine (which might have an unused ROOT installation).
 backend_args=()
-for backend in TGEO DD4HEP; do
+for backend in TGEO DD4HEP GEOMODEL; do
     if grep -q "^NODEHAMMER_WITH_${backend}:BOOL=ON$" "$build/library/CMakeCache.txt"; then
         backend_args+=("-DCONSUMER_WITH_${backend}=ON")
     fi
