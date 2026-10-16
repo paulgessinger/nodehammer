@@ -792,6 +792,13 @@ TessellationOutput tessellatePcon(const ir::semantic::PconShape &s, const Tessel
     if (s.sections.size() < 2) {
         return out;
     }
+    // GeoModel also supplies profiles ordered from high Z to low Z. Reverse
+    // the whole profile (including coincident-Z steps) to preserve its boundary.
+    if (s.sections.front().z > s.sections.back().z) {
+        auto ascending = s;
+        std::reverse(ascending.sections.begin(), ascending.sections.end());
+        return tessellatePcon(ascending, p);
+    }
     const int segs = std::max(3, p.maxSegmentsCircle);
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
@@ -868,6 +875,41 @@ TessellationOutput tessellatePcon(const ir::semantic::PconShape &s, const Tessel
                                    {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
                                    {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN});
                 }
+            }
+        }
+    }
+
+    // Triangulate the complete radial profile. Separate section quads leave
+    // T-junctions where coincident-Z sections change radius.
+    if (std::abs(dphi - 2 * kPi) > 1e-4f) {
+        manifold::SimplePolygon profile;
+        auto add = [&](double radius, double z) {
+            const manifold::vec2 point{radius, z};
+            if (profile.empty() || profile.back() != point)
+                profile.push_back(point);
+        };
+        for (const auto &section : s.sections)
+            add(section.rMax, section.z);
+        for (auto it = s.sections.rbegin(); it != s.sections.rend(); ++it)
+            add(it->rMin, it->z);
+        if (profile.size() > 1 && profile.front() == profile.back())
+            profile.pop_back();
+        const auto triangles = manifold::Triangulate({profile});
+        for (int end = 0; end < 2; ++end) {
+            const float phi = angle(end ? segs : 0);
+            const glm::vec3 normal =
+                (end ? 1.0f : -1.0f) * glm::vec3{-std::sin(phi), std::cos(phi), 0};
+            auto vertex = [&](int index) -> ir::render::Vertex {
+                const auto &point = profile[static_cast<size_t>(index)];
+                return {{static_cast<float>(point.x) * std::cos(phi),
+                         static_cast<float>(point.x) * std::sin(phi), static_cast<float>(point.y)},
+                        normal};
+            };
+            for (const auto &tri : triangles) {
+                if (end)
+                    appendTriangle(out, vertex(tri[2]), vertex(tri[1]), vertex(tri[0]));
+                else
+                    appendTriangle(out, vertex(tri[0]), vertex(tri[1]), vertex(tri[2]));
             }
         }
     }

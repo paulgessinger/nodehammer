@@ -444,7 +444,8 @@ struct App::Impl {
     [[nodiscard]] bool jobsRunning() const {
         const auto session_phase = build_controller_.session().phase();
         return !ibl_baker_.installed() || build_controller_.inProgress() ||
-               (scene && !scene_uploaded) || (cut_scene && !cut_uploaded) ||
+               (scene && !scene_uploaded && scene_renderer.uploadError().empty()) ||
+               (cut_scene && !cut_uploaded && cut_renderer.uploadError().empty()) ||
                build_controller_.pendingCutRebuild() || session_phase == BuildPhase::Stale ||
                session_phase == BuildPhase::ResolvedReady;
     }
@@ -660,6 +661,9 @@ void App::Impl::onInit() {
     // assets, each consuming a vbuf + an ibuf — bump generously so we
     // don't have to retune per dataset.
     gfx_desc.buffer_pool_size = 8192;
+    // Large cut scenes can have tens of thousands of draw groups. Uniform
+    // updates are aligned to 256 bytes; the default 4 MiB is insufficient.
+    gfx_desc.uniform_buffer_size = 64 * 1024 * 1024;
     gfx_desc.image_pool_size = 1024;
     gfx_desc.shader_pool_size = 256;
     gfx_desc.pipeline_pool_size = 256;
@@ -721,12 +725,14 @@ void App::Impl::onInit() {
                                     .on_base_scene_ready =
                                         [this](std::shared_ptr<const ir::render::Scene> s) {
                                             scene = std::move(s);
+                                            scene_renderer.clearScene();
                                             scene_uploaded = false;
                                             camera_framed = false;
                                         },
                                     .on_cut_scene_ready =
                                         [this](std::shared_ptr<const ir::render::Scene> s) {
                                             cut_scene = std::move(s);
+                                            cut_renderer.clearScene();
                                             cut_uploaded = false;
                                         },
                                     .on_project_build_starting =
@@ -1362,20 +1368,28 @@ void App::Impl::render() {
     // Drive the chunked GPU uploads BEFORE sg_begin_pass so any new sokol
     // buffer creation isn't tangled up with the active scene pass. The base and
     // cut scenes live in separate renderers, so their uploads run independently.
-    if (scene && !scene_uploaded) {
+    if (scene && !scene_uploaded && scene_renderer.uploadError().empty()) {
         if (!scene_renderer.uploadInProgress()) {
             scene_renderer.beginUpload(scene);
         }
         if (scene_renderer.advanceUpload()) {
-            scene_uploaded = true;
+            scene_uploaded = scene_renderer.uploadError().empty();
+            if (!scene_uploaded) {
+                notifications.error(std::string{scene_renderer.uploadError()});
+                std::println(stderr, "viewer: {}", scene_renderer.uploadError());
+            }
         }
     }
-    if (cut_scene && !cut_uploaded) {
+    if (cut_scene && !cut_uploaded && cut_renderer.uploadError().empty()) {
         if (!cut_renderer.uploadInProgress()) {
             cut_renderer.beginUpload(cut_scene);
         }
         if (cut_renderer.advanceUpload()) {
-            cut_uploaded = true;
+            cut_uploaded = cut_renderer.uploadError().empty();
+            if (!cut_uploaded) {
+                notifications.error(std::string{cut_renderer.uploadError()});
+                std::println(stderr, "viewer: {}", cut_renderer.uploadError());
+            }
         }
     }
 
@@ -2771,7 +2785,11 @@ void App::Impl::onFrame() {
     // exit non-zero the moment any of those terminal error states appears.
     if (startup_screenshot_pending) {
         std::string fatal;
-        if (project_ && project_->status() == ProjectFsStatus::Error) {
+        if (!scene_renderer.uploadError().empty()) {
+            fatal = scene_renderer.uploadError();
+        } else if (!cut_renderer.uploadError().empty()) {
+            fatal = cut_renderer.uploadError();
+        } else if (project_ && project_->status() == ProjectFsStatus::Error) {
             fatal = "failed to load input project/geometry file";
         } else if (build_controller_.session().phase() == BuildPhase::Error) {
             fatal = "failed to resolve or parse the config/geometry";

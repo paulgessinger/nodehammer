@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <memory>
 #include <sokol_gfx.h>
+#include <string_view>
 
 namespace nodehammer::ir::render {
 struct Scene;
@@ -16,7 +17,7 @@ struct Camera;
 struct IblBakeData;
 
 /// GPU-side renderer for nodehammer's tessellated render::Scene IR using
-/// sokol_gfx. Per-mesh-asset static vertex/index buffers, draws grouped by
+/// sokol_gfx. Shared immutable vertex/index buffer batches, draws grouped by
 /// (mesh, material) with hardware instancing for the per-node world matrix.
 /// Lambertian shading; PBR comes later.
 class SceneRenderer {
@@ -51,17 +52,21 @@ class SceneRenderer {
     void beginUpload(std::shared_ptr<const ir::render::Scene> scene);
 
     /// Make progress on a chunked upload started by `beginUpload`. Spends
-    /// up to `budget_ns` creating per-mesh GPU buffers and finalises the
+    /// up to `budget_ns` creating shared GPU buffer batches and finalises the
     /// scene (materials, draw groups, instance buffer) on the call that
     /// processes the last mesh. Returns true once the upload is fully
-    /// complete; further calls are no-ops until the next `beginUpload`.
+    /// complete or has failed (see uploadError); further calls are no-ops
+    /// until the next `beginUpload`.
     bool advanceUpload(uint64_t budget_ns = 8'000'000);
 
     /// Whether `advanceUpload` would still return false. Useful for UI
     /// feedback ("Uploading scene to GPU…").
     [[nodiscard]] bool uploadInProgress() const;
 
-    /// Drop the currently-uploaded scene (per-mesh buffers, materials, draw
+    /// Terminal upload failure, cleared by clearScene or beginUpload.
+    [[nodiscard]] std::string_view uploadError() const;
+
+    /// Drop the currently-uploaded scene (shared buffers, materials, draw
     /// groups, instance buffer). Keeps shaders / pipelines / IBL alive so
     /// the next `beginUpload` doesn't pay re-init cost. Idempotent.
     void clearScene();
