@@ -68,6 +68,27 @@ nodes. A broad `skip_geometry` rule on the whole subtree also suppresses the
 detector's actual solids. Dropping a node, skipping its solid, and marking
 extras invisible have different effects.
 
+## Check for overlapping solids when adding detail
+
+Before retaining both an envelope/core and its internal parts, inspect their
+parent–daughter relationship and physical boundaries. Simulation geometry can
+represent daughter material as replacing part of a material-filled mother.
+Rendering their complete solids together does not automatically subtract the
+daughters from the mother: this can hide internal detail or create coincident
+surfaces. A valid config and zero tessellation diagnostics do not detect this.
+
+Choose a consistent representation for each assembly: an envelope proxy for an
+overview, or explicit constituent surfaces for detail. Retain grouping nodes
+when needed, but omit their solid with a narrowly scoped `skip_geometry`, or
+drop the bulk mother with appropriate orphan hoisting. Do not indiscriminately
+remove non-leaf solids; many are real, useful structures.
+
+For example, in one ATLAS snapshot, TRT module-shell mothers overlapped the
+selected straws. ITk `StaveCore` shared faces with an end closeout, while
+`PetalCore` enclosed face sheets and shared their radial boundaries. Omitting
+those bulk mothers preserved the selected straws/skins/supports. These are
+snapshot-specific findings, not a general blacklist of volume names.
+
 ## Add appearance and mesh settings
 
 Define render materials and assign them using observed source-material names
@@ -127,6 +148,51 @@ Inspect the PNG for missing geometry, envelope solids hiding the detector,
 unexpected opacity/colors, and excessive faceting. Do not start a blocking
 viewer just to verify. If rendering is unavailable, report the validation and
 conversion evidence and the outstanding visual check.
+
+### Diagnose flicker, stripes, and competing surfaces
+
+Use this check when a preview shows artifacts or when adding closely packed
+supports, skins, straws, or service layers:
+
+- Identify the affected placement using a path/logical-volume name from
+  inspection. If the viewer actually supports picking, that can help; do not
+  assume it does. Otherwise use wider context and isolated subsystem renders. An image alone may not identify an anonymous placement or distinguish
+  a tracker support from a magnet assembly; keep unidentified artifacts separate.
+- Isolate the subsystem in a temporary config, then compare the suspected groups
+  individually and together at the same camera, cut, and shading settings. Change
+  one selection group at a time. This tests which pair produces the artifact
+  without broadly removing requested detail.
+- Inspect shapes, dimensions, daughter transforms, and placements from the
+  semantic scene or source geometry. Compare boundaries in a common coordinate
+  frame; equal local coordinates are evidence only after accounting for the
+  transforms. Check for overlapping mother/daughter solids, coplanar faces, and
+  duplicate placements. Query one representative repeated assembly first, then
+  check whether the finding applies to its other instances.
+- Distinguish faceting from depth fighting. A stable polygonal silhouette may
+  need more circle segments; changing stripes, speckles, or triangular patches
+  on surfaces suggest competing depth values. More phi segments do not resolve
+  coincident planar faces. Thin-edge aliasing or specular shimmer can look
+  similar, so appearance alone is not proof of overlap.
+- Record the actual renderer/backend. A WebGL/WebGPU comparison can isolate a
+  backend-specific depth issue; artifacts also seen in native and WebGPU cannot
+  be attributed solely to the WebGL path. Shared rendering code remains a
+  possibility. Do not prescribe a depth-buffer change without checking geometry.
+
+Prefer a narrow selection correction when the overlap comes from displaying
+both a bulk proxy and its constituents. If both physical pieces must remain,
+investigate geometry-aware subtraction or an appropriate merge rather than
+silently shifting/scaling placements or hiding the issue with depth bias.
+`drop_coincident_faces` requires `merge_descendants` and is not a general cure
+for arbitrary intersecting solids; confirm its suitability before applying it.
+
+After a correction, validate and export again, check retained parts/counts, and
+render the affected region at matched close-up and overview views. Check nearby
+camera angles when investigating motion-dependent flicker. One successful still
+render establishes that rendering completes, not that flicker is eliminated.
+Report separately the overlap established by geometry inspection, the change
+made, the visual evidence, and any unidentified or unreproduced artifacts.
+Repack from source when updating an authorized published project; validate the
+replacement archive and avoid claiming browser verification from native renders.
 
 Deliver the editable config and any fragments, explain the selected parts,
 merge/detail choices and unit assumptions, and give the command that reproduces

@@ -156,6 +156,9 @@ For **a config for a particular detector**, start with
 actual geometry before choosing paths or tags; a valid config can match nothing.
 Use TOML for direct declarations and Lua when repetition benefits from loops or
 helpers, preserving an existing format or the user's preference.
+When adding internal detail or investigating flicker/z-fighting, follow that
+workflow’s overlap checks: material-filled mothers and their daughters can
+render competing surfaces even when conversion reports no diagnostics.
 
 `convert -c` takes either spelling too, so a Lua config needs no flattening first.
 
