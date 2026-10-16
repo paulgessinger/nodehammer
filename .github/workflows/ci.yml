@@ -1252,7 +1252,7 @@ jobs:
             # the full build's processing or application dependencies.
             bash ci/verify-ingest.sh build/ingestion-key4hep \
               -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
-            "$NH_PYTHON" -m unittest discover -s ci -p "test_fccee.py"
+            "$NH_PYTHON" -m pytest ci -q
             PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" "$NH_PYTHON" ci/fccee.py
 
       - name: Upload FCC-ee geometry and diagnostics

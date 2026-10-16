@@ -40,4 +40,4 @@ configs and compressed NHB geometry are uploaded as fccee-results even on
 failure, retained for seven days. Geometry is not committed.
 
 The local harness checks run with:
-  python3 -m unittest discover -s ci -p test_fccee.py
+  python3 -m pytest ci -q
