@@ -42,6 +42,9 @@
         //     loose files) onto the canvas, or use the file picker.
         // Per-page query params override the sidecar: `?archive=…` picks the
         // archive URL, `?lock=0` unlocks, and steer params (?pbr=1&…) apply.
+        // `?embed=1` (or `defaults.embed`) selects embed mode for hosting in an
+        // iframe: scene only, no UI / URL / storage side effects, postMessage
+        // camera bridge to the parent page — see docs/viewer-embed.md.
         //
         // Sidecar (nh_manifest.json) schema (all fields optional):
         //   {
@@ -163,6 +166,8 @@
             setNumberOpt(viewerOpts, 'cutStart', 'cutStart');
             setNumberOpt(viewerOpts, 'cutEnd', 'cutEnd');
             setBoolOpt(viewerOpts, 'pbr', 'pbr');
+            setBoolOpt(viewerOpts, 'embed', 'embed');
+            var embed = viewerOpts.embed === true;
 
             // Camera state survives only when all six fields are present
             // (matches the C++ reader's mutual-requirement check).
@@ -181,11 +186,19 @@
             }
 
             var statusEl = document.getElementById('status');
+            if (embed) {
+                // Embed mode shows nothing but the scene: the host page owns any
+                // loading indication (it is told via the nh:ready message).
+                statusEl.style.display = 'none';
+            }
             window.Module = {
                 canvas: document.getElementById('canvas'),
                 print: function (msg) { console.log(msg); },
                 printErr: function (msg) { console.error(msg); },
                 setStatus: function (text) {
+                    if (embed) {
+                        return;
+                    }
                     if (text) {
                         statusEl.textContent = text;
                         statusEl.style.display = 'block';
@@ -211,7 +224,9 @@
             };
             window.Module.setStatus('loading ' + bundleBase + '…');
             window.onerror = function (msg) {
-                window.Module.setStatus('error — see console');
+                if (!embed) {
+                    window.Module.setStatus('error — see console');
+                }
                 console.error(msg);
             };
 

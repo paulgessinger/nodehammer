@@ -559,6 +559,11 @@ void Platform::commitUrlState(const std::string & /*state_query*/,
     // No browser URL on native.
 }
 
+// Embed mode is a browser-iframe posture; there is no host page on native.
+void Platform::installEmbedBridge() {}
+void Platform::postEmbedMessage(const std::string & /*type*/, const std::string & /*camera_json*/) {
+}
+
 void Platform::openUrl(const std::string & /*url*/) {
     // TODO: native URL opener intentionally deferred.
 }
