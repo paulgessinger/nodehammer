@@ -12,6 +12,11 @@ project(nodehammer
 
 # This branch returns before discovering or configuring any processing,
 # application, Python, or viewer dependencies.
+option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel SQLite importer" OFF)
+option(NODEHAMMER_FETCH_GEOMODEL "Build pinned GeoModel Core/IO from source" OFF)
+if(NODEHAMMER_FETCH_GEOMODEL AND NOT NODEHAMMER_WITH_GEOMODEL)
+    message(FATAL_ERROR "NODEHAMMER_FETCH_GEOMODEL requires NODEHAMMER_WITH_GEOMODEL=ON")
+endif()
 option(NODEHAMMER_INGEST_ONLY "Build only the C++20 geometry ingestion library" OFF)
 if(NODEHAMMER_INGEST_ONLY)
     include(cmake/IngestionOnly.cmake)
@@ -869,6 +874,12 @@ else()
 endif()
 
 # Global-detector opt-in and exit warning belong only to the native CLI.
+if(NODEHAMMER_WITH_GEOMODEL)
+    nh_backend_objects(nodehammer_geomodel_native_objs src/cli/cmd_geomodel_native.cpp)
+    target_compile_definitions(nodehammer_geomodel_native_objs PRIVATE NH_STATIC)
+    target_sources(nodehammer PRIVATE $<TARGET_OBJECTS:nodehammer_geomodel_native_objs>)
+endif()
+
 if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
     nh_backend_objects(nodehammer_dd4hep_native_objs src/cli/cmd_dd4hep_native.cpp)
     target_compile_definitions(nodehammer_dd4hep_native_objs PRIVATE NH_STATIC)

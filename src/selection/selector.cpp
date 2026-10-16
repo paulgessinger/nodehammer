@@ -130,8 +130,9 @@ SelectionResult SelectionEngine::evaluate(const ir::expanded::Scene &scene) cons
     nodeEntries.reserve(reachable.size());
     for (const auto id : reachable) {
         const auto &node = scene.nodes.at(id);
-        std::string_view matName;
+        std::string_view matName, volumeName;
         if (auto lvIt = scene.logVols.find(node.logVolId); lvIt != scene.logVols.end()) {
+            volumeName = lvIt->second.name;
             if (auto matIt = scene.materials.find(lvIt->second.materialId);
                 matIt != scene.materials.end()) {
                 matName = matIt->second.name;
@@ -141,6 +142,7 @@ SelectionResult SelectionEngine::evaluate(const ir::expanded::Scene &scene) cons
         view.name = node.name;
         view.path = node.originalPath;
         view.materialName = matName;
+        view.volumeName = volumeName;
         view.isLeaf = node.children.empty();
         view.tags = &node.tags;
         nodeEntries.push_back({id, view});

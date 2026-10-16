@@ -24,6 +24,7 @@ add_executable(nodehammer_tests
     selection/test_shared_export.cpp
     selection/test_selection_cache.cpp
     tessellation/test_primitive_tessellator.cpp
+    tessellation/test_generic_trap.cpp
     tessellation/test_boolean_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
     tessellation/test_wedge_cut.cpp
@@ -88,6 +89,7 @@ endif()
 # notice it slipping, so it is a regression test and not merely a suite member.
 target_sources(nodehammer_tests PRIVATE
     cli/test_cli_run.cpp
+    cli/test_import_log_guard.cpp
     cli/test_cli_shared.cpp
     cli/test_cli_inspect_json.cpp
     cli/test_cli_config.cpp
@@ -466,6 +468,11 @@ if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
         $<TARGET_OBJECTS:nodehammer_dd4hep_native_objs>
         $<TARGET_OBJECTS:nodehammer_dd4hep_plugin_objs>)
     target_link_libraries(nodehammer_dd4hep_probe PRIVATE nodehammer_lib DD4hep::DDCore)
+    if(NODEHAMMER_WITH_GEOMODEL)
+        # The probe uses the real main(), including all enabled native adapters.
+        target_sources(nodehammer_dd4hep_probe PRIVATE
+            $<TARGET_OBJECTS:nodehammer_geomodel_native_objs>)
+    endif()
     target_compile_options(nodehammer_dd4hep_probe PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNH_WITH_VIEWER>
         $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNH_WITH_VIEWER>)
