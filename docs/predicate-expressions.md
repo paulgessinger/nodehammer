@@ -31,13 +31,26 @@ Both forms produce the same predicate AST. The table form remains valid and can 
 | `true` | Always matches |
 | `false` | Never matches |
 | `is_leaf` | Matches nodes with no children |
-| `name ~= "pattern"` | Glob match against the node's name |
+| `name ~= "pattern"` | Glob match against the node's placement/display name |
+| `volume ~= "pattern"` | Glob match against the logical-volume name |
 | `path ~= "pattern"` | Glob match against the node's original path |
 | `material ~= "pattern"` | Glob match against the source material name |
 | `tag.KEY` | Matches if the tag `KEY` exists (any value) |
 | `tag.KEY == "value"` | Matches if tag `KEY` equals `"value"` |
 
 In the table form, the constants `true`/`false` are written `{ type = "bool", value = true }` / `{ type = "bool", value = false }`.
+
+`volume` works with existing NHB files and all importers that preserve logical-volume
+names. It is independent of placement names, display renames and paths. For example,
+`volume == "BAR_Toroid" || volume == "ECT_Toroids"` selects the ATLAS toroid
+assemblies even when both placements are named `ANON`. The structured form is
+`{ type = "volume_glob", pattern = "*Toroid*" }`. `inspect tree` displays the
+logical-volume name as `volume=...`; JSON tree entries include a `volume` field.
+Like other predicates, this matches individual nodes, not their entire subtrees.
+See [the ATLAS toroid configuration](../fixtures/configs/atlas_toroids.toml) for
+a GLB example that retains their descendants and hides Air/Ether envelopes.
+It relies on the default `hoist_orphans = false` to prune other muon assemblies;
+selection can report NH0400 warnings for descendants of those dropped assemblies.
 
 ### Glob patterns
 
@@ -157,10 +170,11 @@ primary    <- func_call / atom / '(' expr ')'
 func_call  <- ('any' / 'all') '(' expr (',' expr)* ','? ')'
 
 atom       <- 'true' / 'false' / 'is_leaf'
-            / tag_expr / path_expr / name_expr / material_expr
+            / tag_expr / path_expr / name_expr / volume_expr / material_expr
 tag_expr   <- 'tag.' IDENT (('==' / '!=') STRING)?
 path_expr  <- 'path' ('~=' / '==' / '!=') STRING
 name_expr  <- 'name' ('~=' / '==' / '!=') STRING
+volume_expr <- 'volume' ('~=' / '==' / '!=') STRING
 material_expr <- 'material' ('~=' / '==' / '!=') STRING
 
 STRING     <- '"' [^"]* '"'

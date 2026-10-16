@@ -168,6 +168,7 @@ TEST_CASE("inspect tree answers in JSON, flat and filterable", "[cli][inspect][j
         CHECK(doc["filtered"] == 2);
         CHECK(doc["filter"] == "/world/calo");
         CHECK(doc["nodes"][0]["name"] == "calo");
+        CHECK(doc["nodes"][0]["volume"] == "box");
         CHECK(doc["nodes"][0]["tags"]["subdetector"] == "calo");
     }
 

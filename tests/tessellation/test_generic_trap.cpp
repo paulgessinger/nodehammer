@@ -119,3 +119,28 @@ TEST_CASE("GenericTrap dedup compares all parameters", "[generic_trap][ir]") {
     REQUIRE(s.deduplicateShapes() == 1);
     REQUIRE(s.shapes.size() == 4);
 }
+
+TEST_CASE("Logical volume predicates drive tessellation for named placements",
+          "[tessellation][predicate]") {
+    auto source = scene();
+    auto loaded = config::ConfigLoader::loadFromString(R"(
+[defaults.tessellation]
+skip_geometry = true
+[[rules]]
+match = 'volume == "trap"'
+[rules.tessellation]
+skip_geometry = false
+)");
+    REQUIRE_FALSE(loaded.diags.hasErrors());
+    auto result = TessellationPass{loaded.config}.lower(source);
+    REQUIRE_FALSE(result.diags.hasErrors());
+    std::size_t rendered = 0;
+    for (const auto &[id, node] : result.scene.nodes) {
+        (void)id;
+        if (!node.meshBindings.empty()) {
+            REQUIRE((node.name == "coarse" || node.name == "fine"));
+            ++rendered;
+        }
+    }
+    REQUIRE(rendered == 2);
+}

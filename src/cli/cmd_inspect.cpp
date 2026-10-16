@@ -174,7 +174,8 @@ void printTree(const nodehammer::ir::semantic::Scene &scene, int maxDepth,
                 prefix += lastAtDepth[i] ? "    " : "|   ";
             if (depth)
                 prefix += last ? "\\-- " : "|-- ";
-            std::string annotations;
+            const auto &volumeName = scene.logVols.at(node.logVolId).name;
+            std::string annotations = std::format("volume={}", volumeName);
             for (const auto &[k, v] : node.tags) {
                 if (!annotations.empty())
                     annotations += ", ";
@@ -220,6 +221,7 @@ nlohmann::json treeJson(const nodehammer::ir::semantic::Scene &scene, int maxDep
         if (filter.empty() || nodehammer::selection::matchGlob(filter, node.originalPath)) {
             nlohmann::json entry{{"path", node.originalPath},
                                  {"name", node.name},
+                                 {"volume", scene.logVols.at(node.logVolId).name},
                                  {"depth", depth},
                                  {"children", node.childCount},
                                  {"leaf", node.childCount == 0}};

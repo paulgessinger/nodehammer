@@ -19,7 +19,8 @@ Predicate compileCachedPredicate(const config::PredicateExpr &expr) {
         [](const auto &node) -> Predicate {
             using T = std::decay_t<decltype(node)>;
             if constexpr (std::is_same_v<T, config::NameGlobPredicate> ||
-                          std::is_same_v<T, config::MaterialGlobPredicate>) {
+                          std::is_same_v<T, config::MaterialGlobPredicate> ||
+                          std::is_same_v<T, config::VolumeGlobPredicate>) {
                 auto predicate = compilePredicate(config::PredicateExpr{node});
                 return [predicate = std::move(predicate),
                         cache = std::unordered_map<std::string_view, bool>{}](
@@ -27,6 +28,8 @@ Predicate compileCachedPredicate(const config::PredicateExpr &expr) {
                     const auto key = [&] {
                         if constexpr (std::is_same_v<T, config::NameGlobPredicate>)
                             return view.name;
+                        else if constexpr (std::is_same_v<T, config::VolumeGlobPredicate>)
+                            return view.volumeName;
                         else
                             return view.materialName;
                     }();
@@ -329,8 +332,11 @@ struct OccurrenceIndex {
                             ? std::optional{std::pair{stack.at(stack.size() - 2).volume, id.back()}}
                             : std::nullopt;
                     const NodeView view{tree.displayNameFor(id, frame.name),
-                                        tree.originalPathFor(id, path), material, leaf,
-                                        &tree.tagsFor(id, frame.volume, placement)};
+                                        tree.originalPathFor(id, path),
+                                        material,
+                                        leaf,
+                                        &tree.tagsFor(id, frame.volume, placement),
+                                        volume.name};
                     frame.parentDropped =
                         visitor(frame.ordinal, view, frame.parentDropped, frame.parentName);
                     frame.parentName = view.name;
@@ -452,7 +458,8 @@ OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::Selec
                     {},
                     material == source.materials.end() ? std::string_view{} : material->second.name,
                     false,
-                    &index_->tree.defaultTagsFor(daughter.logVolId, std::pair{volume, i})};
+                    &index_->tree.defaultTagsFor(daughter.logVolId, std::pair{volume, i}),
+                    child.name};
                 unsigned actions = 1;
                 for (const auto &rule : compiled) {
                     auto matches = rule.local(view);
