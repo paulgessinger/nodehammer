@@ -6,6 +6,8 @@
 #include <nodehammer/nhb.hpp>
 #include <nodehammer/version.hpp>
 
+#include <iostream>
+
 #ifdef CONSUMER_WITH_TGEO
 #include <TGeoManager.h>
 #include <TGeoMaterial.h>
@@ -15,8 +17,11 @@
 #endif
 
 int main() {
-    if (nodehammer::version() != nodehammer::VERSION)
+    if (nodehammer::version() != nodehammer::VERSION) {
+        std::cerr << "version mismatch: headers=" << nodehammer::VERSION
+                  << ", library=" << nodehammer::version() << '\n';
         return 1;
+    }
 #ifdef CONSUMER_WITH_TGEO
     TGeoManager manager("consumer", "existing experiment geometry");
     auto *material = new TGeoMaterial("vacuum", 0, 0, 0);
@@ -35,6 +40,7 @@ int main() {
     } catch (const nodehammer::Error &) {
         return 0;
     }
+    std::cerr << "toNhb accepted an invalid SemanticScene instead of throwing Error\n";
     return 1;
 #endif
 }

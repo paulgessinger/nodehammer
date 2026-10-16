@@ -900,7 +900,7 @@ TessellationOutput tessellatePcon(const ir::semantic::PconShape &s, const Tessel
             const glm::vec3 normal =
                 (end ? 1.0f : -1.0f) * glm::vec3{-std::sin(phi), std::cos(phi), 0};
             auto vertex = [&](int index) -> ir::render::Vertex {
-                const auto &point = profile[index];
+                const auto &point = profile[static_cast<size_t>(index)];
                 return {{static_cast<float>(point.x) * std::cos(phi),
                          static_cast<float>(point.x) * std::sin(phi), static_cast<float>(point.y)},
                         normal};
