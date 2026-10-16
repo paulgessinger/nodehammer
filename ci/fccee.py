@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Full DD4hep -> NHS9 conversion and bounded rendering of representative FCC-ee models."""
 import argparse
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -69,56 +71,117 @@ def check_render(render, expected_nodes):
     return {"render_nodes": len(render["nodes"]), "meshes": len(meshes), "triangles": triangles}
 
 
-def run_case(exe, source, output, min_nodes=1):
+@contextmanager
+def capture_phase(output, phase, timings):
+    """Capture Python and native plugin output in a dedicated worker process."""
+    start = time.monotonic()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    ctypes.CDLL(None).fflush(None)
+    saved = [os.dup(fd) for fd in (1, 2)]
+    try:
+        with (output / f'{phase}.stdout').open('w') as stdout, \
+                (output / f'{phase}.log').open('w') as stderr:
+            os.dup2(stdout.fileno(), 1)
+            os.dup2(stderr.fileno(), 2)
+            try:
+                yield
+            finally:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                ctypes.CDLL(None).fflush(None)
+    finally:
+        for fd, original in zip((1, 2), saved):
+            os.dup2(original, fd)
+            os.close(original)
+        timings[phase] = time.monotonic() - start
+
+
+def check_diagnostics(diags):
+    for diagnostic in diags:
+        print(f'{diagnostic.code}: {diagnostic.message}', file=sys.stderr)
+    if diags.has_errors:
+        raise ValueError('bindings returned error diagnostics')
+
+
+def run_case(source, output, min_nodes=1):
+    # Imported only in the fresh worker, never in the parent orchestrator.
+    import nodehammer as nh
+
     output.mkdir(parents=True, exist_ok=True)
     timings = {}
-
-    def run(phase, *args, document=False):
-        start = time.monotonic()
-        with (output / f"{phase}.log").open('w') as log:
-            result = subprocess.run([str(exe), *map(str, args)], stdout=subprocess.PIPE,
-                                    stderr=log, text=True, timeout=1200)
-        timings[phase] = time.monotonic() - start
-        (output / f"{phase}.stdout").write_text(result.stdout)
-        if result.returncode:
-            raise RuntimeError(f"{phase} exited {result.returncode}; see {output / (phase + '.log')}")
-        if document:
-            value = json.loads(result.stdout)
-            (output / f"{phase}.json").write_text(json.dumps(value, indent=2) + '\n')
-            return value
-        return None
-
     nhb = output / 'geometry.nhb.zst'
     nhb.unlink(missing_ok=True)
-    flags = ['--dd4hep-global'] if source.suffix == '.xml' else []
-    run('convert', 'convert', '-i', source, *flags, '-o', nhb)
+    with capture_phase(output, 'convert', timings):
+        options = {'dd4hep.useGlobalDetector': True} if source.suffix == '.xml' else {}
+        scene, diags = nh.read_semantic(source, importer_options=options)
+        check_diagnostics(diags)
+        if not scene.valid or scene.node_count < min_nodes:
+            raise ValueError('full geometry is empty, unexpectedly reduced, or invalid')
+        nh.write(scene, nhb)
     if not nhb.is_file() or nhb.stat().st_size == 0:
-        raise ValueError("conversion did not write geometry")
-    summary = run('summary', 'inspect', '--output-format', 'json', 'summary', '-i', nhb,
-                  document=True)
-    if summary['nodes'] < min_nodes or summary['diagnostics']['errors']:
-        raise ValueError("full geometry is empty, unexpectedly reduced, or invalid")
-    tree = run('tree', 'inspect', '--output-format', 'json', 'tree', '-i', nhb,
-               '--depth', 2, document=True)
+        raise ValueError('conversion did not write geometry')
+
+    # Inspect the serialized scene too, preserving the NHB round-trip checks.
+    # Tree/summary inspection has no scene API; use the in-process CLI binding.
+    documents = {}
+    for phase, extra in (('summary', []), ('tree', ['--depth', '2'])):
+        with capture_phase(output, phase, timings):
+            code = nh.cli.run(['inspect', '--output-format', 'json', phase,
+                               '-i', str(nhb), *extra])
+            if code:
+                raise RuntimeError(f'{phase} exited {code}')
+        document = json.loads((output / f'{phase}.stdout').read_text())
+        (output / f'{phase}.json').write_text(json.dumps(document, indent=2) + '\n')
+        documents[phase] = document
+    summary, tree = documents['summary'], documents['tree']
+    if summary['nodes'] != scene.node_count or summary['diagnostics']['errors']:
+        raise ValueError('serialized geometry differs from the imported scene or is invalid')
     config = output / 'smoke.toml'
     config.write_text(smoke_config(tree))
-    run('config', 'config', 'validate', '-c', config)
+    with capture_phase(output, 'config', timings):
+        cfg, diags = nh.read_config(config)
+        check_diagnostics(diags)
     render_file = output / 'render.json'
     render_file.unlink(missing_ok=True)
-    run('tessellate', 'convert', '-i', nhb, '-c', config,
-        '--output-format', 'render-json', '-o', render_file)
+    with capture_phase(output, 'tessellate', timings):
+        render, diags = nh.build(scene, cfg.scene)
+        check_diagnostics(diags)
+        nh.write(render, render_file, cfg.output, format='render-json')
     counts = check_render(json.loads(render_file.read_text()), len(tree['nodes']))
-    return {"source": str(source), "full_nodes": summary['nodes'],
+    return {"source": str(source), "full_nodes": scene.node_count,
             "nhb_bytes": nhb.stat().st_size, **counts, "seconds": timings}
+
+
+def run_worker(source, output, min_nodes):
+    """One interpreter per model, including when a plugin calls exit() or crashes."""
+    output.mkdir(parents=True, exist_ok=True)
+    result_path = output / 'result.json'
+    result_path.unlink(missing_ok=True)
+    with (output / 'worker.stdout').open('w') as stdout, \
+            (output / 'worker.log').open('w') as stderr:
+        result = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), '--worker', str(source),
+             '--output', str(output), '--min-nodes', str(min_nodes)],
+            stdout=stdout, stderr=stderr, timeout=1200)
+    if result.returncode:
+        raise RuntimeError(f'worker exited {result.returncode}; see {output / "worker.log"}')
+    # A plugin can exit(0) prematurely: only an explicit result means success.
+    return json.loads(result_path.read_text())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--nodehammer', type=Path, default=Path('build/Release/nodehammer'))
+    parser.add_argument('--worker', type=Path, help=argparse.SUPPRESS)
+    parser.add_argument('--min-nodes', type=int, default=1, help=argparse.SUPPRESS)
     parser.add_argument('--geometry-root', type=Path)
     parser.add_argument('--output', type=Path, default=Path('build/fccee-results'))
     parser.add_argument('--model', choices=MODELS, action='append')
     args = parser.parse_args()
+    if args.worker is not None:
+        result = run_case(args.worker, args.output, args.min_nodes)
+        (args.output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+        return 0
     root = args.geometry_root or geometry_root()
     report = {}
     def run_model(model):
@@ -126,9 +189,9 @@ def main():
         source = root / 'FCCee' / family / 'compact' / model / f'{model}.xml'
         if not source.is_file():
             raise FileNotFoundError(source)
-        return run_case(args.nodehammer.resolve(), source, args.output / model, minimum)
+        return run_worker(source, args.output / model, minimum)
 
-    # Threads only orchestrate isolated CLI processes: ROOT/DD4hep imports
+    # Threads only orchestrate isolated Python workers: ROOT/DD4hep imports
     # cannot share a process. Each model keeps its own sequential phases/logs.
     with ThreadPoolExecutor(max_workers=4) as pool:
         pending = {}
