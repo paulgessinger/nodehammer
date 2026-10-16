@@ -23,10 +23,11 @@
 #include <nlohmann/json.hpp>
 
 #include <viewer/app.hpp>
+#include <viewer/camera_json.hpp>
 #include <viewer/config.hpp>
+#include <viewer/web_embed_connection.hpp>
 
 #include <emscripten/fetch.h>
-#include <glm/glm.hpp>
 
 #include <array>
 #include <cstddef>
@@ -45,10 +46,10 @@ namespace {
 // sync with the readField calls below — the warnUnknownKeys check uses it
 // to flag silent typos in JSON keys (the boundary's main weakness vs. a
 // strongly-typed binding like embind).
-constexpr std::array<std::string_view, 17> kKnownOptionKeys = {
+constexpr std::array<std::string_view, 18> kKnownOptionKeys = {
     "title",     "width",      "height",   "vsync",          "cull",       "pauseWhenUnfocused",
     "autoOrbit", "orbitSpeed", "angleCut", "shaderAngleCut", "booleanCut", "cutStart",
-    "cutEnd",    "pbr",        "archive",  "lock",           "camera",
+    "cutEnd",    "pbr",        "archive",  "lock",           "camera",     "embed",
 };
 
 constexpr std::array<std::string_view, 7> kKnownCameraKeys = {
@@ -94,34 +95,12 @@ std::optional<nodehammer::viewer::Camera> parseCamera(const nlohmann::json &j) {
     if (it == j.end() || !it->is_object()) {
         return std::nullopt;
     }
-    const auto &c = *it;
-    warnUnknownKeys(c, kKnownCameraKeys, "camera");
-    // All six fields are required to restore a camera — partial state is
-    // ambiguous, so fall back to defaults if any is missing. Matches the
-    // CLI's `--camera-*` mutual-requirement check.
-    if (!c.contains("targetX") || !c.contains("targetY") || !c.contains("targetZ") ||
-        !c.contains("distance") || !c.contains("yawDeg") || !c.contains("pitchDeg")) {
-        return std::nullopt;
-    }
-    nodehammer::viewer::Camera cam;
-    cam.target.x = c["targetX"].get<float>();
-    cam.target.y = c["targetY"].get<float>();
-    cam.target.z = c["targetZ"].get<float>();
-    cam.distance = c["distance"].get<float>();
-    if (cam.distance <= 0.f) {
-        return std::nullopt;
-    }
-    cam.yaw = glm::radians(c["yawDeg"].get<float>());
-    cam.pitch = glm::radians(c["pitchDeg"].get<float>());
-    if (auto proj = c.find("projection"); proj != c.end() && proj->is_string()) {
-        const auto value = proj->get<std::string>();
-        if (value == "orthographic" || value == "ortho") {
-            cam.projection = nodehammer::viewer::ProjectionMode::Orthographic;
-        } else if (value == "perspective") {
-            cam.projection = nodehammer::viewer::ProjectionMode::Perspective;
-        }
-    }
-    return cam;
+    warnUnknownKeys(*it, kKnownCameraKeys, "camera");
+    // All six pose fields are required to restore a camera — partial state is
+    // ambiguous, so fall back to defaults if any is missing. Matches the CLI's
+    // `--camera-*` mutual-requirement check. The vocabulary is shared with the
+    // embed postMessage protocol (viewer/camera_json.hpp).
+    return nodehammer::viewer::cameraFromJson(*it);
 }
 
 } // namespace
@@ -187,6 +166,14 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
     }
     cfg.initial_camera = parseCamera(j);
     cfg.startup_overrides.camera = cfg.initial_camera;
+    // Embed mode: scene-only rendering, no URL/localStorage/IDB side effects,
+    // postMessage camera bridge to the host page (docs/viewer-embed.md).
+    bool embed = false;
+    readField(j, "embed", embed);
+    if (embed) {
+        cfg.presentation = nodehammer::viewer::PresentationMode::Surface;
+        cfg.connection = nodehammer::viewer::makeWebEmbedConnection();
+    }
 
     std::string archiveUrl;
     bool lock = true; // viewer-mode publications are content-locked by default
@@ -220,11 +207,13 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
             emscripten_fetch_close(f);
         };
         emscripten_fetch(&attr, archiveUrl.c_str());
-    } else {
+    } else if (cfg.presentation != nodehammer::viewer::PresentationMode::Surface) {
         // Application mode (no sidecar-provided archive): the App keeps its
         // eagerly-allocated empty working set. Kick an async IndexedDB restore so a
         // previously-persisted project reappears; drops/picks otherwise accumulate
         // into the working set and App-side recognition picks the root keys.
+        // Embed mode never touches IDB — the host owns all state — so an
+        // archive-less embed simply stays empty.
         application->restoreWebProjectFromIdb();
     }
 

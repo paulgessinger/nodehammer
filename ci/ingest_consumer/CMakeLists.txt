@@ -37,6 +37,10 @@ if(NOT CMAKE_CXX_STANDARD EQUAL 20)
 endif()
 
 add_executable(consumer main.cpp)
+# Verify the current SDK even when CI's ccache skips system-header changes.
+# Imported targets otherwise make the installed headers system includes, so
+# a cached consumer can retain an older VERSION after the SDK is rebuilt.
+set_target_properties(consumer PROPERTIES NO_SYSTEM_FROM_IMPORTED ON)
 target_link_libraries(consumer PRIVATE nodehammer::ingest)
 if(NODEHAMMER_SOURCE_DIR)
     target_compile_definitions(consumer PRIVATE CONSUMER_MINIMAL_HEADERS)

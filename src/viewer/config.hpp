@@ -3,6 +3,7 @@
 #include <viewer/camera.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -30,6 +31,11 @@ struct ConfigStartupOverrides {
     std::optional<Camera> camera;
 };
 
+class ViewerConnection;
+
+/// Surface mode gives presentation and persistence ownership to the caller.
+enum class PresentationMode { Interactive, Surface };
+
 struct Config {
     std::string title{"nodehammer viewer"};
     uint32_t width{1280};
@@ -48,6 +54,9 @@ struct Config {
     float angle_cut_start_deg{0.f};
     float angle_cut_end_deg{90.f};
     bool enable_pbr{true};
+    PresentationMode presentation{PresentationMode::Interactive};
+    /// Optional external control; independent of presentation and platform.
+    std::shared_ptr<ViewerConnection> connection;
     std::optional<Camera> initial_camera;
     ConfigStartupOverrides startup_overrides;
 };
