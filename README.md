@@ -284,6 +284,7 @@ Key CMake options:
 | `NODEHAMMER_WITH_DD4HEP` | DD4hep importer | ✅ |
 | `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | ✅ GDML via Geant4 (requires GDML support) |
 | `NODEHAMMER_WITH_GEOMODEL` | GeoModel SQLite importer | Prototype; [fidelity notes](docs/geomodel-import.md) |
+| `NODEHAMMER_FETCH_GEOMODEL` | Build pinned GeoModel Core/IO (default OFF; requires prerequisites) | [Build notes](docs/geomodel-import.md) |
 | `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary | ✅ |
 | `NODEHAMMER_BUILD_SHARED` | Also build and install `libnodehammer` and `libnodehammer_ingest` + the public headers + a CMake package config | 🚧 packaging works; the API it exposes is still being written |
 
