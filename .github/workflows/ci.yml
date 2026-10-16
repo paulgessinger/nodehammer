@@ -1168,7 +1168,7 @@ jobs:
           draft: false
 
   lcg:
-    name: Key4hep FCC-ee (TGeo/DD4hep)
+    name: Key4hep FCC-ee + GeoModel (TGeo/DD4hep/GeoModel)
     timeout-minutes: 90
     runs-on: ubuntu-24.04
     steps:
@@ -1239,7 +1239,12 @@ jobs:
             uv venv --python "$(command -v python3)" .venv-key4hep
             uv pip install --python .venv-key4hep --group dev
             export NH_PYTHON="$PWD/.venv-key4hep/bin/python"
-            ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON \
+            # GeoModel is not part of Key4hep. Build the pinned Core/IO release
+            # with the same compiler; ccache also covers these dependency builds.
+            bash ci/build-geomodel.sh build/geomodel
+            export CMAKE_PREFIX_PATH="$PWD/build/geomodel/install:${CMAKE_PREFIX_PATH:-}"
+            export LD_LIBRARY_PATH="$PWD/build/geomodel/install/lib:${LD_LIBRARY_PATH:-}"
+            ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON -DNODEHAMMER_WITH_GEOMODEL=ON \
               -DNODEHAMMER_BUILD_PYTHON=ON -DPython_EXECUTABLE="$NH_PYTHON"
             ci/build.sh build native
             ci/build.sh test native -j4
@@ -1251,7 +1256,7 @@ jobs:
             # Separate configure: this must succeed without discovering any of
             # the full build's processing or application dependencies.
             bash ci/verify-ingest.sh build/ingestion-key4hep \
-              -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
+              -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON -DNODEHAMMER_WITH_GEOMODEL=ON
             "$NH_PYTHON" -m pytest ci -q
             PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" "$NH_PYTHON" ci/fccee.py
 
