@@ -1,8 +1,11 @@
 import json
+from contextlib import nullcontext
+import os
 from pathlib import Path
 import subprocess
 import tempfile
 import threading
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -19,6 +22,19 @@ RENDER = {"nodes": [{"meshBindings": [{"meshId": 1}]},
 
 
 class FCCeeChecks(unittest.TestCase):
+    def test_phase_captures_native_output_and_restores_descriptors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            timings = {}
+            with self.assertRaisesRegex(ValueError, 'failed'):
+                with fccee.capture_phase(output, 'convert', timings):
+                    os.write(1, b'plugin stdout\n')
+                    os.write(2, b'plugin stderr\n')
+                    raise ValueError('failed')
+            self.assertEqual((output / 'convert.stdout').read_text(), 'plugin stdout\n')
+            self.assertEqual((output / 'convert.log').read_text(), 'plugin stderr\n')
+            self.assertIn('convert', timings)
+
     def test_four_models_overlap_and_failure_is_reported(self):
         barrier = threading.Barrier(4)
         with tempfile.TemporaryDirectory() as directory:
@@ -28,7 +44,7 @@ class FCCeeChecks(unittest.TestCase):
                 source.parent.mkdir(parents=True)
                 source.touch()
 
-            def run_case(exe, source, output, minimum):
+            def run_worker(source, output, minimum):
                 # All four must start before any can finish.
                 barrier.wait(timeout=5)
                 self.assertEqual(output.name, source.stem)
@@ -37,7 +53,7 @@ class FCCeeChecks(unittest.TestCase):
                 return {'full_nodes': minimum}
 
             argv = ['fccee.py', '--geometry-root', str(root), '--output', str(root / 'results')]
-            with patch('sys.argv', argv), patch('fccee.run_case', side_effect=run_case):
+            with patch('sys.argv', argv), patch('fccee.run_worker', side_effect=run_worker):
                 self.assertEqual(fccee.main(), 1)
             report = json.loads((root / 'results/summary.json').read_text())
             self.assertEqual(set(report), set(fccee.MODELS))
@@ -67,46 +83,62 @@ class FCCeeChecks(unittest.TestCase):
 
     def test_process_failure_is_not_a_pass(self):
         with tempfile.TemporaryDirectory() as directory:
-            with patch('fccee.subprocess.run', return_value=subprocess.CompletedProcess([], 7, '')):
-                with self.assertRaisesRegex(RuntimeError, 'convert exited 7'):
-                    fccee.run_case(Path('/nh'), Path('/det.xml'), Path(directory))
+            with patch('fccee.subprocess.run', return_value=subprocess.CompletedProcess([], 7)):
+                with self.assertRaisesRegex(RuntimeError, 'worker exited 7'):
+                    fccee.run_worker(Path('/det.xml'), Path(directory), 1)
 
-    def test_successful_exit_without_geometry_is_not_a_pass(self):
+    def test_successful_exit_without_result_is_not_a_pass(self):
         with tempfile.TemporaryDirectory() as directory:
-            with patch('fccee.subprocess.run', return_value=subprocess.CompletedProcess([], 0, '')):
-                (Path(directory) / 'geometry.nhb.zst').write_bytes(b'stale output')
-                with self.assertRaisesRegex(ValueError, 'did not write geometry'):
-                    fccee.run_case(Path('/nh'), Path('/det.xml'), Path(directory))
+            output = Path(directory)
+            (output / 'result.json').write_text('{}')
+            with patch('fccee.subprocess.run', return_value=subprocess.CompletedProcess([], 0)):
+                with self.assertRaises(FileNotFoundError):
+                    fccee.run_worker(Path('/det.xml'), output, 1)
 
     def test_full_import_and_render_are_checked(self):
-        commands = []
+        class Diagnostics(list):
+            has_errors = False
+
+        diags = Diagnostics()
+        scene = SimpleNamespace(valid=True, node_count=260_000_000)
+        cfg = SimpleNamespace(scene=object(), output=object())
+        calls = []
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
 
-            def execute(args, **kwargs):
-                commands.append(args)
-                if 'summary' in args:
-                    doc = {"nodes": 260_000_000, "diagnostics": {"errors": 0}}
-                elif 'tree' in args:
-                    doc = TREE
-                elif '--output-format' in args:
-                    (output / 'render.json').write_text(json.dumps(RENDER))
-                    doc = {}
-                else:
-                    if '-o' in args:
-                        (output / 'geometry.nhb.zst').write_bytes(b'geometry')
-                    doc = {}
-                return subprocess.CompletedProcess(args, 0, json.dumps(doc))
+            def read_semantic(source, **kwargs):
+                calls.append((source, kwargs))
+                return scene, diags
 
-            with patch('fccee.subprocess.run', side_effect=execute):
-                result = fccee.run_case(Path('/nh'), Path('/det.xml'), output, 200_000_000)
-            self.assertEqual(result['render_nodes'], 3)
-            self.assertIn('--dd4hep-global', commands[0])
-            self.assertNotIn('-c', commands[0])  # The full import is never filtered.
-            self.assertEqual(result['full_nodes'], 260_000_000)
-            with patch('fccee.subprocess.run', side_effect=execute):
+            def write(value, path, *args, **kwargs):
+                if value is scene:
+                    path.write_bytes(b'geometry')
+                else:
+                    path.write_text(json.dumps(RENDER))
+
+            def inspect(args):
+                phase = args[3]
+                doc = ({'nodes': scene.node_count, 'diagnostics': {'errors': 0}}
+                       if phase == 'summary' else TREE)
+                (output / f'{phase}.stdout').write_text(json.dumps(doc))
+                return 0
+
+            nh = SimpleNamespace(read_semantic=read_semantic, write=write,
+                                 cli=SimpleNamespace(run=inspect),
+                                 read_config=lambda path: (cfg, diags),
+                                 build=lambda value, config: (object(), diags))
+            with patch.dict('sys.modules', nodehammer=nh), \
+                    patch('fccee.capture_phase', side_effect=lambda *args: nullcontext()):
+                result = fccee.run_case(Path('/det.xml'), output, 200_000_000)
+                self.assertEqual(result['render_nodes'], 3)
+                self.assertEqual(calls[0], (Path('/det.xml'), {
+                    'importer_options': {'dd4hep.useGlobalDetector': True}}))
+                self.assertEqual(result['full_nodes'], 260_000_000)
                 with self.assertRaisesRegex(ValueError, 'unexpectedly reduced'):
-                    fccee.run_case(Path('/nh'), Path('/det.xml'), output, 300_000_000)
+                    fccee.run_case(Path('/det.xml'), output, 300_000_000)
+                diags.has_errors = True
+                with self.assertRaisesRegex(ValueError, 'error diagnostics'):
+                    fccee.run_case(Path('/det.xml'), output)
 
 
 if __name__ == '__main__':
