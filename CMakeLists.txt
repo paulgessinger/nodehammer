@@ -320,6 +320,9 @@ set(NH_CORE_SOURCES
 set(NH_APP_SOURCES
     src/viewer/app_state.cpp
     src/viewer/camera.cpp
+    src/viewer/camera_transition.cpp
+    src/viewer/viewer_connection.cpp
+    src/viewer/viewer_protocol.cpp
     # Camera pose <-> JSON (web shell options + embed postMessage protocol).
     # GPU-free, so the tests link it without the viewer.
     src/viewer/camera_json.cpp

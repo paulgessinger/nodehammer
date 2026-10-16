@@ -34,13 +34,13 @@
 #include <viewer/app_state.hpp>
 #include <viewer/build_session.hpp>
 #include <viewer/camera.hpp>
-#include <viewer/camera_json.hpp>
+#include <viewer/camera_transition.hpp>
 #include <viewer/dynamic_render_scale.hpp>
 #include <viewer/project_fs.hpp>
+#include <viewer/viewer_connection.hpp>
 
 #include <imgui.h>
 #include <imgui_internal.h>
-#include <nlohmann/json.hpp>
 #include <sokol_app.h>
 #include <sokol_gfx.h>
 #include <sokol_glue.h>
@@ -61,7 +61,6 @@
 #include <functional>
 #include <iomanip>
 #include <memory>
-#include <numbers>
 #include <optional>
 #include <print>
 #include <span>
@@ -192,23 +191,9 @@ struct App::Impl {
     std::string last_url_query_;
     std::chrono::steady_clock::time_point last_url_commit_{};
 
-    // Embed mode (cfg.embed) host bridge — docs/viewer-embed.md. `nh:ready` is
-    // posted exactly once, after the first frame that drew the uploaded scene;
-    // `nh:camera` whenever the pose differs from the last one posted, throttled
-    // to kEmbedCameraPostInterval, or immediately on a host `nh:getCamera`.
-    // `embed_anim_` is the host-requested eased camera move (nh:setCamera with
-    // animate=true), driven by tickEmbedCameraAnim each frame.
-    bool embed_ready_posted_{false};
-    bool embed_camera_post_requested_{false};
-    Camera embed_last_posted_camera_;
-    std::chrono::steady_clock::time_point embed_last_camera_post_{};
-    struct EmbedCameraAnim {
-        bool active{false};
-        float t{0.f};
-        Camera from;
-        Camera to;
-    };
-    EmbedCameraAnim embed_anim_;
+    CameraTransition camera_transition_;
+    std::optional<Camera> last_published_camera_;
+    bool scene_presented_{false};
 
     // In-flight "Publish package" working set: seeded with the sidecar + archive,
     // then the async runtime fetch adds the index.html + wasm files before
@@ -430,7 +415,9 @@ struct App::Impl {
 
     explicit Impl(Config c)
         : cfg(std::move(c)), launch_had_initial_camera(cfg.initial_camera.has_value()),
-          project_(platform::makeEmptyBag()), startup_overrides(std::move(cfg.startup_overrides)) {}
+          project_(platform::makeEmptyBag()), startup_overrides(std::move(cfg.startup_overrides)) {
+        window_customization.restore_placement = cfg.presentation != PresentationMode::Surface;
+    }
 
     void onInit();
     void onFrame();
@@ -530,16 +517,10 @@ struct App::Impl {
     [[nodiscard]] std::string browserUrlStateQuery(bool include_view, bool include_camera) const;
     void tickUrlSync();
 
-    // Embed-mode host bridge (no-ops unless cfg.embed). tickEmbedCameraPost runs
-    // at the top of onFrame, ahead of every idle gate, so a pose change from the
-    // previous frame reaches the host even when this frame is throttled away;
-    // tickEmbedReady runs after render() so the ready signal follows the first
-    // frame that actually drew the uploaded scene.
-    void tickEmbedCameraPost();
-    void tickEmbedReady();
-    void tickEmbedCameraAnim();
-    void postEmbedCamera(const char *type);
-    void setCameraFromHost(const Camera &pose, bool animate);
+    void setCameraPose(const Camera &pose, bool animate);
+    void tickCameraTransition();
+    void processCommands();
+    void publishPresentedFrame();
 
     static void initCb(void *user) { static_cast<Impl *>(user)->onInit(); }
     static void frameCb(void *user) { static_cast<Impl *>(user)->onFrame(); }
@@ -550,7 +531,7 @@ struct App::Impl {
 };
 
 void App::Impl::loadViewerConfigState() {
-    if (cfg.embed) {
+    if (cfg.presentation == PresentationMode::Surface) {
         return; // the host owns all state; never read localStorage
     }
     auto bytes = platform_->loadPersistentText(kViewerConfigStateKey);
@@ -590,7 +571,7 @@ void App::Impl::applyStartupOverrides() {
 }
 
 void App::Impl::loadImGuiState() {
-    if (cfg.embed) {
+    if (cfg.presentation == PresentationMode::Surface) {
         return;
     }
     auto bytes = platform_->loadPersistentText(kImGuiStateKey);
@@ -623,7 +604,7 @@ std::string App::Impl::currentViewerConfigStateToml() const {
 }
 
 void App::Impl::persistViewerConfigStateNow() {
-    if (cfg.embed) {
+    if (cfg.presentation == PresentationMode::Surface) {
         return;
     }
     const std::string s = currentViewerConfigStateToml();
@@ -632,7 +613,7 @@ void App::Impl::persistViewerConfigStateNow() {
 }
 
 void App::Impl::loadRenderQualityState() {
-    if (cfg.embed) {
+    if (cfg.presentation == PresentationMode::Surface) {
         return;
     }
     auto bytes = platform_->loadPersistentText(kRenderQualityStateKey);
@@ -653,8 +634,8 @@ std::string App::Impl::currentRenderQualityStateToml() const {
 }
 
 void App::Impl::savePersistentState(bool force) {
-    if (cfg.embed) {
-        return; // embed mode never writes localStorage (host owns state)
+    if (cfg.presentation == PresentationMode::Surface) {
+        return; // surface mode never writes localStorage (host owns state)
     }
     const uint64_t now = stm_now();
     if (!force && last_persistence_save_time != 0 &&
@@ -770,6 +751,7 @@ void App::Impl::onInit() {
                                             scene = std::move(s);
                                             scene_uploaded = false;
                                             camera_framed = false;
+                                            scene_presented_ = false;
                                         },
                                     .on_cut_scene_ready =
                                         [this](std::shared_ptr<const ir::render::Scene> s) {
@@ -852,11 +834,6 @@ void App::Impl::onInit() {
     fb_width = static_cast<uint32_t>(sapp_width());
     fb_height = static_cast<uint32_t>(sapp_height());
     platform_->attachWindow(window_customization);
-    if (cfg.embed) {
-        // Start listening for the host page's nh:setCamera / nh:getCamera. The
-        // viewer → host direction (nh:ready, nh:camera) is driven from onFrame.
-        platform_->installEmbedBridge();
-    }
 
     benchInit();
 }
@@ -1208,11 +1185,10 @@ bool App::Impl::shouldThrottleIdle() const {
     if (platform_ && platform_->windowState().drag_hover.active) {
         return false;
     }
-    // A host-driven camera move (embed nh:setCamera animate=true) or a pending
-    // host camera request must render / post on the very next frame.
-    if (embed_anim_.active || embed_camera_post_requested_) {
+    if (camera_transition_.active()) {
         return false;
     }
+
     // TODO: in-app animation hook. When something like cfg.auto_orbit
     // is producing motion of its own we want to keep the loop at full
     // rate even with no user input. Today auto_orbit only ticks
@@ -1874,7 +1850,7 @@ std::string App::Impl::browserUrlStateQuery(bool include_view, bool include_came
 
 void App::Impl::syncBrowserUrl() const {
     if constexpr (platform::kIsWeb) {
-        if (cfg.embed) {
+        if (cfg.presentation == PresentationMode::Surface) {
             return; // the host page owns window.location
         }
         const std::string state_query =
@@ -1884,7 +1860,8 @@ void App::Impl::syncBrowserUrl() const {
 }
 
 void App::Impl::tickUrlSync() {
-    if (!platform::kIsWeb || cfg.embed || !ui_state.url_sync_continuous) {
+    if (!platform::kIsWeb || cfg.presentation == PresentationMode::Surface ||
+        !ui_state.url_sync_continuous) {
         return;
     }
     // Debounce: only re-write the address bar when the steer actually changed and
@@ -1898,45 +1875,44 @@ void App::Impl::tickUrlSync() {
     }
 }
 
-// ── Embed-mode host bridge ──────────────────────────────────────────────────
-
-void App::Impl::postEmbedCamera(const char *type) {
-    platform_->postEmbedMessage(type, cameraToJson(camera).dump());
-    embed_last_posted_camera_ = camera;
-    embed_last_camera_post_ = std::chrono::steady_clock::now();
-    embed_camera_post_requested_ = false;
-}
-
-void App::Impl::tickEmbedCameraPost() {
-    if (!cfg.embed || !embed_ready_posted_) {
-        return; // before ready, the pose travels with nh:ready itself
-    }
-    constexpr auto kEmbedCameraPostInterval = std::chrono::milliseconds(100); // 10 Hz
-    const auto now = std::chrono::steady_clock::now();
-    const bool changed = !sameCameraPose(camera, embed_last_posted_camera_);
-    if (embed_camera_post_requested_ ||
-        (changed && now - embed_last_camera_post_ >= kEmbedCameraPostInterval)) {
-        postEmbedCamera("nh:camera");
-    }
-}
-
-void App::Impl::tickEmbedReady() {
-    if (!cfg.embed || embed_ready_posted_) {
+void App::Impl::processCommands() {
+    if (!cfg.connection) {
         return;
     }
-    // camera_framed flips inside render()'s scene pass, on the first frame that
-    // draws the uploaded scene, after framing + applyInitialCamera — so the pose
-    // posted here is the one that frame was rendered with.
-    if (scene && scene_uploaded && camera_framed) {
-        embed_ready_posted_ = true;
-        postEmbedCamera("nh:ready");
+    cfg.connection->poll();
+    auto commands = cfg.connection->takeCommands();
+    if (!commands.empty()) {
+        last_activity_time = stm_now();
     }
+    for (const auto &command : commands) {
+        if (const auto *set = std::get_if<commands::SetCamera>(&command)) {
+            setCameraPose(set->pose, set->animate);
+        } else if (const auto *get = std::get_if<commands::GetCamera>(&command)) {
+            cfg.connection->publish(events::CameraResponse{get->request_id, camera});
+        }
+    }
+    cfg.connection->poll();
 }
 
-void App::Impl::setCameraFromHost(const Camera &pose, bool animate) {
-    if (!cfg.embed) {
+void App::Impl::publishPresentedFrame() {
+    if (!cfg.connection || !scene || !scene_uploaded || !camera_framed) {
         return;
     }
+    if (!scene_presented_) {
+        cfg.connection->publish(events::ScenePresented{camera});
+        scene_presented_ = true;
+    } else if (!last_published_camera_ || camera.target != last_published_camera_->target ||
+               camera.distance != last_published_camera_->distance ||
+               camera.yaw != last_published_camera_->yaw ||
+               camera.pitch != last_published_camera_->pitch ||
+               camera.projection != last_published_camera_->projection) {
+        cfg.connection->publish(events::CameraChanged{camera});
+    }
+    last_published_camera_ = camera;
+    cfg.connection->poll();
+}
+
+void App::Impl::setCameraPose(const Camera &pose, bool animate) {
     // Take only the pose; keep fov and let dolly() re-derive the clip planes.
     Camera to = camera;
     to.target = pose.target;
@@ -1950,52 +1926,34 @@ void App::Impl::setCameraFromHost(const Camera &pose, bool animate) {
         // set now, so route the pose through the initial-camera slot instead
         // (applyInitialCamera reapplies it right after frameBounds).
         cfg.initial_camera = to;
-        embed_anim_.active = false;
+        // A later archive manifest must not replace an explicit camera request.
+        startup_overrides.camera = to;
+        camera_transition_.cancel();
         return;
     }
     if (animate) {
-        embed_anim_ = EmbedCameraAnim{.active = true, .t = 0.f, .from = camera, .to = to};
+        camera_transition_.start(camera, to, CameraTransition::Clock::now());
     } else {
-        embed_anim_.active = false;
+        camera_transition_.cancel();
         camera = to;
         camera.dolly(1.f, scene_radius);
     }
-    // Wake the frame loop: an unfocused iframe would otherwise sit at the idle
-    // gate and neither render nor report the new pose.
+    // Wake the frame loop so an unfocused window renders the new pose.
     last_activity_time = stm_now();
 }
 
-void App::Impl::tickEmbedCameraAnim() {
-    if (!embed_anim_.active) {
+void App::Impl::tickCameraTransition() {
+    if (!camera_transition_.active()) {
         return;
     }
-    // User input takes over immediately rather than fighting the ease.
+    // User input takes over immediately rather than fighting the transition.
     const ImGuiIO &io = ImGui::GetIO();
     if (io.MouseDown[0] || io.MouseDown[2] || pending_scroll_x != 0.f || pending_scroll_y != 0.f ||
         !platform_gesture_events.empty()) {
-        embed_anim_.active = false;
+        camera_transition_.cancel();
         return;
     }
-    constexpr float kDurationSeconds = 0.4f;
-    embed_anim_.t =
-        std::min(1.f, embed_anim_.t + static_cast<float>(delta_seconds) / kDurationSeconds);
-    const float t = embed_anim_.t;
-    const float s = t * t * (3.f - 2.f * t); // smoothstep ease
-    const Camera &a = embed_anim_.from;
-    const Camera &b = embed_anim_.to;
-    camera.target = glm::mix(a.target, b.target, s);
-    // Distance eases in log space so zooming in and out feel symmetric.
-    camera.distance = std::exp(std::lerp(std::log(a.distance), std::log(b.distance), s));
-    // Yaw takes the shortest arc (remainder wraps the delta into [-π, π]).
-    const float dyaw = std::remainder(b.yaw - a.yaw, 2.f * std::numbers::pi_v<float>);
-    camera.yaw = a.yaw + dyaw * s;
-    camera.pitch = std::lerp(a.pitch, b.pitch, s);
-    camera.projection = b.projection;
-    camera.sanitize();
-    camera.dolly(1.f, scene_radius);
-    if (t >= 1.f) {
-        embed_anim_.active = false;
-    }
+    camera_transition_.update(camera, scene_radius, CameraTransition::Clock::now());
     last_activity_time = stm_now();
 }
 
@@ -2305,8 +2263,8 @@ void App::Impl::applyPersistedRootKeyOverride() {
 }
 
 bool App::Impl::webAppModeProject() const {
-    // Embed mode never persists to IDB — the host page owns all state.
-    if (!platform::kIsWeb || cfg.embed) {
+    // Surface mode never persists to IDB — the host page owns all state.
+    if (!platform::kIsWeb || cfg.presentation == PresentationMode::Surface) {
         return false;
     }
     // The working set persists in application mode (Empty scratch or a Local
@@ -2399,7 +2357,7 @@ void App::Impl::stashPersistedRootKeys() {
 }
 
 void App::Impl::restoreWebProjectFromIdb() {
-    if (!platform::kIsWeb || cfg.embed) {
+    if (!platform::kIsWeb || cfg.presentation == PresentationMode::Surface) {
         return;
     }
     // Load the persisted root selection synchronously *before* the async blob
@@ -2562,6 +2520,8 @@ void App::Impl::renderActiveModal() {
 }
 
 void App::Impl::onFrame() {
+    // Drain before computing idle: external commands wake an unfocused viewer.
+    processCommands();
     // Resolve idle-mode once per frame: shouldThrottleIdle reads
     // event-loop state (input timestamp, focus, drag hover) that
     // doesn't change during onFrame, so a single read is fine. Used
@@ -2602,10 +2562,6 @@ void App::Impl::onFrame() {
     // Continuous URL steer sync (Sync-to-URL window): keep the address bar equal to
     // the current screen when enabled. No-op otherwise.
     tickUrlSync();
-
-    // Embed mode: tell the host about the pose the previous frame rendered with.
-    // Ahead of the idle gates on purpose — see the declaration.
-    tickEmbedCameraPost();
 
     // Benchmark mode takes over the frame entirely: it drives the camera/state
     // sequence and renders at full rate, bypassing the idle/UI/input path below.
@@ -2668,12 +2624,13 @@ void App::Impl::onFrame() {
         const bool input_recent =
             last_activity_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_activity_time)) < kIdleInputSeconds;
-        // Toasts never render in embed mode, so they must not hold full rate there
+        // Toasts never render in surface mode, so they must not hold full rate there
         // (nothing expires them); the host camera animation does need it.
-        const bool full_rate = input_recent || jobsRunning() || ibl_baker_.dirty(ibl_settings) ||
-                               cfg.auto_orbit || drag_hover || pending_gesture ||
-                               (!cfg.embed && notifications.hasActiveToasts()) ||
-                               embed_anim_.active;
+        const bool full_rate =
+            input_recent || jobsRunning() || ibl_baker_.dirty(ibl_settings) || cfg.auto_orbit ||
+            drag_hover || pending_gesture ||
+            (cfg.presentation != PresentationMode::Surface && notifications.hasActiveToasts()) ||
+            camera_transition_.active();
         if (!full_rate && last_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
             // Re-present the last full frame with a cheap blit instead of an
@@ -2749,7 +2706,7 @@ void App::Impl::onFrame() {
         last_activity_time = stm_now();
     }
 
-    tickEmbedCameraAnim();
+    tickCameraTransition();
     updateCameraInput();
     if (scene && cfg.auto_orbit) {
         camera.orbit(glm::radians(cfg.auto_orbit_speed_deg) * static_cast<float>(delta_seconds),
@@ -2891,6 +2848,7 @@ void App::Impl::onFrame() {
         scene_uploaded = false;
         cut_uploaded = false;
         camera_framed = false;
+        scene_presented_ = false;
         scene_radius = 0.f;
         notifications.info("Project closed");
     };
@@ -2914,8 +2872,8 @@ void App::Impl::onFrame() {
         moveProjectKey(from_key, dest_dir_key);
     };
 
-    if (cfg.embed) {
-        // Embed mode draws the scene only: no dockspace, panels, menu bar, drop
+    if (cfg.presentation == PresentationMode::Surface) {
+        // Surface mode draws the scene only: no dockspace, panels, menu bar, drop
         // overlay, modals or toasts. The ImGui frame still runs (empty, like
         // bench mode) so render()'s ImGui draw has valid data, and with no
         // windows io.WantCaptureMouse stays false so camera input reaches
@@ -2988,9 +2946,7 @@ void App::Impl::onFrame() {
 
     exporter_.postRender();
 
-    // Embed mode: the one-shot ready signal, once the uploaded scene has been
-    // drawn (render() just set scene_uploaded / camera_framed on that frame).
-    tickEmbedReady();
+    publishPresentedFrame();
 
     // Drain any pending native picker modal. ImGui frame is ended,
     // sokol pass is committed; if NFD spawns a nested run loop and
@@ -3028,6 +2984,7 @@ void App::setScene(std::shared_ptr<const ir::render::Scene> scene) {
     impl_->scene = std::move(scene);
     impl_->scene_uploaded = false;
     impl_->camera_framed = false;
+    impl_->scene_presented_ = false;
 }
 
 void App::requestScreenshot(std::string path, PngExportSettings settings) {
@@ -3103,16 +3060,8 @@ void App::restoreWebProjectFromIdb() { impl_->restoreWebProjectFromIdb(); }
 
 void App::createArchiveFromScene() { impl_->createArchiveFromScene(); }
 
-void App::setCameraFromHost(const Camera &camera, bool animate) {
-    impl_->setCameraFromHost(camera, animate);
-}
-
-void App::requestCameraBroadcast() {
-    if (!impl_->cfg.embed || !impl_->embed_ready_posted_) {
-        return; // before ready, nh:ready itself carries the pose
-    }
-    impl_->embed_camera_post_requested_ = true;
-    impl_->last_activity_time = stm_now(); // wake a throttled frame loop
+void App::setCameraPose(const Camera &camera, bool animate) {
+    impl_->setCameraPose(camera, animate);
 }
 
 #ifndef __EMSCRIPTEN__

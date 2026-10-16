@@ -25,6 +25,7 @@
 #include <viewer/app.hpp>
 #include <viewer/camera_json.hpp>
 #include <viewer/config.hpp>
+#include <viewer/web_embed_connection.hpp>
 
 #include <emscripten/fetch.h>
 
@@ -167,7 +168,12 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
     cfg.startup_overrides.camera = cfg.initial_camera;
     // Embed mode: scene-only rendering, no URL/localStorage/IDB side effects,
     // postMessage camera bridge to the host page (docs/viewer-embed.md).
-    readField(j, "embed", cfg.embed);
+    bool embed = false;
+    readField(j, "embed", embed);
+    if (embed) {
+        cfg.presentation = nodehammer::viewer::PresentationMode::Surface;
+        cfg.connection = nodehammer::viewer::makeWebEmbedConnection();
+    }
 
     std::string archiveUrl;
     bool lock = true; // viewer-mode publications are content-locked by default
@@ -201,7 +207,7 @@ __attribute__((used)) int nh_viewer_start(const char *opts_json) {
             emscripten_fetch_close(f);
         };
         emscripten_fetch(&attr, archiveUrl.c_str());
-    } else if (!cfg.embed) {
+    } else if (cfg.presentation != nodehammer::viewer::PresentationMode::Surface) {
         // Application mode (no sidecar-provided archive): the App keeps its
         // eagerly-allocated empty working set. Kick an async IndexedDB restore so a
         // previously-persisted project reappears; drops/picks otherwise accumulate

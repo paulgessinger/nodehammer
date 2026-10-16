@@ -1,12 +1,10 @@
 #include <viewer/app.hpp>
 #include <viewer/archive_project_fs.hpp>
-#include <viewer/camera_json.hpp>
 #include <viewer/platform.hpp>
 #include <viewer/project_fs.hpp>
 #include <viewer/zip_working_set.hpp>
 
 #include <emscripten/emscripten.h>
-#include <nlohmann/json.hpp>
 #include <sokol_app.h>
 
 #include <cstddef>
@@ -172,64 +170,6 @@ EM_JS(void, nh_viewer_idb_delete, (const char *key), {
 // The single IDB key for the current application-mode project (single-document
 // now; a named multi-document switcher would key per name — §12 R6).
 static constexpr const char *kProjectBlobKey = "project/default";
-
-// Embed mode (docs/viewer-embed.md): the viewer runs inside an iframe and talks
-// to the embedding page over window.postMessage. Both directions are inert when
-// the page is not framed (window.parent === window).
-//
-// Host → viewer: `nh:setCamera` carries a `camera` object in the same
-// vocabulary as the nh_viewer_start `camera` option; it is forwarded to C++ as
-// JSON text so the same reader (cameraFromJson) validates it. `nh:getCamera`
-// asks for an immediate `nh:camera` reply. Messages from any origin are
-// accepted: the only effect is moving the camera of a page the host already
-// controls, and the viewer never sends anything but a camera pose back.
-// clang-format off
-EM_JS(void, nh_viewer_embed_install, (), {
-    if (Module['__nhEmbedInstalled']) {
-        return;
-    }
-    Module['__nhEmbedInstalled'] = true;
-    if (window.parent === window) {
-        return;
-    }
-    window.addEventListener('message', function(ev) {
-        var data = ev.data;
-        if (!data || typeof data !== 'object' || typeof data.type !== 'string') {
-            return;
-        }
-        if (data.type === 'nh:getCamera') {
-            Module['_nh_viewer_embed_request_camera']();
-        } else if (data.type === 'nh:setCamera') {
-            if (!data.camera || typeof data.camera !== 'object') {
-                return;
-            }
-            var json = JSON.stringify(data.camera);
-            var len = lengthBytesUTF8(json) + 1;
-            var ptr = Module['_malloc'](len);
-            stringToUTF8(json, ptr, len);
-            Module['_nh_viewer_embed_set_camera'](ptr, data.animate ? 1 : 0);
-            Module['_free'](ptr);
-        }
-    });
-});
-
-// Viewer → host: post {type, camera} to the parent. `camera_json` is the
-// serialized cameraToJson object; it is re-parsed here so the host receives a
-// structured-clone object rather than a string.
-EM_JS(void, nh_viewer_embed_post, (const char *type, const char *camera_json), {
-    if (window.parent === window) {
-        return;
-    }
-    var camera = null;
-    try {
-        camera = JSON.parse(UTF8ToString(camera_json));
-    } catch (e) {
-        console.warn('nodehammer: bad embed camera payload', e);
-        return;
-    }
-    window.parent.postMessage({ type: UTF8ToString(type), camera: camera }, '*');
-});
-// clang-format on
 
 // "Publish package": fetch the app's own same-origin runtime siblings and push each
 // back to C++ (App::addPackageFile), then finalize. The archive + sidecar were
@@ -637,12 +577,6 @@ void Platform::commitUrlState(const std::string &state_query, const std::string 
     nh_viewer_commit_url_state(state_query.c_str(), managed_keys.c_str());
 }
 
-void Platform::installEmbedBridge() { nh_viewer_embed_install(); }
-
-void Platform::postEmbedMessage(const std::string &type, const std::string &camera_json) {
-    nh_viewer_embed_post(type.c_str(), camera_json.c_str());
-}
-
 void Platform::openUrl(const std::string &url) { nh_viewer_open_url(url.c_str()); }
 
 std::optional<std::string> Platform::saveExportedImage(const std::string &filename,
@@ -802,38 +736,6 @@ void nh_viewer_save_persistent_state() {
         // beforeunload also flushes the application-mode working set to IDB so the
         // last edits survive a reload even if the debounce hadn't fired yet.
         app->flushWebProjectPersistence();
-    }
-}
-
-// Embed-mode host → viewer entry points (called from the nh_viewer_embed_install
-// message listener). `camera_json` is the host's camera object as JSON text.
-EMSCRIPTEN_KEEPALIVE
-void nh_viewer_embed_set_camera(const char *camera_json, int animate) {
-    auto *app = nodehammer::viewer::App::instance();
-    if (app == nullptr || camera_json == nullptr) {
-        return;
-    }
-    nlohmann::json j;
-    try {
-        j = nlohmann::json::parse(camera_json);
-    } catch (const std::exception &e) {
-        std::println(stderr, "viewer: ignoring nh:setCamera with unparsable camera: {}", e.what());
-        return;
-    }
-    const auto camera = nodehammer::viewer::cameraFromJson(j);
-    if (!camera) {
-        std::println(stderr, "viewer: ignoring nh:setCamera -- camera needs numeric targetX/Y/Z, "
-                             "distance > 0, yawDeg, pitchDeg");
-        return;
-    }
-    app->setCameraFromHost(*camera, animate != 0);
-}
-
-EMSCRIPTEN_KEEPALIVE
-void nh_viewer_embed_request_camera() {
-    auto *app = nodehammer::viewer::App::instance();
-    if (app != nullptr) {
-        app->requestCameraBroadcast();
     }
 }
 
