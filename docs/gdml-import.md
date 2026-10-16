@@ -20,13 +20,27 @@ is `geant4`. Geant4 lengths are converted to nodehammer's centimetres, density
 to g/cm³, and angles remain radians. GDML expressions, references and units are
 resolved by Geant4.
 
-Boxes, tubes, cones, trapezoids (`G4Trd`), polycones and union/intersection/
-subtraction solids map to analytic semantic shapes. Boolean operand displacement
-is preserved. Remaining solids use `G4VSolid::GetPolyhedron()` and become
-triangle meshes, with an `NH0112` informational diagnostic. This includes
-extruded solids and generic traps. Their mesh resolution is fixed at import
-time by Geant4; nodehammer's later circle-resolution setting cannot refine them.
-A solid without a usable Geant4 polyhedron fails the import.
+Boxes, tubes, cones, trapezoids (`G4Trd`), parallelepipeds (`G4Para`), tori,
+polycones, historical/Z-plane polyhedra and union/intersection/subtraction solids
+map to parametric semantic shapes. Boolean operand displacement is preserved.
+Geant4's internally scaled polyhedra radii are converted to nodehammer apothems.
+
+`G4ExtrudedSolid` retains its polygon (including concave outlines) and all Z
+sections, offsets and scale factors. `G4GenericTrap` and `G4Trap` retain their
+paired four-vertex endcaps. These shapes survive JSON and NHB round trips without
+an import-time mesh. Extrusions and planar traps tessellate exactly apart from
+floating-point rounding. Twisted generic-trap sides are bilinear surfaces;
+`max_segments_circle` controls their longitudinal subdivision at render time
+(one strip for planar sides, the configured count for twisted traps).
+
+Remaining solids, including generic R/Z-contour polyhedra, use
+`G4VSolid::GetPolyhedron()` and become triangle meshes, with an `NH0112`
+informational diagnostic. Their mesh resolution is fixed at import time by
+Geant4; nodehammer's later circle-resolution setting cannot refine them. A solid
+without a usable Geant4 polyhedron fails the import.
+
+NHB files containing extrusions or generic traps require the NHS9 parametric-shape
+feature. Older readers reject them; legacy NHS8 writing cannot encode these shapes.
 
 Replica and parameterised placements currently fail explicitly (`NH0110`),
 rather than importing only one copy. Sensitive-detector bindings, optical
@@ -92,3 +106,9 @@ bounding box of ±500 cm in x/y and ±550 cm in z. The importer preserves those
 counts and dimensions. Rendering this detector also exercises boolean trees
 deeper than 32 levels; the tessellator evaluates these operand graphs iteratively,
 with shared-operand caching and explicit cycle detection.
+
+The parametric regression fixture compares signed mesh volumes and surface
+positions against Geant4, checks closed oriented edges and Manifold acceptance,
+and covers partial tori/polyhedra, concave multisection extrusions, twisted traps,
+collapsed trap edges, and general traps. The sPHENIX input's 12 extruded solids
+and 24 generic traps now import parametrically with no `NH0112` fallbacks.

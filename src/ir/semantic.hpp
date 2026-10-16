@@ -145,6 +145,28 @@ struct TorusShape {
     double phiDelta{2.0 * std::numbers::pi};
 };
 
+// Polygon order may be clockwise or counterclockwise. Sections have increasing z.
+struct ExtrudedShape {
+    struct Section {
+        double z{0};
+        glm::dvec2 offset{0};
+        double scale{1};
+    };
+    std::vector<glm::dvec2> polygon;
+    std::vector<Section> sections;
+};
+
+// Corresponding cyclic vertices at -dz and +dz. Side surfaces interpolate
+// linearly between corresponding edges (bilinear patches when twisted).
+struct GenericTrapShape {
+    double dz{0};
+    std::array<glm::dvec2, 8> vertices{};
+};
+
+// Throw invalid_argument for malformed parametric geometry.
+void validateShape(const ExtrudedShape &shape);
+void validateShape(const GenericTrapShape &shape);
+
 struct TessellatedShape {
     struct Triangle {
         std::array<glm::dvec3, 3> vertices;
@@ -175,9 +197,10 @@ struct BooleanSubtraction {
     glm::dmat4 rightTransform{1.0};
 };
 
-using ShapeVariant = std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape,
-                                  PgonShape, TorusShape, TessellatedShape, BooleanUnion,
-                                  BooleanIntersection, BooleanSubtraction, UnknownShape>;
+using ShapeVariant =
+    std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape, PgonShape,
+                 TorusShape, TessellatedShape, BooleanUnion, BooleanIntersection,
+                 BooleanSubtraction, UnknownShape, ExtrudedShape, GenericTrapShape>;
 
 /// The boolean/CSG shape variants. These reference other shapes and must be
 /// routed to the boolean tessellator; the primitive tessellator rejects them.

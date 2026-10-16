@@ -194,3 +194,38 @@ TEST_CASE("boolean tessellator: invalid nested operands do not fall back to prim
     REQUIRE(out.diags.size() == 1);
     CHECK(out.diags.begin()->message.find(expected) != std::string::npos);
 }
+
+TEST_CASE("parametric extrusion and trap remain usable boolean operands",
+          "[tessellation][boolean][parametric]") {
+    std::vector<semantic::ShapeVariant> shapes{
+        semantic::ExtrudedShape{{{-2, -1}, {2, -1}, {2, 1}, {-2, 1}},
+                                {{-2, {0, 0}, 1}, {2, {0, 0}, 1}}},
+        semantic::GenericTrapShape{
+            2, {{{-2, -1}, {2, -1}, {2, 1}, {-2, 1}, {-2, -1}, {2, -1}, {2, 1}, {-2, 1}}}}};
+    for (const auto &shape : shapes) {
+        expanded::Scene scene;
+        const semantic::ShapeId left{1}, right{2};
+        scene.shapes.emplace(left, semantic::Shape{left, shape});
+        scene.shapes.emplace(right, semantic::Shape{right, semantic::BoxShape{1, 2, 3}});
+        const auto mesh =
+            tessellateBooleanShape(semantic::BooleanSubtraction{left, right, glm::dmat4{1}}, scene,
+                                   PrimitiveTessellator{}, {});
+        REQUIRE(mesh.succeeded);
+        DiagnosticList diags;
+        const auto solid = meshToManifold(mesh, diags, "cut");
+        REQUIRE(solid.has_value());
+        REQUIRE(solid->Status() == manifold::Manifold::Error::NoError);
+        REQUIRE(std::abs(solid->Volume() - 16) < 1e-6);
+    }
+}
+
+TEST_CASE("generic trap supports an apex and triangular endcaps", "[tessellation][parametric]") {
+    const semantic::GenericTrapShape pyramid{
+        2, {{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}}};
+    const auto mesh = PrimitiveTessellator{}.tessellate(pyramid, {});
+    DiagnosticList diags;
+    const auto solid = meshToManifold(mesh, diags, "pyramid");
+    REQUIRE(solid.has_value());
+    REQUIRE(solid->Status() == manifold::Manifold::Error::NoError);
+    REQUIRE(std::abs(solid->Volume() - 16.0 / 3) < 1e-6);
+}

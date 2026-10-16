@@ -183,3 +183,50 @@ TEST_CASE("PrimitiveTessellator: canTessellate returns true for primitive varian
     REQUIRE(t.canTessellate(ir::semantic::TubeShape{0, 1, 1}));
     REQUIRE(t.canTessellate(ir::semantic::UnknownShape{"foo"}));
 }
+
+TEST_CASE("parametric extrusion rejects malformed geometry", "[tessellation][parametric]") {
+    semantic::ExtrudedShape shape{{{0, 0}, {2, 0}, {2, 1}, {0, 1}},
+                                  {{-1, {0, 0}, 1}, {1, {0, 0}, 1}}};
+    REQUIRE_NOTHROW(semantic::validateShape(shape));
+    SECTION("non-finite vertex") { shape.polygon[0].x = std::numeric_limits<double>::infinity(); }
+    SECTION("crossed outline") { std::swap(shape.polygon[1], shape.polygon[2]); }
+    SECTION("repeated vertex") { shape.polygon[1] = shape.polygon[0]; }
+    SECTION("zero scale") { shape.sections[0].scale = 0; }
+    SECTION("unordered sections") { shape.sections[1].z = shape.sections[0].z; }
+    SECTION("one section") { shape.sections.pop_back(); }
+    REQUIRE_THROWS_AS(semantic::validateShape(shape), std::invalid_argument);
+    REQUIRE_THROWS_AS(PrimitiveTessellator{}.tessellate(shape, {}), std::invalid_argument);
+}
+
+TEST_CASE("parametric extrusion supports either winding and concave caps",
+          "[tessellation][parametric]") {
+    semantic::ExtrudedShape shape{{{0, 0}, {2, 0}, {2, 1}, {1, 1}, {1, 2}, {0, 2}},
+                                  {{-1, {0, 0}, 1}, {0, {1, -1}, 0.5}, {2, {-1, 2}, 2}}};
+    for (int winding = 0; winding < 2; ++winding) {
+        auto mesh = PrimitiveTessellator{}.tessellate(shape, {});
+        REQUIRE(mesh.indices.size() == 96);
+        REQUIRE(hasNoDegenerateTriangles(mesh));
+        REQUIRE(normalsAreUnitLength(mesh));
+        double volume = 0;
+        for (size_t i = 0; i < mesh.indices.size(); i += 3) {
+            const glm::dvec3 a = mesh.vertices[mesh.indices[i]].position;
+            const glm::dvec3 b = mesh.vertices[mesh.indices[i + 1]].position;
+            const glm::dvec3 c = mesh.vertices[mesh.indices[i + 2]].position;
+            volume += glm::dot(a, glm::cross(b, c)) / 6;
+        }
+        // Area 3; each section interval integrates a quadratic scale factor.
+        REQUIRE(std::abs(volume - 12.25) < 1e-6);
+        std::reverse(shape.polygon.begin(), shape.polygon.end());
+    }
+}
+
+TEST_CASE("generic trap rejects invalid parameters", "[tessellation][parametric]") {
+    semantic::GenericTrapShape shape{
+        2, {{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}, {-2, -2}, {2, -2}, {2, 2}, {-2, 2}}}};
+    REQUIRE_NOTHROW(semantic::validateShape(shape));
+    SECTION("negative length") { shape.dz = -1; }
+    SECTION("non-finite vertex") { shape.vertices[7].y = std::numeric_limits<double>::quiet_NaN(); }
+    SECTION("opposite winding") { std::reverse(shape.vertices.begin() + 4, shape.vertices.end()); }
+    SECTION("zero area") { shape.vertices.fill({0, 0}); }
+    REQUIRE_THROWS_AS(semantic::validateShape(shape), std::invalid_argument);
+}

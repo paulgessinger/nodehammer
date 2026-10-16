@@ -26,6 +26,8 @@ std::vector<ShapeId> operands(const Shape &shape) {
     return std::visit(
         [](const auto &data) -> std::vector<ShapeId> {
             using T = std::decay_t<decltype(data)>;
+            if constexpr (std::is_same_v<T, ExtrudedShape> || std::is_same_v<T, GenericTrapShape>)
+                validateShape(data);
             if constexpr (std::is_same_v<T, BooleanUnion> ||
                           std::is_same_v<T, BooleanIntersection> ||
                           std::is_same_v<T, BooleanSubtraction>) {

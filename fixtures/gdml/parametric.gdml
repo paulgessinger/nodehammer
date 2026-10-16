@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<gdml>
+  <define>
+    <constant name="length" value="20"/>
+  </define>
+  <materials>
+    <element name="TestHydrogen" formula="H" Z="1"><atom value="1.00794"/></element>
+    <material name="TestMaterial"><D value="0.25" unit="g/cm3"/><fraction n="1" ref="TestHydrogen"/></material>
+  </materials>
+  <solids><box name="worldBox" x="2" y="2" z="2" lunit="m"/>
+
+    <para name="para" x="20" y="30" z="40" alpha="12" theta="18" phi="27" aunit="deg" lunit="mm"/>
+    <torus name="torus" rmin="3" rmax="8" rtor="30" startphi="20" deltaphi="240" aunit="deg" lunit="mm"/>
+    <polyhedra name="pgon" startphi="17" deltaphi="270" numsides="5" aunit="deg" lunit="mm">
+      <zplane z="-20" rmin="4" rmax="20"/><zplane z="0" rmin="6" rmax="25"/><zplane z="20" rmin="6" rmax="18"/>
+    </polyhedra>
+    <polyhedra name="pgonFull" startphi="0" deltaphi="360" numsides="6" aunit="deg" lunit="mm">
+      <zplane z="-10" rmin="0" rmax="20"/><zplane z="10" rmin="0" rmax="20"/>
+    </polyhedra>
+    <polyhedra name="pgonTip" startphi="0" deltaphi="90" numsides="1" aunit="deg" lunit="mm">
+      <zplane z="-10" rmin="0" rmax="0"/><zplane z="10" rmin="0" rmax="20"/>
+    </polyhedra>
+    <xtru name="concave" lunit="mm">
+      <twoDimVertex x="0" y="0"/><twoDimVertex x="20" y="0"/><twoDimVertex x="20" y="10"/><twoDimVertex x="10" y="10"/><twoDimVertex x="10" y="20"/><twoDimVertex x="0" y="20"/>
+      <section zOrder="0" zPosition="-20" xOffset="-5" yOffset="3" scalingFactor="1"/>
+      <section zOrder="1" zPosition="0" xOffset="2" yOffset="-4" scalingFactor="0.6"/>
+      <section zOrder="2" zPosition="30" xOffset="8" yOffset="7" scalingFactor="1.5"/>
+    </xtru>
+    <arb8 name="twisted" dz="20" lunit="mm" v1x="-10" v1y="-10" v2x="-10" v2y="10" v3x="10" v3y="10" v4x="10" v4y="-10" v5x="-8" v5y="-12" v6x="-12" v6y="8" v7x="8" v7y="12" v8x="12" v8y="-8"/>
+    <arb8 name="triangular" dz="20" lunit="mm" v1x="-10" v1y="-10" v2x="0" v2y="10" v3x="10" v3y="-10" v4x="10" v4y="-10" v5x="-5" v5y="-5" v6x="0" v6y="5" v7x="5" v7y="-5" v8x="5" v8y="-5"/>
+    <trap name="trap" z="40" theta="15" phi="30" y1="20" x1="20" x2="30" alpha1="10" y2="30" x3="30" x4="45" alpha2="10" aunit="deg" lunit="mm"/>
+  </solids>
+  <structure>
+    <volume name="para"><materialref ref="TestMaterial"/><solidref ref="para"/></volume>
+    <volume name="torus"><materialref ref="TestMaterial"/><solidref ref="torus"/></volume>
+    <volume name="pgon"><materialref ref="TestMaterial"/><solidref ref="pgon"/></volume>
+    <volume name="pgonFull"><materialref ref="TestMaterial"/><solidref ref="pgonFull"/></volume>
+    <volume name="concave"><materialref ref="TestMaterial"/><solidref ref="concave"/></volume>
+    <volume name="twisted"><materialref ref="TestMaterial"/><solidref ref="twisted"/></volume>
+    <volume name="triangular"><materialref ref="TestMaterial"/><solidref ref="triangular"/></volume>
+    <volume name="trap"><materialref ref="TestMaterial"/><solidref ref="trap"/></volume>
+    <volume name="pgonTip"><materialref ref="TestMaterial"/><solidref ref="pgonTip"/></volume>
+    <volume name="world"><materialref ref="TestMaterial"/><solidref ref="worldBox"/>
+      <physvol><volumeref ref="pgonTip"/></physvol>
+      <physvol><volumeref ref="para"/></physvol>
+      <physvol><volumeref ref="torus"/></physvol>
+      <physvol><volumeref ref="pgon"/></physvol>
+      <physvol><volumeref ref="pgonFull"/></physvol>
+      <physvol><volumeref ref="concave"/></physvol>
+      <physvol><volumeref ref="twisted"/></physvol>
+      <physvol><volumeref ref="triangular"/></physvol>
+      <physvol><volumeref ref="trap"/></physvol>
+    </volume>
+  </structure><setup name="Default" version="1.0"><world ref="world"/></setup>
+</gdml>

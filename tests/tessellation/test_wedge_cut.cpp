@@ -577,3 +577,22 @@ TEST_CASE("canonical wedge: occurrence edits match expanded cuts and retain shar
         }
     }
 }
+
+TEST_CASE("wedge cut classifies parametric extrusion and trap bounds",
+          "[tessellation][wedgecut][parametric]") {
+    std::vector<semantic::ShapeVariant> shapes{
+        semantic::ExtrudedShape{{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}},
+                                {{-1, {0, 0}, 1}, {1, {0, 0}, 1}}},
+        semantic::GenericTrapShape{
+            1, {{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}, {-1, -1}, {1, -1}, {1, 1}, {-1, 1}}}}};
+    for (const auto &shape : shapes) {
+        auto ts = makeScene();
+        const auto lv = ts.scene.nodes.at(ts.a).logVolId;
+        ts.scene.shapes.at(ts.scene.logVols.at(lv).shapeId).data = shape;
+        const auto stats = applyWedgeCut(ts.scene, {0, 90});
+        REQUIRE(stats.kept == 2);
+        REQUIRE(stats.emptied == 1);
+        REQUIRE(stats.skipped == 0);
+        REQUIRE_FALSE(ts.scene.nodes.contains(ts.c));
+    }
+}

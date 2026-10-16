@@ -49,6 +49,12 @@ std::string shapeTypeName(const nodehammer::ir::semantic::Shape &shape) {
             [](const nodehammer::ir::semantic::TubeShape &) -> std::string { return "tube"; },
             [](const nodehammer::ir::semantic::ConeShape &) -> std::string { return "cone"; },
             [](const nodehammer::ir::semantic::TrdShape &) -> std::string { return "trd"; },
+            [](const nodehammer::ir::semantic::ExtrudedShape &) -> std::string {
+                return "extruded";
+            },
+            [](const nodehammer::ir::semantic::GenericTrapShape &) -> std::string {
+                return "generic_trap";
+            },
             [](const nodehammer::ir::semantic::ParaShape &) -> std::string { return "para"; },
             [](const nodehammer::ir::semantic::PconShape &) -> std::string { return "pcon"; },
             [](const nodehammer::ir::semantic::PgonShape &) -> std::string { return "pgon"; },

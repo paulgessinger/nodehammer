@@ -235,6 +235,12 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                     fbs::CreateTorusShape(builder, s.rMin, s.rMax, s.rTor, s.phiStart, s.phiDelta);
                 return {fbs::ShapeData_TorusShape, o.Union()};
             },
+            [](const semantic::ExtrudedShape &) -> ShapeOffsetResult {
+                throw std::runtime_error("NHS8 cannot encode extruded shapes; use NHS9");
+            },
+            [](const semantic::GenericTrapShape &) -> ShapeOffsetResult {
+                throw std::runtime_error("NHS8 cannot encode generic traps; use NHS9");
+            },
             [&](const semantic::TessellatedShape &s) -> ShapeOffsetResult {
                 std::vector<fbs::Triangle> tris;
                 tris.reserve(s.triangles.size());

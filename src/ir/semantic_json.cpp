@@ -118,6 +118,21 @@ void to_json(nlohmann::json &j, const TorusShape &s) {
         j["phiDelta"] = s.phiDelta;
     }
 }
+void to_json(nlohmann::json &j, const ExtrudedShape &s) {
+    j = {{"type", "extruded"},
+         {"polygon", nlohmann::json::array()},
+         {"sections", nlohmann::json::array()}};
+    for (const auto &p : s.polygon)
+        j["polygon"].push_back({p.x, p.y});
+    for (const auto &sec : s.sections)
+        j["sections"].push_back(
+            {{"z", sec.z}, {"offset", {sec.offset.x, sec.offset.y}}, {"scale", sec.scale}});
+}
+void to_json(nlohmann::json &j, const GenericTrapShape &s) {
+    j = {{"type", "generic_trap"}, {"dz", s.dz}, {"vertices", nlohmann::json::array()}};
+    for (const auto &p : s.vertices)
+        j["vertices"].push_back({p.x, p.y});
+}
 void to_json(nlohmann::json &j, const TessellatedShape &s) {
     auto tris = nlohmann::json::array();
     for (const auto &tri : s.triangles) {
@@ -152,6 +167,25 @@ void to_json(nlohmann::json &j, const Shape &s) {
 
 ShapeVariant shapeVariantFromJson(const nlohmann::json &j) {
     const auto type = j.at("type").get<std::string>();
+    if (type == "extruded") {
+        ExtrudedShape s;
+        for (const auto &p : j.at("polygon"))
+            s.polygon.push_back({p.at(0), p.at(1)});
+        for (const auto &sec : j.at("sections"))
+            s.sections.push_back(
+                {sec.at("z"), {sec.at("offset").at(0), sec.at("offset").at(1)}, sec.at("scale")});
+        return s;
+    }
+    if (type == "generic_trap") {
+        GenericTrapShape s;
+        s.dz = j.at("dz");
+        const auto &points = j.at("vertices");
+        if (points.size() != 8)
+            throw std::invalid_argument("generic_trap requires eight vertices");
+        for (std::size_t i = 0; i < 8; ++i)
+            s.vertices[i] = {points[i].at(0), points[i].at(1)};
+        return s;
+    }
     if (type == "box") {
         return BoxShape{j.at("dx"), j.at("dy"), j.at("dz")};
     }
