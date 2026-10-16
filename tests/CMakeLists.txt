@@ -468,6 +468,11 @@ if(NODEHAMMER_WITH_DD4HEP AND NOT EMSCRIPTEN)
         $<TARGET_OBJECTS:nodehammer_dd4hep_native_objs>
         $<TARGET_OBJECTS:nodehammer_dd4hep_plugin_objs>)
     target_link_libraries(nodehammer_dd4hep_probe PRIVATE nodehammer_lib DD4hep::DDCore)
+    if(NODEHAMMER_WITH_GEOMODEL)
+        # The probe uses the real main(), including all enabled native adapters.
+        target_sources(nodehammer_dd4hep_probe PRIVATE
+            $<TARGET_OBJECTS:nodehammer_geomodel_native_objs>)
+    endif()
     target_compile_options(nodehammer_dd4hep_probe PRIVATE
         $<$<CXX_COMPILER_ID:MSVC>:/UNH_WITH_VIEWER>
         $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UNH_WITH_VIEWER>)
