@@ -47,6 +47,8 @@ void to_json(nlohmann::json &j, const ParaShape &s);
 void to_json(nlohmann::json &j, const PconShape &s);
 void to_json(nlohmann::json &j, const PgonShape &s);
 void to_json(nlohmann::json &j, const TorusShape &s);
+void to_json(nlohmann::json &j, const ExtrudedShape &s);
+void to_json(nlohmann::json &j, const GenericTrapShape &s);
 void to_json(nlohmann::json &j, const TessellatedShape &s);
 void to_json(nlohmann::json &j, const UnknownShape &s);
 void to_json(nlohmann::json &j, const BooleanUnion &s);

@@ -12,10 +12,13 @@ class OccurrenceNodes {
   public:
     explicit OccurrenceNodes(const ir::semantic::Scene &scene,
                              const OccurrenceOverrides *overrides = nullptr)
-        : scene_(scene), count_(scene.nodeCount()), overrides_(overrides) {
-        if (count_ == 0) {
+        : scene_(scene), count_(0), overrides_(overrides) {
+        if (scene.logVols.empty() && scene.root.logVolId.value == 0) {
             return;
         }
+        // makeTree validates the source, including cycles and count overflow.
+        // Reuse the postorder count below instead of validating via nodeCount
+        // before validating the same scene again in makeTree.
         tree_ = scene.makeTree(0);
         // Iterative postorder: deep source hierarchies must not exhaust the C++ stack.
         std::vector<std::pair<ir::semantic::LogVolId, bool>> pending{{scene.root.logVolId, false}};
@@ -43,6 +46,7 @@ class OccurrenceNodes {
             }
             sizes_.emplace(id, size);
         }
+        count_ = sizes_.at(scene.root.logVolId);
     }
 
     [[nodiscard]] bool contains(ir::expanded::NodeId id) const {

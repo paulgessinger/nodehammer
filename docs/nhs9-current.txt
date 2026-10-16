@@ -6,6 +6,13 @@ unsupported; regenerate those artifacts from their source geometry. NHS8 remains
 readable through the existing legacy adapter. The schema revision marker is 6;
 other revisions and unknown required features are rejected.
 
+Required-feature bit 0 denotes parametric ExtrudedShape/GenericTrapShape payloads.
+Writers set it only when these shapes occur; existing scenes retain feature mask
+0 and their wire encoding. The two shape union tags are appended after existing
+tags. Readers predating this extension reject the required feature. Extrusions
+store double-precision XY vertices and Z/offset/scale sections; generic traps
+store a half-length and eight double-precision XY vertices.
+
 The root contains volume columns, metadata columns and a shared string pool.
 There are no legacy tables, placeholder vectors or alternative encodings.
 Volume IDs use uint64 differences modulo 2^64. Daughter volume references use

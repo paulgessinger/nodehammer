@@ -53,6 +53,21 @@ template <typename Tag> struct std::hash<nodehammer::ir::StrongId<Tag>> {
     }
 };
 
+#ifdef __EMSCRIPTEN__
+// Dense tables need a full 64-bit hash. On wasm32, routing IDs through
+// std::hash<uint64_t> first truncates to size_t and then mixes again. SplitMix64
+// supplies all 64 bits directly using ordinary WASM integer operations.
+template <typename Tag> struct ankerl::unordered_dense::hash<nodehammer::ir::StrongId<Tag>> {
+    using is_avalanching = void;
+    uint64_t operator()(nodehammer::ir::StrongId<Tag> id) const noexcept {
+        uint64_t value = id.value + UINT64_C(0x9e3779b97f4a7c15);
+        value = (value ^ (value >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+        value = (value ^ (value >> 27)) * UINT64_C(0x94d049bb133111eb);
+        return value ^ (value >> 31);
+    }
+};
+#endif
+
 namespace nodehammer::ir::semantic {
 
 // ── Shape types ───────────────────────────────────────────────────────────────
@@ -130,6 +145,28 @@ struct TorusShape {
     double phiDelta{2.0 * std::numbers::pi};
 };
 
+// Polygon order may be clockwise or counterclockwise. Sections have increasing z.
+struct ExtrudedShape {
+    struct Section {
+        double z{0};
+        glm::dvec2 offset{0};
+        double scale{1};
+    };
+    std::vector<glm::dvec2> polygon;
+    std::vector<Section> sections;
+};
+
+// Corresponding cyclic vertices at -dz and +dz. Side surfaces interpolate
+// linearly between corresponding edges (bilinear patches when twisted).
+struct GenericTrapShape {
+    double dz{0};
+    std::array<glm::dvec2, 8> vertices{};
+};
+
+// Throw invalid_argument for malformed parametric geometry.
+void validateShape(const ExtrudedShape &shape);
+void validateShape(const GenericTrapShape &shape);
+
 struct TessellatedShape {
     struct Triangle {
         std::array<glm::dvec3, 3> vertices;
@@ -160,9 +197,10 @@ struct BooleanSubtraction {
     glm::dmat4 rightTransform{1.0};
 };
 
-using ShapeVariant = std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape,
-                                  PgonShape, TorusShape, TessellatedShape, BooleanUnion,
-                                  BooleanIntersection, BooleanSubtraction, UnknownShape>;
+using ShapeVariant =
+    std::variant<BoxShape, TubeShape, ConeShape, TrdShape, ParaShape, PconShape, PgonShape,
+                 TorusShape, TessellatedShape, BooleanUnion, BooleanIntersection,
+                 BooleanSubtraction, UnknownShape, ExtrudedShape, GenericTrapShape>;
 
 /// The boolean/CSG shape variants. These reference other shapes and must be
 /// routed to the boolean tessellator; the primitive tessellator rejects them.

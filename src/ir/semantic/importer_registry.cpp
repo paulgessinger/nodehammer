@@ -11,6 +11,10 @@
 
 #endif
 
+#ifdef NH_WITH_GEANT4
+#include <ir/geant4/semantic/importer.hpp>
+#endif
+
 #include <algorithm>
 #include <cctype>
 #include <diagnostic_codes.hpp>
@@ -191,6 +195,9 @@ ImporterRegistry ImporterRegistry::makeDefault(const SemanticReadOptions &option
 #endif
 #ifdef NH_WITH_DD4HEP
     reg.registerImporter(std::make_unique<DD4hepImporter>());
+#endif
+#ifdef NH_WITH_GEANT4
+    reg.registerImporter(std::make_unique<GdmlImporter>());
 #endif
     reg.configure(options.importerOptions);
     return reg;

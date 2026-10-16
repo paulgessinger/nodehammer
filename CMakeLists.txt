@@ -144,17 +144,16 @@ include(GNUInstallDirs)
 include(cmake/PublicBackendHeaders.cmake)
 # Profiling flags are additive on top of any build type (Release, RelWithDebInfo,
 # Debug). Same interface across native and wasm; the flags differ per toolchain:
-# Clang/GCC get -g + frame pointers; MSVC gets /Zi + /Oy-; emscripten gets
-# --profiling-funcs on top so wasm function names survive the linker.
+# Native builds get debug information and frame pointers. Emscripten needs
+# function names only: DWARF would limit Binaryen optimizations in Release.
 if(NODEHAMMER_PROFILING)
-    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    if(EMSCRIPTEN)
+        add_link_options(--profiling-funcs)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         add_compile_options(-g -fno-omit-frame-pointer)
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         add_compile_options(/Zi /Oy-)
         add_link_options(/DEBUG)
-    endif()
-    if(EMSCRIPTEN)
-        add_link_options(--profiling-funcs)
     endif()
 endif()
 
@@ -182,7 +181,8 @@ include(cmake/Ingestion.cmake)
 #
 # BUMP THIS when the manifest/archive shape or the worker protocol changes.
 # Monotonic; never reused.
-set(NH_WEB_RUNTIME_SCHEMA 1)
+# Schema 2 workers understand NHS9 parametric extrusion/trap payloads.
+set(NH_WEB_RUNTIME_SCHEMA 2)
 set(NH_WEB_RUNTIME_STAMP "nh_runtime.json")
 set(NH_WEB_RUNTIME_DIR "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/web")
 
@@ -418,7 +418,8 @@ list(APPEND NH_CORE_DEPS ${NH_INGEST_BACKEND_DEPS})
 list(APPEND NH_CORE_DEFINES ${NH_INGEST_DEFINES})
 
 if(NODEHAMMER_WITH_GEANT4)
-    find_package(Geant4 REQUIRED)
+    find_package(Geant4 REQUIRED COMPONENTS gdml)
+    list(APPEND NH_CORE_SOURCES src/ir/geant4/semantic/importer.cpp)
     # Geant4 exports plain variables rather than imported targets, so unlike
     # every other backend its include directories do not ride along with the
     # link and have to be named separately.
@@ -840,6 +841,9 @@ if(NODEHAMMER_WITH_VIEWER)
         # src/web/compute_worker.js — see nh_compute_build.
         add_executable(nodehammer-compute src/web/compute_worker_main.cpp)
         target_link_libraries(nodehammer-compute PRIVATE nodehammer_lib)
+        if(NODEHAMMER_PROFILING)
+            target_compile_definitions(nodehammer-compute PRIVATE NH_COMPUTE_PROFILING=1)
+        endif()
         nh_apply_emscripten_compute_options(nodehammer-compute)
         nh_set_compiler_options(nodehammer-compute)
     else()

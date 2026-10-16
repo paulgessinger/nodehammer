@@ -19,7 +19,8 @@ struct SelectionResult {
 
 // ── SelectionEngine ───────────────────────────────────────────────────────────
 
-/// Evaluates [[selection_rules]] against a expanded::Scene.
+/// Evaluates [[selection_rules]] against an expanded scene, with a shared-scene
+/// pruning overload that selects occurrences without expanding the scene.
 ///
 /// Rule semantics:
 ///   - Default disposition: every node is KEPT (no rules = no filtering).
@@ -47,6 +48,7 @@ class SelectionEngine {
     /// If the root node is in the dropped set the scene is left unchanged and
     /// an NH0401 error is emitted.  Returns accumulated diagnostics.
     DiagnosticList prune(ir::expanded::Scene &scene) const;
+    /// Select directly from shared geometry via selection/shared_scene.hpp.
     [[nodiscard]] DiagnosticList prune(ir::semantic::Scene &scene) const;
 
   private:

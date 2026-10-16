@@ -36,6 +36,11 @@ table BooleanIntersection { left:uint64; right:uint64; right_transform_index:uin
 table BooleanSubtraction  { left:uint64; right:uint64; right_transform_index:uint32; }
 table UnknownShape   { original_type:string; }
 
+struct DVec2 { x:double; y:double; }
+struct ExtrudedSection { z:double; x:double; y:double; scale:double; }
+table ExtrudedShape { polygon:[DVec2] (required); sections:[ExtrudedSection] (required); }
+table GenericTrapShape { dz:double; vertices:[DVec2] (required); }
+
 union ShapeData {
     BoxShape,
     TubeShape,
@@ -49,7 +54,9 @@ union ShapeData {
     BooleanUnion,
     BooleanIntersection,
     BooleanSubtraction,
-    UnknownShape
+    UnknownShape,
+    ExtrudedShape,
+    GenericTrapShape
 }
 
 table Shape {

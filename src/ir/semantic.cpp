@@ -4,12 +4,76 @@
 
 #include <algorithm>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
 
 namespace nodehammer::ir::semantic {
+
+namespace {
+bool finitePoint(glm::dvec2 v) { return std::isfinite(v.x) && std::isfinite(v.y); }
+double cross2(glm::dvec2 a, glm::dvec2 b) { return a.x * b.y - a.y * b.x; }
+} // namespace
+
+void validateShape(const ExtrudedShape &s) {
+    auto fail = [] {
+        throw std::invalid_argument("invalid extruded shape: expected a simple polygon and "
+                                    "increasing finite sections with positive scale");
+    };
+    if (s.polygon.size() < 3 || s.sections.size() < 2)
+        fail();
+    double area = 0;
+    for (size_t i = 0; i < s.polygon.size(); ++i) {
+        const auto a = s.polygon[i], b = s.polygon[(i + 1) % s.polygon.size()];
+        if (!finitePoint(a) || a == b)
+            fail();
+        area += cross2(a, b);
+        for (size_t j = i + 1; j < s.polygon.size(); ++j) {
+            if (j == i + 1 || (i == 0 && j + 1 == s.polygon.size()))
+                continue;
+            const auto c = s.polygon[j], d = s.polygon[(j + 1) % s.polygon.size()];
+            const auto ab = b - a, cd = d - c;
+            const double denominator = cross2(ab, cd);
+            if (denominator != 0) {
+                const double t = cross2(c - a, cd) / denominator,
+                             u = cross2(c - a, ab) / denominator;
+                if (t >= 0 && t <= 1 && u >= 0 && u <= 1)
+                    fail();
+            } else if (cross2(c - a, ab) == 0 &&
+                       std::max(std::min(a.x, b.x), std::min(c.x, d.x)) <=
+                           std::min(std::max(a.x, b.x), std::max(c.x, d.x)) &&
+                       std::max(std::min(a.y, b.y), std::min(c.y, d.y)) <=
+                           std::min(std::max(a.y, b.y), std::max(c.y, d.y)))
+                fail();
+        }
+    }
+    if (!std::isfinite(area) || area == 0)
+        fail();
+    double previous = -std::numeric_limits<double>::infinity();
+    for (const auto &section : s.sections) {
+        if (!std::isfinite(section.z) || section.z <= previous || !finitePoint(section.offset) ||
+            !std::isfinite(section.scale) || section.scale <= 0)
+            fail();
+        previous = section.z;
+    }
+}
+
+void validateShape(const GenericTrapShape &s) {
+    if (!std::isfinite(s.dz) || s.dz <= 0 ||
+        std::any_of(s.vertices.begin(), s.vertices.end(), [](auto v) { return !finitePoint(v); }))
+        throw std::invalid_argument(
+            "invalid generic trap: expected finite vertices and positive half-length");
+    double areas[2]{};
+    for (size_t end = 0; end < 2; ++end)
+        for (size_t i = 0; i < 4; ++i)
+            areas[end] += cross2(s.vertices[end * 4 + i], s.vertices[end * 4 + (i + 1) % 4]);
+    if (!std::isfinite(areas[0] + areas[1]) || areas[0] * areas[1] < 0 ||
+        (areas[0] == 0 && areas[1] == 0))
+        throw std::invalid_argument(
+            "invalid generic trap: endcaps must have consistent winding and nonzero combined area");
+}
 
 namespace {
 
@@ -127,6 +191,28 @@ std::size_t ShapeHash::operator()(const ShapeVariant &v) const {
                        hh = hashCombine(hh, hashDouble(s.phiStart));
                        return hashCombine(hh, hashDouble(s.phiDelta));
                    },
+                   [](const ExtrudedShape &s) {
+                       std::size_t hh = s.polygon.size();
+                       for (const auto &p : s.polygon) {
+                           hh = hashCombine(hh, hashDouble(p.x));
+                           hh = hashCombine(hh, hashDouble(p.y));
+                       }
+                       for (const auto &z : s.sections) {
+                           hh = hashCombine(hh, hashDouble(z.z));
+                           hh = hashCombine(hh, hashDouble(z.offset.x));
+                           hh = hashCombine(hh, hashDouble(z.offset.y));
+                           hh = hashCombine(hh, hashDouble(z.scale));
+                       }
+                       return hh;
+                   },
+                   [](const GenericTrapShape &s) {
+                       auto hh = hashDouble(s.dz);
+                       for (const auto &p : s.vertices) {
+                           hh = hashCombine(hh, hashDouble(p.x));
+                           hh = hashCombine(hh, hashDouble(p.y));
+                       }
+                       return hh;
+                   },
                    [](const TessellatedShape &s) {
                        std::size_t hh = s.triangles.size();
                        for (const auto &tri : s.triangles) {
@@ -195,6 +281,31 @@ bool ShapeEqual::operator()(const ShapeVariant &a, const ShapeVariant &b) const 
             [](const TorusShape &sa, const TorusShape &sb) {
                 return deq(sa.rMin, sb.rMin) && deq(sa.rMax, sb.rMax) && deq(sa.rTor, sb.rTor) &&
                        deq(sa.phiStart, sb.phiStart) && deq(sa.phiDelta, sb.phiDelta);
+            },
+            [](const ExtrudedShape &sa, const ExtrudedShape &sb) {
+                if (sa.polygon.size() != sb.polygon.size() ||
+                    sa.sections.size() != sb.sections.size())
+                    return false;
+                for (std::size_t i = 0; i < sa.polygon.size(); ++i)
+                    if (!deq(sa.polygon[i].x, sb.polygon[i].x) ||
+                        !deq(sa.polygon[i].y, sb.polygon[i].y))
+                        return false;
+                for (std::size_t i = 0; i < sa.sections.size(); ++i) {
+                    const auto &x = sa.sections[i], &y = sb.sections[i];
+                    if (!deq(x.z, y.z) || !deq(x.offset.x, y.offset.x) ||
+                        !deq(x.offset.y, y.offset.y) || !deq(x.scale, y.scale))
+                        return false;
+                }
+                return true;
+            },
+            [](const GenericTrapShape &sa, const GenericTrapShape &sb) {
+                if (!deq(sa.dz, sb.dz))
+                    return false;
+                for (std::size_t i = 0; i < 8; ++i)
+                    if (!deq(sa.vertices[i].x, sb.vertices[i].x) ||
+                        !deq(sa.vertices[i].y, sb.vertices[i].y))
+                        return false;
+                return true;
             },
             [](const TessellatedShape &sa, const TessellatedShape &sb) {
                 if (sa.triangles.size() != sb.triangles.size()) {

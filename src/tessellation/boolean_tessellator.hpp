@@ -19,7 +19,7 @@ meshToManifold(const TessellationOutput &mesh, DiagnosticList &diags, std::strin
 /// fails.
 [[nodiscard]] TessellationOutput convexHull(const std::vector<glm::vec3> &points);
 
-/// Recursively tessellate a boolean shape using the Manifold library.
+/// Tessellate a boolean operand graph using the Manifold library.
 ///
 /// Resolves operand shapes from the scene. For primitives, prefers Manifold's
 /// built-in constructors (Box, Cylinder) for guaranteed watertight input; falls

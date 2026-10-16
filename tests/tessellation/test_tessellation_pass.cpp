@@ -785,3 +785,17 @@ TEST_CASE("Canonical node lookup indexes definitions rather than physical occurr
     CHECK_FALSE(nodes.contains(ir::expanded::NodeId{count + 1}));
     CHECK_THROWS_AS(nodes.at(ir::expanded::NodeId{0}), std::out_of_range);
 }
+
+TEST_CASE("Canonical occurrence indexing validates before traversing",
+          "[tessellation][canonical]") {
+    auto source = ir::semantic::fromExpanded(makeSingleBoxScene());
+    SECTION("cycle") {
+        source.logVols.at(source.root.logVolId)
+            .daughters.push_back({"cycle", source.root.logVolId});
+    }
+    SECTION("missing root") { source.logVols.erase(source.root.logVolId); }
+    SECTION("invalid metadata route") {
+        source.metadata.originalPaths.emplace(ir::semantic::OccurrenceId{99}, "/invalid");
+    }
+    REQUIRE_THROWS(OccurrenceNodes{source});
+}

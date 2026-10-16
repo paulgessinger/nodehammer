@@ -217,8 +217,11 @@ struct OccurrenceMask {
 
 struct OccurrenceIndex {
     OccurrenceTree &tree;
-    std::unordered_map<LogVolId, uint64_t> counts;
-    std::unordered_map<LogVolId, std::vector<uint64_t>> childOffsets;
+    // These indexes are immutable after construction; no references need to
+    // survive insertion. Dense tables avoid per-definition node allocations
+    // and pointer chasing in the per-occurrence lookup path.
+    ankerl::unordered_dense::map<LogVolId, uint64_t> counts;
+    ankerl::unordered_dense::map<LogVolId, std::vector<uint64_t>> childOffsets;
     uint64_t total{};
     std::vector<LogVolId> volumeOrder;
 
@@ -231,8 +234,10 @@ struct OccurrenceIndex {
             uint64_t count{1};
         };
         const auto &volumes = tree.sourceScene().logVols;
+        counts.reserve(volumes.size());
+        volumeOrder.reserve(volumes.size());
         std::vector<Frame> stack{{tree.rootPlacement().logVolId}};
-        std::unordered_set<LogVolId> active{stack.back().id};
+        ankerl::unordered_dense::set<LogVolId> active{stack.back().id};
         while (!stack.empty()) {
             auto &frame = stack.back();
             const auto &daughters = volumes.at(frame.id).daughters;
@@ -246,7 +251,10 @@ struct OccurrenceIndex {
                     offsets.push_back(offset);
                     offset += counts.at(daughter.logVolId);
                 }
-                childOffsets.emplace(frame.id, std::move(offsets));
+                // Only ancestors have child offsets. Millions of leaf volumes
+                // need a count, but no empty vector entry in this table.
+                if (!offsets.empty())
+                    childOffsets.emplace(frame.id, std::move(offsets));
                 active.erase(frame.id);
                 stack.pop_back();
                 continue;
@@ -424,7 +432,7 @@ OccurrenceEvaluation SelectedOccurrences::dryRun(const std::vector<config::Selec
     // Postorder proofs are reusable across occurrences of the same definition.
     // Only explicit drops qualify: a keep forced down by an ancestor must still
     // be visited to preserve exact orphan diagnostics and their order.
-    std::unordered_map<ir::semantic::LogVolId, bool> droppedDescendants;
+    ankerl::unordered_dense::map<ir::semantic::LogVolId, bool> droppedDescendants;
     if (optimize) {
         droppedDescendants.reserve(index_->volumeOrder.size());
         const auto &source = index_->tree.sourceScene();

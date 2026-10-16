@@ -105,6 +105,26 @@ ShapeOffsetResult serializeShapeVariant(flatbuffers::FlatBufferBuilder &builder,
                     fbs::CreateTorusShape(builder, s.rMin, s.rMax, s.rTor, s.phiStart, s.phiDelta);
                 return {fbs::ShapeData_TorusShape, o.Union()};
             },
+            [&](const semantic::ExtrudedShape &s) -> ShapeOffsetResult {
+                std::vector<fbs::DVec2> points;
+                std::vector<fbs::ExtrudedSection> sections;
+                for (const auto &p : s.polygon)
+                    points.emplace_back(p.x, p.y);
+                for (const auto &sec : s.sections)
+                    sections.emplace_back(sec.z, sec.offset.x, sec.offset.y, sec.scale);
+                const auto p = builder.CreateVectorOfStructs(points);
+                const auto z = builder.CreateVectorOfStructs(sections);
+                const auto o = fbs::CreateExtrudedShape(builder, p, z);
+                return {fbs::ShapeData_ExtrudedShape, o.Union()};
+            },
+            [&](const semantic::GenericTrapShape &s) -> ShapeOffsetResult {
+                std::vector<fbs::DVec2> points;
+                for (const auto &p : s.vertices)
+                    points.emplace_back(p.x, p.y);
+                const auto o = fbs::CreateGenericTrapShape(builder, s.dz,
+                                                           builder.CreateVectorOfStructs(points));
+                return {fbs::ShapeData_GenericTrapShape, o.Union()};
+            },
             [&](const semantic::TessellatedShape &s) -> ShapeOffsetResult {
                 std::vector<fbs::Triangle> tris;
                 tris.reserve(s.triangles.size());
@@ -202,6 +222,27 @@ semantic::ShapeVariant deserializeShapeVariant(fbs::ShapeData type, const void *
         const auto *s = static_cast<const fbs::TorusShape *>(data);
         return semantic::TorusShape{s->r_min(), s->r_max(), s->r_tor(), s->phi_start(),
                                     s->phi_delta()};
+    }
+    case fbs::ShapeData_ExtrudedShape: {
+        const auto *s = static_cast<const fbs::ExtrudedShape *>(data);
+        semantic::ExtrudedShape result;
+        for (const auto *p : *s->polygon())
+            result.polygon.push_back({p->x(), p->y()});
+        for (const auto *z : *s->sections())
+            result.sections.push_back({z->z(), {z->x(), z->y()}, z->scale()});
+        return result;
+    }
+    case fbs::ShapeData_GenericTrapShape: {
+        const auto *s = static_cast<const fbs::GenericTrapShape *>(data);
+        if (s->vertices()->size() != 8)
+            throw std::runtime_error("NHS9: generic trap requires eight vertices");
+        semantic::GenericTrapShape result;
+        result.dz = s->dz();
+        for (flatbuffers::uoffset_t i = 0; i < 8; ++i) {
+            const auto *p = s->vertices()->Get(i);
+            result.vertices[i] = {p->x(), p->y()};
+        }
+        return result;
     }
     case fbs::ShapeData_TessellatedShape: {
         const auto *s = static_cast<const fbs::TessellatedShape *>(data);
@@ -543,6 +584,8 @@ void decodeColumns(const fbs::SharedGeometry *fb, Scene &scene) {
     equalColumns(n, &names, v->shapes(), v->materials());
     equalColumns(d, &daughterVolumes, v->daughter_transforms());
     checkOffsets(&offsets, n, d);
+    // Validated columns give the exact catalog size; avoid repeated reallocations.
+    scene.logVols.reserve(n);
     auto volumeId = [&](uint32_t index) {
         if (index == 0 || index > n)
             throw std::runtime_error("NHS9: invalid volume reference");
@@ -671,7 +714,13 @@ std::vector<std::byte> sceneToBytes(const Scene &geometry) {
     auto tf = b.CreateVector(transforms.values);
     auto mats = b.CreateVector(materials);
     auto sh = b.CreateVector(shapes);
-    auto result = fbs::CreateSharedGeometry(b, 6, 0, sourceFile, root, count, tf, mats, sh,
+    uint64_t features = 0;
+    for (const auto &[id, shape] : scene.shapes) {
+        if (std::holds_alternative<ExtrudedShape>(shape.data) ||
+            std::holds_alternative<GenericTrapShape>(shape.data))
+            features |= 1;
+    }
+    auto result = fbs::CreateSharedGeometry(b, 6, features, sourceFile, root, count, tf, mats, sh,
                                             columns.volumes, columns.metadata, columns.strings);
     fbs::FinishSharedGeometryBuffer(b, result);
     const auto *begin = reinterpret_cast<const std::byte *>(b.GetBufferPointer());
@@ -711,7 +760,7 @@ Scene sceneFromBytes(std::span<const std::byte> bytes) {
     if (!fbs::VerifySharedGeometryBuffer(verifier))
         throw std::runtime_error("NHS9: invalid FlatBuffer");
     const auto *fb = fbs::GetSharedGeometry(bytes.data());
-    if (fb->schema_version() != 6 || fb->required_features() != 0)
+    if (fb->schema_version() != 6 || (fb->required_features() & ~uint64_t{1}) != 0)
         throw std::runtime_error("NHS9: unsupported schema version or required features");
     if (fb->transforms()->size() % 16)
         throw std::runtime_error("NHS9: malformed transform pool");
@@ -723,6 +772,8 @@ Scene sceneFromBytes(std::span<const std::byte> bytes) {
                                            decodeTransform(fb->transforms(), p->transform_index())};
     };
     result.root = placement(fb->root());
+    scene.materials.reserve(fb->materials()->size());
+    scene.shapes.reserve(fb->shapes()->size());
     for (const auto *m : *fb->materials()) {
         semantic::SourceMaterial value{semantic::MaterialId{m->id()},
                                        m->name() ? m->name()->str() : "", std::nullopt,

@@ -7,6 +7,8 @@
 
 #include <manifold/manifold.h>
 
+#include <array>
+#include <cmath>
 #include <numbers>
 
 using namespace nodehammer;
@@ -98,4 +100,132 @@ TEST_CASE("boolean tessellator: partial tube subtraction clears the named sector
     }
     CHECK_FALSE(anyInRemoved); // first quadrant cleared
     CHECK(anyInOpposite);      // opposite quadrant retained
+}
+
+// IDEA's Ta shields are hollow cone sectors, including a sector crossing 2*pi.
+// Rendering alone did not expose their missing radial faces; Boolean cuts did.
+TEST_CASE("boolean tessellator: IDEA cone sectors are watertight",
+          "[tessellation][boolean][manifold]") {
+    PrimitiveTessellator tess;
+    const std::array<semantic::ConeShape, 8> shields{{
+        {1.989, 2.789, 3.30266, 4.80266, 34.57, 5.689773361501514, 1.1868238913561442},
+        {1.666, 1.676, 1.989, 2.789, 8.5, 5.689773361501514, 1.1868238913561442},
+        {2.179, 2.879, 3.30266, 4.80266, 29.57, 0.5934119456780721, 0.6283185307179586},
+        {2.179, 2.879, 3.30266, 4.80266, 29.57, 5.078908123303498, 0.6108652381980153},
+        // Solid sector, both apex orientations, and unchanged full sweep.
+        {0, 2, 0, 3, 4, 0, kPi / 2},
+        {0, 2, 0, 0, 4, 1, kPi / 2},
+        {0, 0, 0, 2, 4, 1, kPi / 2},
+        {0, 2, 0, 3, 4, 1, 2 * kPi},
+    }};
+    for (const auto &shape : shields) {
+        for (const int segments : {24, 64}) {
+            CAPTURE(shape.phiStart, shape.phiDelta, segments);
+            TessellationParams params;
+            params.maxSegmentsCircle = segments;
+            const auto mesh = tess.tessellate(semantic::ShapeVariant{shape}, params);
+            DiagnosticList diags;
+            const auto solid = meshToManifold(mesh, diags, "IDEA shield");
+            REQUIRE(solid.has_value());
+            CHECK(solid->Status() == manifold::Manifold::Error::NoError);
+            // Exact volume of the polygonal frustum sector (not the smooth cone).
+            const auto radii = [](double a, double b) { return a * a + a * b + b * b; };
+            const double expected =
+                segments * std::sin(shape.phiDelta / segments) * shape.dz / 3 *
+                (radii(shape.rMax1, shape.rMax2) - radii(shape.rMin1, shape.rMin2));
+            CHECK(std::abs(solid->Volume() - expected) < expected * 1e-4);
+            CHECK_FALSE(diags.hasErrors());
+        }
+    }
+}
+
+// Detector supports can contain long chains of drilled holes. A fixed depth
+// cutoff rejected sPHENIX's MVTX end wheel (34 nested boolean operations).
+TEST_CASE("boolean tessellator: deep operand graph preserves the cut volume",
+          "[tessellation][boolean][manifold]") {
+    ir::expanded::Scene scene;
+    const auto box = scene.nextShapeId();
+    scene.shapes[box] = {box, ir::semantic::BoxShape{10.0, 10.0, 10.0}};
+    const auto hole = scene.nextShapeId();
+    scene.shapes[hole] = {hole, ir::semantic::BoxShape{1.0, 1.0, 1.0}};
+    auto previous = box;
+    glm::dmat4 transform{1.0};
+    transform[3][0] = 3.0;
+    for (int i = 0; i < 128; ++i) {
+        const auto id = scene.nextShapeId();
+        scene.shapes[id] = {id, ir::semantic::BooleanSubtraction{previous, hole, transform}};
+        previous = id;
+    }
+    // Both sides share the deep operand graph; this is a DAG, not a cycle.
+    const auto root = ir::semantic::BooleanUnion{previous, previous, glm::dmat4{1.0}};
+    PrimitiveTessellator tess;
+    auto out = tessellateBooleanShape(root, scene, tess, kDefault);
+    REQUIRE(out.succeeded);
+    REQUIRE(out.diags.empty());
+    REQUIRE_FALSE(out.vertices.empty());
+    DiagnosticList diags;
+    auto solid = meshToManifold(out, diags, "deep cut");
+    REQUIRE(solid.has_value());
+    CHECK(std::abs(solid->Volume() - (8000.0 - 8.0)) < 1e-5);
+}
+
+TEST_CASE("boolean tessellator: invalid nested operands do not fall back to primitives",
+          "[tessellation][boolean][manifold]") {
+    ir::expanded::Scene scene;
+    const auto box = scene.nextShapeId();
+    scene.shapes[box] = {box, ir::semantic::BoxShape{1.0, 1.0, 1.0}};
+    const auto nested = scene.nextShapeId();
+    std::string expected;
+    SECTION("cycle") {
+        scene.shapes[nested] = {nested, ir::semantic::BooleanUnion{box, nested, glm::dmat4{1.0}}};
+        expected = "cycle in boolean operands";
+    }
+    SECTION("missing operand") {
+        const auto missing = scene.nextShapeId();
+        scene.shapes[nested] = {nested,
+                                ir::semantic::BooleanSubtraction{box, missing, glm::dmat4{1.0}}};
+        expected = "not found in scene";
+    }
+    const auto root = ir::semantic::BooleanUnion{nested, box, glm::dmat4{1.0}};
+    PrimitiveTessellator tess;
+    auto out = tessellateBooleanShape(root, scene, tess, kDefault);
+    CHECK_FALSE(out.succeeded);
+    CHECK(out.vertices.empty());
+    REQUIRE(out.diags.size() == 1);
+    CHECK(out.diags.begin()->message.find(expected) != std::string::npos);
+}
+
+TEST_CASE("parametric extrusion and trap remain usable boolean operands",
+          "[tessellation][boolean][parametric]") {
+    std::vector<semantic::ShapeVariant> shapes{
+        semantic::ExtrudedShape{{{-2, -1}, {2, -1}, {2, 1}, {-2, 1}},
+                                {{-2, {0, 0}, 1}, {2, {0, 0}, 1}}},
+        semantic::GenericTrapShape{
+            2, {{{-2, -1}, {2, -1}, {2, 1}, {-2, 1}, {-2, -1}, {2, -1}, {2, 1}, {-2, 1}}}}};
+    for (const auto &shape : shapes) {
+        expanded::Scene scene;
+        const semantic::ShapeId left{1}, right{2};
+        scene.shapes.emplace(left, semantic::Shape{left, shape});
+        scene.shapes.emplace(right, semantic::Shape{right, semantic::BoxShape{1, 2, 3}});
+        const auto mesh =
+            tessellateBooleanShape(semantic::BooleanSubtraction{left, right, glm::dmat4{1}}, scene,
+                                   PrimitiveTessellator{}, {});
+        REQUIRE(mesh.succeeded);
+        DiagnosticList diags;
+        const auto solid = meshToManifold(mesh, diags, "cut");
+        REQUIRE(solid.has_value());
+        REQUIRE(solid->Status() == manifold::Manifold::Error::NoError);
+        REQUIRE(std::abs(solid->Volume() - 16) < 1e-6);
+    }
+}
+
+TEST_CASE("generic trap supports an apex and triangular endcaps", "[tessellation][parametric]") {
+    const semantic::GenericTrapShape pyramid{
+        2, {{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}, {0, 0}, {0, 0}, {0, 0}, {0, 0}}}};
+    const auto mesh = PrimitiveTessellator{}.tessellate(pyramid, {});
+    DiagnosticList diags;
+    const auto solid = meshToManifold(mesh, diags, "pyramid");
+    REQUIRE(solid.has_value());
+    REQUIRE(solid->Status() == manifold::Manifold::Error::NoError);
+    REQUIRE(std::abs(solid->Volume() - 16.0 / 3) < 1e-6);
 }

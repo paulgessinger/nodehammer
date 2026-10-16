@@ -236,3 +236,70 @@ TEST_CASE("compilePredicate: IsLeafPredicate", "[selection][predicate]") {
     v.isLeaf = false;
     REQUIRE_FALSE(p(v));
 }
+
+TEST_CASE("Compiled globs agree with an independent wildcard matcher", "[selection][predicate]") {
+    // Exhaustively cover anchored literals, optional '/' after '**', repeated
+    // stars, empty matches, and single-star slash boundaries.
+    const auto words = [](std::string_view alphabet, std::size_t depth) {
+        std::vector<std::string> values{""};
+        std::size_t begin = 0;
+        for (std::size_t n = 0; n < depth; ++n) {
+            const auto end = values.size();
+            for (std::size_t i = begin; i < end; ++i) {
+                for (const char c : alphabet) {
+                    values.push_back(values.at(i) + c);
+                }
+            }
+            begin = end;
+        }
+        return values;
+    };
+    const auto reference = [](std::string_view pattern, std::string_view text) {
+        std::vector<std::vector<bool>> matches(pattern.size() + 1,
+                                               std::vector<bool>(text.size() + 1));
+        matches.back().back() = true;
+        for (std::size_t p = pattern.size(); p-- > 0;) {
+            for (std::size_t t = text.size() + 1; t-- > 0;) {
+                if (pattern.at(p) == '*') {
+                    const bool doubleStar = p + 1 < pattern.size() && pattern.at(p + 1) == '*';
+                    auto next = p + (doubleStar ? 2 : 1);
+                    if (doubleStar && next < pattern.size() && pattern.at(next) == '/') {
+                        ++next;
+                    }
+                    matches.at(p).at(t) = matches.at(next).at(t) ||
+                                          (t < text.size() && (doubleStar || text.at(t) != '/') &&
+                                           matches.at(p).at(t + 1));
+                } else {
+                    matches.at(p).at(t) = t < text.size() && pattern.at(p) == text.at(t) &&
+                                          matches.at(p + 1).at(t + 1);
+                }
+            }
+        }
+        return static_cast<bool>(matches.front().front());
+    };
+    const auto texts = words("ab/", 4);
+    for (const auto &pattern : words("a/*", 5)) {
+        const auto predicate = makePathGlobPredicate(pattern);
+        for (const auto &text : texts) {
+            CAPTURE(pattern, text);
+            NodeView view;
+            view.path = text;
+            REQUIRE(predicate(view) == reference(pattern, text));
+        }
+    }
+}
+
+TEST_CASE("Leading double-star shortcuts preserve path matching semantics",
+          "[selection][predicate]") {
+    REQUIRE(matchGlob("**/sensor", "biosensor"));
+    REQUIRE(matchGlob("**/", "any/path"));
+    REQUIRE(matchGlob("**//sensor", "prefix/sensor"));
+    REQUIRE_FALSE(matchGlob("**//sensor", "sensor"));
+    REQUIRE(matchGlob("**/PixelLayer*", "/world/xPixelLayer0"));
+    REQUIRE_FALSE(matchGlob("**/PixelLayer*", "/world/PixelLayer0/stave0"));
+    REQUIRE_FALSE(matchGlob("**/PixelLayer*", "/world/PixelLayer0/"));
+    REQUIRE(
+        matchGlob("**/PixelLayer*/stave*/**", "/xPixelLayer_wrong/x/PixelLayer0/stave0/sensor"));
+    REQUIRE_FALSE(matchGlob("**/PixelLayer*/stave*", "/world/PixelLayer0/x/stave0"));
+    REQUIRE(matchGlob("**/PixelLayer*/stave*", "/world/PixelLayer0/stave0"));
+}

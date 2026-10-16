@@ -3,6 +3,7 @@
 #include <tessellation/primitive_tessellator.hpp>
 
 #include <glm/glm.hpp>
+#include <manifold/polygon.h>
 
 #include <algorithm>
 #include <cmath>
@@ -504,6 +505,38 @@ TessellationOutput tessellateCone(const ir::semantic::ConeShape &s, const Tessel
             }
         }
     }
+    // Partial sweeps need radial faces at both ends. Without them the cone
+    // looks plausible when rendered but is an open mesh, invalid for Booleans.
+    if (std::abs(dphi - 2.0f * kPi) >= 1e-4f) {
+        for (int side = 0; side < 2; ++side) {
+            // Reuse the wall's exact endpoint arithmetic so vertices weld.
+            const float a = angle(side == 0 ? 0 : segs);
+            const float ca = std::cos(a), sa = std::sin(a);
+            const glm::vec3 n = side == 0 ? glm::vec3{sa, -ca, 0} : glm::vec3{-sa, ca, 0};
+            const ir::render::Vertex innerBot{{rMin1 * ca, rMin1 * sa, -hz}, n};
+            const ir::render::Vertex outerBot{{rMax1 * ca, rMax1 * sa, -hz}, n};
+            const ir::render::Vertex outerTop{{rMax2 * ca, rMax2 * sa, hz}, n};
+            const ir::render::Vertex innerTop{{rMin2 * ca, rMin2 * sa, hz}, n};
+            const auto triangle = [&](const auto &v0, const auto &v1, const auto &v2) {
+                if (side == 0)
+                    appendTriangle(out, v0, v1, v2);
+                else
+                    appendTriangle(out, v2, v1, v0);
+            };
+            // At a cone apex (or a closed annular end), the face is triangular.
+            if (rMin1 == rMax1) {
+                if (rMin2 != rMax2)
+                    triangle(innerBot, outerTop, innerTop);
+            } else if (rMin2 == rMax2) {
+                triangle(innerBot, outerBot, outerTop);
+            } else if (side == 0) {
+                appendQuad(out, innerBot, outerBot, outerTop, innerTop);
+            } else {
+                appendQuad(out, innerTop, outerTop, outerBot, innerBot);
+            }
+        }
+    }
+
     return out;
 }
 
@@ -611,14 +644,14 @@ TessellationOutput tessellatePara(const ir::semantic::ParaShape &s) {
     auto fn = [](glm::vec3 a, glm::vec3 b, glm::vec3 c) {
         return glm::normalize(glm::cross(b - a, c - a));
     };
-    auto nxp = fn(b1, t1, t2);
-    appendQuad(out, {b1, nxp}, {t1, nxp}, {t2, nxp}, {b2, nxp}); // +X
-    auto nxn = fn(b3, t3, t0);
-    appendQuad(out, {b3, nxn}, {t3, nxn}, {t0, nxn}, {b0, nxn}); // -X
-    auto nyp = fn(b3, b2, t2);
-    appendQuad(out, {b3, nyp}, {b2, nyp}, {t2, nyp}, {t3, nyp}); // +Y
-    auto nyn = fn(b0, t0, t1);
-    appendQuad(out, {b0, nyn}, {t0, nyn}, {t1, nyn}, {b1, nyn}); // -Y
+    auto nxp = fn(b1, b2, t2);
+    appendQuad(out, {b1, nxp}, {b2, nxp}, {t2, nxp}, {t1, nxp}); // +X
+    auto nxn = fn(b3, b0, t0);
+    appendQuad(out, {b3, nxn}, {b0, nxn}, {t0, nxn}, {t3, nxn}); // -X
+    auto nyp = fn(b3, t3, t2);
+    appendQuad(out, {b3, nyp}, {t3, nyp}, {t2, nyp}, {b2, nyp}); // +Y
+    auto nyn = fn(b0, b1, t1);
+    appendQuad(out, {b0, nyn}, {b1, nyn}, {t1, nyn}, {t0, nyn}); // -Y
     auto ntp = fn(t0, t1, t2);
     appendQuad(out, {t0, ntp}, {t1, ntp}, {t2, ntp}, {t3, ntp}); // +Z
     auto ntn = fn(b3, b2, b1);
@@ -695,6 +728,34 @@ TessellationOutput tessellateTorus(const ir::semantic::TorusShape &s, const Tess
             for (int j = 0; j < nTube; ++j) {
                 appendQuad(out, vert(i, j + 1, rInner, -1.0f), vert(i + 1, j + 1, rInner, -1.0f),
                            vert(i + 1, j, rInner, -1.0f), vert(i, j, rInner, -1.0f));
+            }
+        }
+    }
+    if (std::abs(dphi - 2 * kPi) > 1e-4f) {
+        for (int end = 0; end < 2; ++end) {
+            const int i = end ? segs : 0;
+            const float phi = sweepAngle(phi0, dphi, i, segs);
+            const glm::vec3 normal =
+                (end ? 1.0f : -1.0f) * glm::vec3{-std::sin(phi), std::cos(phi), 0};
+            auto cap = [&](int j, float r) {
+                auto v = vert(i, j, r, 1);
+                v.normal = normal;
+                return v;
+            };
+            for (int j = 0; j < nTube; ++j) {
+                auto a = cap(j, rInner), b = cap(j, rOuter), c = cap(j + 1, rOuter),
+                     d = cap(j + 1, rInner);
+                if (rInner > 0) {
+                    if (end)
+                        appendQuad(out, d, c, b, a);
+                    else
+                        appendQuad(out, a, b, c, d);
+                } else {
+                    if (end)
+                        appendTriangle(out, a, c, b);
+                    else
+                        appendTriangle(out, a, b, c);
+                }
             }
         }
     }
@@ -843,9 +904,25 @@ TessellationOutput tessellatePcon(const ir::semantic::PconShape &s, const Tessel
 
 TessellationOutput tessellatePgon(const ir::semantic::PgonShape &s, const TessellationParams &p) {
     TessellationOutput out;
-    if (s.sections.size() < 2 || s.nSides < 3) {
+    if (s.sections.size() < 2 || s.nSides < 1 || s.phiDelta / s.nSides >= std::numbers::pi) {
         return out;
     }
+    auto quad = [&](TessellationOutput &target, const ir::render::Vertex &a,
+                    const ir::render::Vertex &b, const ir::render::Vertex &c,
+                    const ir::render::Vertex &d) {
+        // Cone tips and zero-thickness section edges collapse one or both triangles.
+        auto triangle = [&](const auto &x, const auto &y, const auto &z) {
+            const auto cross = glm::cross(y.position - x.position, z.position - x.position);
+            if (glm::dot(cross, cross) > 0)
+                appendTriangle(target, x, y, z);
+        };
+        if (a.position == b.position || b.position == c.position || c.position == d.position ||
+            d.position == a.position) {
+            triangle(a, b, c);
+            triangle(a, c, d);
+        } else
+            appendQuad(target, a, b, c, d);
+    };
     const int segs = s.nSides; // one segment per polygon face
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
@@ -872,19 +949,23 @@ TessellationOutput tessellatePgon(const ir::semantic::PgonShape &s, const Tessel
         for (int i = 0; i < segs; ++i) {
             const float a0 = angle(i), a1 = angle(i + 1);
             // Outward normal perpendicular to this flat face.
-            const float amid = (a0 + a1) * 0.5f;
-            const glm::vec3 nOut{std::cos(amid), std::sin(amid), 0};
-            appendQuad(out, {glm::vec3{oBot * std::cos(a0), oBot * std::sin(a0), z0}, nOut},
-                       {glm::vec3{oBot * std::cos(a1), oBot * std::sin(a1), z0}, nOut},
-                       {glm::vec3{oTop * std::cos(a1), oTop * std::sin(a1), z1}, nOut},
-                       {glm::vec3{oTop * std::cos(a0), oTop * std::sin(a0), z1}, nOut});
+            const float amid =
+                phi0 + dphi * (static_cast<float>(i) + 0.5f) / static_cast<float>(segs);
+            const glm::vec3 nOut = glm::normalize(glm::vec3{
+                (z1 - z0) * std::cos(amid), (z1 - z0) * std::sin(amid), (oBot - oTop) * cosPN});
+            quad(out, {glm::vec3{oBot * std::cos(a0), oBot * std::sin(a0), z0}, nOut},
+                 {glm::vec3{oBot * std::cos(a1), oBot * std::sin(a1), z0}, nOut},
+                 {glm::vec3{oTop * std::cos(a1), oTop * std::sin(a1), z1}, nOut},
+                 {glm::vec3{oTop * std::cos(a0), oTop * std::sin(a0), z1}, nOut});
             if (iBot > 0.0f || iTop > 0.0f) {
                 // Inner wall — inward normal, reversed Z order for correct winding.
-                const glm::vec3 nIn{-std::cos(amid), -std::sin(amid), 0};
-                appendQuad(out, {glm::vec3{iTop * std::cos(a0), iTop * std::sin(a0), z1}, nIn},
-                           {glm::vec3{iTop * std::cos(a1), iTop * std::sin(a1), z1}, nIn},
-                           {glm::vec3{iBot * std::cos(a1), iBot * std::sin(a1), z0}, nIn},
-                           {glm::vec3{iBot * std::cos(a0), iBot * std::sin(a0), z0}, nIn});
+                const glm::vec3 nIn =
+                    glm::normalize(glm::vec3{-(z1 - z0) * std::cos(amid),
+                                             -(z1 - z0) * std::sin(amid), (iTop - iBot) * cosPN});
+                quad(out, {glm::vec3{iTop * std::cos(a0), iTop * std::sin(a0), z1}, nIn},
+                     {glm::vec3{iTop * std::cos(a1), iTop * std::sin(a1), z1}, nIn},
+                     {glm::vec3{iBot * std::cos(a1), iBot * std::sin(a1), z0}, nIn},
+                     {glm::vec3{iBot * std::cos(a0), iBot * std::sin(a0), z0}, nIn});
             }
         }
     }
@@ -907,15 +988,15 @@ TessellationOutput tessellatePgon(const ir::semantic::PgonShape &s, const Tessel
             if (rInner > 0.0f) {
                 // Hollow: annular polygon ring.
                 if (sign > 0) {
-                    appendQuad(out, {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN},
-                               {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
-                               {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
-                               {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN});
+                    quad(out, {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN},
+                         {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                         {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                         {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN});
                 } else {
-                    appendQuad(out, {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN},
-                               {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
-                               {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
-                               {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN});
+                    quad(out, {glm::vec3{rInner * ca1, rInner * sa1, capZ}, capN},
+                         {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
+                         {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN},
+                         {glm::vec3{rInner * ca0, rInner * sa0, capZ}, capN});
                 }
             } else {
                 // Solid: polygon fan from the axis.
@@ -932,6 +1013,142 @@ TessellationOutput tessellatePgon(const ir::semantic::PgonShape &s, const Tessel
         }
     }
 
+    // Close the two radial faces of a partial polygonal sector.
+    if (std::abs(dphi - 2 * kPi) > 1e-4f) {
+        for (int end = 0; end < 2; ++end) {
+            const float phi = angle(end ? segs : 0);
+            const glm::vec3 normal =
+                (end ? 1.0f : -1.0f) * glm::vec3{-std::sin(phi), std::cos(phi), 0};
+            auto vertex = [&](float radius, double z) -> ir::render::Vertex {
+                return {{radius * std::cos(phi), radius * std::sin(phi), static_cast<float>(z)},
+                        normal};
+            };
+            for (size_t k = 1; k < s.sections.size(); ++k) {
+                const auto &lo = s.sections[k - 1], &hi = s.sections[k];
+                auto a = vertex(circumR(static_cast<float>(lo.rMin)), lo.z);
+                auto b = vertex(circumR(static_cast<float>(lo.rMax)), lo.z);
+                auto c = vertex(circumR(static_cast<float>(hi.rMax)), hi.z);
+                auto d = vertex(circumR(static_cast<float>(hi.rMin)), hi.z);
+                if (end)
+                    quad(out, d, c, b, a);
+                else
+                    quad(out, a, b, c, d);
+            }
+        }
+    }
+    return out;
+}
+
+// ── Extrusions and general traps ─────────────────────────────────────────────
+
+// Emit flat normals after choosing triangle vertices, including on twisted sides.
+void appendSurfaceTriangle(TessellationOutput &out, glm::dvec3 a, glm::dvec3 b, glm::dvec3 c) {
+    const auto cross = glm::cross(b - a, c - a);
+    if (glm::dot(cross, cross) == 0)
+        return; // collapsed trap edge or cap
+    const glm::vec3 normal = glm::normalize(cross);
+    appendTriangle(out, {glm::vec3(a), normal}, {glm::vec3(b), normal}, {glm::vec3(c), normal});
+}
+
+void appendPolygonCap(TessellationOutput &out, const std::vector<glm::dvec3> &ring, bool top) {
+    manifold::SimplePolygon polygon;
+    std::vector<glm::dvec3> points;
+    for (const auto &v : ring) {
+        if (points.empty() || v != points.back())
+            points.push_back(v);
+    }
+    if (points.size() > 1 && points.front() == points.back())
+        points.pop_back();
+    if (points.size() < 3)
+        return;
+    double area = 0;
+    for (size_t i = 0; i < points.size(); ++i) {
+        const auto &a = points[i], &b = points[(i + 1) % points.size()];
+        area += a.x * b.y - b.x * a.y;
+        polygon.push_back({a.x, a.y});
+    }
+    if (area == 0)
+        return;
+    for (const auto &tri : manifold::Triangulate({polygon})) {
+        if (top)
+            appendSurfaceTriangle(out, points[static_cast<size_t>(tri[0])],
+                                  points[static_cast<size_t>(tri[1])],
+                                  points[static_cast<size_t>(tri[2])]);
+        else
+            appendSurfaceTriangle(out, points[static_cast<size_t>(tri[2])],
+                                  points[static_cast<size_t>(tri[1])],
+                                  points[static_cast<size_t>(tri[0])]);
+    }
+}
+
+double signedArea(const std::vector<glm::dvec2> &ring) {
+    double area = 0;
+    for (size_t i = 0; i < ring.size(); ++i) {
+        auto a = ring[i], b = ring[(i + 1) % ring.size()];
+        area += a.x * b.y - b.x * a.y;
+    }
+    return area;
+}
+
+TessellationOutput tessellateExtruded(const ir::semantic::ExtrudedShape &s) {
+    TessellationOutput out;
+    ir::semantic::validateShape(s);
+    auto polygon = s.polygon;
+    if (signedArea(polygon) < 0)
+        std::reverse(polygon.begin(), polygon.end());
+    std::vector<std::vector<glm::dvec3>> rings;
+    for (const auto &section : s.sections) {
+        auto &ring = rings.emplace_back();
+        for (auto v : polygon)
+            ring.emplace_back(section.offset + section.scale * v, section.z);
+    }
+    if (rings.size() < 2 || polygon.size() < 3)
+        return out;
+    appendPolygonCap(out, rings.front(), false);
+    appendPolygonCap(out, rings.back(), true);
+    for (size_t k = 1; k < rings.size(); ++k)
+        for (size_t i = 0; i < polygon.size(); ++i) {
+            const auto j = (i + 1) % polygon.size();
+            const auto a = rings[k - 1][i], b = rings[k - 1][j], c = rings[k][j], d = rings[k][i];
+            appendSurfaceTriangle(out, a, b, c);
+            appendSurfaceTriangle(out, a, c, d);
+        }
+    return out;
+}
+
+TessellationOutput tessellateGenericTrap(const ir::semantic::GenericTrapShape &s,
+                                         const TessellationParams &p) {
+    TessellationOutput out;
+    ir::semantic::validateShape(s);
+    std::vector<glm::dvec2> lower(s.vertices.begin(), s.vertices.begin() + 4);
+    std::vector<glm::dvec2> upper(s.vertices.begin() + 4, s.vertices.end());
+    if (signedArea(lower) + signedArea(upper) < 0) {
+        std::reverse(lower.begin(), lower.end());
+        std::reverse(upper.begin(), upper.end());
+    }
+    int segments = 1;
+    for (size_t i = 0; i < 4; ++i) {
+        const size_t j = (i + 1) % 4;
+        const auto a = lower[j] - lower[i], b = upper[j] - upper[i];
+        if (std::abs(a.x * b.y - a.y * b.x) > 1e-12 * glm::length(a) * glm::length(b))
+            segments = std::max(1, p.maxSegmentsCircle);
+    }
+    std::vector<std::vector<glm::dvec3>> rings;
+    for (int k = 0; k <= segments; ++k) {
+        const double t = static_cast<double>(k) / segments;
+        auto &ring = rings.emplace_back();
+        for (size_t i = 0; i < 4; ++i)
+            ring.emplace_back((1 - t) * lower[i] + t * upper[i], (2 * t - 1) * s.dz);
+    }
+    appendPolygonCap(out, rings.front(), false);
+    appendPolygonCap(out, rings.back(), true);
+    for (size_t k = 1; k < rings.size(); ++k)
+        for (size_t i = 0; i < 4; ++i) {
+            const size_t j = (i + 1) % 4;
+            const auto a = rings[k - 1][i], b = rings[k - 1][j], c = rings[k][j], d = rings[k][i];
+            appendSurfaceTriangle(out, a, b, c);
+            appendSurfaceTriangle(out, a, c, d);
+        }
     return out;
 }
 
@@ -979,6 +1196,10 @@ TessellationOutput PrimitiveTessellator::tessellate(const ir::semantic::ShapeVar
             },
             [&](const ir::semantic::PconShape &s) { return tessellatePcon(s, params); },
             [&](const ir::semantic::PgonShape &s) { return tessellatePgon(s, params); },
+            [&](const ir::semantic::ExtrudedShape &s) { return tessellateExtruded(s); },
+            [&](const ir::semantic::GenericTrapShape &s) {
+                return tessellateGenericTrap(s, params);
+            },
             [&](const ir::semantic::TessellatedShape &s) { return tessellateTessellated(s); },
             [](const ir::semantic::UnknownShape &s) {
                 TessellationOutput err;

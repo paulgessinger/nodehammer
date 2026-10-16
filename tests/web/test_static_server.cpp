@@ -1,3 +1,5 @@
+#include <format>
+#include <web/runtime_locator.hpp>
 // The server behind `viewer serve`.
 //
 // The claim worth testing is not "HTTP works" -- cpp-httplib's own suite covers
@@ -70,7 +72,8 @@ void makePayload(const TempDir &dir) {
     dir.write("compute_worker.js", "// worker");
     dir.write("nodehammer-gles3.js", "// loader");
     dir.write("nodehammer-gles3.wasm", "\0asm fake");
-    dir.write("nh_runtime.json", "{\"schema\": 1, \"version\": \"test\"}");
+    dir.write("nh_runtime.json",
+              std::format("{{\"schema\": {}, \"version\": \"test\"}}", web::compiledSchema()));
     dir.write("nh_manifest.json", "{\"archive\": \"p.nhproj\", \"lock\": true}");
     dir.write("p.nhproj", "PK fake archive");
 }

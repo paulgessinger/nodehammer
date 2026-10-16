@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -25,6 +26,8 @@ std::vector<ShapeId> operands(const Shape &shape) {
     return std::visit(
         [](const auto &data) -> std::vector<ShapeId> {
             using T = std::decay_t<decltype(data)>;
+            if constexpr (std::is_same_v<T, ExtrudedShape> || std::is_same_v<T, GenericTrapShape>)
+                validateShape(data);
             if constexpr (std::is_same_v<T, BooleanUnion> ||
                           std::is_same_v<T, BooleanIntersection> ||
                           std::is_same_v<T, BooleanSubtraction>) {
@@ -37,13 +40,15 @@ std::vector<ShapeId> operands(const Shape &shape) {
 }
 
 void shapeGraph(const GeometryCatalogs &scene) {
-    std::unordered_set<ShapeId> done;
-    std::unordered_set<ShapeId> active;
+    ankerl::unordered_dense::set<ShapeId> done;
+    ankerl::unordered_dense::set<ShapeId> active;
+    done.reserve(scene.shapes.size());
     struct Frame {
         ShapeId id;
         std::vector<ShapeId> children;
         std::size_t next{};
     };
+    std::vector<Frame> stack;
     for (const auto &[id, shape] : scene.shapes) {
         if (id != shape.id) {
             throw std::invalid_argument("shared shape key/id mismatch");
@@ -51,7 +56,7 @@ void shapeGraph(const GeometryCatalogs &scene) {
         if (done.contains(id)) {
             continue;
         }
-        std::vector<Frame> stack{{id, operands(shape)}};
+        stack.push_back({id, operands(shape)});
         active.insert(id);
         while (!stack.empty()) {
             auto &frame = stack.back();
@@ -78,13 +83,15 @@ void shapeGraph(const GeometryCatalogs &scene) {
 }
 
 uint64_t volumeGraph(const GeometryCatalogs &scene, LogVolId root) {
-    std::unordered_map<LogVolId, uint64_t> counts;
-    std::unordered_set<LogVolId> active;
+    ankerl::unordered_dense::map<LogVolId, uint64_t> counts;
+    ankerl::unordered_dense::set<LogVolId> active;
+    counts.reserve(scene.logVols.size());
     struct Frame {
         LogVolId id;
         std::size_t next{};
         uint64_t count{1};
     };
+    std::vector<Frame> stack;
     for (const auto &[id, volume] : scene.logVols) {
         if (id != volume.id) {
             throw std::invalid_argument("shared volume key/id mismatch");
@@ -92,7 +99,7 @@ uint64_t volumeGraph(const GeometryCatalogs &scene, LogVolId root) {
         if (counts.contains(id)) {
             continue;
         }
-        std::vector<Frame> stack{{id}};
+        stack.push_back({id});
         active.insert(id);
         while (!stack.empty()) {
             auto &frame = stack.back();
@@ -152,15 +159,30 @@ uint64_t Scene::validate() const {
             throw std::invalid_argument("shared metadata tag set missing");
         }
     };
+    // Sparse metadata is sorted by route. Adjacent entries usually share
+    // most ancestors, so retain the validated prefix rather than restarting
+    // from the root for every entry. The longest-common-prefix check also
+    // handles moving backwards when the next metadata map begins.
+    const OccurrenceId *previous = nullptr;
+    std::vector<LogVolId> routeVolumes{root.logVolId};
     auto occurrence = [&](const OccurrenceId &id) {
-        auto volume = root.logVolId;
-        for (const auto slot : id) {
-            const auto &daughters = logVols.at(volume).daughters;
+        std::size_t common = 0;
+        if (previous != nullptr) {
+            while (common < previous->size() && common < id.size() &&
+                   previous->at(common) == id.at(common)) {
+                ++common;
+            }
+        }
+        routeVolumes.resize(common + 1);
+        for (std::size_t depth = common; depth < id.size(); ++depth) {
+            const auto &daughters = logVols.at(routeVolumes.back()).daughters;
+            const auto slot = id.at(depth);
             if (slot >= daughters.size()) {
                 throw std::invalid_argument("shared metadata occurrence missing");
             }
-            volume = daughters.at(slot).logVolId;
+            routeVolumes.push_back(daughters.at(slot).logVolId);
         }
+        previous = &id;
     };
     for (const auto &[volume, index] : metadata.volumeTags) {
         if (!logVols.contains(volume)) {
@@ -205,30 +227,36 @@ uint64_t Scene::validate() const {
 std::unique_ptr<semantic::OccurrenceTree> Scene::makeTree(std::size_t capacity) const {
     (void)validate();
     auto tree = std::make_unique<semantic::OccurrenceTree>(*this, root, capacity);
-    tree->setDefaultSourceSystem(metadata.defaultSourceSystem);
+    // validate() has checked every route and tag ID. Replaying the public
+    // setters would traverse every route again and insert sorted maps in
+    // O(n log n), despite the fresh tree having no snapshots to invalidate.
+    tree->defaultSourceSystem_ = metadata.defaultSourceSystem;
+    tree->displayNames_ = metadata.displayNames;
+    tree->pathNames_ = metadata.pathNames;
+    tree->sourceSystems_ = metadata.sourceSystems;
+    tree->originalPaths_ = metadata.originalPaths;
+    tree->degradation_ = metadata.degradation;
+
+    // Metadata IDs need not equal interned IDs (duplicate and unused source
+    // tag sets are allowed). Intern each referenced definition only once.
+    std::vector<std::optional<std::size_t>> tagIds(metadata.tagSets.size());
+    const auto internTag = [&](uint64_t id) {
+        const auto index = static_cast<std::size_t>(id);
+        auto &mapped = tagIds.at(index);
+        if (!mapped) {
+            mapped = tree->intern(metadata.tagSets.at(index));
+        }
+        return *mapped;
+    };
     for (const auto &[volume, tag] : metadata.volumeTags) {
-        tree->setVolumeTags(volume, metadata.tagSets.at(static_cast<std::size_t>(tag)));
+        tree->volumeTags_.emplace_hint(tree->volumeTags_.end(), volume, internTag(tag));
     }
     for (const auto &[slot, tag] : metadata.placementTags) {
-        tree->setPlacementTags(slot.first, slot.second,
-                               metadata.tagSets.at(static_cast<std::size_t>(tag)));
+        tree->placementTags_.emplace_hint(tree->placementTags_.end(), slot, internTag(tag));
     }
     for (const auto &[id, tag] : metadata.occurrenceTags) {
-        tree->setTags(id, metadata.tagSets.at(static_cast<std::size_t>(tag)));
+        tree->tags_.emplace_hint(tree->tags_.end(), id, internTag(tag));
     }
-    for (const auto &[id, name] : metadata.displayNames) {
-        tree->setDisplayName(id, name);
-    }
-    for (const auto &[id, name] : metadata.pathNames) {
-        tree->setPathName(id, name);
-    }
-    for (const auto &[id, system] : metadata.sourceSystems) {
-        tree->setSourceSystem(id, system);
-    }
-    for (const auto &[id, path] : metadata.originalPaths)
-        tree->setOriginalPath(id, path);
-    for (const auto &[id, flags] : metadata.degradation)
-        tree->setDegradation(id, flags);
     return tree;
 }
 

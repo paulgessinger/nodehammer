@@ -3,7 +3,10 @@ add_executable(nodehammer_ingest_test core.cpp)
 target_link_libraries(nodehammer_ingest_test PRIVATE nodehammer_ingest_objs
     glm::glm unordered_dense::unordered_dense zstd::libzstd_static ${NH_INGEST_BACKEND_DEPS})
 target_compile_definitions(nodehammer_ingest_test PRIVATE NH_STATIC)
-target_include_directories(nodehammer_ingest_test SYSTEM PRIVATE
+# These include our implementation headers. Marking them SYSTEM lets ccache
+# with system_headers sloppiness reuse incompatible objects after header edits
+# (for example, a changed inline ID hash). Keep them as normal dependencies.
+target_include_directories(nodehammer_ingest_test PRIVATE
     "$<TARGET_PROPERTY:nodehammer_ingest_objs,INCLUDE_DIRECTORIES>")
 set_target_properties(nodehammer_ingest_test PROPERTIES
     CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)

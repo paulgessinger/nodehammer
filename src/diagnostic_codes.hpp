@@ -73,6 +73,10 @@ inline constexpr std::string_view kWarnImportUnplacedAncestor = "NH0106";
 // Non-fatal compatibility notice for successfully loaded NHS8 geometry.
 inline constexpr std::string_view kWarnImportLegacyNhb = "NH0107";
 
+inline constexpr std::string_view kFatalGdmlImport = "NH0110";
+inline constexpr std::string_view kWarnGdmlBackend = "NH0111";
+inline constexpr std::string_view kInfoGdmlTessellated = "NH0112";
+
 // ── Scene operations ──────────────────────────────────────────────────────────
 // Info: how much deduplication actually merged. Reported rather than discarded
 // because "dedup ran" and "dedup did something" are different facts, and only
