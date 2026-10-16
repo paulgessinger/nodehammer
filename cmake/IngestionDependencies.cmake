@@ -1,5 +1,5 @@
-# The complete dependency set for geometry ingestion. Heavy experiment
-# backends are resolved separately and are never fetched.
+# Common dependencies for geometry ingestion. Experiment backends are resolved
+# separately; GeoModel has an explicit opt-in source build in GeoModel.cmake.
 include_guard(GLOBAL)
 include(FetchContent)
 

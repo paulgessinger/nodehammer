@@ -13,6 +13,10 @@ project(nodehammer
 # This branch returns before discovering or configuring any processing,
 # application, Python, or viewer dependencies.
 option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel SQLite importer" OFF)
+option(NODEHAMMER_FETCH_GEOMODEL "Build pinned GeoModel Core/IO from source" OFF)
+if(NODEHAMMER_FETCH_GEOMODEL AND NOT NODEHAMMER_WITH_GEOMODEL)
+    message(FATAL_ERROR "NODEHAMMER_FETCH_GEOMODEL requires NODEHAMMER_WITH_GEOMODEL=ON")
+endif()
 option(NODEHAMMER_INGEST_ONLY "Build only the C++20 geometry ingestion library" OFF)
 if(NODEHAMMER_INGEST_ONLY)
     include(cmake/IngestionOnly.cmake)
