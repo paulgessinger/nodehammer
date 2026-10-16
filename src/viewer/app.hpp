@@ -131,17 +131,11 @@ class App {
     /// (drop files) and then Save. Cross-platform (strategy doc step 7).
     void createArchiveFromScene();
 
-    /// Embed-mode host bridge (`Config::embed`, web only; docs/viewer-embed.md).
-    ///   - `setCameraFromHost(camera, animate)` applies a pose received from the
-    ///     embedding page. With `animate` the current pose eases into the new
-    ///     one over a short interval instead of snapping. Only the pose fields
-    ///     (target, distance, yaw, pitch, projection) are taken; fov and clip
-    ///     planes are re-derived against the loaded scene.
-    ///   - `requestCameraBroadcast()` makes the next frame post an `nh:camera`
-    ///     message regardless of the change-throttle.
-    /// Both are no-ops when not in embed mode.
-    void setCameraFromHost(const Camera &camera, bool animate);
-    void requestCameraBroadcast();
+    /// Set the orbit pose on the viewer thread, optionally easing over 0.4 seconds.
+    /// Other threads submit SetCamera through Config::connection instead.
+    /// Keeps the current FOV and derives clipping from the scene. Before scene
+    /// framing, queues the pose as the initial camera. User input cancels easing.
+    void setCameraPose(const Camera &camera, bool animate = false);
 
 #ifndef __EMSCRIPTEN__
     /// Serialize the active archive to `path`, binding it there (native save-as).
