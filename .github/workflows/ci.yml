@@ -340,6 +340,14 @@ jobs:
       - name: Verify standalone C++20 ingestion
         if: matrix.artifact-name == 'nodehammer-linux-x86_64'
         shell: bash
+        env:
+          # Inherit the launchers in all three independent CMake builds.
+          CMAKE_C_COMPILER_LAUNCHER: ccache
+          CMAKE_CXX_COMPILER_LAUNCHER: ccache
+          CCACHE_COMPILERCHECK: content
+          CCACHE_BASEDIR: ${{ github.workspace }}
+          CCACHE_NOHASHDIR: "1"
+          CCACHE_SLOPPINESS: time_macros,include_file_mtime,include_file_ctime,pch_defines,system_headers,locale,clang_index_store
         run: bash ci/verify-ingest.sh build/ingestion-ci
 
       - name: Package archive
@@ -1163,7 +1171,10 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/conan/dependencies.tgz
-          key: conan-v3-2.30.0-key4hep-20260408-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py', '.github/workflows/ci.yml') }}
+          # Hash dependency inputs, not the workflow: artifact/test edits must
+          # not force a rebuild. Bump the key epoch when changing the container
+          # or Conan invocation here; keep restore and save keys identical.
+          key: conan-v3-2.30.0-key4hep-20260408-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py') }}
 
       # The container action's built-in cache is immutable for a whole day.
       # Use a separate workspace directory so its restore cannot overwrite this
@@ -1195,6 +1206,8 @@ jobs:
             export CCACHE_DIR="$PWD/.ccache-key4hep"
             ccache --set-config=max_size=500M
             ccache --zero-stats
+            # Report the active cache even if a later build or test fails.
+            trap 'ccache --show-stats' EXIT
             # Conan caches compiled dependency packages. Enable ccache only
             # afterwards to avoid also caching their object files. Inherit the
             # launchers in nodehammer and the independent SDK/ingestion builds;
@@ -1252,4 +1265,4 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/conan/dependencies.tgz
-          key: conan-v3-2.30.0-key4hep-20260408-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py', '.github/workflows/ci.yml') }}
+          key: conan-v3-2.30.0-key4hep-20260408-${{ hashFiles('conan.lock', 'conanfile.py', 'recipes/**', 'profiles/**', 'ci/build.sh', 'ci/conan-cache.py') }}
