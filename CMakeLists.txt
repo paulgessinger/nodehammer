@@ -325,6 +325,9 @@ set(NH_CORE_SOURCES
 set(NH_APP_SOURCES
     src/viewer/app_state.cpp
     src/viewer/camera.cpp
+    # Camera pose <-> JSON (web shell options + embed postMessage protocol).
+    # GPU-free, so the tests link it without the viewer.
+    src/viewer/camera_json.cpp
     # Adaptive render-scale state machine. GPU-free, so the tests link it
     # without the viewer.
     src/viewer/dynamic_render_scale.cpp
