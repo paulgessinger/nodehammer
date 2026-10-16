@@ -48,6 +48,14 @@ struct Config {
     float angle_cut_start_deg{0.f};
     float angle_cut_end_deg{90.f};
     bool enable_pbr{true};
+    /// Embed mode (web): the viewer is hosted in an iframe by a page that owns
+    /// the UI, the URL and all persistence. The App then draws only the 3D
+    /// scene — no Dear ImGui panels, menus, toasts or drop hints (orbit / zoom /
+    /// pan input still works) — never rewrites the browser URL, never reads or
+    /// writes localStorage / IndexedDB, and talks to the host page over
+    /// `window.postMessage` (camera pose + a one-shot ready signal). See
+    /// `docs/viewer-embed.md`. Ignored on native.
+    bool embed{false};
     std::optional<Camera> initial_camera;
     ConfigStartupOverrides startup_overrides;
 };
