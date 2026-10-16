@@ -1,3 +1,4 @@
+option(NODEHAMMER_WITH_GEOMODEL "Enable GeoModel SQLite importer" OFF)
 # Source embedding and standalone installation share this entry point.
 option(NODEHAMMER_WITH_TGEO "Enable ingestion from an existing ROOT installation" OFF)
 option(NODEHAMMER_WITH_DD4HEP "Enable ingestion from an existing DD4hep installation" OFF)

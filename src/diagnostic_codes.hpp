@@ -32,9 +32,14 @@
 //   NH0900–NH0999  CLI usage
 //   NH1000–NH1099  web viewer runtime
 //   NH1100–NH1199  project archives
+//   NH1300–NH1399  GeoModel importer
 //   NH1200–NH1299  agent skills
 
 namespace nodehammer::codes {
+// GeoModel import: opaque extension payloads are retained, but cannot be rendered.
+inline constexpr std::string_view kFatalGeoModelRead = "NH1300";
+inline constexpr std::string_view kErrGeoModelOpaqueShape = "NH1301";
+inline constexpr std::string_view kErrGeoModelUnsupportedShape = "NH1302";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 //

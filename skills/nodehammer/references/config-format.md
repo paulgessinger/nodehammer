@@ -140,6 +140,7 @@ All these fields work in `[rules.tessellation]` and `[defaults.tessellation]`.
 | `skip_geometry` | Suppress this node's own solid while retaining its hierarchy/descendants; useful for world and envelope containers |
 | `merge_descendants` | Merge retained descendant geometry into a group; assign to a stave/disk/module container, not every leaf |
 | `max_segments_circle` | Positive integer controlling curved-shape resolution; built-in default 64 |
+| `generic_trap_tolerance` | Finite positive boundary tolerance for twisted generic traps, in source length units (mm for GeoModel); default 0.01. Affects rendering, not NHB parameters. |
 | `fallback` | Unsupported boolean handling: "skip" (default), "bbox" (bounding-box proxy), "fail" |
 | `drop_coincident_faces` | Remove coincident internal triangle pairs on merged opaque stacks |
 | `average_material_stack` | Compute merged-stack average data for viewer filtering of distant material bands |

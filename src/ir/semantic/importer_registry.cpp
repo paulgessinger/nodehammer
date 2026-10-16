@@ -1,3 +1,6 @@
+#ifdef NH_WITH_GEOMODEL
+#include <ir/geomodel/semantic/importer.hpp>
+#endif
 #include <ir/fb/semantic/importer.hpp>
 #include <ir/json/semantic/importer.hpp>
 #include <ir/semantic/importer.hpp>
@@ -187,6 +190,9 @@ void ImporterRegistry::decorate(std::string_view format, const Decorator &decora
 
 ImporterRegistry ImporterRegistry::makeDefault(const SemanticReadOptions &options) {
     ImporterRegistry reg;
+#ifdef NH_WITH_GEOMODEL
+    reg.registerImporter(std::make_unique<GeoModelImporter>());
+#endif
     reg.registerImporter(std::make_unique<SyntheticImporter>());
     reg.registerImporter(std::make_unique<JsonImporter>());
     reg.registerImporter(std::make_unique<FlatBufferImporter>());

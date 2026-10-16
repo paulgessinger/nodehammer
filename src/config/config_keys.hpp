@@ -76,11 +76,17 @@ inline constexpr std::string_view kMergeDescendants = "merge_descendants";
 inline constexpr std::string_view kDropCoincidentFaces = "drop_coincident_faces";
 inline constexpr std::string_view kAverageMaterialStack = "average_material_stack";
 inline constexpr std::string_view kMaxSegmentsCircle = "max_segments_circle";
+inline constexpr std::string_view kGenericTrapTolerance = "generic_trap_tolerance";
 inline constexpr std::string_view kFallback = "fallback";
 
 inline constexpr std::array kTessellationKeys = {
-    kSkipGeometry,         kMergeDescendants,  kDropCoincidentFaces,
-    kAverageMaterialStack, kMaxSegmentsCircle, kFallback,
+    kSkipGeometry,
+    kMergeDescendants,
+    kDropCoincidentFaces,
+    kAverageMaterialStack,
+    kMaxSegmentsCircle,
+    kGenericTrapTolerance,
+    kFallback,
 };
 
 // ── [defaults] ───────────────────────────────────────────────────────────────

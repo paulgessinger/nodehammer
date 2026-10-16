@@ -592,6 +592,7 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             tess.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();
             tess.averageMaterialStack = (*tessTbl)["average_material_stack"].value<bool>();
             tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
+            tess.genericTrapTolerance = (*tessTbl)["generic_trap_tolerance"].value<double>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);
                 if (!parsed) {
@@ -737,6 +738,7 @@ ConfigResult parseTable(const toml::table &tbl) {
             td.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();
             td.averageMaterialStack = (*tessTbl)["average_material_stack"].value<bool>();
             td.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
+            td.genericTrapTolerance = (*tessTbl)["generic_trap_tolerance"].value<double>();
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);
                 if (!parsed) {

@@ -22,7 +22,7 @@ real time with a physically-based pipeline, natively or straight in the
 browser.
 
 ```
-   TGeo / DD4hep / GDML (Geant4) ── (GeoModel: planned)
+   TGeo / DD4hep / GDML (Geant4) / GeoModel
               │
               ▼
     Semantic scene graph (.nhb / .nhb.zst)
@@ -88,7 +88,7 @@ versus what's on the roadmap.
 
 ### 🚧 Planned / in progress
 
-- **GeoModel importer** — CMake option declared only; no implementation.
+- **GeoModel SQLite importer** — optional prototype; see [fidelity and limitations](docs/geomodel-import.md).
 - **Windows viewer verification** — the D3D11 backend builds and passes CI's
   headless tests, but the maintainer has no Windows machine to manually
   verify interactive rendering; the PNG-export readback for D3D11 is a
@@ -283,7 +283,7 @@ Key CMake options:
 | `NODEHAMMER_WITH_TGEO` | ROOT/TGeo importer | ✅ |
 | `NODEHAMMER_WITH_DD4HEP` | DD4hep importer | ✅ |
 | `NODEHAMMER_WITH_GEANT4` | GDML/Geant4 importer | ✅ GDML via Geant4 (requires GDML support) |
-| `NODEHAMMER_WITH_GEOMODEL` | GeoModel importer | 🚧 declared only |
+| `NODEHAMMER_WITH_GEOMODEL` | GeoModel SQLite importer | Prototype; [fidelity notes](docs/geomodel-import.md) |
 | `NODEHAMMER_BUILD_TESTS` | Build the Catch2 unit-test binary | ✅ |
 | `NODEHAMMER_BUILD_SHARED` | Also build and install `libnodehammer` and `libnodehammer_ingest` + the public headers + a CMake package config | 🚧 packaging works; the API it exposes is still being written |
 
