@@ -23,10 +23,10 @@
 #include <nlohmann/json.hpp>
 
 #include <viewer/app.hpp>
+#include <viewer/camera_json.hpp>
 #include <viewer/config.hpp>
 
 #include <emscripten/fetch.h>
-#include <glm/glm.hpp>
 
 #include <array>
 #include <cstddef>
@@ -94,34 +94,12 @@ std::optional<nodehammer::viewer::Camera> parseCamera(const nlohmann::json &j) {
     if (it == j.end() || !it->is_object()) {
         return std::nullopt;
     }
-    const auto &c = *it;
-    warnUnknownKeys(c, kKnownCameraKeys, "camera");
-    // All six fields are required to restore a camera — partial state is
-    // ambiguous, so fall back to defaults if any is missing. Matches the
-    // CLI's `--camera-*` mutual-requirement check.
-    if (!c.contains("targetX") || !c.contains("targetY") || !c.contains("targetZ") ||
-        !c.contains("distance") || !c.contains("yawDeg") || !c.contains("pitchDeg")) {
-        return std::nullopt;
-    }
-    nodehammer::viewer::Camera cam;
-    cam.target.x = c["targetX"].get<float>();
-    cam.target.y = c["targetY"].get<float>();
-    cam.target.z = c["targetZ"].get<float>();
-    cam.distance = c["distance"].get<float>();
-    if (cam.distance <= 0.f) {
-        return std::nullopt;
-    }
-    cam.yaw = glm::radians(c["yawDeg"].get<float>());
-    cam.pitch = glm::radians(c["pitchDeg"].get<float>());
-    if (auto proj = c.find("projection"); proj != c.end() && proj->is_string()) {
-        const auto value = proj->get<std::string>();
-        if (value == "orthographic" || value == "ortho") {
-            cam.projection = nodehammer::viewer::ProjectionMode::Orthographic;
-        } else if (value == "perspective") {
-            cam.projection = nodehammer::viewer::ProjectionMode::Perspective;
-        }
-    }
-    return cam;
+    warnUnknownKeys(*it, kKnownCameraKeys, "camera");
+    // All six pose fields are required to restore a camera — partial state is
+    // ambiguous, so fall back to defaults if any is missing. Matches the CLI's
+    // `--camera-*` mutual-requirement check. The vocabulary is shared with the
+    // embed postMessage protocol (viewer/camera_json.hpp).
+    return nodehammer::viewer::cameraFromJson(*it);
 }
 
 } // namespace
