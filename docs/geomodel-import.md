@@ -1,11 +1,48 @@
 # GeoModel SQLite import
 
-Build with `NODEHAMMER_WITH_GEOMODEL=ON` and an installed GeoModelCore/GeoModelIO.
-The current prototype requires GeoModel 6.29.0 or later and is validated against 6.29.0, with GCC 14/15 and C++20
-for ingestion. It reuses the experiment's GeoModel libraries; it does not fetch
-or build another GeoModel. GeoModelRead currently accompanies this optional backend
-in both the full and ingestion builds. Athena integration and a public in-memory
-adapter header are separate follow-up work.
+Build with `NODEHAMMER_WITH_GEOMODEL=ON` and an installed GeoModelCore/GeoModelIO
+6.29.0 or later. The importer is validated against 6.29.0 with GCC 14/15 and
+C++20 for ingestion. Athena integration and a public in-memory adapter header
+are separate follow-up work.
+
+For a standalone source build, also enable `NODEHAMMER_FETCH_GEOMODEL=ON`:
+
+```sh
+cmake -S . -B build/ingest -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DNODEHAMMER_INGEST_ONLY=ON \
+  -DNODEHAMMER_BUILD_TESTS=ON -DNODEHAMMER_WITH_GEOMODEL=ON \
+  -DNODEHAMMER_FETCH_GEOMODEL=ON
+cmake --build build/ingest --parallel 4
+ctest --test-dir build/ingest --output-on-failure
+```
+
+The fetch option defaults to **OFF** and requires the importer to be enabled.
+It builds only Core/IO from pinned GeoModel 6.29.0, using the same compiler as
+nodehammer. Eigen3, SQLite3, Xerces-C and nlohmann_json must already be available;
+the pinned Key4hep environment supplies these. ATLAS extensions, simulation,
+visualization and upstream tests are disabled; submodules and LFS detector
+payloads are not downloaded. To use a local source checkout, set
+`FETCHCONTENT_SOURCE_DIR_GEOMODEL=/absolute/path/to/GeoModel`.
+
+Embedding projects should normally leave fetching off and provide their own
+GeoModel installation. If both Core and IO targets already exist, nodehammer
+reuses them even when fetching is enabled. Fetching alongside only one of those
+targets is rejected to avoid mixing GeoModel copies.
+
+Fetched GeoModel remains a **separate shared-library runtime dependency**. A
+normal nodehammer install does not install GeoModel headers or libraries. To
+install the fetched dependency separately (using the default FetchContent paths):
+
+```sh
+cmake --build build/ingest --target GeoModelIOHelpers --parallel 4
+cmake --install build/ingest/_deps/geomodel-build --prefix /absolute/path/to/geomodel
+```
+
+`GeoModelIOHelpers` builds the complete Core/IO library set needed by that install.
+Add the prefix to `CMAKE_PREFIX_PATH` for subsequent installed-package builds and
+its `lib` directory to the runtime library search path (for example,
+`LD_LIBRARY_PATH` on Linux). GeoModelRead accompanies the optional backend in
+both full and ingestion builds.
 
 ```sh
 nodehammer convert -i detector.db -o detector.nhb
@@ -20,10 +57,11 @@ entry point is `ir::importGeoModel(const GeoVPhysVol&, source)`.
 ## CI coverage
 
 The Key4hep job also tests GeoModel. GeoModel is not supplied by that stack:
-`ci/build-geomodel.sh` builds GeoModelCore and GeoModelIO from the pinned 6.29.0
-commit with Key4hep's compiler and dependencies. The job enables all three
-backends (TGeo, DD4hep and GeoModel) in the full build and in the separate
-C++20 ingestion-library build, including installed and embedded consumers.
+the full build uses `NODEHAMMER_FETCH_GEOMODEL=ON` to build Core/IO with
+Key4hep's compiler and dependencies. The job then installs that GeoModel
+separately and uses `find_package` in the independent C++20 ingestion build,
+including installed and embedded consumers. Both builds enable all three
+backends (TGeo, DD4hep and GeoModel).
 
 The GeoModel tests create small SQLite fixtures during the run. They cover
 conversion, opaque-shape policy, NHB round-trips and deferred trap tessellation;
