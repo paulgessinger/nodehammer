@@ -229,3 +229,59 @@ TEST_CASE("generic trap supports an apex and triangular endcaps", "[tessellation
     REQUIRE(solid->Status() == manifold::Manifold::Error::NoError);
     REQUIRE(std::abs(solid->Volume() - 16.0 / 3) < 1e-6);
 }
+
+TEST_CASE("boolean tessellator: ATLAS toroid partial polycones are manifold",
+          "[tessellation][boolean][manifold]") {
+    // ECT_TS_CentralTube_top/low: descending-Z profiles with open phi sweeps.
+    for (const auto &[start, sweep] : std::array{std::pair{-0.1221730476396031, 3.385938748868999},
+                                                 std::pair{3.490658503988659, 2.443460952792061}}) {
+        for (bool descending : {false, true}) {
+            ir::semantic::PconShape pcon;
+            pcon.phiStart = start;
+            pcon.phiDelta = sweep;
+            pcon.sections = {{1730.0, 1050.0, 1060.0}, {1990.0, 1305.0, 1315.0}};
+            if (descending)
+                std::swap(pcon.sections[0], pcon.sections[1]);
+            PrimitiveTessellator tess;
+            auto mesh = tess.tessellate(ir::semantic::ShapeVariant{pcon}, kDefault);
+            DiagnosticList diags;
+            auto solid = meshToManifold(mesh, diags, "ECT_TS_CentralTube");
+            REQUIRE(solid.has_value());
+            CHECK(solid->Status() == manifold::Manifold::Error::NoError);
+            CHECK(solid->Volume() > 0.0);
+        }
+    }
+}
+
+TEST_CASE("ATLAS stepped partial polycones have closed radial faces",
+          "[tessellation][boolean][manifold]") {
+    for (int shape : {15308, 15702, 15703}) {
+        CAPTURE(shape);
+        semantic::PconShape pcon;
+        if (shape == 15308) {
+            pcon.phiStart = -0.0698131700797732;
+            pcon.phiDelta = 0.1396263401595464;
+            pcon.sections = {{3179, 1150, 1217}, {3189, 1150, 1225}, {3189, 1212, 1225},
+                             {3405, 1387, 1400}, {3405, 1390, 1400}, {3415, 1390, 1400}};
+        } else {
+            pcon.phiStart = shape == 15702 ? -0.098174770424681 : -0.0483091787439614;
+            pcon.phiDelta = -2 * pcon.phiStart;
+            pcon.sections = {{-165, 2044, 2070}, {-10, 2044, 2070}, {-10, 2050.5, 2070},
+                             {10, 2050.5, 2070}, {10, 2044, 2070},  {165, 2044, 2070}};
+        }
+        for (bool descending : {false, true}) {
+            if (descending)
+                std::reverse(pcon.sections.begin(), pcon.sections.end());
+            for (int segments : {24, 48}) {
+                auto params = kDefault;
+                params.maxSegmentsCircle = segments;
+                const auto mesh = PrimitiveTessellator{}.tessellate(pcon, params);
+                DiagnosticList diags;
+                const auto solid = meshToManifold(mesh, diags, "stepped ATLAS polycone");
+                REQUIRE(solid.has_value());
+                CHECK(solid->Status() == manifold::Manifold::Error::NoError);
+                CHECK(solid->Volume() > 0);
+            }
+        }
+    }
+}
