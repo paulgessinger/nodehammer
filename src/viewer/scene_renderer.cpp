@@ -2,6 +2,7 @@
 
 #include <viewer/backend_caps.hpp>
 #include <viewer/camera.hpp>
+#include <viewer/mesh_buffer_batch.hpp>
 
 #include <ankerl/unordered_dense.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -19,6 +20,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <format>
 #include <limits>
 #include <print>
 #include <vector>
@@ -30,6 +32,8 @@ namespace {
 struct GpuMesh {
     sg_buffer vbuf{};
     sg_buffer ibuf{};
+    int vertex_offset{0};
+    int index_offset{0};
     uint32_t index_count{0};
     uint64_t triangle_count{0};
     glm::vec3 local_min{0.f};
@@ -200,6 +204,8 @@ struct SceneRenderer::Impl {
     // Per-group dynamic buffer of mat4 instance transforms. Allocated once
     // at upload() to fit the largest group; reused across frames since the
     // scene is static. Holds GROUPS-worth of data at start of each render().
+    std::vector<sg_buffer> mesh_buffers; // owns shared batch buffers
+    std::string upload_error;
     sg_buffer instance_buf{};
     size_t instance_buf_capacity{0}; // bytes
 
@@ -265,7 +271,8 @@ struct SceneRenderer::Impl {
     void ensurePipelines(sg_pixel_format color_fmt);
     void destroyGpu();
     void uploadInstanceBuffer();
-    void uploadOneMesh(ir::render::MeshAssetId id, const ir::render::MeshAsset &asset);
+    void uploadBatch();
+    sg_buffer makeBuffer(const sg_buffer_desc &desc);
     void finalizeUpload();
 };
 
@@ -385,14 +392,9 @@ void SceneRenderer::Impl::ensurePipelines(sg_pixel_format color_fmt) {
 }
 
 void SceneRenderer::Impl::destroyGpu() {
-    for (auto &[id, m] : meshes) {
-        if (m.vbuf.id != SG_INVALID_ID) {
-            sg_destroy_buffer(m.vbuf);
-        }
-        if (m.ibuf.id != SG_INVALID_ID) {
-            sg_destroy_buffer(m.ibuf);
-        }
-    }
+    for (auto buffer : mesh_buffers)
+        sg_destroy_buffer(buffer);
+    mesh_buffers.clear();
     meshes.clear();
     materials.clear();
     groups.clear();
@@ -426,6 +428,8 @@ void SceneRenderer::Impl::uploadInstanceBuffer() {
     // frame, but those are separate static instances (addBindings pushed one to
     // each), so this sum already covers the worst case of the whole scene mid-
     // fade.
+    if (total > static_cast<size_t>(std::numeric_limits<int>::max()) / sizeof(InstanceGpu))
+        throw std::runtime_error("scene instance data exceeds GPU buffer offset limits");
     visible_instances.reserve(total);
     const size_t bytes = total * sizeof(InstanceGpu);
 
@@ -433,7 +437,7 @@ void SceneRenderer::Impl::uploadInstanceBuffer() {
     bdesc.size = bytes;
     bdesc.usage.vertex_buffer = true;
     bdesc.usage.stream_update = true;
-    instance_buf = sg_make_buffer(&bdesc);
+    instance_buf = makeBuffer(bdesc);
     instance_buf_capacity = bytes;
 }
 
@@ -483,45 +487,70 @@ void SceneRenderer::release() {
     impl_->initialised = false;
 }
 
-void SceneRenderer::Impl::uploadOneMesh(ir::render::MeshAssetId id,
-                                        const ir::render::MeshAsset &asset) {
-    if (asset.vertices.empty() || asset.indices.empty()) {
-        return;
+sg_buffer SceneRenderer::Impl::makeBuffer(const sg_buffer_desc &desc) {
+    const auto buffer = sg_make_buffer(&desc);
+    if (sg_query_buffer_state(buffer) != SG_RESOURCESTATE_VALID) {
+        if (buffer.id != SG_INVALID_ID)
+            sg_destroy_buffer(buffer);
+        throw std::runtime_error(
+            std::format("GPU upload failed allocating {} bytes for {} (buffer pool capacity: {}). "
+                        "Reduce scene detail or available GPU memory pressure.",
+                        desc.size, desc.label ? desc.label : "instance data",
+                        sg_query_desc().buffer_pool_size));
     }
-    GpuMesh gm;
+    return buffer;
+}
 
+void SceneRenderer::Impl::uploadBatch() {
+    MeshBufferBatch batch;
+    while (next_pending_mesh < pending_mesh_ids.size()) {
+        const auto &asset = pending_scene->meshAssets.at(pending_mesh_ids[next_pending_mesh]);
+        if (!batch.append(asset))
+            break;
+        ++next_pending_mesh;
+    }
+    if (batch.slices.empty())
+        return;
     sg_buffer_desc vdesc{};
-    vdesc.size = asset.vertices.size() * sizeof(ir::render::Vertex);
+    vdesc.size = batch.vertices.size() * sizeof(ir::render::Vertex);
     vdesc.usage.vertex_buffer = true;
     vdesc.usage.immutable = true;
-    vdesc.data.ptr = asset.vertices.data();
-    vdesc.data.size = vdesc.size;
-    gm.vbuf = sg_make_buffer(&vdesc);
-
+    vdesc.data = {batch.vertices.data(), vdesc.size};
+    vdesc.label = "scene mesh vertex batch";
+    const auto vbuf = makeBuffer(vdesc);
+    mesh_buffers.push_back(vbuf);
     sg_buffer_desc idesc{};
-    idesc.size = asset.indices.size() * sizeof(uint32_t);
+    idesc.size = batch.indices.size() * sizeof(uint32_t);
     idesc.usage.index_buffer = true;
     idesc.usage.immutable = true;
-    idesc.data.ptr = asset.indices.data();
-    idesc.data.size = idesc.size;
-    gm.ibuf = sg_make_buffer(&idesc);
+    idesc.data = {batch.indices.data(), idesc.size};
+    idesc.label = "scene mesh index batch";
+    const auto ibuf = makeBuffer(idesc);
+    mesh_buffers.push_back(ibuf);
+    for (const auto &slice : batch.slices) {
+        const auto &asset = pending_scene->meshAssets.at(slice.mesh);
+        GpuMesh gm;
+        gm.vbuf = vbuf;
+        gm.ibuf = ibuf;
+        gm.vertex_offset = slice.vertex_offset;
+        gm.index_offset = slice.index_offset;
+        gm.index_count = static_cast<uint32_t>(asset.indices.size());
+        gm.triangle_count = asset.indices.size() / 3;
 
-    gm.index_count = static_cast<uint32_t>(asset.indices.size());
-    gm.triangle_count = asset.indices.size() / 3;
-
-    glm::vec3 lmin{std::numeric_limits<float>::max()};
-    glm::vec3 lmax{std::numeric_limits<float>::lowest()};
-    for (const auto &v : asset.vertices) {
-        lmin = glm::min(lmin, v.position);
-        lmax = glm::max(lmax, v.position);
+        glm::vec3 lmin{std::numeric_limits<float>::max()};
+        glm::vec3 lmax{std::numeric_limits<float>::lowest()};
+        for (const auto &v : asset.vertices) {
+            lmin = glm::min(lmin, v.position);
+            lmax = glm::max(lmax, v.position);
+        }
+        gm.local_min = lmin;
+        gm.local_max = lmax;
+        if (asset.stackAverage.has_value()) {
+            gm.stack_avg_color = asset.stackAverage->avgColorLinear;
+            gm.stack_feature_size = asset.stackAverage->featureSize;
+        }
+        meshes.emplace(slice.mesh, gm);
     }
-    gm.local_min = lmin;
-    gm.local_max = lmax;
-    if (asset.stackAverage.has_value()) {
-        gm.stack_avg_color = asset.stackAverage->avgColorLinear;
-        gm.stack_feature_size = asset.stackAverage->featureSize;
-    }
-    meshes.emplace(id, gm);
 }
 
 void SceneRenderer::Impl::finalizeUpload() {
@@ -599,13 +628,25 @@ void SceneRenderer::Impl::finalizeUpload() {
     bounds_max = bmax;
     has_bounds = any_bounds;
 
+    // Reserve room for two scene submissions plus post-processing per frame.
+    // Each group can require a VS and FS update, each aligned to 256 bytes.
+    // Sokol's Metal overflow check is an assertion, absent in release builds.
+    constexpr size_t reserved_uniform_bytes = 1024 * 1024;
+    constexpr size_t uniform_bytes_per_group = 2 * 2 * 256;
+    const auto uniform_capacity = static_cast<size_t>(sg_query_desc().uniform_buffer_size);
+    if (uniform_capacity <= reserved_uniform_bytes ||
+        groups.size() > (uniform_capacity - reserved_uniform_bytes) / uniform_bytes_per_group)
+        throw std::runtime_error(
+            "scene exceeds per-frame GPU uniform capacity; reduce scene detail");
     uploadInstanceBuffer();
 
-    std::println("viewer: scene uploaded -- meshes={} materials={} nodes={} groups={} tris={} "
-                 "bbox=[{:.1f} {:.1f} {:.1f} .. {:.1f} {:.1f} {:.1f}]\n",
-                 meshes.size(), materials.size(), node_count, groups.size(),
-                 static_cast<unsigned long long>(triangle_count), bmin.x, bmin.y, bmin.z, bmax.x,
-                 bmax.y, bmax.z);
+    std::println(
+        stderr,
+        "viewer: scene uploaded -- meshes={} buffers={} materials={} nodes={} groups={} tris={} "
+        "bbox=[{:.1f} {:.1f} {:.1f} .. {:.1f} {:.1f} {:.1f}]\n",
+        meshes.size(), mesh_buffers.size(), materials.size(), node_count, groups.size(),
+        static_cast<unsigned long long>(triangle_count), bmin.x, bmin.y, bmin.z, bmax.x, bmax.y,
+        bmax.z);
 
     pending_scene.reset();
     pending_mesh_ids.clear();
@@ -620,6 +661,7 @@ void SceneRenderer::beginUpload(std::shared_ptr<const ir::render::Scene> scene) 
     impl_->ensureInit();
     impl_->destroyGpu();
 
+    impl_->upload_error.clear();
     impl_->pending_scene = std::move(scene);
     impl_->pending_mesh_ids.clear();
     if (impl_->pending_scene) {
@@ -636,27 +678,34 @@ bool SceneRenderer::advanceUpload(uint64_t budget_ns) {
     if (!impl_->upload_busy) {
         return true;
     }
-    const uint64_t start_ticks = stm_now();
-    while (impl_->next_pending_mesh < impl_->pending_mesh_ids.size()) {
-        const auto id = impl_->pending_mesh_ids[impl_->next_pending_mesh++];
-        const auto it = impl_->pending_scene->meshAssets.find(id);
-        if (it != impl_->pending_scene->meshAssets.end()) {
-            impl_->uploadOneMesh(id, it->second);
+    try {
+        const uint64_t start_ticks = stm_now();
+        while (impl_->next_pending_mesh < impl_->pending_mesh_ids.size()) {
+            impl_->uploadBatch();
+            if (stm_ns(stm_diff(stm_now(), start_ticks)) >= static_cast<double>(budget_ns)) {
+                // Yield to the next frame; meshes left in the queue resume on
+                // the next advance.
+                return false;
+            }
         }
-        if (stm_ns(stm_diff(stm_now(), start_ticks)) >= static_cast<double>(budget_ns)) {
-            // Yield to the next frame; meshes left in the queue resume on
-            // the next advance.
-            return false;
-        }
+        impl_->finalizeUpload();
+        return true;
+    } catch (const std::exception &e) {
+        impl_->destroyGpu();
+        impl_->upload_error = e.what();
+        return true; // terminal failure; caller must inspect uploadError()
     }
-    impl_->finalizeUpload();
-    return true;
 }
+
+std::string_view SceneRenderer::uploadError() const { return impl_->upload_error; }
 
 bool SceneRenderer::uploadInProgress() const { return impl_->upload_busy; }
 
 void SceneRenderer::clearScene() {
-    if (!impl_ || !impl_->initialised) {
+    if (!impl_)
+        return;
+    impl_->upload_error.clear();
+    if (!impl_->initialised) {
         return;
     }
     impl_->destroyGpu();
@@ -913,9 +962,11 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
 
         sg_bindings bind{};
         bind.vertex_buffers[0] = mesh.vbuf;
+        bind.vertex_buffer_offsets[0] = mesh.vertex_offset;
         bind.vertex_buffers[1] = impl_->instance_buf;
         bind.vertex_buffer_offsets[1] = static_cast<int>(g.visible_byte_offset);
         bind.index_buffer = mesh.ibuf;
+        bind.index_buffer_offset = mesh.index_offset;
         bind.views[VIEW_scene_tex_irradiance] = impl_->ibl.irradiance_view;
         bind.views[VIEW_scene_tex_prefilter] = impl_->ibl.prefilter_view;
         bind.views[VIEW_scene_tex_brdf_lut] = impl_->ibl.brdf_lut_view;

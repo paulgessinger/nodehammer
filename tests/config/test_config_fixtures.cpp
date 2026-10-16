@@ -41,6 +41,7 @@ const std::vector<std::string> kCoveredElsewhere = {
 };
 
 const std::vector<FixtureCase> kFixtureCases = {
+    {"atlas_toroids.toml", Expect::Valid},
     {"invalid_bad_tolerance.toml", Expect::ValidateFails},
     {"invalid_missing_material_ref.toml", Expect::ValidateFails},
     {"odd.toml", Expect::Valid},
