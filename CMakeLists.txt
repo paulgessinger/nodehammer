@@ -746,12 +746,17 @@ if(NODEHAMMER_BUILD_SHARED)
         # machine that built it. A wheel is the opposite: every dependency is a
         # static archive absorbed into this .so, there is nothing left to point
         # at, and an absolute build-machine path in RUNPATH is the one thing
-        # auditwheel and delocate cannot repair.
+        # auditwheel and delocate cannot repair. Building the bindings in a
+        # native SDK (such as Key4hep) is not a wheel build: retain its backend
+        # search paths so installed C++ consumers can resolve them as well.
         set_target_properties(nodehammer_shared PROPERTIES
-            INSTALL_RPATH_USE_LINK_PATH OFF
             INSTALL_RPATH "$<IF:$<PLATFORM_ID:Darwin>,@loader_path,$ORIGIN>"
             MACOSX_RPATH ON
         )
+        if(SKBUILD)
+            set_target_properties(nodehammer_shared PROPERTIES
+                INSTALL_RPATH_USE_LINK_PATH OFF)
+        endif()
     endif()
 
     # Hidden visibility only governs objects *we* compile; the static
