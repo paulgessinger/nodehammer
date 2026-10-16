@@ -302,6 +302,13 @@ Predicate makeNameGlobPredicate(std::string pattern) {
     return [g = std::move(g)](const NodeView &v) -> bool { return matchCompiledGlob(*g, v.name); };
 }
 
+Predicate makeVolumeGlobPredicate(std::string pattern) {
+    auto g = compileGlob(std::move(pattern));
+    return [g = std::move(g)](const NodeView &v) -> bool {
+        return matchCompiledGlob(*g, v.volumeName);
+    };
+}
+
 Predicate makePathGlobPredicate(std::string pattern) {
     auto g = compileGlob(std::move(pattern));
     return [g = std::move(g)](const NodeView &v) -> bool { return matchCompiledGlob(*g, v.path); };
@@ -367,6 +374,9 @@ Predicate compilePredicate(const config::PredicateExpr &expr) {
         detail::overloaded{
             [](const config::NameGlobPredicate &node) {
                 return makeNameGlobPredicate(node.pattern);
+            },
+            [](const config::VolumeGlobPredicate &node) {
+                return makeVolumeGlobPredicate(node.pattern);
             },
             [](const config::PathGlobPredicate &node) {
                 return makePathGlobPredicate(node.pattern);

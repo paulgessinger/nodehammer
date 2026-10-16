@@ -285,6 +285,10 @@ class Parser {
                 return parseGlobExpr<NameGlobPredicate>("name");
             }
 
+            if (tok.text == "volume") {
+                return parseGlobExpr<VolumeGlobPredicate>("volume");
+            }
+
             // material ~= "pattern"
             if (tok.text == "material") {
                 return parseGlobExpr<MaterialGlobPredicate>("material");

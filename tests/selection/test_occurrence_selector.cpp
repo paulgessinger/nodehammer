@@ -595,3 +595,22 @@ TEST_CASE("Canonical selection projects retained topology and supports successiv
         }
     }
 }
+
+TEST_CASE("Logical volume selection agrees across shared and expanded scenes",
+          "[selection][occurrence][differential]") {
+    Fixture f;
+    f.source.logVols.at(LogVolId{3}).name = "BAR_Toroid";
+    f.source.logVols.at(LogVolId{4}).name = "shield";
+    f.expanded.logVols = f.source.logVols;
+    OccurrenceTree tree{f.source, f.root, 1};
+    f.setTags(tree);
+    const SelectedOccurrences original{tree};
+    const std::vector rules{
+        rule(SelectionAction::DropIf, PredicateExpr{BoolPredicate{true}}),
+        rule(SelectionAction::KeepIf, PredicateExpr{VolumeGlobPredicate{"*Toroid*"}})};
+    sameEvaluation(original, f.expanded, f.identities, rules, true);
+    const auto selected = original.prune(rules, true);
+    REQUIRE(selected.contains(OccurrenceId{0, 0}));
+    REQUIRE(selected.contains(OccurrenceId{1, 0}));
+    REQUIRE_FALSE(selected.contains(OccurrenceId{0, 0, 0}));
+}

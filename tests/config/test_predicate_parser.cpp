@@ -335,3 +335,9 @@ TEST_CASE("PredicateParser: any() missing closing paren -> error", "[config][par
 TEST_CASE("PredicateParser: tag.key == non-string -> error", "[config][parser]") {
     mustFail("tag.x == 42");
 }
+
+TEST_CASE("PredicateParser: logical volume glob", "[config][parser]") {
+    const auto expr = mustParse(R"(volume ~= "*Toroid*")");
+    REQUIRE(std::get<VolumeGlobPredicate>(expr.data).pattern == "*Toroid*");
+    mustFail(R"(volume ~= 12)");
+}

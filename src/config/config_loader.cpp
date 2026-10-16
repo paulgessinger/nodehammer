@@ -205,6 +205,15 @@ std::optional<PredicateExpr> parsePredicate(const toml::table &tbl, DiagnosticLi
         return PredicateExpr{NameGlobPredicate{*pat}};
     }
 
+    if (type == "volume_glob") {
+        auto pat = tbl["pattern"].value<std::string>();
+        if (!pat) {
+            diags.error(codes::kErrConfigParse, "volume_glob predicate missing 'pattern'", context);
+            return std::nullopt;
+        }
+        return PredicateExpr{VolumeGlobPredicate{*pat}};
+    }
+
     if (type == "path_glob") {
         auto pat = tbl["pattern"].value<std::string>();
         if (!pat) {

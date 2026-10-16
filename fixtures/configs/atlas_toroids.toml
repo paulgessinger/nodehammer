@@ -1,0 +1,30 @@
+# Preserve the world and Muon ancestors, but discard other detector branches.
+[[selection_rules]]
+drop_if = '!(path == "/WorldLog" || path == "/WorldLog/Muon" || path ~= "/WorldLog/Muon/**")'
+
+# Keep only the toroid assemblies among Muon's direct children. Descendants
+# retain their default keep action; dropping an ancestor removes its subtree.
+[[selection_rules]]
+drop_if = 'path ~= "/WorldLog/Muon/*" && !(volume == "BAR_Toroid" || volume == "ECT_Toroids")'
+
+[materials.toroid]
+base_color = [0.65, 0.68, 0.72, 1.0]
+metallic = 0.65
+roughness = 0.35
+
+[defaults.tessellation]
+max_segments_circle = 64
+fallback = "fail"
+
+# Air and Ether envelopes would obscure the physical coils and cryostats.
+[[rules]]
+match = 'material == "std::Air" || material == "GeoModelAir" || material == "special::Ether"'
+[rules.tessellation]
+skip_geometry = true
+
+[[rules]]
+material = "toroid"
+
+[export.gltf]
+unit_scale = 0.001
+bake_unit_scale = true
