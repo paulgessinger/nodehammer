@@ -146,20 +146,6 @@ class Platform {
     /// @TODO: Evolve this to a uniform UI state persistence model
     void commitUrlState(const std::string &state_query, const std::string &managed_keys);
 
-    /// Embed-mode host bridge (web only; see docs/viewer-embed.md). The viewer
-    /// runs inside an iframe and exchanges camera poses with the embedding page
-    /// over `window.postMessage`:
-    ///   - `installEmbedBridge()` starts listening for host → viewer messages
-    ///     (`nh:setCamera`, `nh:getCamera`), which the runtime routes to
-    ///     `App::setCameraFromHost` / `App::requestCameraBroadcast`.
-    ///   - `postEmbedMessage(type, camera_json)` posts `{type, camera}` to
-    ///     `window.parent`, where `camera_json` is the serialized object from
-    ///     `cameraToJson`.
-    /// Both are no-ops on native and when the page is not framed
-    /// (`window.parent === window`).
-    void installEmbedBridge();
-    void postEmbedMessage(const std::string &type, const std::string &camera_json);
-
     /// Open an external URL. Web opens a new tab/window; native is
     /// currently a no-op.
     void openUrl(const std::string &url);
