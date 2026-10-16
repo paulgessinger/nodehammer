@@ -377,8 +377,8 @@ void registerCmdViewerNative(CLI::App &app, const CliOptions & /*options*/,
 
             // Native CLI flow: if both roots live under the launch CWD, mount that
             // directory as a real filesystem project so the tree can expose
-            // neighbouring includes/assets. Otherwise keep the historical bag path:
-            // read the supplied files into memory and build from those keys.
+            // neighbouring includes/assets. Roots outside CWD use a lazy filesystem
+            // mount at their common ancestor, preserving config dependencies too.
             // Existence checks happen here so typos exit before the window opens;
             // build failures show up as red text in the project panel.
             // The web flow lives in src/web/viewer_main.cpp.
@@ -440,6 +440,24 @@ void registerCmdViewerNative(CLI::App &app, const CliOptions & /*options*/,
                         application->setProject(
                             std::make_unique<nodehammer::viewer::WatchedFilesystemProjectFs>(
                                 std::make_unique<nodehammer::viewer::FilesystemProjectFs>(cwd)));
+                        application->setRootKeys(std::move(*config_key), std::move(*geometry_key));
+                        runViewer(application);
+                        return;
+                    }
+
+                    // A two-file bag loses every Lua use()/include() and TOML
+                    // include dependency. Mount a common ancestor instead. The
+                    // filesystem backend reads/lists lazily; do not install a
+                    // recursive watcher on a potentially very broad root here.
+                    auto mount = config_abs.parent_path();
+                    while (!relativeKeyUnder(mount, geometry_abs) && mount != mount.parent_path()) {
+                        mount = mount.parent_path();
+                    }
+                    config_key = relativeKeyUnder(mount, config_abs);
+                    geometry_key = relativeKeyUnder(mount, geometry_abs);
+                    if (config_key && geometry_key) {
+                        application->setProject(
+                            std::make_unique<nodehammer::viewer::FilesystemProjectFs>(mount));
                         application->setRootKeys(std::move(*config_key), std::move(*geometry_key));
                         runViewer(application);
                         return;
