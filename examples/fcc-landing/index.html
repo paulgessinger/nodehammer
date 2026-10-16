@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FCC-ee in nodehammer</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one full-bleed WebGL stage; the HUD floats over it in three
+   corners (wordmark top-left, legend/stats bottom-left, detector dossier
+   right). Single committed dark look — the subject is a tunnel. */
+:root {
+  --bg: #05080f;
+  --ground: #0a1020;
+  --fg: #e6ecf7;
+  --fg-dim: #8b97b1;
+  --line: rgba(139, 151, 177, 0.22);
+  --panel: rgba(8, 12, 22, 0.72);
+  --electron: #3ee9ff;
+  --positron: #ff4fd8;
+  --ip: #ffb547;
+  --accent: #3ee9ff;
+  --display: "Syne", "Avenir Next", "Helvetica Neue", sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font-family: var(--body); font-size: 14px; line-height: 1.5;
+  overflow: hidden;
+}
+#stage { position: absolute; inset: 0; }
+#stage canvas { display: block; width: 100%; height: 100%; outline: none; }
+
+/* ── HUD ─────────────────────────────────────────────────────────────── */
+.hud { position: absolute; inset: 0; pointer-events: none; padding: 20px 16px; box-sizing: border-box; }
+.hud > * { pointer-events: auto; }
+
+.brand {
+  position: absolute; left: 16px; top: calc(16px + env(safe-area-inset-top, 0px));
+  max-width: min(600px, calc(100vw - 32px));
+}
+.wordmark {
+  font-family: var(--display); font-weight: 800; letter-spacing: -0.03em;
+  font-size: clamp(40px, 5.4vw, 64px); line-height: 0.95; white-space: nowrap; margin: 0;
+  text-wrap: balance;
+  background: linear-gradient(100deg, #fff 0%, var(--electron) 55%, var(--positron) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  filter: drop-shadow(0 0 22px rgba(62, 233, 255, 0.35));
+}
+.wordmark .cursor { color: var(--electron); -webkit-text-fill-color: var(--electron); animation: blink 1.1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.tagline {
+  font-family: var(--display); font-weight: 500; font-size: clamp(15px, 2vw, 20px);
+  margin: 10px 0 0; color: var(--fg); text-wrap: balance;
+}
+.blurb { margin: 12px 0 0; color: var(--fg-dim); max-width: 46ch; }
+.blurb b { color: var(--fg); font-weight: 500; }
+.pipeline {
+  margin: 14px 0 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim);
+}
+.pipeline span { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); backdrop-filter: blur(6px); }
+.pipeline .arrow { border: 0; padding: 0; background: none; color: var(--accent); }
+.pipeline .hot { border-color: rgba(62, 233, 255, 0.5); color: var(--fg); }
+.links { margin: 14px 0 0; display: flex; gap: 10px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+  font-family: var(--display); font-weight: 700; font-size: 13px; letter-spacing: 0.02em;
+  padding: 9px 14px; border-radius: 8px; border: 1px solid rgba(62, 233, 255, 0.45);
+  color: var(--fg); background: rgba(62, 233, 255, 0.08); transition: background .15s, transform .15s;
+}
+.btn:hover { background: rgba(62, 233, 255, 0.18); transform: translateY(-1px); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary { background: linear-gradient(90deg, rgba(62,233,255,.25), rgba(255,79,216,.25)); border-color: rgba(255,255,255,.35); }
+.btn.ghost { border-color: var(--line); background: var(--panel); }
+.btn .k { font-family: var(--mono); font-weight: 400; font-size: 11px; color: var(--fg-dim); }
+
+/* bottom-left: legend + stats */
+.foot {
+  position: absolute; left: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  display: flex; flex-direction: column; gap: 10px; max-width: calc(100vw - 32px);
+}
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); font-size: 11.5px; color: var(--fg-dim); }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; box-shadow: 0 0 8px currentColor; }
+.stats { display: flex; gap: 0; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); backdrop-filter: blur(8px); overflow: hidden; }
+.stat { padding: 8px 14px; border-right: 1px solid var(--line); min-width: 92px; }
+.stat:last-child { border-right: 0; }
+.stat .v { font-family: var(--display); font-weight: 700; font-size: 20px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stat .l { font-family: var(--mono); font-size: 10.5px; color: var(--fg-dim); letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* right: hint + dossier */
+.hint {
+  position: absolute; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  font-family: var(--mono); font-size: 11px; color: var(--fg-dim); text-align: right;
+}
+.hint kbd { font-family: inherit; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
+
+.dossier {
+  position: absolute; right: 16px; top: calc(16px + env(safe-area-inset-top, 0px));
+  width: min(360px, calc(100vw - 32px));
+  border: 1px solid rgba(255, 181, 71, 0.45); border-radius: 12px; background: var(--panel);
+  backdrop-filter: blur(10px); padding: 16px 18px; box-sizing: border-box;
+  transform: translateX(16px); opacity: 0; transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .3s;
+  box-shadow: 0 0 0 1px rgba(255,181,71,.08), 0 20px 60px rgba(0,0,0,.5);
+}
+.dossier.open { transform: none; opacity: 1; }
+.dossier .eyebrow { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ip); }
+.dossier h2 { font-family: var(--display); font-weight: 800; font-size: 28px; letter-spacing: -0.02em; margin: 4px 0 2px; }
+.dossier .sub { color: var(--fg-dim); margin: 0 0 12px; }
+.dossier dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0 0 14px; font-size: 13px; }
+.dossier dt { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); align-self: baseline; }
+.dossier dd { margin: 0; font-variant-numeric: tabular-nums; }
+.dossier .standin b { color: var(--fg); font-weight: 500; }
+.dossier .standin { font-size: 12px; color: var(--fg-dim); border-top: 1px solid var(--line); padding-top: 10px; margin-top: 12px; }
+.dossier .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.dossier .close { position: absolute; right: 10px; top: 8px; background: none; border: 0; color: var(--fg-dim); font-size: 18px; cursor: pointer; padding: 4px 8px; }
+.dossier .close:hover { color: var(--fg); }
+
+/* 3D labels projected into the page */
+.lbl {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -100%);
+  font-family: var(--mono); font-size: 11px; white-space: nowrap; pointer-events: none;
+  color: var(--fg-dim); letter-spacing: 0.04em; opacity: .9;
+}
+.lbl.ip { color: var(--ip); font-weight: 500; }
+.lbl.ip b { display: block; font-family: var(--display); font-size: 13px; color: var(--fg); letter-spacing: 0; }
+.lbl.hot b { color: var(--electron); text-shadow: 0 0 12px var(--electron); }
+.lbl .tick { display: block; width: 1px; height: 14px; margin: 2px auto 0; background: currentColor; opacity: .6; }
+.lbl.faint { opacity: .55; font-size: 10.5px; }
+
+/* loading */
+.loader {
+  position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg);
+  transition: opacity .6s; z-index: 5;
+}
+.loader.done { opacity: 0; pointer-events: none; }
+.loader .box { font-family: var(--mono); font-size: 12px; color: var(--fg-dim); text-align: center; }
+.loader .bar { width: 220px; height: 2px; background: var(--line); margin: 10px auto 0; overflow: hidden; }
+.loader .bar i { display: block; height: 100%; width: 30%; background: linear-gradient(90deg, var(--electron), var(--positron)); animation: slide 1.1s ease-in-out infinite; }
+@keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+
+.nts { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); font-family: var(--mono); font-size: 10.5px; color: var(--fg-dim); opacity: .7; white-space: nowrap; }
+
+@media (max-width: 760px) {
+  .blurb, .pipeline, .hint, .nts { display: none; }
+  .stat { min-width: 0; padding: 6px 10px; }
+  .stat .v { font-size: 16px; }
+  .dossier { top: auto; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); right: 16px; left: 16px; width: auto; }
+  .foot { gap: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .wordmark .cursor, .loader .bar i { animation: none; }
+}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<div class="hud">
+  <div class="brand">
+    <h1 class="wordmark">node<br>hammer<span class="cursor">_</span></h1>
+    <p class="tagline">Turn HEP detector geometry into a scene you can actually fly through.</p>
+    <p class="blurb">
+      <b>nodehammer</b> reads simulation geometry (ROOT/TGeo, DD4hep, GDML), lowers it through a
+      semantic scene graph, and renders it with a physically-based pipeline, natively or straight in
+      the browser. Below: the 90.7 km FCC-ee footprint from the Feasibility Study, both beams at the
+      Z pole, and a detector at each of its four interaction points.
+    </p>
+    <div class="pipeline">
+      <span>TGeo</span><span>DD4hep</span><span>GDML</span>
+      <span class="arrow">→</span><span class="hot">semantic IR</span>
+      <span class="arrow">→</span><span class="hot">render IR</span>
+      <span class="arrow">→</span><span>glTF</span><span>.nhproj</span><span>WebGPU</span>
+    </div>
+    <div class="links">
+      <a class="btn primary" id="btnTour" href="#tour">Fly to a detector <span class="k">▶</span></a>
+      <a class="btn ghost" href="https://github.com/paulgessinger/nodehammer" target="_blank" rel="noopener">GitHub ↗</a>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="legend">
+      <span><i style="color: var(--electron)"></i>e⁻ beam · clockwise</span>
+      <span><i style="color: var(--positron)"></i>e⁺ beam · counter-clockwise</span>
+      <span><i style="color: var(--ip)"></i>interaction point</span>
+    </div>
+    <div class="stats">
+      <div class="stat"><div class="v" data-count="90.7" data-dec="1">0</div><div class="l">km ring</div></div>
+      <div class="stat"><div class="v" data-count="4">0</div><div class="l">IPs</div></div>
+      <div class="stat"><div class="v" data-count="11200">0</div><div class="l">bunches / beam</div></div>
+      <div class="stat"><div class="v" data-count="45.6" data-dec="1">0</div><div class="l">GeV / beam</div></div>
+      <div class="stat"><div class="v" data-count="240">0</div><div class="l">m avg depth</div></div>
+    </div>
+  </div>
+
+  <div class="nts">detectors and beams enlarged ~100× · ring geometry from FCC FSR Vol. 3 point coordinates</div>
+
+  <div class="hint">drag to orbit · scroll to zoom · click a detector<br><kbd>esc</kbd> back to the ring</div>
+
+  <aside class="dossier" id="dossier" aria-live="polite">
+    <button class="close" id="dossierClose" aria-label="Close">×</button>
+    <div class="eyebrow" id="dEyebrow">Point PA · large experiment cavern</div>
+    <h2 id="dName">ALLEGRO</h2>
+    <p class="sub" id="dSub">noble-liquid ECAL · k4geo ALLEGRO_o1_v01</p>
+    <dl>
+      <dt>site</dt><dd id="dTown">Ferney-Voltaire, Ain (FR)</dd>
+      <dt>cavern</dt><dd id="dCavern">large · 66 × 35 × 35 m</dd>
+      <dt>shaft</dt><dd id="dShaft">201 m</dd>
+      <dt>beams cross</dt><dd>30 mrad · every 25 ns</dd>
+      <dt>lumi / IP</dt><dd>1.4 × 10³⁶ cm⁻² s⁻¹ at the Z</dd>
+    </dl>
+    <div class="actions">
+      <a class="btn primary" id="dLaunch" href="https://paulgessinger.github.io/nodehammer/odd/" target="_blank" rel="noopener">Open in nodehammer ↗</a>
+      <a class="btn ghost" href="#ring" id="dBack">Back to ring</a>
+    </div>
+    <p class="standin">Shown as a stand-in: the Open Data Detector, converted by nodehammer with a
+      90° wedge cut and packed to 151 KB. The four FCC-ee concepts are distributed over the IPs for
+      illustration; the Feasibility Study does not assign them.</p>
+  </aside>
+</div>
+
+<div class="loader" id="loader"><div class="box">fetching geometry · odd.glb<div class="bar"><i></i></div></div></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const DPR = Math.min(devicePixelRatio || 1, 2);
+
+// ── Data: FCC FSR Vol. 3, Tables 2.2/2.3 (WGS84 theoretical IPs) ─────────────
+const POINTS = [
+  { id: 'PA', role: 'experiment', size: 'large', lat: 46.2480475, lon: 6.0986019, town: 'Ferney-Voltaire, Ain (FR)', shaft: 201, concept: 'ALLEGRO', tag: 'noble-liquid ECAL', model: 'ALLEGRO_o1_v01' },
+  { id: 'PB', role: 'injection & extraction', lat: 46.2271027, lon: 6.2374818, town: 'Presinge, Geneva (CH)', shaft: 201 },
+  { id: 'PD', role: 'experiment', size: 'small', lat: 46.1453657, lon: 6.3169260, town: 'Nangy, Haute-Savoie (FR)', shaft: 181, concept: 'CLD', tag: 'all-silicon, CLIC-derived', model: 'CLD_o2_v08' },
+  { id: 'PF', role: 'collimation', lat: 46.0490317, lon: 6.2865850, town: 'Éteaux, Haute-Savoie (FR)', shaft: 400 },
+  { id: 'PG', role: 'experiment', size: 'large', lat: 45.9938019, lon: 6.1693009, town: 'Charvonnex / Groisy, Haute-Savoie (FR)', shaft: 226, concept: 'IDEA', tag: 'drift chamber, dual-readout', model: 'IDEA_o2_v01' },
+  { id: 'PH', role: 'main-ring RF', lat: 46.0146646, lon: 6.0309816, town: 'Cercier / Marlioz, Haute-Savoie (FR)', shaft: 235 },
+  { id: 'PJ', role: 'experiment', size: 'small', lat: 46.0962036, lon: 5.9513024, town: 'Dingy-en-Vuache / Vulbens, Haute-Savoie (FR)', shaft: 253, concept: 'ILD', tag: 'TPC, particle flow', model: 'ILD_FCCee_v02' },
+  { id: 'PL', role: 'booster RF', lat: 46.1926255, lon: 5.9810829, town: 'Challex, Ain (FR)', shaft: 250 },
+];
+const LHC = { lat: 46.27, lon: 6.066, r: 4.243 };          // centre (approx.), 26.659 km
+const MEYRIN = { lat: 46.2330, lon: 6.0556 };
+
+// Local tangent plane in km, centred on the ring centroid. +x east, +z south, +y up.
+const lat0 = POINTS.reduce((s, p) => s + p.lat, 0) / POINTS.length;
+const lon0 = POINTS.reduce((s, p) => s + p.lon, 0) / POINTS.length;
+const kmLat = 110.57, kmLon = 111.32 * Math.cos(lat0 * Math.PI / 180);
+const toXZ = (lat, lon) => new THREE.Vector3((lon - lon0) * kmLon, 0, -(lat - lat0) * kmLat);
+
+// ── Renderer ────────────────────────────────────────────────────────────────
+const stage = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(DPR);
+renderer.setSize(stage.clientWidth, stage.clientHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+stage.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x05080f);
+scene.fog = new THREE.FogExp2(0x05080f, 0.012);
+
+const camera = new THREE.PerspectiveCamera(42, stage.clientWidth / stage.clientHeight, 0.05, 600);
+camera.position.set(0, 70, 70);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.maxPolarAngle = Math.PI * 0.49; controls.minDistance = 0.4; controls.maxDistance = 140;
+controls.autoRotate = !reduced; controls.autoRotateSpeed = 0.25;
+controls.enabled = false;
+controls.addEventListener('start', () => { controls.autoRotate = false; });
+
+scene.add(new THREE.HemisphereLight(0x8fb6ff, 0x0a0f1e, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(30, 50, 20); scene.add(sun);
+const rim = new THREE.DirectionalLight(0x3ee9ff, 0.8); rim.position.set(-40, 10, -30); scene.add(rim);
+
+// ── Ground: a faint survey grid + horizon glow ───────────────────────────────
+{
+  const grid = new THREE.GridHelper(160, 80, 0x1a2640, 0x0f1729);
+  grid.position.y = -0.02; scene.add(grid);
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(80, 96),
+    new THREE.MeshBasicMaterial({ color: 0x0a1020, transparent: true, opacity: 0.9 }));
+  disc.rotation.x = -Math.PI / 2; disc.position.y = -0.05; scene.add(disc);
+  // a dusting of "stars" above — mostly so the bloom has something to breathe on
+  const n = 1800, pos = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const r = 120 + Math.random() * 160, th = Math.random() * Math.PI * 2, ph = Math.random() * Math.PI * 0.45;
+    pos[i * 3] = r * Math.cos(th) * Math.cos(ph); pos[i * 3 + 1] = r * Math.sin(ph) + 5; pos[i * 3 + 2] = r * Math.sin(th) * Math.cos(ph);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x6f86b8, size: 0.35, sizeAttenuation: true, transparent: true, opacity: 0.6, fog: false })));
+}
+
+// ── The ring ────────────────────────────────────────────────────────────────
+const ringPts = POINTS.map(p => toXZ(p.lat, p.lon));
+const curve = new THREE.CatmullRomCurve3(ringPts, true, 'centripetal', 0.5);
+const SAMPLES = 4096;
+const table = curve.getSpacedPoints(SAMPLES);             // arc-length-uniform
+const tangents = table.map((_, i) => table[(i + 1) % SAMPLES].clone().sub(table[(i - 1 + SAMPLES) % SAMPLES]).normalize());
+const UP = new THREE.Vector3(0, 1, 0);
+function at(t, out) {          // t in [0,1), arc-length param
+  const f = ((t % 1) + 1) % 1 * SAMPLES, i = Math.floor(f), a = f - i;
+  return out.copy(table[i]).lerp(table[(i + 1) % SAMPLES], a);
+}
+function tangentAt(t) { return tangents[Math.floor((((t % 1) + 1) % 1) * SAMPLES)]; }
+function normalAt(t) { return tangentAt(t).clone().cross(UP).normalize(); }   // outward-ish
+
+// tunnel
+scene.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 512, 0.13, 10, true),
+  new THREE.MeshStandardMaterial({ color: 0x182238, roughness: 0.55, metalness: 0.5, transparent: true, opacity: 0.85 })));
+// the two beam pipes, offset ±0.19 km (exaggerated): glowing hairlines
+function pipe(offset, color) {
+  const pts = []; for (let i = 0; i <= 512; i++) { const t = i / 512; pts.push(at(t, new THREE.Vector3()).addScaledVector(normalAt(t), offset)); }
+  const geo = new THREE.BufferGeometry().setFromPoints(pts);
+  scene.add(new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.55 })));
+}
+pipe(+0.19, 0x3ee9ff); pipe(-0.19, 0xff4fd8);
+
+// LHC for scale, and CERN
+{
+  const c = toXZ(LHC.lat, LHC.lon);
+  const lhc = new THREE.Mesh(new THREE.TorusGeometry(LHC.r, 0.06, 8, 160),
+    new THREE.MeshStandardMaterial({ color: 0x4a5a7a, emissive: 0x24304a, roughness: 0.6 }));
+  lhc.rotation.x = Math.PI / 2; lhc.position.copy(c); lhc.position.y = 0.03; scene.add(lhc);
+  const m = toXZ(MEYRIN.lat, MEYRIN.lon);
+  const mk = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.7, 4), new THREE.MeshBasicMaterial({ color: 0xdde6ff }));
+  mk.position.copy(m); mk.position.y = 0.4; mk.rotation.x = Math.PI; scene.add(mk);
+}
+
+const dotTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d');
+  const g = x.createRadialGradient(32, 32, 0, 32, 32, 32); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.35, 'rgba(255,255,255,0.55)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(c);
+})();
+// ── Bunch trains: 40 trains × 280 bunches per beam at the Z (drawn as 40×8) ──
+const TRAINS = 40, PER = 8, NB = TRAINS * PER;
+function beam(color, offset) {
+  const pos = new Float32Array(NB * 3);
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const m = new THREE.PointsMaterial({ color, map: dotTex, size: 0.22, sizeAttenuation: true, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  const p = new THREE.Points(g, m); p.frustumCulled = false; scene.add(p);
+  // trailing streak: one line segment per train, head → tail
+  const g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.BufferAttribute(new Float32Array(TRAINS * 6), 3));
+  const p2 = new THREE.LineSegments(g2, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  p2.frustumCulled = false; scene.add(p2);
+  return { p, p2, offset };
+}
+const eMinus = beam(0x3ee9ff, +0.19), ePlus = beam(0xff4fd8, -0.19);
+const tmp = new THREE.Vector3();
+function updateBeam(b, phase, dir) {
+  const a = b.p.geometry.attributes.position, a2 = b.p2.geometry.attributes.position;
+  for (let i = 0; i < NB; i++) {
+    const train = Math.floor(i / PER), k = i % PER;
+    const t = dir * (phase + train / TRAINS + k * 0.0011);
+    at(t, tmp).addScaledVector(normalAt(t), b.offset);
+    a.setXYZ(i, tmp.x, tmp.y + 0.05, tmp.z);
+    if (k === 0) {
+      a2.setXYZ(train * 2, tmp.x, tmp.y + 0.05, tmp.z);
+      const tt = t - dir * 0.012;
+      at(tt, tmp).addScaledVector(normalAt(tt), b.offset);
+      a2.setXYZ(train * 2 + 1, tmp.x, tmp.y + 0.05, tmp.z);
+    }
+  }
+  a.needsUpdate = true; a2.needsUpdate = true;
+}
+
+// ── Point markers + labels ──────────────────────────────────────────────────
+const hud = document.querySelector('.hud');
+const labels = [];
+function addLabel(pos, html, cls) {
+  const el = document.createElement('div'); el.className = 'lbl ' + (cls || ''); el.innerHTML = html;
+  hud.appendChild(el); labels.push({ el, pos: pos.clone() }); return el;
+}
+POINTS.forEach((p, i) => {
+  const pos = ringPts[i].clone();
+  if (p.role !== 'experiment') {
+    const mk = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 12), new THREE.MeshBasicMaterial({ color: 0x9fb0d6 }));
+    mk.position.copy(pos); mk.position.y = 0.1; scene.add(mk);
+    addLabel(pos.clone().setY(0.5), `${p.id} · ${p.role}<span class="tick"></span>`, 'faint');
+  }
+});
+addLabel(toXZ(LHC.lat, LHC.lon).add(new THREE.Vector3(0, 0.2, -LHC.r)), 'LHC · 26.7 km<span class="tick"></span>', 'faint');
+addLabel(toXZ(MEYRIN.lat, MEYRIN.lon).setY(1.1), 'CERN Meyrin<span class="tick"></span>', 'faint');
+
+// ── Detectors: the ODD stand-in at each IP ──────────────────────────────────
+const DET_SCALE = 0.011;                      // model units → km (≈1.5 km across; ~100× real)
+const detectors = [];                         // { group, point, idx, label, glow }
+const ipFlash = [];                           // { sprite, ring, t0 }
+const raycaster = new THREE.Raycaster();
+const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+
+const flashTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d');
+  const g = x.createRadialGradient(64, 64, 0, 64, 64, 64); g.addColorStop(0, 'rgba(255,255,255,1)'); g.addColorStop(0.25, 'rgba(255,200,120,0.8)'); g.addColorStop(1, 'rgba(255,120,60,0)');
+  x.fillStyle = g; x.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c);
+})();
+
+loader.load('odd.glb', (gltf) => {
+  const src = gltf.scene;
+  src.traverse(o => { if (o.isMesh) { o.material = o.material.clone(); o.material.emissive = o.material.color.clone().multiplyScalar(0.18); o.material.envMapIntensity = 1; } });
+  // The ODD's origin is its interaction point and its beam axis is +z, so the
+  // model goes in untranslated: the IP lands exactly on the ring point.
+
+  POINTS.forEach((p, i) => {
+    if (p.role !== 'experiment') { return; }
+    const pos = ringPts[i];
+    // arc-length t of this point on the sampled table
+    let best = 0, bd = 1e9; for (let k = 0; k < SAMPLES; k++) { const d = table[k].distanceToSquared(pos); if (d < bd) { bd = d; best = k; } }
+    const tan = tangents[best];
+    const g = new THREE.Group();
+    const inst = src.clone(true);
+    inst.scale.setScalar(DET_SCALE);
+    g.add(inst);
+    g.position.copy(pos); g.position.y = 0.0;
+    // align model +z with the ring tangent, keep y up
+    const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), tan.clone().setY(0).normalize());
+    g.quaternion.copy(q);
+    // cut faces toward the camera's usual side (outside of the ring, upward)
+    const outward = pos.clone().setY(0).normalize();
+    const localOut = outward.clone().applyQuaternion(q.clone().invert());
+    // the wedge is removed between +x and +y (0°–90°, bisector at 45°); spin the
+    // model about its beam axis so that gap faces outward-and-up, toward the viewer
+    inst.rotation.z = Math.atan2(1, localOut.x) - Math.PI / 4;
+    scene.add(g);
+    // halo under the detector
+    const halo = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.12, 64), new THREE.MeshBasicMaterial({ color: 0xffb547, transparent: true, opacity: 0.35, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+    halo.rotation.x = -Math.PI / 2; halo.position.set(pos.x, 0.01, pos.z); scene.add(halo);
+    // collision flash sprites
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: flashTex, color: 0xffffff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }));
+    sp.position.set(pos.x, 0.05, pos.z); sp.scale.setScalar(0.001); scene.add(sp);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.96, 1, 64), new THREE.MeshBasicMaterial({ color: 0xffe0a0, transparent: true, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2; ring.position.set(pos.x, 0.02, pos.z); ring.scale.setScalar(0.001); scene.add(ring);
+    ipFlash.push({ sp, ring, t0: -10, idx: detectors.length });
+
+    const label = addLabel(pos.clone().setY(1.6), `<b>${p.concept}</b>${p.id} · ${p.tag}<span class="tick"></span>`, 'ip');
+    detectors.push({ group: g, inst, point: p, idx: i, label, halo, pos });
+  });
+  document.getElementById('loader').classList.add('done');
+  startIntro();
+}, undefined, (err) => {
+  document.querySelector('.loader .box').textContent = 'could not load odd.glb — ' + err;
+});
+
+// ── Post: bloom ─────────────────────────────────────────────────────────────
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(stage.clientWidth, stage.clientHeight), 0.9, 0.6, 0.72);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+
+// ── Camera choreography ─────────────────────────────────────────────────────
+const ease = x => 1 - Math.pow(1 - x, 3);
+let tween = null;
+function flyTo(pos, target, dur) {
+  tween = { p0: camera.position.clone(), t0: controls.target.clone(), p1: pos.clone(), t1: target.clone(), start: performance.now(), dur: reduced ? 1 : dur };
+  controls.enabled = false;
+}
+function stepTween(now) {
+  if (!tween) { return; }
+  const k = ease(Math.min(1, (now - tween.start) / tween.dur));
+  camera.position.lerpVectors(tween.p0, tween.p1, k);
+  controls.target.lerpVectors(tween.t0, tween.t1, k);
+  if (k >= 1) { tween = null; controls.enabled = true; }
+}
+const HOME = { pos: new THREE.Vector3(-22, 17, 30), target: new THREE.Vector3(0, 0, 0) };
+function startIntro() {
+  camera.position.set(0, 90, 2); controls.target.set(0, 0, 0);
+  flyTo(HOME.pos, HOME.target, 4200);
+  if (!reduced) { countUp(); } else { document.querySelectorAll('[data-count]').forEach(el => { el.textContent = fmt(+el.dataset.count, +(el.dataset.dec || 0)); }); }
+}
+const fmt = (v, d) => v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+function countUp() {
+  const els = [...document.querySelectorAll('[data-count]')], t0 = performance.now();
+  (function tick() {
+    const k = ease(Math.min(1, (performance.now() - t0) / 2200));
+    els.forEach(el => { el.textContent = fmt(+el.dataset.count * k, +(el.dataset.dec || 0)); });
+    if (k < 1) { requestAnimationFrame(tick); }
+  })();
+}
+
+// ── Focus a detector ────────────────────────────────────────────────────────
+const dossier = document.getElementById('dossier');
+let focused = null, hovered = null, tourIdx = 0;
+function focus(d) {
+  focused = d;
+  const back = d.pos.clone().setY(0).normalize();            // outward from ring centre
+  const camPos = d.pos.clone().addScaledVector(back, 2.4).add(new THREE.Vector3(0, 1.5, 0));
+  flyTo(camPos, d.pos.clone().setY(0.25), 1800);
+  controls.autoRotate = false;
+  const p = d.point;
+  document.getElementById('dEyebrow').textContent = `Point ${p.id} · ${p.size} experiment cavern`;
+  document.getElementById('dName').textContent = p.concept;
+  document.getElementById('dSub').textContent = `${p.tag} · k4geo ${p.model}`;
+  document.getElementById('dTown').textContent = p.town;
+  document.getElementById('dCavern').textContent = p.size === 'large' ? 'large · 66 × 35 × 35 m' : 'small · 66 × 25 × 24.5 m';
+  document.getElementById('dShaft').textContent = `${p.shaft} m`;
+  const launch = document.getElementById('dLaunch');
+  launch.href = 'https://paulgessinger.github.io/nodehammer/odd/?autoOrbit=1&pbr=1&cameraYaw=35&cameraPitch=22';
+  dossier.classList.add('open');
+  detectors.forEach(x => x.label.classList.toggle('hot', x === d));
+}
+function unfocus() {
+  focused = null; dossier.classList.remove('open');
+  flyTo(HOME.pos, HOME.target, 1600);
+  detectors.forEach(x => x.label.classList.remove('hot'));
+}
+document.getElementById('dossierClose').onclick = unfocus;
+document.getElementById('dBack').onclick = (e) => { e.preventDefault(); unfocus(); };
+document.getElementById('btnTour').onclick = (e) => { e.preventDefault(); if (!detectors.length) { return; } focus(detectors[tourIdx++ % detectors.length]); };
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && focused) { unfocus(); } });
+
+// picking
+const ndc = new THREE.Vector2(); let downAt = null;
+renderer.domElement.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 6) { return; }
+  const d = pick(e); if (d) { focus(d); }
+});
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const d = pick(e); if (d !== hovered) { hovered = d; renderer.domElement.style.cursor = d ? 'pointer' : ''; }
+});
+function pick(e) {
+  if (!detectors.length) { return null; }
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  // cheap: test a sphere per detector rather than 50k triangles
+  const s = new THREE.Sphere(); let best = null, bd = Infinity;
+  for (const d of detectors) { s.set(d.pos.clone().setY(0.3), 1.2); const hit = raycaster.ray.intersectSphere(s, tmp); if (hit) { const dist = hit.distanceTo(camera.position); if (dist < bd) { bd = dist; best = d; } } }
+  return best;
+}
+
+// ── Frame loop ──────────────────────────────────────────────────────────────
+const clock = new THREE.Clock(); let phase = 0, lastFlash = 0, flashIP = 0;
+const v = new THREE.Vector3();
+function frame() {
+  requestAnimationFrame(frame);
+  const dt = Math.min(clock.getDelta(), 0.05), now = performance.now();
+  stepTween(now);
+  controls.update();
+  if (!reduced) {
+    phase += dt * 0.035;                                   // one lap ≈ 29 s (real: 302 µs)
+    updateBeam(eMinus, phase, +1); updateBeam(ePlus, phase, -1);
+    // collision flashes cycle round the four IPs
+    if (now - lastFlash > 900 && ipFlash.length) { lastFlash = now; ipFlash[flashIP % ipFlash.length].t0 = now; flashIP++; }
+    for (const f of ipFlash) {
+      const k = (now - f.t0) / 900; if (k < 0 || k > 1) { f.sp.material.opacity = 0; f.ring.material.opacity = 0; continue; }
+      f.sp.scale.setScalar(0.6 + 2.2 * ease(k)); f.sp.material.opacity = (1 - k) * 0.9;
+      f.ring.scale.setScalar(0.2 + 3.5 * ease(k)); f.ring.material.opacity = (1 - k) * 0.8;
+    }
+    for (const d of detectors) { d.halo.material.opacity = 0.18 + 0.12 * Math.sin(now * 0.003 + d.idx); d.halo.scale.setScalar(1 + 0.04 * Math.sin(now * 0.002 + d.idx)); }
+  } else if (!eMinus.p.geometry.attributes.position.array[0]) { updateBeam(eMinus, 0, 1); updateBeam(ePlus, 0, -1); }
+
+  // hovered detector: emissive pulse
+  for (const d of detectors) {
+    const hot = d === hovered || d === focused;
+    d.inst.traverse(o => { if (o.isMesh) { o.material.emissiveIntensity = hot ? 1.6 : 0.6; } });
+  }
+
+  composer.render();
+  // project labels
+  const W = stage.clientWidth, H = stage.clientHeight, camDist = camera.position.length();
+  for (const l of labels) {
+    v.copy(l.pos).project(camera);
+    const behind = v.z > 1, far = l.el.classList.contains('faint') && camDist < 10;
+    if (behind || far || v.x < -1.05 || v.x > 1.05 || v.y < -1.05 || v.y > 1.05) { l.el.style.display = 'none'; continue; }
+    l.el.style.display = ''; l.el.style.transform = `translate(${((v.x + 1) / 2 * W).toFixed(1)}px, ${((1 - v.y) / 2 * H).toFixed(1)}px) translate(-50%, -100%)`;
+  }
+}
+frame();
+
+addEventListener('resize', () => {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h); composer.setSize(w, h); bloom.resolution.set(w, h);
+});
+</script>
+</body>
+</html>
