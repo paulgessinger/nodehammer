@@ -24,6 +24,7 @@ add_executable(nodehammer_tests
     selection/test_shared_export.cpp
     selection/test_selection_cache.cpp
     tessellation/test_primitive_tessellator.cpp
+    tessellation/test_generic_trap.cpp
     tessellation/test_boolean_tessellator.cpp
     tessellation/test_tessellation_pass.cpp
     tessellation/test_wedge_cut.cpp

@@ -227,6 +227,9 @@ config::Rule::Tessellation tessFromLua(const sol::table &t, const std::string &c
     if (const sol::optional<bool> v = t[config::keys::kAverageMaterialStack]) {
         tess.averageMaterialStack = *v;
     }
+    if (const sol::optional<double> v = t[config::keys::kGenericTrapTolerance]) {
+        tess.genericTrapTolerance = *v;
+    }
     if (const sol::optional<int> v = t[config::keys::kMaxSegmentsCircle]) {
         tess.maxSegmentsCircle = *v;
     }

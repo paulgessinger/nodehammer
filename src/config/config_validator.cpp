@@ -1,6 +1,7 @@
 #include <config/config_validator.hpp>
 #include <diagnostic_codes.hpp>
 
+#include <cmath>
 #include <format>
 #include <unordered_set>
 
@@ -9,6 +10,16 @@ namespace nodehammer::config {
 DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
     DiagnosticList diags;
 
+    auto validateTrapTolerance = [&](const Rule::Tessellation &t) {
+        if (t.genericTrapTolerance &&
+            (!std::isfinite(*t.genericTrapTolerance) || *t.genericTrapTolerance <= 0))
+            diags.error(codes::kErrNegativeTolerance,
+                        "generic_trap_tolerance must be finite and positive");
+    };
+    validateTrapTolerance(cfg.tessellationDefaults);
+    for (const auto &rule : cfg.rules)
+        if (rule.tessellation)
+            validateTrapTolerance(*rule.tessellation);
     // Build set of defined material names for reference checking.
     std::unordered_set<std::string> definedMaterials;
     for (const auto &mat : cfg.materials) {

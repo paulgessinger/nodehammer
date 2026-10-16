@@ -9,8 +9,8 @@
 namespace nodehammer::tessellation {
 
 struct TessellationParams {
-    int maxSegmentsCircle{
-        64}; ///< Circle segments; also longitudinal strips for twisted generic traps
+    int maxSegmentsCircle{64}; ///< Segments per full circle (tubes, cones, torus, pcon, pgon)
+    double genericTrapTolerance{0.01}; ///< Bilinear boundary error in source length units (mm)
 };
 
 struct TessellationOutput {
