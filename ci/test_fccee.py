@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -18,6 +19,31 @@ RENDER = {"nodes": [{"meshBindings": [{"meshId": 1}]},
 
 
 class FCCeeChecks(unittest.TestCase):
+    def test_four_models_overlap_and_failure_is_reported(self):
+        barrier = threading.Barrier(4)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for model, (family, _) in fccee.MODELS.items():
+                source = root / 'FCCee' / family / 'compact' / model / f'{model}.xml'
+                source.parent.mkdir(parents=True)
+                source.touch()
+
+            def run_case(exe, source, output, minimum):
+                # All four must start before any can finish.
+                barrier.wait(timeout=5)
+                self.assertEqual(output.name, source.stem)
+                if source.stem == 'IDEA_o1_v03':
+                    raise RuntimeError('import failed')
+                return {'full_nodes': minimum}
+
+            argv = ['fccee.py', '--geometry-root', str(root), '--output', str(root / 'results')]
+            with patch('sys.argv', argv), patch('fccee.run_case', side_effect=run_case):
+                self.assertEqual(fccee.main(), 1)
+            report = json.loads((root / 'results/summary.json').read_text())
+            self.assertEqual(set(report), set(fccee.MODELS))
+            self.assertEqual(report['IDEA_o1_v03'], {'status': 'failed', 'error': 'import failed'})
+            self.assertEqual(sum(row['status'] == 'passed' for row in report.values()), 3)
+
     def test_bounded_config(self):
         text = fccee.smoke_config(TREE)
         self.assertIn('/world/det/module/**', text)

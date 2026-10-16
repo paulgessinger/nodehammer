@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Full DD4hep -> NHS9 conversion and bounded rendering of representative FCC-ee models."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import os
 from pathlib import Path
@@ -120,22 +121,31 @@ def main():
     args = parser.parse_args()
     root = args.geometry_root or geometry_root()
     report = {}
-    for model in args.model or MODELS:
+    def run_model(model):
         family, minimum = MODELS[model]
         source = root / 'FCCee' / family / 'compact' / model / f'{model}.xml'
-        print(f'::group::{model}', flush=True)
-        try:
-            if not source.is_file():
-                raise FileNotFoundError(source)
-            report[model] = {"status": "passed", **run_case(args.nodehammer.resolve(), source,
-                                                            args.output / model, minimum)}
-        except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired) as error:
-            report[model] = {"status": "failed", "error": str(error)}
-            print(f'::error::{model}: {error}', flush=True)
-        finally:
-            args.output.mkdir(parents=True, exist_ok=True)
-            (args.output / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
-            print('::endgroup::', flush=True)
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        return run_case(args.nodehammer.resolve(), source, args.output / model, minimum)
+
+    # Threads only orchestrate isolated CLI processes: ROOT/DD4hep imports
+    # cannot share a process. Each model keeps its own sequential phases/logs.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        pending = {}
+        for model in dict.fromkeys(args.model or MODELS):
+            print(f'Starting {model}', flush=True)
+            pending[pool.submit(run_model, model)] = model
+        for future in as_completed(pending):
+            model = pending[future]
+            try:
+                report[model] = {"status": "passed", **future.result()}
+                print(f'Passed {model}', flush=True)
+            except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired) as error:
+                report[model] = {"status": "failed", "error": str(error)}
+                print(f'::error::{model}: {error}', flush=True)
+            finally:
+                args.output.mkdir(parents=True, exist_ok=True)
+                (args.output / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
     return int(any(row['status'] != 'passed' for row in report.values()))
 
 
