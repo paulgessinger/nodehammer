@@ -1,3 +1,5 @@
+#include <format>
+#include <web/runtime_locator.hpp>
 // Assembling the directory the server serves.
 //
 // The assertion that matters most is the smallest: an `nh_manifest.json` next to
@@ -60,7 +62,8 @@ void makeRuntime(const TempDir &dir) {
     dir.write("compute_worker.js", "// worker");
     dir.write("nodehammer-gles3.js", "// loader");
     dir.write("nodehammer-gles3.wasm", "fake");
-    dir.write("nh_runtime.json", "{\"schema\": 1, \"version\": \"test\"}");
+    dir.write("nh_runtime.json",
+              std::format("{{\"schema\": {}, \"version\": \"test\"}}", web::compiledSchema()));
 }
 
 std::string readAll(const fs::path &p) {

@@ -6,17 +6,24 @@
 #include <G4Cons.hh>
 #include <G4DisplacedSolid.hh>
 #include <G4Element.hh>
+#include <G4ExtrudedSolid.hh>
 #include <G4GDMLParser.hh>
+#include <G4GenericTrap.hh>
 #include <G4Isotope.hh>
 #include <G4LogicalVolume.hh>
 #include <G4LogicalVolumeStore.hh>
 #include <G4Material.hh>
+#include <G4Para.hh>
 #include <G4PhysicalVolumeStore.hh>
 #include <G4Polycone.hh>
+#include <G4Polyhedra.hh>
+#include <G4PolyhedraHistorical.hh>
 #include <G4Polyhedron.hh>
 #include <G4SolidStore.hh>
 #include <G4StateManager.hh>
 #include <G4SystemOfUnits.hh>
+#include <G4Torus.hh>
+#include <G4Trap.hh>
 #include <G4Trd.hh>
 #include <G4Tubs.hh>
 #include <G4VExceptionHandler.hh>
@@ -164,6 +171,63 @@ struct Builder {
             for (int i = 0; i < p->Num_z_planes; ++i)
                 out.sections.push_back({p->Z_values[i] / cm, p->Rmin[i] / cm, p->Rmax[i] / cm});
             data = std::move(out);
+        } else if (const auto *para = dynamic_cast<const G4Para *>(solid)) {
+            data = semantic::ParaShape{para->GetXHalfLength() / cm,
+                                       para->GetYHalfLength() / cm,
+                                       para->GetZHalfLength() / cm,
+                                       para->GetAlpha(),
+                                       para->GetTheta(),
+                                       para->GetPhi()};
+        } else if (const auto *torus = dynamic_cast<const G4Torus *>(solid)) {
+            data = semantic::TorusShape{torus->GetRmin() / cm, torus->GetRmax() / cm,
+                                        torus->GetRtor() / cm, torus->GetSPhi(), torus->GetDPhi()};
+        } else if (const auto *pgon = dynamic_cast<const G4Polyhedra *>(solid);
+                   pgon && !pgon->IsGeneric()) {
+            const auto *p = pgon->GetOriginalParameters();
+            semantic::PgonShape out{p->Start_angle, p->Opening_angle, p->numSide, {}};
+            // Geant4's historical radii are circumradii; our Pgon stores apothems.
+            const double factor = std::cos(p->Opening_angle / (2 * p->numSide));
+            for (int i = 0; i < p->Num_z_planes; ++i)
+                out.sections.push_back(
+                    {p->Z_values[i] / cm, p->Rmin[i] * factor / cm, p->Rmax[i] * factor / cm});
+            data = std::move(out);
+        } else if (const auto *extruded = dynamic_cast<const G4ExtrudedSolid *>(solid)) {
+            semantic::ExtrudedShape out;
+            for (const auto &v : extruded->GetPolygon())
+                out.polygon.push_back({v.x() / cm, v.y() / cm});
+            for (const auto &section : extruded->GetZSections())
+                out.sections.push_back({section.fZ / cm,
+                                        {section.fOffset.x() / cm, section.fOffset.y() / cm},
+                                        section.fScale});
+            data = std::move(out);
+        } else if (const auto *trap = dynamic_cast<const G4GenericTrap *>(solid)) {
+            semantic::GenericTrapShape out;
+            out.dz = trap->GetZHalfLength() / cm;
+            for (int i = 0; i < 8; ++i)
+                out.vertices[static_cast<size_t>(i)] = {trap->GetVertex(i).x() / cm,
+                                                        trap->GetVertex(i).y() / cm};
+            data = out;
+        } else if (const auto *generalTrap = dynamic_cast<const G4Trap *>(solid)) {
+            semantic::GenericTrapShape out;
+            out.dz = generalTrap->GetZHalfLength() / cm;
+            const auto axis = generalTrap->GetSymAxis();
+            const glm::dvec2 shift{out.dz * axis.x() / axis.z(), out.dz * axis.y() / axis.z()};
+            for (size_t end = 0; end < 2; ++end) {
+                const double dy =
+                    (end ? generalTrap->GetYHalfLength2() : generalTrap->GetYHalfLength1()) / cm;
+                const double dxLow =
+                    (end ? generalTrap->GetXHalfLength3() : generalTrap->GetXHalfLength1()) / cm;
+                const double dxHigh =
+                    (end ? generalTrap->GetXHalfLength4() : generalTrap->GetXHalfLength2()) / cm;
+                const double shear =
+                    end ? generalTrap->GetTanAlpha2() : generalTrap->GetTanAlpha1();
+                const glm::dvec2 center = (end ? 1.0 : -1.0) * shift;
+                out.vertices[end * 4] = center + glm::dvec2{-dxLow - dy * shear, -dy};
+                out.vertices[end * 4 + 1] = center + glm::dvec2{dxLow - dy * shear, -dy};
+                out.vertices[end * 4 + 2] = center + glm::dvec2{dxHigh + dy * shear, dy};
+                out.vertices[end * 4 + 3] = center + glm::dvec2{-dxHigh + dy * shear, dy};
+            }
+            data = out;
         } else if (const auto *boolean = dynamic_cast<const G4BooleanSolid *>(solid)) {
             const auto *left = boolean->GetConstituentSolid(0);
             const auto *right = boolean->GetConstituentSolid(1);

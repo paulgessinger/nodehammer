@@ -116,7 +116,7 @@ TEST_CASE("NHS9 rejects unsupported versions and malformed references",
     SECTION("required feature") {
         auto bytes = original;
         auto *root = const_cast<fb::SharedGeometry *>(fb::GetSharedGeometry(bytes.data()));
-        setField(root, fb::SharedGeometry::VT_REQUIRED_FEATURES, uint64_t{1});
+        setField(root, fb::SharedGeometry::VT_REQUIRED_FEATURES, uint64_t{2});
         REQUIRE_THROWS_WITH(sceneFromBytes(bytes),
                             "NHS9: unsupported schema version or required features");
     }
@@ -203,6 +203,9 @@ TEST_CASE("NHS9 covers every typed shape payload", "[shared][serialization][flat
         PconShape{0.1, 1.2, {{-2, 1, 3}, {2, 1, 4}}},
         PgonShape{0.2, 1.3, 7, {{-2, 1, 3}, {2, 1, 4}}},
         TorusShape{1, 2, 3, 0.1, 1.4},
+        ExtrudedShape{{{0, 0}, {2, 0}, {2, 1}, {0, 1}}, {{-2, {1, 2}, 0.5}, {3, {-1, 4}, 2}}},
+        GenericTrapShape{
+            2, {{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}, {-2, -2}, {2, -2}, {2, 2}, {-2, 2}}}},
         TessellatedShape{{{{glm::dvec3{1, 2, 3}, glm::dvec3{2, 3, 4}, glm::dvec3{3, 4, 5}}}}},
         BooleanIntersection{ShapeId{1}, ShapeId{2}, booleanTransform},
         BooleanSubtraction{ShapeId{1}, ShapeId{2}, booleanTransform}};
@@ -212,11 +215,17 @@ TEST_CASE("NHS9 covers every typed shape payload", "[shared][serialization][flat
         geometry.shapes.emplace(key, Shape{key, variant});
     }
     auto bytes = sceneToBytes(geometry);
+    REQUIRE(nodehammer::shared_fbs::GetSharedGeometry(bytes.data())->required_features() == 1);
     auto restored = sceneFromBytes(bytes);
     REQUIRE(restored.shapes.size() == geometry.shapes.size());
     for (const auto &[key, shape] : geometry.shapes) {
         const auto &copy = restored.shapes.at(key);
         REQUIRE(nlohmann::json(copy) == nlohmann::json(shape));
+        if (std::holds_alternative<ExtrudedShape>(shape.data) ||
+            std::holds_alternative<GenericTrapShape>(shape.data)) {
+            Shape decoded{key, shapeVariantFromJson(nlohmann::json(shape))};
+            REQUIRE(nlohmann::json(decoded) == nlohmann::json(shape));
+        }
         std::visit(
             [&](const auto &value) {
                 using T = std::decay_t<decltype(value)>;
@@ -476,4 +485,32 @@ TEST_CASE("NHS9 shares string and path prefixes without merging identities",
     REQUIRE(copy.metadata.placementTags == original.metadata.placementTags);
     REQUIRE(copy.metadata.occurrenceTags == original.metadata.occurrenceTags);
     REQUIRE(sceneToBytes(copy) == bytes);
+}
+
+TEST_CASE("parametric shape deduplication retains section and vertex differences",
+          "[shared][parametric]") {
+    auto scene = sample();
+    const ExtrudedShape extrusion{{{0, 0}, {2, 0}, {2, 1}, {0, 1}},
+                                  {{-2, {1, 2}, 0.5}, {3, {-1, 4}, 2}}};
+    const GenericTrapShape trap{
+        2, {{{-1, -1}, {1, -1}, {1, 1}, {-1, 1}, {-2, -2}, {2, -2}, {2, 2}, {-2, 2}}}};
+    uint64_t id = 1000;
+    auto add = [&](ShapeVariant shape) {
+        ShapeId key{++id};
+        scene.shapes.emplace(key, Shape{key, std::move(shape)});
+    };
+    add(extrusion);
+    add(extrusion);
+    add(trap);
+    add(trap);
+    auto changed = extrusion;
+    changed.sections[1].offset.x += 0.1;
+    add(changed);
+    changed = extrusion;
+    changed.sections[0].scale += 0.1;
+    add(changed);
+    auto changedTrap = trap;
+    changedTrap.vertices[0].x += 0.1;
+    add(changedTrap);
+    REQUIRE(scene.deduplicateShapes() == 2);
 }

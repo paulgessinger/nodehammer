@@ -181,7 +181,8 @@ include(cmake/Ingestion.cmake)
 #
 # BUMP THIS when the manifest/archive shape or the worker protocol changes.
 # Monotonic; never reused.
-set(NH_WEB_RUNTIME_SCHEMA 1)
+# Schema 2 workers understand NHS9 parametric extrusion/trap payloads.
+set(NH_WEB_RUNTIME_SCHEMA 2)
 set(NH_WEB_RUNTIME_STAMP "nh_runtime.json")
 set(NH_WEB_RUNTIME_DIR "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/web")
 

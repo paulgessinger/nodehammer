@@ -213,6 +213,35 @@ Aabb localAabb(const ir::semantic::ShapeVariant &shape, const ir::semantic::Geom
                 const double outer = s.rTor + s.rMax;
                 return Aabb{{-outer, -outer, -s.rMax}, {outer, outer, s.rMax}, true};
             },
+            [](const ir::semantic::ExtrudedShape &s) -> Aabb {
+                Aabb out;
+                for (const auto &sec : s.sections)
+                    for (const auto &p : s.polygon) {
+                        const glm::dvec3 v{p * sec.scale + sec.offset, sec.z};
+                        if (!out.valid) {
+                            out.lo = out.hi = v;
+                            out.valid = true;
+                        } else {
+                            out.lo = glm::min(out.lo, v);
+                            out.hi = glm::max(out.hi, v);
+                        }
+                    }
+                return out;
+            },
+            [](const ir::semantic::GenericTrapShape &s) -> Aabb {
+                Aabb out;
+                for (std::size_t i = 0; i < 8; ++i) {
+                    const glm::dvec3 v{s.vertices[i], i < 4 ? -s.dz : s.dz};
+                    if (!out.valid) {
+                        out.lo = out.hi = v;
+                        out.valid = true;
+                    } else {
+                        out.lo = glm::min(out.lo, v);
+                        out.hi = glm::max(out.hi, v);
+                    }
+                }
+                return out;
+            },
             [](const ir::semantic::TessellatedShape &s) -> Aabb {
                 Aabb out;
                 for (const auto &tri : s.triangles) {
