@@ -152,6 +152,7 @@ struct Rule {
         // is computed over the merged stack); independent of dropCoincidentFaces.
         std::optional<bool> averageMaterialStack;
         std::optional<int> maxSegmentsCircle;
+        std::optional<double> genericTrapTolerance;
         std::optional<BooleanFallback> fallback;
     };
     std::optional<Tessellation> tessellation;

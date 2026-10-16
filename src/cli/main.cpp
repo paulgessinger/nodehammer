@@ -59,6 +59,9 @@ int main(int argc, char **argv) {
 #ifdef NH_WITH_VIEWER
         &nodehammer::cli::detail::registerCmdViewerNative,
 #endif
+#ifdef NH_WITH_GEOMODEL
+        &nodehammer::cli::detail::registerCmdGeoModelNative,
+#endif
 #ifdef NH_WITH_DD4HEP
         &nodehammer::cli::detail::registerCmdDD4hepNative,
 #endif
