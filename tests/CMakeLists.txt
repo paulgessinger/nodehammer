@@ -89,6 +89,7 @@ endif()
 # notice it slipping, so it is a regression test and not merely a suite member.
 target_sources(nodehammer_tests PRIVATE
     cli/test_cli_run.cpp
+    cli/test_import_log_guard.cpp
     cli/test_cli_shared.cpp
     cli/test_cli_inspect_json.cpp
     cli/test_cli_config.cpp
