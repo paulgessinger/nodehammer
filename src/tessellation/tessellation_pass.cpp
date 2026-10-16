@@ -815,14 +815,16 @@ struct TessellationJob::Impl {
     }
 
     selection::NodeView makeNodeView(const ir::expanded::Node &node) const {
-        std::string_view matName;
+        std::string_view matName, volumeName;
         if (scene->logVols.contains(node.logVolId)) {
             const auto &lv = scene->logVols.at(node.logVolId);
+            volumeName = lv.name;
             if (scene->materials.contains(lv.materialId)) {
                 matName = scene->materials.at(lv.materialId).name;
             }
         }
-        return {node.name, node.originalPath, matName, node.children.empty(), &node.tags};
+        return {node.name,  node.originalPath, matName, node.children.empty(),
+                &node.tags, volumeName};
     }
 
     ir::render::MaterialId getBBoxProxyMaterial() {

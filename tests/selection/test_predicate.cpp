@@ -303,3 +303,18 @@ TEST_CASE("Leading double-star shortcuts preserve path matching semantics",
     REQUIRE_FALSE(matchGlob("**/PixelLayer*/stave*", "/world/PixelLayer0/x/stave0"));
     REQUIRE(matchGlob("**/PixelLayer*/stave*", "/world/PixelLayer0/stave0"));
 }
+
+TEST_CASE("Logical volume predicate distinguishes anonymous placements", "[selection][predicate]") {
+    const auto predicate = compilePredicate(PredicateExpr{VolumeGlobPredicate{"*Toroid*"}});
+    NodeView view;
+    view.name = "ANON";
+    view.path = "/WorldLog/Muon/ANON";
+    view.volumeName = "BAR_Toroid";
+    REQUIRE(predicate(view));
+    view.volumeName = "ECT_Toroids";
+    REQUIRE(predicate(view));
+    view.volumeName = "shield";
+    REQUIRE_FALSE(predicate(view));
+    view.name = "BAR_Toroid";
+    REQUIRE_FALSE(predicate(view));
+}

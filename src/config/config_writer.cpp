@@ -31,6 +31,9 @@ toml::table predicateToTable(const PredicateExpr &expr) {
             [](const NameGlobPredicate &p) -> toml::table {
                 return toml::table{{"type", "name_glob"}, {"pattern", p.pattern}};
             },
+            [](const VolumeGlobPredicate &p) -> toml::table {
+                return toml::table{{"type", "volume_glob"}, {"pattern", p.pattern}};
+            },
             [](const PathGlobPredicate &p) -> toml::table {
                 return toml::table{{"type", "path_glob"}, {"pattern", p.pattern}};
             },
