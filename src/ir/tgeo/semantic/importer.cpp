@@ -180,7 +180,7 @@ TGeoTraversalResult traverseTGeoManager(TGeoManager *mgr, std::string sourceFile
 
 std::string_view TGeoImporter::formatName() const noexcept { return "tgeo"; }
 
-std::vector<std::string> TGeoImporter::supportedExtensions() const { return {".root"}; }
+std::vector<std::string> TGeoImporter::supportedExtensions() const { return {"root"}; }
 
 expanded::ImportResult TGeoImporter::importExpanded(TGeoManager *mgr) const {
     if (mgr == nullptr) {

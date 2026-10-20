@@ -185,7 +185,8 @@ TEST_CASE("GDML: parametric meshes agree with Geant4 solids", "[import][gdml][pa
             {"triangular", semantic::ShapeVariant{semantic::GenericTrapShape{}}.index()},
             {"trap", semantic::ShapeVariant{semantic::GenericTrapShape{}}.index()}};
         REQUIRE(shape.index() == types.at(solid->GetName()));
-        const auto mesh = tessellation::PrimitiveTessellator{}.tessellate(shape, {128});
+        const auto mesh = tessellation::PrimitiveTessellator{}.tessellate(
+            shape, {.maxSegmentsCircle = 128, .genericTrapTolerance = 0.0001});
         REQUIRE(mesh.succeeded);
         REQUIRE_FALSE(mesh.indices.empty());
         DiagnosticList diagnostics;
@@ -222,7 +223,8 @@ TEST_CASE("GDML: parametric meshes agree with Geant4 solids", "[import][gdml][pa
         REQUIRE(volume == Approx(solid->GetCubicVolume() / (cm * cm * cm)).epsilon(0.003));
         REQUIRE(maxSurfaceError < 0.004);
         if (solid->GetName() == "twisted") {
-            const auto coarse = tessellation::PrimitiveTessellator{}.tessellate(shape, {4});
+            const auto coarse = tessellation::PrimitiveTessellator{}.tessellate(
+                shape, {.maxSegmentsCircle = 4, .genericTrapTolerance = 0.1});
             REQUIRE(mesh.indices.size() > coarse.indices.size());
             double coarseVolume = 0;
             for (size_t i = 0; i < coarse.indices.size(); i += 3) {

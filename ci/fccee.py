@@ -55,8 +55,8 @@ def smoke_config(tree):
     return '\n'.join(lines) + '\n'
 
 
-def check_render(render, expected_nodes):
-    if len(render["nodes"]) != expected_nodes:
+def check_render(render, expected_nodes=None):
+    if expected_nodes is not None and len(render["nodes"]) != expected_nodes:
         raise ValueError("render node count differs from the selected depth-2 tree")
     meshes = {m["id"]: m for m in render["meshAssets"]}
     triangles = sum(m["indexCount"] // 3 for m in meshes.values())
@@ -104,7 +104,7 @@ def check_diagnostics(diags):
         raise ValueError('bindings returned error diagnostics')
 
 
-def run_case(source, output, min_nodes=1):
+def run_case(source, output, min_nodes=1, package=False):
     # Imported only in the fresh worker, never in the parent orchestrator.
     import nodehammer as nh
 
@@ -149,6 +149,22 @@ def run_case(source, output, min_nodes=1):
         check_diagnostics(diags)
         nh.write(render, render_file, cfg.output, format='render-json')
     counts = check_render(json.loads(render_file.read_text()), len(tree['nodes']))
+    if package:
+        # Publish only the bounded selection, never the full IDEA intermediate.
+        selected = output / 'selected.nhb.zst'
+        archive = output / 'scene.nhproj'
+        for phase, arguments, target in (
+            ('select', ['convert', '-i', str(nhb), '-c', str(config), '-o', str(selected)], selected),
+            ('pack', ['project', 'pack', '-i', str(selected), '-c', str(config),
+                      '-o', str(archive)], archive),
+        ):
+            target.unlink(missing_ok=True)
+            with capture_phase(output, phase, timings):
+                code = nh.cli.run(arguments)
+                if code:
+                    raise RuntimeError(f'{phase} exited {code}')
+            if not target.is_file() or not target.stat().st_size:
+                raise ValueError(f'{phase} did not produce output')
     return {"source": str(source), "full_nodes": scene.node_count,
             "nhb_bytes": nhb.stat().st_size, **counts, "seconds": timings}
 
@@ -179,7 +195,7 @@ def main():
     parser.add_argument('--model', choices=MODELS, action='append')
     args = parser.parse_args()
     if args.worker is not None:
-        result = run_case(args.worker, args.output, args.min_nodes)
+        result = run_case(args.worker, args.output, args.min_nodes, package=True)
         (args.output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
         return 0
     root = args.geometry_root or geometry_root()
@@ -201,7 +217,9 @@ def main():
         for future in as_completed(pending):
             model = pending[future]
             try:
-                report[model] = {"status": "passed", **future.result()}
+                report[model] = {"status": "passed", **future.result(),
+                                 "title": f"FCC-ee {model} — overview",
+                                 "archive": f"{model}/scene.nhproj"}
                 print(f'Passed {model}', flush=True)
             except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired) as error:
                 report[model] = {"status": "failed", "error": str(error)}

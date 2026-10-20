@@ -40,6 +40,19 @@ semantic::Scene scene(bool boolean = false, bool merged = false) {
     return s;
 }
 } // namespace
+TEST_CASE("GenericTrap collapsed caps contain no repeated-vertex triangles", "[generic_trap]") {
+    auto shape = trap();
+    for (size_t i = 4; i < 8; ++i)
+        shape.vertices[i] = {0, 0};
+    const auto mesh = tessellateGenericTrap(shape, 0.1);
+    REQUIRE_FALSE(mesh.triangles.empty());
+    for (const auto &triangle : mesh.triangles) {
+        const auto &v = triangle.vertices;
+        REQUIRE(v[0] != v[1]);
+        REQUIRE(v[1] != v[2]);
+        REQUIRE(v[2] != v[0]);
+    }
+}
 TEST_CASE("GenericTrap parameters roundtrip without meshes", "[generic_trap][ir]") {
     auto s = scene();
     auto bytes = semantic::sceneToBytes(s);

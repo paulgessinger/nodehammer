@@ -48,9 +48,16 @@ double verifyClosed(const semantic::TessellatedShape &mesh) {
             edge.second += sign;
         }
     }
-    for (const auto &[edge, counts] : edges)
+    for (const auto &[edge, counts] : edges) {
+        if (counts.first != 2 || counts.second != 0)
+            std::cerr << "bad edge in " << mesh.triangles.size()
+                      << "-triangle mesh: " << edge.first[0] << ',' << edge.first[1] << ','
+                      << edge.first[2] << " -> " << edge.second[0] << ',' << edge.second[1] << ','
+                      << edge.second[2] << " count " << counts.first << " orientation "
+                      << counts.second << '\n';
         check(counts.first == 2 && counts.second == 0,
               "mesh is not closed and consistently oriented");
+    }
     check(volume > 0, "mesh winding is inward");
     return volume;
 }
