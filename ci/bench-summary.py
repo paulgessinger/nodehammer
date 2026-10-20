@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render hyperfine benchmark JSONs into a Markdown table.
+"""Render Hyperfine v2 benchmark JSONs into a Markdown table.
 
 Reads `bench.json` from each `bench-<artifact-name>` directory under the
 given root and writes a Markdown summary to stdout. Designed to be piped
@@ -34,10 +34,11 @@ def main() -> int:
             continue
         data = json.loads(bench.read_text())
         for r in data.get("results", []):
-            label = r.get("command_name") or d.name
+            label = r.get("name") or d.name
             label = label.removeprefix("bench-").removeprefix("nodehammer-")
+            stats = r["summary"]["time_wall_clock"]
             rows.append(
-                (label, r["mean"], r["stddev"], r["min"], r["max"])
+                (label, stats["mean"], stats["stddev"], stats["min"], stats["max"])
             )
 
     print("## Benchmark — `nodehammer convert -i odd.nhb.zst -c fixtures/configs/odd.toml`")
