@@ -64,9 +64,9 @@ PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" python3 ci/det
 Then assemble the site with an installed WASM runtime:
 
 ```bash
-python3 -m venv build/gallery-venv
+uv venv --python 3.12 build/gallery-venv
+uv pip install --python build/gallery-venv -r ci/gallery-requirements.txt
 source build/gallery-venv/bin/activate
-pip install -r ci/gallery-requirements.txt
 playwright install chromium
 scripts/build_pages_site.sh stage/share/nodehammer/web build/gallery-site
 python scripts/build_example_gallery.py \

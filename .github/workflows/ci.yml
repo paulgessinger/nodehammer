@@ -1046,10 +1046,14 @@ jobs:
           name: detector-examples
           path: example-artifact
 
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
       - name: Install gallery and browser tools
         run: |
-          python3 -m venv .gallery-venv
-          .gallery-venv/bin/pip install -r ci/gallery-requirements.txt
+          uv venv --python 3.12 .gallery-venv
+          uv pip install --python .gallery-venv -r ci/gallery-requirements.txt
           .gallery-venv/bin/playwright install --with-deps chromium
           echo "$PWD/.gallery-venv/bin" >> "$GITHUB_PATH"
 
