@@ -131,6 +131,12 @@ class App {
     /// (drop files) and then Save. Cross-platform (strategy doc step 7).
     void createArchiveFromScene();
 
+    /// Set the orbit pose on the viewer thread, optionally easing over 0.4 seconds.
+    /// Other threads submit SetCamera through Config::connection instead.
+    /// Keeps the current FOV and derives clipping from the scene. Before scene
+    /// framing, queues the pose as the initial camera. User input cancels easing.
+    void setCameraPose(const Camera &camera, bool animate = false);
+
 #ifndef __EMSCRIPTEN__
     /// Serialize the active archive to `path`, binding it there (native save-as).
     /// Called by the save-archive picker once the user has chosen a path.

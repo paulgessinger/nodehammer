@@ -40,6 +40,10 @@ add_executable(nodehammer_tests
     viewer/test_build_session.cpp
     viewer/test_byte_buffer.cpp
     viewer/test_app_state.cpp
+    viewer/test_camera_json.cpp
+    viewer/test_camera_transition.cpp
+    viewer/test_viewer_connection.cpp
+    viewer/test_viewer_protocol.cpp
     viewer/test_dynamic_render_scale.cpp
     web/test_runtime_locator.cpp
     test_scene_build.cpp

@@ -34,8 +34,10 @@
 #include <viewer/app_state.hpp>
 #include <viewer/build_session.hpp>
 #include <viewer/camera.hpp>
+#include <viewer/camera_transition.hpp>
 #include <viewer/dynamic_render_scale.hpp>
 #include <viewer/project_fs.hpp>
+#include <viewer/viewer_connection.hpp>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -188,6 +190,10 @@ struct App::Impl {
     // Continuous URL steer sync (Sync-to-URL window): debounce on the last query.
     std::string last_url_query_;
     std::chrono::steady_clock::time_point last_url_commit_{};
+
+    CameraTransition camera_transition_;
+    std::optional<Camera> last_published_camera_;
+    bool scene_presented_{false};
 
     // In-flight "Publish package" working set: seeded with the sidecar + archive,
     // then the async runtime fetch adds the index.html + wasm files before
@@ -409,7 +415,9 @@ struct App::Impl {
 
     explicit Impl(Config c)
         : cfg(std::move(c)), launch_had_initial_camera(cfg.initial_camera.has_value()),
-          project_(platform::makeEmptyBag()), startup_overrides(std::move(cfg.startup_overrides)) {}
+          project_(platform::makeEmptyBag()), startup_overrides(std::move(cfg.startup_overrides)) {
+        window_customization.restore_placement = cfg.presentation != PresentationMode::Surface;
+    }
 
     void onInit();
     void onFrame();
@@ -509,6 +517,11 @@ struct App::Impl {
     [[nodiscard]] std::string browserUrlStateQuery(bool include_view, bool include_camera) const;
     void tickUrlSync();
 
+    void setCameraPose(const Camera &pose, bool animate);
+    void tickCameraTransition();
+    void processCommands();
+    void publishPresentedFrame();
+
     static void initCb(void *user) { static_cast<Impl *>(user)->onInit(); }
     static void frameCb(void *user) { static_cast<Impl *>(user)->onFrame(); }
     static void eventCb(const sapp_event *ev, void *user) {
@@ -518,6 +531,9 @@ struct App::Impl {
 };
 
 void App::Impl::loadViewerConfigState() {
+    if (cfg.presentation == PresentationMode::Surface) {
+        return; // the host owns all state; never read localStorage
+    }
     auto bytes = platform_->loadPersistentText(kViewerConfigStateKey);
     if (!bytes || bytes->empty()) {
         return;
@@ -555,6 +571,9 @@ void App::Impl::applyStartupOverrides() {
 }
 
 void App::Impl::loadImGuiState() {
+    if (cfg.presentation == PresentationMode::Surface) {
+        return;
+    }
     auto bytes = platform_->loadPersistentText(kImGuiStateKey);
     if (!bytes || bytes->empty()) {
         return;
@@ -585,12 +604,18 @@ std::string App::Impl::currentViewerConfigStateToml() const {
 }
 
 void App::Impl::persistViewerConfigStateNow() {
+    if (cfg.presentation == PresentationMode::Surface) {
+        return;
+    }
     const std::string s = currentViewerConfigStateToml();
     platform_->savePersistentText(kViewerConfigStateKey, s);
     last_saved_viewer_config_state = s;
 }
 
 void App::Impl::loadRenderQualityState() {
+    if (cfg.presentation == PresentationMode::Surface) {
+        return;
+    }
     auto bytes = platform_->loadPersistentText(kRenderQualityStateKey);
     if (!bytes || bytes->empty()) {
         return;
@@ -609,6 +634,9 @@ std::string App::Impl::currentRenderQualityStateToml() const {
 }
 
 void App::Impl::savePersistentState(bool force) {
+    if (cfg.presentation == PresentationMode::Surface) {
+        return; // surface mode never writes localStorage (host owns state)
+    }
     const uint64_t now = stm_now();
     if (!force && last_persistence_save_time != 0 &&
         stm_sec(stm_diff(now, last_persistence_save_time)) < kPersistenceSaveIntervalSeconds) {
@@ -723,6 +751,7 @@ void App::Impl::onInit() {
                                             scene = std::move(s);
                                             scene_uploaded = false;
                                             camera_framed = false;
+                                            scene_presented_ = false;
                                         },
                                     .on_cut_scene_ready =
                                         [this](std::shared_ptr<const ir::render::Scene> s) {
@@ -1156,6 +1185,10 @@ bool App::Impl::shouldThrottleIdle() const {
     if (platform_ && platform_->windowState().drag_hover.active) {
         return false;
     }
+    if (camera_transition_.active()) {
+        return false;
+    }
+
     // TODO: in-app animation hook. When something like cfg.auto_orbit
     // is producing motion of its own we want to keep the loop at full
     // rate even with no user input. Today auto_orbit only ticks
@@ -1817,6 +1850,9 @@ std::string App::Impl::browserUrlStateQuery(bool include_view, bool include_came
 
 void App::Impl::syncBrowserUrl() const {
     if constexpr (platform::kIsWeb) {
+        if (cfg.presentation == PresentationMode::Surface) {
+            return; // the host page owns window.location
+        }
         const std::string state_query =
             browserUrlStateQuery(ui_state.url_sync_view, ui_state.url_sync_camera);
         platform_->commitUrlState(state_query, kUrlManagedKeys);
@@ -1824,7 +1860,8 @@ void App::Impl::syncBrowserUrl() const {
 }
 
 void App::Impl::tickUrlSync() {
-    if (!platform::kIsWeb || !ui_state.url_sync_continuous) {
+    if (!platform::kIsWeb || cfg.presentation == PresentationMode::Surface ||
+        !ui_state.url_sync_continuous) {
         return;
     }
     // Debounce: only re-write the address bar when the steer actually changed and
@@ -1836,6 +1873,88 @@ void App::Impl::tickUrlSync() {
         last_url_query_ = std::move(query);
         last_url_commit_ = now;
     }
+}
+
+void App::Impl::processCommands() {
+    if (!cfg.connection) {
+        return;
+    }
+    cfg.connection->poll();
+    auto commands = cfg.connection->takeCommands();
+    if (!commands.empty()) {
+        last_activity_time = stm_now();
+    }
+    for (const auto &command : commands) {
+        if (const auto *set = std::get_if<commands::SetCamera>(&command)) {
+            setCameraPose(set->pose, set->animate);
+        } else if (const auto *get = std::get_if<commands::GetCamera>(&command)) {
+            cfg.connection->publish(events::CameraResponse{get->request_id, camera});
+        }
+    }
+    cfg.connection->poll();
+}
+
+void App::Impl::publishPresentedFrame() {
+    if (!cfg.connection || !scene || !scene_uploaded || !camera_framed) {
+        return;
+    }
+    if (!scene_presented_) {
+        cfg.connection->publish(events::ScenePresented{camera});
+        scene_presented_ = true;
+    } else if (!last_published_camera_ || camera.target != last_published_camera_->target ||
+               camera.distance != last_published_camera_->distance ||
+               camera.yaw != last_published_camera_->yaw ||
+               camera.pitch != last_published_camera_->pitch ||
+               camera.projection != last_published_camera_->projection) {
+        cfg.connection->publish(events::CameraChanged{camera});
+    }
+    last_published_camera_ = camera;
+    cfg.connection->poll();
+}
+
+void App::Impl::setCameraPose(const Camera &pose, bool animate) {
+    // Take only the pose; keep fov and let dolly() re-derive the clip planes.
+    Camera to = camera;
+    to.target = pose.target;
+    to.distance = pose.distance;
+    to.yaw = pose.yaw;
+    to.pitch = pose.pitch;
+    to.projection = pose.projection;
+    to.sanitize();
+    if (!camera_framed) {
+        // The scene has not been framed yet: framing would overwrite whatever we
+        // set now, so route the pose through the initial-camera slot instead
+        // (applyInitialCamera reapplies it right after frameBounds).
+        cfg.initial_camera = to;
+        // A later archive manifest must not replace an explicit camera request.
+        startup_overrides.camera = to;
+        camera_transition_.cancel();
+        return;
+    }
+    if (animate) {
+        camera_transition_.start(camera, to, CameraTransition::Clock::now());
+    } else {
+        camera_transition_.cancel();
+        camera = to;
+        camera.dolly(1.f, scene_radius);
+    }
+    // Wake the frame loop so an unfocused window renders the new pose.
+    last_activity_time = stm_now();
+}
+
+void App::Impl::tickCameraTransition() {
+    if (!camera_transition_.active()) {
+        return;
+    }
+    // User input takes over immediately rather than fighting the transition.
+    const ImGuiIO &io = ImGui::GetIO();
+    if (io.MouseDown[0] || io.MouseDown[2] || pending_scroll_x != 0.f || pending_scroll_y != 0.f ||
+        !platform_gesture_events.empty()) {
+        camera_transition_.cancel();
+        return;
+    }
+    camera_transition_.update(camera, scene_radius, CameraTransition::Clock::now());
+    last_activity_time = stm_now();
 }
 
 void App::Impl::addProjectPath(const std::filesystem::path &path) {
@@ -2144,7 +2263,8 @@ void App::Impl::applyPersistedRootKeyOverride() {
 }
 
 bool App::Impl::webAppModeProject() const {
-    if (!platform::kIsWeb) {
+    // Surface mode never persists to IDB — the host page owns all state.
+    if (!platform::kIsWeb || cfg.presentation == PresentationMode::Surface) {
         return false;
     }
     // The working set persists in application mode (Empty scratch or a Local
@@ -2237,7 +2357,7 @@ void App::Impl::stashPersistedRootKeys() {
 }
 
 void App::Impl::restoreWebProjectFromIdb() {
-    if (!platform::kIsWeb) {
+    if (!platform::kIsWeb || cfg.presentation == PresentationMode::Surface) {
         return;
     }
     // Load the persisted root selection synchronously *before* the async blob
@@ -2400,6 +2520,8 @@ void App::Impl::renderActiveModal() {
 }
 
 void App::Impl::onFrame() {
+    // Drain before computing idle: external commands wake an unfocused viewer.
+    processCommands();
     // Resolve idle-mode once per frame: shouldThrottleIdle reads
     // event-loop state (input timestamp, focus, drag hover) that
     // doesn't change during onFrame, so a single read is fine. Used
@@ -2502,9 +2624,13 @@ void App::Impl::onFrame() {
         const bool input_recent =
             last_activity_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_activity_time)) < kIdleInputSeconds;
-        const bool full_rate = input_recent || jobsRunning() || ibl_baker_.dirty(ibl_settings) ||
-                               cfg.auto_orbit || drag_hover || pending_gesture ||
-                               notifications.hasActiveToasts();
+        // Toasts never render in surface mode, so they must not hold full rate there
+        // (nothing expires them); the host camera animation does need it.
+        const bool full_rate =
+            input_recent || jobsRunning() || ibl_baker_.dirty(ibl_settings) || cfg.auto_orbit ||
+            drag_hover || pending_gesture ||
+            (cfg.presentation != PresentationMode::Surface && notifications.hasActiveToasts()) ||
+            camera_transition_.active();
         if (!full_rate && last_time != 0 &&
             stm_sec(stm_diff(stm_now(), last_time)) < kIdleFrameInterval) {
             // Re-present the last full frame with a cheap blit instead of an
@@ -2580,6 +2706,7 @@ void App::Impl::onFrame() {
         last_activity_time = stm_now();
     }
 
+    tickCameraTransition();
     updateCameraInput();
     if (scene && cfg.auto_orbit) {
         camera.orbit(glm::radians(cfg.auto_orbit_speed_deg) * static_cast<float>(delta_seconds),
@@ -2721,6 +2848,7 @@ void App::Impl::onFrame() {
         scene_uploaded = false;
         cut_uploaded = false;
         camera_framed = false;
+        scene_presented_ = false;
         scene_radius = 0.f;
         notifications.info("Project closed");
     };
@@ -2744,9 +2872,17 @@ void App::Impl::onFrame() {
         moveProjectKey(from_key, dest_dir_key);
     };
 
-    ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
-    renderActiveModal();
-    notifications.render();
+    if (cfg.presentation == PresentationMode::Surface) {
+        // Surface mode draws the scene only: no dockspace, panels, menu bar, drop
+        // overlay, modals or toasts. The ImGui frame still runs (empty, like
+        // bench mode) so render()'s ImGui draw has valid data, and with no
+        // windows io.WantCaptureMouse stays false so camera input reaches
+        // updateCameraInput unchanged.
+    } else {
+        ui::renderViewerUi(ui_state, ui_ctx, ui_actions);
+        renderActiveModal();
+        notifications.render();
+    }
 
     // Headless screenshot: once the scene is loaded, uploaded, lit and framed,
     // fire the one-shot export (which quits when the file is written).
@@ -2810,6 +2946,8 @@ void App::Impl::onFrame() {
 
     exporter_.postRender();
 
+    publishPresentedFrame();
+
     // Drain any pending native picker modal. ImGui frame is ended,
     // sokol pass is committed; if NFD spawns a nested run loop and
     // re-enters frame_cb, it'll hit a clean self-contained frame
@@ -2846,6 +2984,7 @@ void App::setScene(std::shared_ptr<const ir::render::Scene> scene) {
     impl_->scene = std::move(scene);
     impl_->scene_uploaded = false;
     impl_->camera_framed = false;
+    impl_->scene_presented_ = false;
 }
 
 void App::requestScreenshot(std::string path, PngExportSettings settings) {
@@ -2920,6 +3059,10 @@ void App::flushWebProjectPersistence() { impl_->flushWebProjectPersistence(); }
 void App::restoreWebProjectFromIdb() { impl_->restoreWebProjectFromIdb(); }
 
 void App::createArchiveFromScene() { impl_->createArchiveFromScene(); }
+
+void App::setCameraPose(const Camera &camera, bool animate) {
+    impl_->setCameraPose(camera, animate);
+}
 
 #ifndef __EMSCRIPTEN__
 void App::saveActiveArchiveTo(const std::filesystem::path &path) {
