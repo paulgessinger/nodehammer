@@ -1,0 +1,12 @@
+[project]
+site_name = "nodehammer"
+site_description = "Detector geometry conversion, configuration, and visualization"
+repo_url = "https://github.com/paulgessinger/nodehammer"
+docs_dir = "pages"
+site_dir = "site"
+# Keep generated links relative to the site root, including under /nodehammer/.
+use_directory_urls = false
+nav = [
+  { "Overview" = "index.md" },
+  { "Detector catalog" = "catalog.md" },
+]
