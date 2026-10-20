@@ -47,8 +47,19 @@ def fcc_case(model, root, output):
     source = root / 'FCCee' / family / 'compact' / model / f'{model}.xml'
     if not source.is_file():
         raise FileNotFoundError(source)
-    return {model: {'status': 'passed', **fccee.run_case(source, output / model, minimum, package=True),
-                    'title': f'FCC-ee {model} — overview', 'archive': f'{model}/scene.nhproj'}}
+    report = {model: {'status': 'passed',
+                      **fccee.run_case(source, output / model, minimum, package=True),
+                      'title': f'FCC-ee {model} — overview', 'archive': f'{model}/scene.nhproj'}}
+    key = model + '-simplified'
+    preset = examples.ROOT / f'fixtures/configs/fccee/{model}/simplified.toml'
+    report[key] = {'title': f'FCC-ee {model} — simplified',
+                   'source': str(source), 'archive': f'{key}/scene.nhproj'}
+    try:
+        report[key].update(fccee.pack_fixture(output / model / 'geometry.nhb.zst',
+                                              preset, output / key))
+    except Exception as error:
+        report[key].update(status='failed', error=str(error))
+    return report
 
 
 def main():
@@ -72,7 +83,8 @@ def main():
     if 'fccee' in suites:
         root = args.geometry_root or fccee.geometry_root()
         for model in fccee.MODELS:
-            metadata = {model: {'title': f'FCC-ee {model} — overview'}}
+            metadata = {model: {'title': f'FCC-ee {model} — overview'},
+                        model + '-simplified': {'title': f'FCC-ee {model} — simplified'}}
             tasks.append(('fccee', model, metadata,
                           partial(fcc_case, model, root, outputs['fccee'])))
     if 'examples' in suites:

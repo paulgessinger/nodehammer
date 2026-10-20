@@ -143,3 +143,10 @@ def test_package_failure_is_not_a_pass(tmp_path, bindings, monkeypatch):
     monkeypatch.setattr(nh.cli, 'run', lambda args: 7 if args[0] == 'project' else original(args))
     with pytest.raises(RuntimeError, match='pack exited 7'):
         fccee.run_case(Path('/det.xml'), tmp_path, package=True)
+
+
+def test_authored_preset_rejects_full_idea_before_pack(tmp_path, bindings):
+    with pytest.raises(ValueError, match='authored preset selected'):
+        fccee.pack_project(tmp_path / 'full.nhb', tmp_path / 'scene.toml',
+                           tmp_path, {}, max_selected=200_000)
+    assert not any(args[0] == 'project' for args in bindings.cli_calls)
