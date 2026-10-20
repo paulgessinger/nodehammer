@@ -1,6 +1,9 @@
 # Detector examples and CI coverage
 
-The Pages dashboard is built with Zensical from the results of the Key4hep job.
+The Pages documentation site is configured in `docs/site/zensical.toml`. Its
+overview renders the repository README, and its detector catalog is built with
+Zensical from the results of the Key4hep job. See `docs/site/README.md` for
+adding pages or building the documentation without geometry inputs.
 Its viewer runtime comes from the separate WASM build in the same workflow.
 Pull requests build and check the site and upload it as `pages-site`; only
 successful `main` runs deploy through the existing GitHub Pages environment.

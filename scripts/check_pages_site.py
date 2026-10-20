@@ -118,6 +118,8 @@ def main() -> None:
         check_publication(site / name)
 
     if (site / "results.json").exists():
+        if not (site / "catalog.html").is_file():
+            fail("missing generated detector catalog")
         results = json.loads((site / "results.json").read_text())
         if not results:
             fail("empty example catalog")
