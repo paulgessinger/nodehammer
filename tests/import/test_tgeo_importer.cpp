@@ -3,6 +3,7 @@
 #include <diagnostic_codes.hpp>
 #include <ir/expanded/conversion.hpp>
 #include <ir/semantic.hpp>
+#include <ir/semantic/importer.hpp>
 #include <ir/tgeo/semantic/importer.hpp>
 
 #include <TGeoBBox.h>
@@ -25,7 +26,11 @@ static void resetManager() {
 TEST_CASE("TGeoImporter: formatName and supportedExtensions", "[import][tgeo]") {
     nodehammer::ir::TGeoImporter imp;
     REQUIRE(imp.formatName() == "tgeo");
-    REQUIRE(imp.supportedExtensions() == std::vector<std::string>{".root"});
+    REQUIRE(imp.supportedExtensions() == std::vector<std::string>{"root"});
+    nodehammer::ir::ImporterRegistry registry;
+    registry.registerImporter(std::make_unique<nodehammer::ir::TGeoImporter>());
+    REQUIRE(registry.resolve("detector.root") != nullptr);
+    REQUIRE(registry.resolve("detector.ROOT") != nullptr);
 }
 
 TEST_CASE("TGeoImporter: TGeoBBox -> BoxShape", "[import][tgeo]") {

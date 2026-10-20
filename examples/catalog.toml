@@ -1,0 +1,57 @@
+# Reviewed input versions. Never replace these with a live remote checksum list.
+base_url = "https://pagessin.web.cern.ch/pagessin/nodehammer/inputs/"
+
+[inputs.atlas-phase1]
+path = "atlas/v1/atlas-nominal-standard.nhb.zst"
+sha256 = "7c037410f32739693ed699de5e8ea801ae7922318e40a729a3540ac65bc139b6"
+
+[inputs.atlas-phase2]
+path = "atlas/v1/atlas-phase2-05-00-00-full.db"
+sha256 = "98ff47d4d680f1e9a563d58288938ed372028d6ea499e44b2c15659366342c6b"
+
+[inputs.sphenix-root]
+path = "sphenix/v1/sPHENIXActsGeom.root"
+sha256 = "c0efc0c725a459b4c5dfc0957fd68000b8233aa49ae691caad10562e6cc84127"
+
+[inputs.sphenix-gdml]
+path = "sphenix/v1/sPHENIXActsGeom.gdml"
+sha256 = "7a9f33ea77df0bf4f140c6c27d2302ef190c59ba348cea501bfecdaef28baff6"
+
+[[examples]]
+id = "atlas-phase1-simple"
+title = "ATLAS Phase 1 — simplified"
+input = "atlas-phase1"
+config = "fixtures/configs/lua/atlas/phase1/simple.lua"
+
+[[examples]]
+id = "atlas-phase1-detailed"
+title = "ATLAS Phase 1 — detailed"
+input = "atlas-phase1"
+config = "fixtures/configs/lua/atlas/phase1/detailed.lua"
+
+[[examples]]
+id = "atlas-phase2-simple"
+title = "ATLAS Phase 2 — simplified"
+input = "atlas-phase2"
+config = "fixtures/configs/lua/atlas/phase2/simple.lua"
+
+[[examples]]
+id = "atlas-phase2-detailed"
+title = "ATLAS Phase 2 — detailed"
+input = "atlas-phase2"
+config = "fixtures/configs/lua/atlas/phase2/detailed.lua"
+test = true
+
+# These are bounded import/render overviews, not hand-authored detector views.
+# Their depth-2 configs are generated from the imported placement paths.
+[[examples]]
+id = "sphenix-root"
+title = "sPHENIX — ROOT overview"
+input = "sphenix-root"
+test = true
+
+[[examples]]
+id = "sphenix-gdml"
+title = "sPHENIX — GDML overview"
+input = "sphenix-gdml"
+test = true

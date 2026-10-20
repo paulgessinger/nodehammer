@@ -90,6 +90,10 @@ tessellateGenericTrap(const ir::semantic::GenericTrapShape &shape, double tolera
     ir::semantic::TessellatedShape mesh;
     mesh.triangles.reserve(8 * strips + 4);
     auto triangle = [&](glm::dvec3 a, glm::dvec3 b, glm::dvec3 c) {
+        // Collapsed caps share vertices. Check equality before the cross product:
+        // fused multiply-subtract can leave a tiny residual even for b == c.
+        if (a == b || b == c || a == c)
+            return;
         const auto normal = glm::cross(b - a, c - a);
         if (!std::isfinite(normal.x) || !std::isfinite(normal.y) || !std::isfinite(normal.z))
             throw std::runtime_error("GeoGenericTrap tessellation coordinate overflow");

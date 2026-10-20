@@ -117,6 +117,16 @@ def main() -> None:
     for name in PUBLICATION_POSTURES:
         check_publication(site / name)
 
+    if (site / "results.json").exists():
+        results = json.loads((site / "results.json").read_text())
+        if not results:
+            fail("empty example catalog")
+        for name, row in results.items():
+            if row["status"] not in ("passed", "packaged"):
+                fail(f"unsuccessful example: {name}")
+            check_runtime(site / "viewers" / name)
+            check_publication(site / "viewers" / name)
+
     print(f"pages site ok: {site}")
 
 
