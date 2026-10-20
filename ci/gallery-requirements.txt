@@ -1,3 +1,2 @@
 zensical==0.0.71
 playwright==1.64.0
-pillow==13.0.0
