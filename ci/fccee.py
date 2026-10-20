@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """Full DD4hep -> NHS9 conversion and bounded rendering of representative FCC-ee models."""
-import argparse
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import ctypes
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 
@@ -167,68 +164,3 @@ def run_case(source, output, min_nodes=1, package=False):
                 raise ValueError(f'{phase} did not produce output')
     return {"source": str(source), "full_nodes": scene.node_count,
             "nhb_bytes": nhb.stat().st_size, **counts, "seconds": timings}
-
-
-def run_worker(source, output, min_nodes):
-    """One interpreter per model, including when a plugin calls exit() or crashes."""
-    output.mkdir(parents=True, exist_ok=True)
-    result_path = output / 'result.json'
-    result_path.unlink(missing_ok=True)
-    with (output / 'worker.stdout').open('w') as stdout, \
-            (output / 'worker.log').open('w') as stderr:
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), '--worker', str(source),
-             '--output', str(output), '--min-nodes', str(min_nodes)],
-            stdout=stdout, stderr=stderr, timeout=1200)
-    if result.returncode:
-        raise RuntimeError(f'worker exited {result.returncode}; see {output / "worker.log"}')
-    # A plugin can exit(0) prematurely: only an explicit result means success.
-    return json.loads(result_path.read_text())
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--worker', type=Path, help=argparse.SUPPRESS)
-    parser.add_argument('--min-nodes', type=int, default=1, help=argparse.SUPPRESS)
-    parser.add_argument('--geometry-root', type=Path)
-    parser.add_argument('--output', type=Path, default=Path('build/fccee-results'))
-    parser.add_argument('--model', choices=MODELS, action='append')
-    args = parser.parse_args()
-    if args.worker is not None:
-        result = run_case(args.worker, args.output, args.min_nodes, package=True)
-        (args.output / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
-        return 0
-    root = args.geometry_root or geometry_root()
-    report = {}
-    def run_model(model):
-        family, minimum = MODELS[model]
-        source = root / 'FCCee' / family / 'compact' / model / f'{model}.xml'
-        if not source.is_file():
-            raise FileNotFoundError(source)
-        return run_worker(source, args.output / model, minimum)
-
-    # Threads only orchestrate isolated Python workers: ROOT/DD4hep imports
-    # cannot share a process. Each model keeps its own sequential phases/logs.
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        pending = {}
-        for model in dict.fromkeys(args.model or MODELS):
-            print(f'Starting {model}', flush=True)
-            pending[pool.submit(run_model, model)] = model
-        for future in as_completed(pending):
-            model = pending[future]
-            try:
-                report[model] = {"status": "passed", **future.result(),
-                                 "title": f"FCC-ee {model} — overview",
-                                 "archive": f"{model}/scene.nhproj"}
-                print(f'Passed {model}', flush=True)
-            except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired) as error:
-                report[model] = {"status": "failed", "error": str(error)}
-                print(f'::error::{model}: {error}', flush=True)
-            finally:
-                args.output.mkdir(parents=True, exist_ok=True)
-                (args.output / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
-    return int(any(row['status'] != 'passed' for row in report.values()))
-
-
-if __name__ == '__main__':
-    sys.exit(main())

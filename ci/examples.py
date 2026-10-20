@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """Pinned WebEOS inputs -> representative checks and portable gallery projects."""
-import argparse
 import hashlib
 import json
 from pathlib import Path
 import shutil
 import subprocess
-import sys
-import tomllib
 import urllib.request
 
 from fccee import check_render, smoke_config
@@ -98,40 +95,23 @@ def example(exe, row, nhb, output):
             "archive": f"{row['id']}/scene.nhproj", **counts}
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--nodehammer", type=Path, default=Path("build/Release/nodehammer"))
-    parser.add_argument("--catalog", type=Path, default=ROOT / "examples/catalog.toml")
-    parser.add_argument("--cache", type=Path, default=Path(".cache/example-inputs"))
-    parser.add_argument("--output", type=Path, default=Path("build/example-results"))
-    args = parser.parse_args()
-    catalog = tomllib.loads(args.catalog.read_text())
-    args.output = args.output.resolve()
-    args.output.mkdir(parents=True, exist_ok=True)
-    exe = args.nodehammer.resolve()
-    prepared = {}
-    report = {}
-    for row in catalog["examples"]:
-        key = row["input"]
-        entry = catalog["inputs"][key]
-        print(f"::group::{row['id']}", flush=True)
-        result = {"title": row["title"], "source": catalog["base_url"] + entry["path"],
-                  "sha256": entry["sha256"]}
+def metadata(catalog, key, rows):
+    entry = catalog['inputs'][key]
+    return {row['id']: {'title': row['title'],
+                        'source': catalog['base_url'] + entry['path'],
+                        'sha256': entry['sha256']} for row in rows}
+
+
+def run_input(exe, catalog, key, rows, cache, output):
+    """Import once per input, then process its presets sequentially."""
+    report = metadata(catalog, key, rows)
+    source = fetch(catalog['base_url'], catalog['inputs'][key], cache)
+    nhb, summary = prepare(exe, source, output / '_inputs' / key)
+    for row in rows:
+        result = report[row['id']]
         try:
-            if key not in prepared:
-                source = fetch(catalog["base_url"], entry, args.cache)
-                prepared[key] = prepare(exe, source, args.output / "_inputs" / key)
-            nhb, summary = prepared[key]
-            result.update(example(exe, row, nhb, args.output / row["id"]))
-            result["full_nodes"] = summary["nodes"]
+            result.update(example(exe, row, nhb, output / row['id']))
+            result['full_nodes'] = summary['nodes']
         except (OSError, ValueError, KeyError, RuntimeError, subprocess.TimeoutExpired) as error:
-            result.update(status="failed", error=str(error))
-            print(f"::error::{row['id']}: {error}", flush=True)
-        report[row["id"]] = result
-        (args.output / "summary.json").write_text(json.dumps(report, indent=2) + "\n")
-        print("::endgroup::", flush=True)
-    return int(any(row["status"] == "failed" for row in report.values()))
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+            result.update(status='failed', error=str(error))
+    return report
