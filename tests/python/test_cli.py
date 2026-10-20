@@ -33,10 +33,10 @@ import nodehammer as nh
 def test_a_failing_command_returns_and_the_interpreter_survives(capfd):
     # The property the whole cli::run refactor exists to provide. Before it,
     # this call ended the pytest process -- there was no assertion to write.
-    code = nh.cli.run(["convert", "--input", "no-such-file.gdml", "--output", "out.glb"])
+    code = nh.cli.run(["convert", "--input", "no-such-file.unsupported", "--output", "out.glb"])
 
     assert code != 0
-    assert "no-such-file.gdml" in capfd.readouterr().err
+    assert "no-such-file.unsupported" in capfd.readouterr().err
 
     # And again, to show `run` holds no state between calls.
     assert nh.cli.run(["--version"]) == 0
@@ -100,13 +100,14 @@ def test_args_default_to_sys_argv(monkeypatch, capfd):
         # Each of these was a `std::exit(1)` before the CLI moved into the
         # library. The point of the sweep is less the individual codes than the
         # fact that a run of them in a row cannot end this process.
-        (["convert", "--input", "no-such-file.gdml", "--output", "out.glb"], "NH0101"),
+        # Use an unknown extension: GDML is supported in full backend builds.
+        (["convert", "--input", "no-such-file.unsupported", "--output", "out.glb"], "NH0101"),
         (["config", "flatten", "--config", "no-such-script.lua"], "NH0902"),
         (["config", "flatten", "--config", "no-such-config.toml"], "NH0100"),
         # `inspect` requires a nested subcommand of its own, so the sweep says
         # so -- a bare `inspect --input ...` fails for that reason instead and
         # would assert nothing about the import path.
-        (["inspect", "--input", "no-such-file.gdml", "summary"], "NH0101"),
+        (["inspect", "--input", "no-such-file.unsupported", "summary"], "NH0101"),
         (["config", "validate", "--config", "no-such-config.toml"], "NH0100"),
     ],
 )
