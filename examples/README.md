@@ -27,6 +27,16 @@ The Key4hep build enables DD4hep, TGeo, GeoModel and Geant4/GDML. It must provid
 Geant4 with GDML support; a missing backend is a build failure, not a skipped
 test. No ATLAS job is launched through CVMFS.
 
+One coordinator schedules all inputs in a shared pool (`--jobs 4` by default).
+A spawn-based process pool gives each input a fresh Python worker, recycled
+after one task. FCC-ee uses the bindings directly; WebEOS stages invoke CLI
+processes. Presets sharing an input run sequentially after one import.
+There are no nested worker pools. Lower `--jobs` on memory-constrained machines;
+`--jobs 1` runs serially. Use `--suite fccee` or `--suite examples` for a subset.
+Ordinary failures are collected without cancelling unrelated inputs. A native
+worker crash breaks the pool and marks unfinished inputs failed rather than
+hanging or reporting success. The command returns nonzero if any check fails. Per-suite summary paths remain unchanged.
+
 ## Inputs and updates
 
 `catalog.toml` pins WebEOS URLs and SHA256 hashes copied from the input
@@ -48,8 +58,7 @@ Key4hep environment (use the same Python interpreter as the build):
 
 ```bash
 python3 -m pytest ci -q
-PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" python3 ci/fccee.py
-python3 ci/examples.py --nodehammer build/Release/nodehammer
+PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" python3 ci/detectors.py --jobs 4 --nodehammer build/Release/nodehammer
 ```
 
 Then assemble the site with an installed WASM runtime:

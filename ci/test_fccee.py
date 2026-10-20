@@ -2,9 +2,7 @@ from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
-import threading
 from types import SimpleNamespace
 
 import pytest
@@ -38,31 +36,6 @@ def test_phase_captures_native_output_and_restores_descriptors(tmp_path, capfd):
     assert captured.err == 'restored stderr\n'
 
 
-def test_four_models_overlap_and_failure_is_reported(tmp_path, monkeypatch):
-    barrier = threading.Barrier(4)
-    for model, (family, _) in fccee.MODELS.items():
-        source = tmp_path / 'FCCee' / family / 'compact' / model / f'{model}.xml'
-        source.parent.mkdir(parents=True)
-        source.touch()
-
-    def run_worker(source, output, minimum):
-        # All four must start before any can finish.
-        barrier.wait(timeout=5)
-        assert output.name == source.stem
-        if source.stem == 'IDEA_o1_v03':
-            raise RuntimeError('import failed')
-        return {'full_nodes': minimum}
-
-    monkeypatch.setattr(sys, 'argv', [
-        'fccee.py', '--geometry-root', str(tmp_path), '--output', str(tmp_path / 'results')])
-    monkeypatch.setattr(fccee, 'run_worker', run_worker)
-    assert fccee.main() == 1
-    report = json.loads((tmp_path / 'results/summary.json').read_text())
-    assert set(report) == set(fccee.MODELS)
-    assert report['IDEA_o1_v03'] == {'status': 'failed', 'error': 'import failed'}
-    assert sum(row['status'] == 'passed' for row in report.values()) == 3
-
-
 def test_bounded_config():
     text = fccee.smoke_config(TREE)
     assert '/world/det/module/**' in text
@@ -92,21 +65,6 @@ def test_empty_geometry_and_dangling_bindings_fail(render):
 
 def test_valid_render_counts_triangles():
     assert fccee.check_render(RENDER, 3)['triangles'] == 1
-
-
-def test_process_failure_is_not_a_pass(tmp_path, monkeypatch):
-    monkeypatch.setattr(fccee.subprocess, 'run',
-                        lambda *args, **kwargs: subprocess.CompletedProcess([], 7))
-    with pytest.raises(RuntimeError, match='worker exited 7'):
-        fccee.run_worker(Path('/det.xml'), tmp_path, 1)
-
-
-def test_successful_exit_without_result_is_not_a_pass(tmp_path, monkeypatch):
-    (tmp_path / 'result.json').write_text('{}')
-    monkeypatch.setattr(fccee.subprocess, 'run',
-                        lambda *args, **kwargs: subprocess.CompletedProcess([], 0))
-    with pytest.raises(FileNotFoundError):
-        fccee.run_worker(Path('/det.xml'), tmp_path, 1)
 
 
 @pytest.fixture

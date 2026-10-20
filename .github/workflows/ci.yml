@@ -1295,8 +1295,7 @@ jobs:
             bash ci/verify-ingest.sh build/ingestion-key4hep \
               -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON -DNODEHAMMER_WITH_GEOMODEL=ON -DNODEHAMMER_FETCH_GEOMODEL=OFF
             "$NH_PYTHON" -m pytest ci -q
-            PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" "$NH_PYTHON" ci/fccee.py
-            "$NH_PYTHON" ci/examples.py
+            PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" "$NH_PYTHON" ci/detectors.py --jobs 4
 
       - name: Upload detector projects
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
