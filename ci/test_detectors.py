@@ -121,3 +121,29 @@ def test_native_exit_does_not_hang_or_pass(tmp_path):
     tasks = [('examples', 'bad', {'bad': {}}, crash_worker)]
     assert detectors.steer(tasks, {'examples': tmp_path}, 1) == 1
     assert json.loads((tmp_path / 'summary.json').read_text())['bad']['status'] == 'failed'
+
+
+def test_fcc_fixture_reuses_full_import_and_keeps_separate_validation(tmp_path, monkeypatch):
+    model = 'CLD_o2_v08'
+    source = tmp_path / 'FCCee/CLD/compact' / model / f'{model}.xml'
+    source.parent.mkdir(parents=True)
+    source.touch()
+    calls = []
+
+    def run_case(source, output, minimum, package):
+        calls.append(('import', source))
+        return {'triangles': 123}
+
+    def pack_fixture(nhb, config, output):
+        calls.append(('fixture', nhb))
+        assert config.name == 'simplified.toml'
+        return {'status': 'packaged'}
+
+    monkeypatch.setattr(detectors.fccee, 'run_case', run_case)
+    monkeypatch.setattr(detectors.fccee, 'pack_fixture', pack_fixture)
+    result = detectors.fcc_case(model, tmp_path, tmp_path / 'results')
+    assert calls == [('import', source),
+                     ('fixture', tmp_path / 'results' / model / 'geometry.nhb.zst')]
+    assert result[model]['status'] == 'passed'
+    assert result[model + '-simplified']['status'] == 'packaged'
+    assert 'triangles' not in result[model + '-simplified']

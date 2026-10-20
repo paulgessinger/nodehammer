@@ -12,7 +12,7 @@ successful `main` runs deploy through the existing GitHub Pages environment.
 
 | Input | Check | Published view |
 | --- | --- | --- |
-| Key4hep k4geo DD4hep XML | Existing full FCC-ee imports and bounded tessellation | Depth-2 overviews |
+| Key4hep k4geo DD4hep XML | Existing full FCC-ee imports and bounded tessellation | Depth-2 overviews and authored simplified presets |
 | ATLAS Phase 2 SQLite | GeoModel import, detailed selection and tessellation | Detailed and simplified |
 | ATLAS Phase 1 NHB | Read, select and package | Detailed and simplified |
 | sPHENIX ROOT | TGeo import and bounded tessellation | Depth-2 overview |
@@ -22,6 +22,10 @@ successful `main` runs deploy through the existing GitHub Pages environment.
 This deliberately avoids a matrix of every preset, importer entry point, and
 graphics backend. The overview configs limit rendering to two placement levels;
 they are useful integration examples, not polished detector visualizations.
+FCC-ee also packages the existing simplified fixtures under
+`fixtures/configs/fccee/`, reusing the full import within each model's worker.
+These are package-only entries; detailed fixture downloads are provided with
+explicit IDEA reduced-input restrictions. We retain the depth-2 smoke checks.
 ATLAS's detailed preset is the representative expensive check. The dashboard
 labels the other presets as package-only; a successful package is not a claim
 that its rendering was tested.

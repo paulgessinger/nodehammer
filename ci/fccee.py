@@ -147,20 +147,49 @@ def run_case(source, output, min_nodes=1, package=False):
         nh.write(render, render_file, cfg.output, format='render-json')
     counts = check_render(json.loads(render_file.read_text()), len(tree['nodes']))
     if package:
-        # Publish only the bounded selection, never the full IDEA intermediate.
-        selected = output / 'selected.nhb.zst'
-        archive = output / 'scene.nhproj'
-        for phase, arguments, target in (
-            ('select', ['convert', '-i', str(nhb), '-c', str(config), '-o', str(selected)], selected),
-            ('pack', ['project', 'pack', '-i', str(selected), '-c', str(config),
-                      '-o', str(archive)], archive),
-        ):
-            target.unlink(missing_ok=True)
-            with capture_phase(output, phase, timings):
-                code = nh.cli.run(arguments)
-                if code:
-                    raise RuntimeError(f'{phase} exited {code}')
-            if not target.is_file() or not target.stat().st_size:
-                raise ValueError(f'{phase} did not produce output')
+        pack_project(nhb, config, output, timings)
     return {"source": str(source), "full_nodes": scene.node_count,
             "nhb_bytes": nhb.stat().st_size, **counts, "seconds": timings}
+
+
+def pack_project(nhb, config, output, timings, max_selected=None):
+    import nodehammer as nh
+
+    # Publish only the bounded selection, never the full IDEA intermediate.
+    selected = output / 'selected.nhb.zst'
+    archive = output / 'scene.nhproj'
+    for phase, arguments, target in (
+        ('select', ['convert', '-i', str(nhb), '-c', str(config), '-o', str(selected)], selected),
+        ('pack', ['project', 'pack', '-i', str(selected), '-c', str(config),
+                  '-o', str(archive)], archive),
+    ):
+        target.unlink(missing_ok=True)
+        with capture_phase(output, phase, timings):
+            code = nh.cli.run(arguments)
+            if code:
+                raise RuntimeError(f'{phase} exited {code}')
+        if not target.is_file() or not target.stat().st_size:
+            raise ValueError(f'{phase} did not produce output')
+        if phase == 'select' and max_selected is not None:
+            with capture_phase(output, 'selected-summary', timings):
+                scene, diags = nh.read_semantic(selected)
+                check_diagnostics(diags)
+                if not scene.valid or not 0 < scene.node_count <= max_selected:
+                    raise ValueError(f'authored preset selected {scene.node_count} nodes; '
+                                     f'expected 1..{max_selected}')
+
+
+def pack_fixture(nhb, config, output):
+    """Publish an authored preset without attributing smoke-test counts to it."""
+    import nodehammer as nh
+
+    output.mkdir(parents=True, exist_ok=True)
+    timings = {}
+    # Validate and flatten before packaging; the result is portable.
+    flat = output / 'scene.toml'
+    with capture_phase(output, 'config', timings):
+        code = nh.cli.run(['config', 'flatten', '-c', str(config), '-o', str(flat)])
+        if code:
+            raise RuntimeError(f'config flatten exited {code}')
+    pack_project(nhb, flat, output, timings, max_selected=200_000)
+    return {'status': 'packaged', 'seconds': timings}

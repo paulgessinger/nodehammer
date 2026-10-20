@@ -45,6 +45,23 @@ def source_catalog():
     return "\n".join(lines)
 
 
+def fixture_links():
+    lines = ["", "## Authored FCC-ee configurations", "",
+             "Simplified presets are published from the same full imports used by CI.",
+             "Detailed configs are provided for authoring, not automatically published.",
+             "**IDEA detailed requires the original reduced input; it does not remove fibers itself.**", "",
+             "[Fixture provenance and input restrictions](https://github.com/paulgessinger/"
+             "nodehammer/blob/main/fixtures/configs/fccee/README.md)", "",
+             "| Model | Simplified | Detailed |", "| --- | --- | --- |"]
+    for model in sorted((ROOT / 'fixtures/configs/fccee').iterdir()):
+        if not model.is_dir():
+            continue
+        base = f"configs/fccee/{model.name}"
+        lines.append(f"| {model.name} | [TOML]({base}/simplified.toml) | "
+                     f"[TOML]({base}/detailed.toml) |")
+    return "\n".join(lines) + "\n"
+
+
 def build(runtime, site, results):
     rows = {}
     for directory in results:
@@ -77,7 +94,8 @@ def build(runtime, site, results):
         "and sPHENIX ROOT and GDML. ATLAS Phase 1 uses a pinned NHB snapshot.",
         "One ATLAS detailed preset and both sPHENIX inputs are tessellated;",
         "the other ATLAS presets are packaged without duplicating those tests.",
-        "FCC-ee and sPHENIX use bounded depth-2 overviews, not full-detail selections.", "",
+        "FCC-ee smoke checks and sPHENIX use bounded depth-2 overviews.",
+        "Authored FCC-ee simplified presets are additional package-only publications.", "",
         "CI also opens the sPHENIX ROOT publication in Chromium/WebGL2 and checks",
         "that geometry was drawn. This is one browser smoke test, not GPU/backend parity coverage.",
         "Only successful builds deploy. Counts describe unique meshes, not instanced GPU cost.", "",
@@ -105,7 +123,8 @@ def build(runtime, site, results):
             if (docs / reserved).exists():
                 raise ValueError(f"reserved generated documentation page: {reserved}")
         (docs / "index.md").write_text(readme_page((ROOT / "README.md").read_text()))
-        (docs / "catalog.md").write_text("\n".join(lines) if results else source_catalog())
+        (docs / "catalog.md").write_text(("\n".join(lines) if results else source_catalog()) + fixture_links())
+        shutil.copytree(ROOT / "fixtures/configs/fccee", docs / "configs/fccee")
         (docs / "assets").mkdir(exist_ok=True)
         shutil.copy2(ROOT / "docs/assets/logo.png", docs / "assets/logo.png")
         if results:
