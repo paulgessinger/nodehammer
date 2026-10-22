@@ -44,13 +44,6 @@
 #include <sokol_glue.h>
 #include <sokol_log.h>
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-EM_JS(void, nh_report_render_status, (int ready, int error, unsigned draws, double triangles), {
-    Module['nodehammerStatus'] =
-        {'ready' : !!ready, 'error' : !!error, 'drawCalls' : draws, 'triangles' : triangles};
-});
-#endif
 #include <sokol_time.h>
 
 #include <algorithm>
@@ -2839,23 +2832,6 @@ void App::Impl::onFrame() {
     render();
 
     exporter_.postRender();
-
-#ifdef __EMSCRIPTEN__
-    // A machine-readable render signal for the published-viewer smoke test.
-    // Quoted keys survive Closure; report after submission, not just WASM startup.
-    const auto web_stats =
-        (active_renderer != nullptr ? active_renderer : &scene_renderer)->lastFrameStats();
-    const bool web_error = !scene_renderer.uploadError().empty() ||
-                           !cut_renderer.uploadError().empty() ||
-                           (project_ && project_->status() == ProjectFsStatus::Error) ||
-                           build_controller_.session().phase() == BuildPhase::Error ||
-                           build_controller_.session().phase() == BuildPhase::WaitingForUser ||
-                           !build_controller_.error().empty();
-    const bool web_ready = scene_uploaded && camera_framed && ibl_baker_.installed() &&
-                           !jobsRunning() && cut_settled && !web_error;
-    nh_report_render_status(web_ready, web_error, web_stats.draw_calls,
-                            static_cast<double>(web_stats.triangles));
-#endif
 
     // Drain any pending native picker modal. ImGui frame is ended,
     // sokol pass is committed; if NFD spawns a nested run loop and

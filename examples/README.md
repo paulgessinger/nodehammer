@@ -17,7 +17,6 @@ successful `main` runs deploy through the existing GitHub Pages environment.
 | ATLAS Phase 1 NHB | Read, select and package | Detailed and simplified |
 | sPHENIX ROOT | TGeo import and bounded tessellation | Depth-2 overview |
 | sPHENIX GDML | Geant4 import and bounded tessellation | Depth-2 overview |
-| sPHENIX ROOT publication | Chromium/WebGL2 load, draw counters and canvas screenshot | Same project as above |
 
 This deliberately avoids a matrix of every preset, importer entry point, and
 graphics backend. The overview configs limit rendering to two placement levels;
@@ -74,20 +73,13 @@ Then assemble the site with an installed WASM runtime:
 uv venv --python 3.12 build/gallery-venv
 uv pip install --python build/gallery-venv -r ci/gallery-requirements.txt
 source build/gallery-venv/bin/activate
-playwright install chromium
 scripts/build_pages_site.sh stage/share/nodehammer/web build/gallery-site
 python scripts/build_example_gallery.py \
   --runtime stage/share/nodehammer/web --site build/gallery-site \
   --results build/example-results build/fccee-results
 scripts/check_pages_site.py build/gallery-site
-python ci/browser_smoke.py --site build/gallery-site \
-  --output build/gallery-site/browser-results
 ```
 
-On Linux, `playwright install --with-deps chromium` also installs system
-dependencies. The browser test uses software WebGL2 for runner portability;
-it does not establish WebGPU performance or native/browser parity.
-It saves screenshots, console output and render counts; CI includes them in
-the site and uploads them separately, including on failure. Viewer readiness is exposed as
-`Module.nodehammerStatus` after render submission, including terminal build or
-upload errors.
+CI checks native geometry processing, project packaging, and the static site
+layout. Browser rendering is not automatically tested; inspect the uploaded
+`pages-site` artifact or the deployed site for visual validation.
