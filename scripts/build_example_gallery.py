@@ -96,12 +96,10 @@ def build(runtime, site, results):
         "the other ATLAS presets are packaged without duplicating those tests.",
         "FCC-ee smoke checks and sPHENIX use bounded depth-2 overviews.",
         "Authored FCC-ee simplified presets are additional package-only publications.", "",
-        "CI also opens the sPHENIX ROOT publication in Chromium/WebGL2 and checks",
-        "that geometry was drawn. This is one browser smoke test, not GPU/backend parity coverage.",
+        "CI validates native processing, project archives, and the static site layout.",
+        "Browser rendering is not automatically tested.",
         "Only successful builds deploy. Counts describe unique meshes, not instanced GPU cost.", "",
-        "[Download machine-readable results](results.json) · "
-        "[Browser screenshot](browser-results/scene.png) · "
-        "[Browser render metrics](browser-results/summary.json)", "",
+        "[Download machine-readable results](results.json)", "",
         "## Input provenance", "",
     ]
     for key, row in rows.items():

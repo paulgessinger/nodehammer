@@ -1,2 +1,1 @@
 zensical==0.0.71
-playwright==1.64.0

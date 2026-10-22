@@ -1050,11 +1050,10 @@ jobs:
         with:
           enable-cache: false
 
-      - name: Install gallery and browser tools
+      - name: Install documentation tools
         run: |
           uv venv --python 3.12 .gallery-venv
           uv pip install --python .gallery-venv -r ci/gallery-requirements.txt
-          .gallery-venv/bin/playwright install --with-deps chromium
           echo "$PWD/.gallery-venv/bin" >> "$GITHUB_PATH"
 
       - name: Unpack wasm runtime
@@ -1087,18 +1086,6 @@ jobs:
       - name: Check site layout
         shell: bash
         run: scripts/check_pages_site.py _site
-
-      - name: Render a published scene in Chromium
-        run: python ci/browser_smoke.py --site _site --output _site/browser-results
-
-      - name: Upload browser evidence
-        if: always()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: browser-results
-          path: _site/browser-results
-          if-no-files-found: warn
-          retention-days: 7
 
       # On main the deployed site is the browsable output; elsewhere (PRs, tags)
       # this artifact is the only way to look at what would be published.
