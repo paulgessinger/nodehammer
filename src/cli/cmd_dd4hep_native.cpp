@@ -1,5 +1,6 @@
 // Native-executable policy: redirect plugin output and explain premature
 // process exit during XML loading. Never linked into the callable CLI or the SDK.
+#include "import_log_guard.hpp"
 #include "run_internal.hpp"
 
 #include <diagnostic_codes.hpp>
@@ -12,12 +13,6 @@
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
-
-#ifdef _WIN32
-#include <io.h>
-#else
-#include <unistd.h>
-#endif
 
 namespace nodehammer::cli::detail {
 namespace {
@@ -72,51 +67,21 @@ class ImportExitGuard {
     std::atomic<unsigned> &counter_;
 };
 
-// Plugins sometimes bypass DD4hep logging and write directly to stdout.
-// Redirect only while importing, restoring the descriptor even on exceptions.
-class ImportLogGuard {
+// Backend-specific verbosity policy; stdout redirection is shared by native adapters.
+class DD4hepLogLevelGuard {
   public:
-    ImportLogGuard() {
-        std::fflush(stdout);
-#ifdef _WIN32
-        saved_ = _dup(_fileno(stdout));
-        const bool redirected = saved_ >= 0 && _dup2(_fileno(stderr), _fileno(stdout)) >= 0;
-#else
-        saved_ = dup(fileno(stdout));
-        const bool redirected = saved_ >= 0 && dup2(fileno(stderr), fileno(stdout)) >= 0;
-#endif
-        if (!redirected) {
-            closeSaved();
-            throw Error{codes::kFatalTgeoOpenFailed, "cannot redirect DD4hep plugin output"};
-        }
+    DD4hepLogLevelGuard() {
         dd4hep::setPrintLevel(dd4hep::ERROR);
         gErrorIgnoreLevel = kError;
     }
-    ~ImportLogGuard() {
-        std::fflush(stdout);
-#ifdef _WIN32
-        _dup2(saved_, _fileno(stdout));
-#else
-        dup2(saved_, fileno(stdout));
-#endif
-        closeSaved();
+    ~DD4hepLogLevelGuard() {
         dd4hep::setPrintLevel(level_);
         gErrorIgnoreLevel = rootLevel_;
     }
-    ImportLogGuard(const ImportLogGuard &) = delete;
-    ImportLogGuard &operator=(const ImportLogGuard &) = delete;
+    DD4hepLogLevelGuard(const DD4hepLogLevelGuard &) = delete;
+    DD4hepLogLevelGuard &operator=(const DD4hepLogLevelGuard &) = delete;
 
   private:
-    void closeSaved() {
-        if (saved_ >= 0) {
-#ifdef _WIN32
-            _close(saved_);
-#else
-            close(saved_);
-#endif
-        }
-    }
-    int saved_ = -1;
     dd4hep::PrintLevel level_ = dd4hep::printLevel();
     int rootLevel_ = gErrorIgnoreLevel;
 };
@@ -137,7 +102,9 @@ class NativeDD4hepImporter final : public ir::ISemanticImporter {
     std::vector<std::string> supportedExtensions() const override { return {}; }
     ir::ImportResult import(const std::filesystem::path &path) const override {
         const ImportGate gate;
-        const ImportLogGuard log;
+        const ImportLogGuard log{codes::kFatalTgeoOpenFailed,
+                                 "cannot redirect DD4hep plugin output"};
+        const DD4hepLogLevelGuard levels;
         const ImportExitGuard warning{global_};
         return importer_->import(path);
     }

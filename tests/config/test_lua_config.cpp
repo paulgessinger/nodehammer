@@ -452,3 +452,17 @@ TEST_CASE("evalLuaConfig: the root guard does not depend on the fetcher", "[conf
     REQUIRE(r.config.materials.empty());
     REQUIRE(project.requested.empty()); // never even asked
 }
+
+TEST_CASE("evalLuaConfig: generic trap render tolerances roundtrip",
+          "[config][lua][generic_trap]") {
+    auto result = eval(R"LUA(
+        defaults { tessellation = { generic_trap_tolerance = 0.1 } }
+        rule { match = 'name == "fine"', tessellation = { generic_trap_tolerance = 0.001 } }
+    )LUA");
+    REQUIRE_FALSE(result.diags.hasErrors());
+    REQUIRE(result.config.tessellationDefaults.genericTrapTolerance == 0.1);
+    REQUIRE(result.config.rules[0].tessellation->genericTrapTolerance == 0.001);
+    auto restored = ConfigLoader::loadFromString(configToToml(result.config));
+    REQUIRE(restored.config.tessellationDefaults.genericTrapTolerance == 0.1);
+    REQUIRE(restored.config.rules[0].tessellation->genericTrapTolerance == 0.001);
+}

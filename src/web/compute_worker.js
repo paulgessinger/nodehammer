@@ -71,17 +71,27 @@ self.onmessage = async function (e) {
     }
 
     const lenPtr = mod._malloc(4);
+    let configPtr = 0;
     let dataPtr = 0;
     try {
+        if (sendBytes) {
+            // ccall's "string" conversion uses the fixed-size WASM stack.
+            // Flattened detector selections can be much larger than that stack;
+            // stage UTF-8 on the growable heap, just like the scene bytes.
+            const config = new TextEncoder().encode(msg.configToml || '');
+            configPtr = mod._malloc(config.length + 1);
+            mod.HEAPU8.set(config, configPtr);
+            mod.HEAPU8[configPtr + config.length] = 0;
+        }
         dataPtr = mod.ccall(
             'nh_compute_build',
             'number',
-            ['number', 'number', 'number', 'string', 'number', 'number', 'number', 'number', 'number'],
+            ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'],
             [
                 epoch,
                 scenePtr,
                 sceneLen,
-                sendBytes ? (msg.configToml || '') : null,
+                configPtr,
                 wedge ? 1 : 0,
                 wedge ? wedge.startDeg : 0,
                 wedge ? wedge.endDeg : 0,
@@ -90,6 +100,9 @@ self.onmessage = async function (e) {
             ]
         );
     } finally {
+        if (configPtr) {
+            mod._free(configPtr);
+        }
         if (scenePtr) {
             mod._free(scenePtr);
         }

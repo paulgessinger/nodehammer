@@ -22,6 +22,7 @@ struct NodeView {
     std::string_view materialName; ///< Source material name, e.g. "Silicon"
     bool isLeaf{false};            ///< true iff the node has no children
     const std::map<std::string, std::string> *tags{nullptr};
+    std::string_view volumeName{}; ///< Logical-volume name, independent of placement/display name.
 };
 
 // ── Predicate ─────────────────────────────────────────────────────────────────
@@ -34,6 +35,9 @@ using Predicate = std::function<bool(const NodeView &)>;
 /// '*' matches any sequence of characters (name has no '/', so '**' behaves identically).
 /// @TODO: add `[abc]` syntax for character class matching.
 [[nodiscard]] Predicate makeNameGlobPredicate(std::string pattern);
+
+/// Matches the logical-volume name, without changing placement names or paths.
+[[nodiscard]] Predicate makeVolumeGlobPredicate(std::string pattern);
 
 /// Matches node path against a glob pattern.
 /// '*' matches any sequence of non-'/' characters; '**' matches any sequence including '/'.

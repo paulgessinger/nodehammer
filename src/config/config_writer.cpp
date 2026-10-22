@@ -31,6 +31,9 @@ toml::table predicateToTable(const PredicateExpr &expr) {
             [](const NameGlobPredicate &p) -> toml::table {
                 return toml::table{{"type", "name_glob"}, {"pattern", p.pattern}};
             },
+            [](const VolumeGlobPredicate &p) -> toml::table {
+                return toml::table{{"type", "volume_glob"}, {"pattern", p.pattern}};
+            },
             [](const PathGlobPredicate &p) -> toml::table {
                 return toml::table{{"type", "path_glob"}, {"pattern", p.pattern}};
             },
@@ -235,6 +238,8 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
             if (tess.averageMaterialStack) {
                 tessTbl.insert("average_material_stack", *tess.averageMaterialStack);
             }
+            if (tess.genericTrapTolerance)
+                tessTbl.insert("generic_trap_tolerance", *tess.genericTrapTolerance);
             if (tess.maxSegmentsCircle) {
                 tessTbl.insert("max_segments_circle",
                                static_cast<int64_t>(*tess.maxSegmentsCircle));
@@ -260,7 +265,8 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
     toml::table out;
     const auto &td = cfg.tessellationDefaults;
     const bool any_tess = td.skipGeometry || td.mergeDescendants || td.dropCoincidentFaces ||
-                          td.averageMaterialStack || td.maxSegmentsCircle || td.fallback;
+                          td.averageMaterialStack || td.maxSegmentsCircle ||
+                          td.genericTrapTolerance || td.fallback;
     if (any_tess) {
         toml::table tessTbl;
         if (td.skipGeometry) {
@@ -275,6 +281,8 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
         if (td.averageMaterialStack) {
             tessTbl.insert("average_material_stack", *td.averageMaterialStack);
         }
+        if (td.genericTrapTolerance)
+            tessTbl.insert("generic_trap_tolerance", *td.genericTrapTolerance);
         if (td.maxSegmentsCircle) {
             tessTbl.insert("max_segments_circle", static_cast<int64_t>(*td.maxSegmentsCircle));
         }

@@ -348,3 +348,13 @@ TEST_CASE("ConfigWriter: tag predicate without value round-trip", "[config][writ
     REQUIRE(tag.key == "active");
     REQUIRE_FALSE(tag.value.has_value());
 }
+
+TEST_CASE("ConfigWriter: logical volume selection roundtrips", "[config][writer]") {
+    NHConfig cfg;
+    SelectionRule rule;
+    rule.predicate = PredicateExpr{VolumeGlobPredicate{"*Toroid*"}};
+    cfg.selection.push_back(rule);
+    const auto restored = roundTrip(cfg);
+    REQUIRE(std::get<VolumeGlobPredicate>(restored.selection.at(0).predicate.data).pattern ==
+            "*Toroid*");
+}

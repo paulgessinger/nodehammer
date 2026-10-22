@@ -26,6 +26,10 @@ struct NameGlobPredicate {
     std::string pattern;
 };
 
+struct VolumeGlobPredicate {
+    std::string pattern;
+};
+
 struct PathGlobPredicate {
     std::string pattern;
 };
@@ -54,8 +58,8 @@ struct OrPredicate;
 struct NotPredicate;
 
 using PredicateVariant =
-    std::variant<NameGlobPredicate, PathGlobPredicate, MaterialGlobPredicate, TagPredicate,
-                 IsLeafPredicate, BoolPredicate, std::shared_ptr<AndPredicate>,
+    std::variant<NameGlobPredicate, VolumeGlobPredicate, PathGlobPredicate, MaterialGlobPredicate,
+                 TagPredicate, IsLeafPredicate, BoolPredicate, std::shared_ptr<AndPredicate>,
                  std::shared_ptr<OrPredicate>, std::shared_ptr<NotPredicate>>;
 
 struct PredicateExpr {
@@ -152,6 +156,7 @@ struct Rule {
         // is computed over the merged stack); independent of dropCoincidentFaces.
         std::optional<bool> averageMaterialStack;
         std::optional<int> maxSegmentsCircle;
+        std::optional<double> genericTrapTolerance;
         std::optional<BooleanFallback> fallback;
     };
     std::optional<Tessellation> tessellation;

@@ -82,6 +82,9 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options, ir::ImporterRe
 void registerCmdInspect(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
 void registerCmdConfig(CLI::App &app, const CliOptions &options, ir::ImporterRegistry &registry);
 
+void registerCmdGeoModelNative(CLI::App &app, const CliOptions &options,
+                               ir::ImporterRegistry &registry);
+
 // Native executable only: plugin output redirection and exit warning.
 void registerCmdDD4hepNative(CLI::App &app, const CliOptions &options,
                              ir::ImporterRegistry &registry);

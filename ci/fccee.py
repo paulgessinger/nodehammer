@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Full DD4hep -> NHS9 conversion and bounded rendering of representative FCC-ee models."""
-import argparse
+from contextlib import contextmanager
+import ctypes
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
 import time
 
@@ -52,8 +52,8 @@ def smoke_config(tree):
     return '\n'.join(lines) + '\n'
 
 
-def check_render(render, expected_nodes):
-    if len(render["nodes"]) != expected_nodes:
+def check_render(render, expected_nodes=None):
+    if expected_nodes is not None and len(render["nodes"]) != expected_nodes:
         raise ValueError("render node count differs from the selected depth-2 tree")
     meshes = {m["id"]: m for m in render["meshAssets"]}
     triangles = sum(m["indexCount"] // 3 for m in meshes.values())
@@ -68,76 +68,128 @@ def check_render(render, expected_nodes):
     return {"render_nodes": len(render["nodes"]), "meshes": len(meshes), "triangles": triangles}
 
 
-def run_case(exe, source, output, min_nodes=1):
+@contextmanager
+def capture_phase(output, phase, timings):
+    """Capture Python and native plugin output in a dedicated worker process."""
+    start = time.monotonic()
+    sys.stdout.flush()
+    sys.stderr.flush()
+    ctypes.CDLL(None).fflush(None)
+    saved = [os.dup(fd) for fd in (1, 2)]
+    try:
+        with (output / f'{phase}.stdout').open('w') as stdout, \
+                (output / f'{phase}.log').open('w') as stderr:
+            os.dup2(stdout.fileno(), 1)
+            os.dup2(stderr.fileno(), 2)
+            try:
+                yield
+            finally:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                ctypes.CDLL(None).fflush(None)
+    finally:
+        for fd, original in zip((1, 2), saved):
+            os.dup2(original, fd)
+            os.close(original)
+        timings[phase] = time.monotonic() - start
+
+
+def check_diagnostics(diags):
+    for diagnostic in diags:
+        print(f'{diagnostic.code}: {diagnostic.message}', file=sys.stderr)
+    if diags.has_errors:
+        raise ValueError('bindings returned error diagnostics')
+
+
+def run_case(source, output, min_nodes=1, package=False):
+    # Imported only in the fresh worker, never in the parent orchestrator.
+    import nodehammer as nh
+
     output.mkdir(parents=True, exist_ok=True)
     timings = {}
-
-    def run(phase, *args, document=False):
-        start = time.monotonic()
-        with (output / f"{phase}.log").open('w') as log:
-            result = subprocess.run([str(exe), *map(str, args)], stdout=subprocess.PIPE,
-                                    stderr=log, text=True, timeout=1200)
-        timings[phase] = time.monotonic() - start
-        (output / f"{phase}.stdout").write_text(result.stdout)
-        if result.returncode:
-            raise RuntimeError(f"{phase} exited {result.returncode}; see {output / (phase + '.log')}")
-        if document:
-            value = json.loads(result.stdout)
-            (output / f"{phase}.json").write_text(json.dumps(value, indent=2) + '\n')
-            return value
-        return None
-
     nhb = output / 'geometry.nhb.zst'
     nhb.unlink(missing_ok=True)
-    flags = ['--dd4hep-global'] if source.suffix == '.xml' else []
-    run('convert', 'convert', '-i', source, *flags, '-o', nhb)
+    with capture_phase(output, 'convert', timings):
+        options = {'dd4hep.useGlobalDetector': True} if source.suffix == '.xml' else {}
+        scene, diags = nh.read_semantic(source, importer_options=options)
+        check_diagnostics(diags)
+        if not scene.valid or scene.node_count < min_nodes:
+            raise ValueError('full geometry is empty, unexpectedly reduced, or invalid')
+        nh.write(scene, nhb)
     if not nhb.is_file() or nhb.stat().st_size == 0:
-        raise ValueError("conversion did not write geometry")
-    summary = run('summary', 'inspect', '--output-format', 'json', 'summary', '-i', nhb,
-                  document=True)
-    if summary['nodes'] < min_nodes or summary['diagnostics']['errors']:
-        raise ValueError("full geometry is empty, unexpectedly reduced, or invalid")
-    tree = run('tree', 'inspect', '--output-format', 'json', 'tree', '-i', nhb,
-               '--depth', 2, document=True)
+        raise ValueError('conversion did not write geometry')
+
+    # Inspect the serialized scene too, preserving the NHB round-trip checks.
+    # Tree/summary inspection has no scene API; use the in-process CLI binding.
+    documents = {}
+    for phase, extra in (('summary', []), ('tree', ['--depth', '2'])):
+        with capture_phase(output, phase, timings):
+            code = nh.cli.run(['inspect', '--output-format', 'json', phase,
+                               '-i', str(nhb), *extra])
+            if code:
+                raise RuntimeError(f'{phase} exited {code}')
+        document = json.loads((output / f'{phase}.stdout').read_text())
+        (output / f'{phase}.json').write_text(json.dumps(document, indent=2) + '\n')
+        documents[phase] = document
+    summary, tree = documents['summary'], documents['tree']
+    if summary['nodes'] != scene.node_count or summary['diagnostics']['errors']:
+        raise ValueError('serialized geometry differs from the imported scene or is invalid')
     config = output / 'smoke.toml'
     config.write_text(smoke_config(tree))
-    run('config', 'config', 'validate', '-c', config)
+    with capture_phase(output, 'config', timings):
+        cfg, diags = nh.read_config(config)
+        check_diagnostics(diags)
     render_file = output / 'render.json'
     render_file.unlink(missing_ok=True)
-    run('tessellate', 'convert', '-i', nhb, '-c', config,
-        '--output-format', 'render-json', '-o', render_file)
+    with capture_phase(output, 'tessellate', timings):
+        render, diags = nh.build(scene, cfg.scene)
+        check_diagnostics(diags)
+        nh.write(render, render_file, cfg.output, format='render-json')
     counts = check_render(json.loads(render_file.read_text()), len(tree['nodes']))
-    return {"source": str(source), "full_nodes": summary['nodes'],
+    if package:
+        pack_project(nhb, config, output, timings)
+    return {"source": str(source), "full_nodes": scene.node_count,
             "nhb_bytes": nhb.stat().st_size, **counts, "seconds": timings}
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--nodehammer', type=Path, default=Path('build/Release/nodehammer'))
-    parser.add_argument('--geometry-root', type=Path)
-    parser.add_argument('--output', type=Path, default=Path('build/fccee-results'))
-    parser.add_argument('--model', choices=MODELS, action='append')
-    args = parser.parse_args()
-    root = args.geometry_root or geometry_root()
-    report = {}
-    for model in args.model or MODELS:
-        family, minimum = MODELS[model]
-        source = root / 'FCCee' / family / 'compact' / model / f'{model}.xml'
-        print(f'::group::{model}', flush=True)
-        try:
-            if not source.is_file():
-                raise FileNotFoundError(source)
-            report[model] = {"status": "passed", **run_case(args.nodehammer.resolve(), source,
-                                                            args.output / model, minimum)}
-        except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.TimeoutExpired) as error:
-            report[model] = {"status": "failed", "error": str(error)}
-            print(f'::error::{model}: {error}', flush=True)
-        finally:
-            args.output.mkdir(parents=True, exist_ok=True)
-            (args.output / 'summary.json').write_text(json.dumps(report, indent=2) + '\n')
-            print('::endgroup::', flush=True)
-    return int(any(row['status'] != 'passed' for row in report.values()))
+def pack_project(nhb, config, output, timings, max_selected=None):
+    import nodehammer as nh
+
+    # Publish only the bounded selection, never the full IDEA intermediate.
+    selected = output / 'selected.nhb.zst'
+    archive = output / 'scene.nhproj'
+    for phase, arguments, target in (
+        ('select', ['convert', '-i', str(nhb), '-c', str(config), '-o', str(selected)], selected),
+        ('pack', ['project', 'pack', '-i', str(selected), '-c', str(config),
+                  '-o', str(archive)], archive),
+    ):
+        target.unlink(missing_ok=True)
+        with capture_phase(output, phase, timings):
+            code = nh.cli.run(arguments)
+            if code:
+                raise RuntimeError(f'{phase} exited {code}')
+        if not target.is_file() or not target.stat().st_size:
+            raise ValueError(f'{phase} did not produce output')
+        if phase == 'select' and max_selected is not None:
+            with capture_phase(output, 'selected-summary', timings):
+                scene, diags = nh.read_semantic(selected)
+                check_diagnostics(diags)
+                if not scene.valid or not 0 < scene.node_count <= max_selected:
+                    raise ValueError(f'authored preset selected {scene.node_count} nodes; '
+                                     f'expected 1..{max_selected}')
 
 
-if __name__ == '__main__':
-    sys.exit(main())
+def pack_fixture(nhb, config, output):
+    """Publish an authored preset without attributing smoke-test counts to it."""
+    import nodehammer as nh
+
+    output.mkdir(parents=True, exist_ok=True)
+    timings = {}
+    # Validate and flatten before packaging; the result is portable.
+    flat = output / 'scene.toml'
+    with capture_phase(output, 'config', timings):
+        code = nh.cli.run(['config', 'flatten', '-c', str(config), '-o', str(flat)])
+        if code:
+            raise RuntimeError(f'config flatten exited {code}')
+    pack_project(nhb, flat, output, timings, max_selected=200_000)
+    return {'status': 'packaged', 'seconds': timings}

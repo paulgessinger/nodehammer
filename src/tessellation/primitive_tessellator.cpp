@@ -1,3 +1,4 @@
+#include "generic_trap.hpp"
 #include <detail/overloaded.hpp>
 #include <diagnostic_codes.hpp>
 #include <tessellation/primitive_tessellator.hpp>
@@ -791,6 +792,13 @@ TessellationOutput tessellatePcon(const ir::semantic::PconShape &s, const Tessel
     if (s.sections.size() < 2) {
         return out;
     }
+    // GeoModel also supplies profiles ordered from high Z to low Z. Reverse
+    // the whole profile (including coincident-Z steps) to preserve its boundary.
+    if (s.sections.front().z > s.sections.back().z) {
+        auto ascending = s;
+        std::reverse(ascending.sections.begin(), ascending.sections.end());
+        return tessellatePcon(ascending, p);
+    }
     const int segs = std::max(3, p.maxSegmentsCircle);
     const float phi0 = static_cast<float>(s.phiStart);
     const float dphi = static_cast<float>(s.phiDelta);
@@ -867,6 +875,41 @@ TessellationOutput tessellatePcon(const ir::semantic::PconShape &s, const Tessel
                                    {glm::vec3{rOuter * ca1, rOuter * sa1, capZ}, capN},
                                    {glm::vec3{rOuter * ca0, rOuter * sa0, capZ}, capN});
                 }
+            }
+        }
+    }
+
+    // Triangulate the complete radial profile. Separate section quads leave
+    // T-junctions where coincident-Z sections change radius.
+    if (std::abs(dphi - 2 * kPi) > 1e-4f) {
+        manifold::SimplePolygon profile;
+        auto add = [&](double radius, double z) {
+            const manifold::vec2 point{radius, z};
+            if (profile.empty() || profile.back() != point)
+                profile.push_back(point);
+        };
+        for (const auto &section : s.sections)
+            add(section.rMax, section.z);
+        for (auto it = s.sections.rbegin(); it != s.sections.rend(); ++it)
+            add(it->rMin, it->z);
+        if (profile.size() > 1 && profile.front() == profile.back())
+            profile.pop_back();
+        const auto triangles = manifold::Triangulate({profile});
+        for (int end = 0; end < 2; ++end) {
+            const float phi = angle(end ? segs : 0);
+            const glm::vec3 normal =
+                (end ? 1.0f : -1.0f) * glm::vec3{-std::sin(phi), std::cos(phi), 0};
+            auto vertex = [&](int index) -> ir::render::Vertex {
+                const auto &point = profile[static_cast<size_t>(index)];
+                return {{static_cast<float>(point.x) * std::cos(phi),
+                         static_cast<float>(point.x) * std::sin(phi), static_cast<float>(point.y)},
+                        normal};
+            };
+            for (const auto &tri : triangles) {
+                if (end)
+                    appendTriangle(out, vertex(tri[2]), vertex(tri[1]), vertex(tri[0]));
+                else
+                    appendTriangle(out, vertex(tri[0]), vertex(tri[1]), vertex(tri[2]));
             }
         }
     }
@@ -1116,42 +1159,6 @@ TessellationOutput tessellateExtruded(const ir::semantic::ExtrudedShape &s) {
     return out;
 }
 
-TessellationOutput tessellateGenericTrap(const ir::semantic::GenericTrapShape &s,
-                                         const TessellationParams &p) {
-    TessellationOutput out;
-    ir::semantic::validateShape(s);
-    std::vector<glm::dvec2> lower(s.vertices.begin(), s.vertices.begin() + 4);
-    std::vector<glm::dvec2> upper(s.vertices.begin() + 4, s.vertices.end());
-    if (signedArea(lower) + signedArea(upper) < 0) {
-        std::reverse(lower.begin(), lower.end());
-        std::reverse(upper.begin(), upper.end());
-    }
-    int segments = 1;
-    for (size_t i = 0; i < 4; ++i) {
-        const size_t j = (i + 1) % 4;
-        const auto a = lower[j] - lower[i], b = upper[j] - upper[i];
-        if (std::abs(a.x * b.y - a.y * b.x) > 1e-12 * glm::length(a) * glm::length(b))
-            segments = std::max(1, p.maxSegmentsCircle);
-    }
-    std::vector<std::vector<glm::dvec3>> rings;
-    for (int k = 0; k <= segments; ++k) {
-        const double t = static_cast<double>(k) / segments;
-        auto &ring = rings.emplace_back();
-        for (size_t i = 0; i < 4; ++i)
-            ring.emplace_back((1 - t) * lower[i] + t * upper[i], (2 * t - 1) * s.dz);
-    }
-    appendPolygonCap(out, rings.front(), false);
-    appendPolygonCap(out, rings.back(), true);
-    for (size_t k = 1; k < rings.size(); ++k)
-        for (size_t i = 0; i < 4; ++i) {
-            const size_t j = (i + 1) % 4;
-            const auto a = rings[k - 1][i], b = rings[k - 1][j], c = rings[k][j], d = rings[k][i];
-            appendSurfaceTriangle(out, a, b, c);
-            appendSurfaceTriangle(out, a, c, d);
-        }
-    return out;
-}
-
 // ── TessellatedShape ──────────────────────────────────────────────────────────
 //
 // The shape already carries explicit triangle soup (e.g. from a TGeoTessellated
@@ -1189,6 +1196,17 @@ TessellationOutput PrimitiveTessellator::tessellate(const ir::semantic::ShapeVar
             [&](const ir::semantic::BoxShape &s) { return tessellateBox(s); },
             [&](const ir::semantic::TubeShape &s) { return tessellateTube(s, params); },
             [&](const ir::semantic::ConeShape &s) { return tessellateCone(s, params); },
+            [&](const ir::semantic::GenericTrapShape &s) {
+                try {
+                    return tessellateTessellated(
+                        tessellateGenericTrap(s, params.genericTrapTolerance));
+                } catch (const std::exception &e) {
+                    TessellationOutput out;
+                    out.succeeded = false;
+                    out.diags.error(codes::kErrTessUnknownShape, e.what(), "generic_trap");
+                    return out;
+                }
+            },
             [&](const ir::semantic::TrdShape &s) { return tessellateTrd(s); },
             [&](const ir::semantic::ParaShape &s) { return tessellatePara(s); },
             [&](const ir::semantic::TorusShape &s) -> TessellationOutput {
@@ -1197,9 +1215,6 @@ TessellationOutput PrimitiveTessellator::tessellate(const ir::semantic::ShapeVar
             [&](const ir::semantic::PconShape &s) { return tessellatePcon(s, params); },
             [&](const ir::semantic::PgonShape &s) { return tessellatePgon(s, params); },
             [&](const ir::semantic::ExtrudedShape &s) { return tessellateExtruded(s); },
-            [&](const ir::semantic::GenericTrapShape &s) {
-                return tessellateGenericTrap(s, params);
-            },
             [&](const ir::semantic::TessellatedShape &s) { return tessellateTessellated(s); },
             [](const ir::semantic::UnknownShape &s) {
                 TessellationOutput err;

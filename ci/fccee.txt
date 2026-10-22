@@ -8,29 +8,40 @@ and compiler caches are separate from the former LCG 109 environment.
 
 The representative suite is CLD_o2_v08, ALLEGRO_o1_v01, IDEA_o1_v03 and
 IDEA_o2_v01 from the installed k4geo compact files. Each detector is loaded in
-a fresh CLI process using --dd4hep-global (required by ALLEGRO readouts) and
-converted without a selection config into full NHS9. The output is reloaded
+a fresh Python worker using read_semantic with dd4hep.useGlobalDetector=true
+(required by ALLEGRO readouts), then written without selection into full NHS9.
+The unified steering script shares a bounded process pool across all detector
+inputs, with four workers by default and one input per worker lifetime. The output is reloaded
 and validated with inspect summary. IDEA imports must retain at least 200
 million occurrences; reduced historical fixtures cannot pass this check.
 
 Tessellation is deliberately bounded: inspect tree --depth 2 supplies the
 placement boundaries for a generated config which drops deeper descendants.
 The entire source is still imported and serialized first. Tessellation tests
-NHS9 readback, shared selection and lowering on these upper placement levels,
+shared selection and lowering on the imported scene's upper placement levels,
 not full-detail detector rendering or the historical hand-authored configs.
 The world solid is hidden, every retained node receives a material, and
 boolean failure is an error. The gate requires matching retained/render node
 counts, nonempty triangle geometry and valid mesh references.
 
-ci/fccee.py --nodehammer build/Release/nodehammer
+PYTHONPATH=build/Release/python .venv-key4hep/bin/python ci/detectors.py --suite fccee
+
+The Key4hep build enables NODEHAMMER_BUILD_PYTHON with the stack's Python
+interpreter in a uv-managed virtual environment containing the dev dependency group:
+
+  uv venv --python "$(command -v python3)" .venv-key4hep
+  uv pip install --python .venv-key4hep --group dev
+Loading, writing, configuration and rendering use the direct Python bindings.
+Tree and summary inspection use nh.cli.run in-process, since those operations
+have no scene-level Python API. No stage launches a CLI subprocess.
 
 The script discovers compact files via K4GEO or CMAKE_PREFIX_PATH; an explicit
---geometry-root can supply the directory containing FCCee/. --model selects
-one model for debugging. Each CLI stage has a 20-minute timeout; the job has
-a 90-minute bound. A detector failure does not prevent attempts on the other
-models. summary.json, per-stage logs, inspection/render JSON and generated
-configs are uploaded as fccee-results even on failure, retained for seven days.
-Large generated NHB geometry is not uploaded or committed.
+--geometry-root can supply the directory containing FCCee/. --suite fccee
+selects only FCC-ee inputs; --jobs controls concurrency. The CI job has a
+90-minute bound. Ordinary detector failures do not stop other inputs; a native
+worker crash breaks the pool and marks unfinished inputs failed. summary.json, per-stage logs, inspection/render JSON, generated
+configs and compressed NHB geometry are uploaded as fccee-results even on
+failure, retained for seven days. Geometry is not committed.
 
 The local harness checks run with:
-  python3 -m unittest discover -s ci -p test_fccee.py
+  python3 -m pytest ci -q

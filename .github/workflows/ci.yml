@@ -1029,7 +1029,7 @@ jobs:
 
   pages:
     name: Build Pages site
-    needs: build
+    needs: [build, lcg]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1040,6 +1040,22 @@ jobs:
           name: nodehammer-wasm32
           path: wasm-artifact
 
+      - name: Download detector examples
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: detector-examples
+          path: example-artifact
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: false
+
+      - name: Install documentation tools
+        run: |
+          uv venv --python 3.12 .gallery-venv
+          uv pip install --python .gallery-venv -r ci/gallery-requirements.txt
+          echo "$PWD/.gallery-venv/bin" >> "$GITHUB_PATH"
+
       - name: Unpack wasm runtime
         shell: bash
         run: |
@@ -1047,8 +1063,6 @@ jobs:
           tar xzf wasm-artifact/nodehammer-wasm32.tar.gz -C wasm-runtime
           ls -la wasm-runtime/share/nodehammer/web
 
-      # The native build is only here to mint the .nhb fixture for the smoke
-      # below; this job otherwise deals purely in the wasm artifact.
       # Landing page + one self-contained directory per web posture:
       # app/ (no sidecar -> application mode) and odd/ + odd-simple/
       # (sidecar -> locked .nhproj publications).
@@ -1059,7 +1073,11 @@ jobs:
       # that no machine without a checkout could serve.
       - name: Assemble site
         shell: bash
-        run: scripts/build_pages_site.sh wasm-runtime/share/nodehammer/web _site
+        run: |
+          scripts/build_pages_site.sh wasm-runtime/share/nodehammer/web _site
+          python scripts/build_example_gallery.py \
+            --runtime wasm-runtime/share/nodehammer/web --site _site \
+            --results example-artifact/example-results example-artifact/fccee-results
 
       # Keeps the assembly honest on pull requests, which never deploy: the
       # artifact stays browsable and the job fails here if a posture is
@@ -1168,7 +1186,7 @@ jobs:
           draft: false
 
   lcg:
-    name: Key4hep FCC-ee (TGeo/DD4hep)
+    name: Key4hep detector coverage (DD4hep/TGeo/GeoModel/GDML)
     timeout-minutes: 90
     runs-on: ubuntu-24.04
     steps:
@@ -1178,6 +1196,13 @@ jobs:
         uses: cvmfs-contrib/github-action-cvmfs@72f2a8d366043978d6aebee154bc9ed321c2f2a8 # v5.6
         with:
           cvmfs_repositories: "sft.cern.ch,sft-nightlies.cern.ch,geant4.cern.ch,sw.hsf.org"
+
+      - name: Restore pinned example inputs
+        id: example-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/example-inputs
+          key: example-inputs-v1-${{ hashFiles('examples/catalog.toml') }}
 
       - name: Restore Conan cache
         id: conan-cache
@@ -1200,7 +1225,7 @@ jobs:
           restore-keys: |
             ccache-key4hep-v2-20260408-
 
-      - name: Build, test and convert FCC-ee in Key4hep
+      - name: Build and check representative detectors in Key4hep
         uses: aidasoft/run-lcg-view@b4da52e1c5ccb70a60ad4e7216de0a90664d5849 # v6.0.2
         with:
           container: el9
@@ -1235,9 +1260,22 @@ jobs:
             export CCACHE_BASEDIR="$PWD"
             export CCACHE_NOHASHDIR=1
             export CCACHE_SLOPPINESS=time_macros,include_file_mtime,include_file_ctime,pch_defines,locale,clang_index_store
-            ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
+            # Use the stack's interpreter for both the extension and FCC-ee workers.
+            uv venv --python "$(command -v python3)" .venv-key4hep
+            uv pip install --python .venv-key4hep --group dev
+            export NH_PYTHON="$PWD/.venv-key4hep/bin/python"
+            # Key4hep supplies GeoModel's prerequisites; FetchContent supplies
+            # pinned Core/IO, built with the same compiler as nodehammer.
+            ci/build.sh configure native -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON -DNODEHAMMER_WITH_GEANT4=ON -DNODEHAMMER_WITH_GEOMODEL=ON -DNODEHAMMER_FETCH_GEOMODEL=ON \
+              -DNODEHAMMER_BUILD_PYTHON=ON -DPython_EXECUTABLE="$NH_PYTHON"
             ci/build.sh build native
             ci/build.sh test native -j4
+            # Keep the installed-package path covered too. GeoModel is installed
+            # separately, rather than adding its headers to the nodehammer SDK.
+            cmake --build build/Release --target GeoModelIOHelpers --parallel 4
+            cmake --install build/Release/_deps/geomodel-build --prefix "$PWD/build/geomodel/install"
+            export CMAKE_PREFIX_PATH="$PWD/build/geomodel/install:${CMAKE_PREFIX_PATH:-}"
+            export LD_LIBRARY_PATH="$PWD/build/geomodel/install/lib:${LD_LIBRARY_PATH:-}"
             # The only environment where the backends are *shared* libraries
             # rather than absorbable static archives, so the only real test of
             # cmake/nodehammer-config.cmake.in's "no find_dependency() needed".
@@ -1246,16 +1284,42 @@ jobs:
             # Separate configure: this must succeed without discovering any of
             # the full build's processing or application dependencies.
             bash ci/verify-ingest.sh build/ingestion-key4hep \
-              -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON
-            python3 -m unittest discover -s ci -p "test_fccee.py"
-            python3 ci/fccee.py
+              -DNODEHAMMER_WITH_TGEO=ON -DNODEHAMMER_WITH_DD4HEP=ON -DNODEHAMMER_WITH_GEOMODEL=ON -DNODEHAMMER_FETCH_GEOMODEL=OFF
+            "$NH_PYTHON" -m pytest ci -q
+            PYTHONPATH="$PWD/build/Release/python${PYTHONPATH:+:$PYTHONPATH}" "$NH_PYTHON" ci/detectors.py --jobs 4
 
-      - name: Upload FCC-ee diagnostics
+      - name: Upload detector projects
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: detector-examples
+          path: |
+            build/example-results/summary.json
+            build/example-results/*/scene.nhproj
+            build/fccee-results/summary.json
+            build/fccee-results/*/scene.nhproj
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload example diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: example-results
+          path: |
+            build/example-results/summary.json
+            build/example-results/**/*.toml
+            build/example-results/**/*.log
+            build/example-results/**/*.stdout
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload FCC-ee geometry and diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fccee-results
           path: |
+            build/fccee-results/**/*.nhb.zst
             build/fccee-results/**/*.json
             build/fccee-results/**/*.toml
             build/fccee-results/**/*.log
@@ -1265,7 +1329,7 @@ jobs:
 
       - name: Fix cache ownership
         if: always()
-        run: sudo chown -R "$USER" "${{ github.workspace }}/.conan2" "${{ github.workspace }}/.ccache-key4hep" "${{ github.workspace }}/.cache/conan" || true
+        run: sudo chown -R "$USER" "${{ github.workspace }}/.conan2" "${{ github.workspace }}/.ccache-key4hep" "${{ github.workspace }}/.cache" || true
 
       - name: Save Key4hep ccache
         if: success() && github.ref == 'refs/heads/main'
@@ -1273,6 +1337,13 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache-key4hep
           key: ccache-key4hep-v2-20260408-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Save pinned example inputs
+        if: success() && steps.example-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/example-inputs
+          key: example-inputs-v1-${{ hashFiles('examples/catalog.toml') }}
 
       - name: Save Conan cache
         if: success() && github.ref == 'refs/heads/main' && steps.conan-cache.outputs.cache-hit != 'true'
