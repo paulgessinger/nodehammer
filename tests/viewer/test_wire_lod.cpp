@@ -8,11 +8,8 @@ using namespace nodehammer;
 using namespace nodehammer::viewer;
 
 namespace {
-detail::JsonValue metadata(float radius = 0.01f, float length = 1, float pixels = 0.5f) {
-    return detail::JsonValue::makeObject(
-        {{"nodehammer_wire_lod",
-          detail::JsonValue::makeObject(
-              {{"radius", radius}, {"half_length", length}, {"min_pixels", pixels}})}});
+ir::render::WireLod metadata(float radius = 0.01f, float length = 1, float pixels = 0.5f) {
+    return {radius, length, pixels};
 }
 const auto perspective = glm::perspective(glm::radians(90.f), 1.f, 0.1f, 1000.f);
 float fade(const WireLodBounds &wire) {
@@ -58,7 +55,7 @@ TEST_CASE("wire LOD handles affine radial scaling and malformed metadata conserv
     CHECK(wireLodBounds(metadata(1), world).radius == Catch::Approx(3));
     world[1][0] = 2;
     CHECK(wireLodBounds(metadata(1), world).radius > 3);
-    CHECK(fade(wireLodBounds(detail::JsonValue{}, world)) == 0);
+    CHECK(fade(wireLodBounds(std::nullopt, world)) == 0);
     CHECK(fade(wireLodBounds(metadata(1, 1, 0), world)) == 0);
     CHECK(fade(wireLodBounds(metadata(-1), world)) == 0);
     CHECK(fade(wireLodBounds(metadata(1, -1), world)) == 0);
@@ -115,9 +112,7 @@ TEST_CASE("wire distance uses nearest segment and sparse distant hint with neste
     CHECK(wireDistanceFraction(100, 100) == kWireHintFraction);
     CHECK(wireDistanceFraction(10000, 100) == kWireHintFraction);
     auto data = metadata();
-    auto lod = *data.find("nodehammer_wire_lod");
-    lod.set("max_distance", 100.);
-    data.set("nodehammer_wire_lod", lod);
+    data.maxDistance = 100;
     CHECK(wireLodBounds(data, glm::mat4{1}).maxDistance == 100);
 }
 
@@ -181,17 +176,14 @@ TEST_CASE("custom wire policies retain conservative mixed spatial blocks", "[vie
 }
 
 TEST_CASE("wire policy metadata reaches renderer without changing defaults", "[viewer][wire_lod]") {
-    auto extras = metadata();
-    auto lod = *extras.find("nodehammer_wire_lod");
-    lod.set("distance_factors", detail::JsonValue::makeArray({0.1, 0.4, 2.0}));
-    lod.set("fractions", detail::JsonValue::makeArray({0.8, 0.2, 0.05, 0.0}));
-    lod.set("hint_pixels", 0.75);
-    extras.set("nodehammer_wire_lod", lod);
-    auto wire = wireLodBounds(extras, glm::mat4{1});
+    auto lod = metadata();
+    lod.distanceFactors = {0.1, 0.4, 2.0};
+    lod.fractions = {0.8, 0.2, 0.05, 0.0};
+    lod.hintPixels = 0.75;
+    auto wire = wireLodBounds(lod, glm::mat4{1});
     CHECK(wire.policy.factors == std::array<float, 3>{0.1f, 0.4f, 2});
     CHECK(wire.policy.fractions == std::array<float, 4>{0.8f, 0.2f, 0.05f, 0});
     CHECK(wire.policy.hintPixels == 0.75f);
-    lod.set("fractions", detail::JsonValue::makeArray({1.0, 0.1, 0.2, 0.0}));
-    extras.set("nodehammer_wire_lod", lod);
-    CHECK(wireLodBounds(extras, glm::mat4{1}).policy.fractions == WireLodPolicy{}.fractions);
+    lod.fractions = {1.0, 0.1, 0.2, 0.0};
+    CHECK(wireLodBounds(lod, glm::mat4{1}).policy.fractions == WireLodPolicy{}.fractions);
 }

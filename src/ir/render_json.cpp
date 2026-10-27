@@ -88,6 +88,16 @@ void to_json(nlohmann::json &j, const Node &n) {
         {"meshBindings", n.meshBindings},
         {"semanticNodeId", n.semanticNodeId},
     };
+    if (n.wireLod) {
+        const auto &w = *n.wireLod;
+        j["wireLod"] = {{"radius", w.radius},
+                        {"halfLength", w.halfLength},
+                        {"minPixels", w.minPixels},
+                        {"maxDistance", w.maxDistance},
+                        {"distanceFactors", w.distanceFactors},
+                        {"fractions", w.fractions},
+                        {"hintPixels", w.hintPixels}};
+    }
     if (n.parentId)
         j["parentId"] = *n.parentId;
     if (!n.extras.empty())

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <detail/json_value.hpp>
 #include <glm/glm.hpp>
+#include <ir/render.hpp>
 
 #include <algorithm>
 #include <array>
@@ -27,22 +27,14 @@ struct WireLodBounds {
     WireLodPolicy policy{};
 };
 
-inline WireLodBounds wireLodBounds(const detail::JsonValue &extras, const glm::mat4 &world) {
-    const auto *metadata = extras.find("nodehammer_wire_lod");
+inline WireLodBounds wireLodBounds(const std::optional<ir::render::WireLod> &metadata,
+                                   const glm::mat4 &world) {
     if (!metadata)
         return {};
-    auto number = [&](const char *key) {
-        const auto *value = metadata->find(key);
-        if (!value)
-            return 0.f;
-        if (const auto *d = value->asDouble())
-            return static_cast<float>(*d);
-        if (const auto *i = value->asInt())
-            return static_cast<float>(*i);
-        return 0.f;
-    };
-    const float radius = number("radius"), halfLength = number("half_length"),
-                pixels = number("min_pixels"), distance = number("max_distance");
+    const float radius = static_cast<float>(metadata->radius),
+                halfLength = static_cast<float>(metadata->halfLength),
+                pixels = static_cast<float>(metadata->minPixels),
+                distance = static_cast<float>(metadata->maxDistance);
     if (!(radius > 0 && halfLength > 0 && (pixels > 0 || distance > 0)) || !std::isfinite(radius) ||
         !std::isfinite(halfLength) || !std::isfinite(pixels) || !std::isfinite(distance))
         return {};
@@ -56,35 +48,24 @@ inline WireLodBounds wireLodBounds(const detail::JsonValue &extras, const glm::m
                          distance};
     if (!std::isfinite(bounds.radius))
         return {};
-    auto readArray = [&](const char *key, auto &out, bool increasing) {
-        const auto *value = metadata->find(key);
-        if (!value)
-            return;
-        const auto *array = value->asArray();
-        if (!array || array->size() != out.size())
-            return;
+    auto readArray = [](const auto &values, auto &out, bool increasing) {
         auto parsed = out;
         float previous = increasing ? 0.f : 1.f;
         for (size_t i = 0; i < parsed.size(); ++i) {
-            const auto &v = (*array)[i];
-            float parsedValue = v.asDouble() ? static_cast<float>(*v.asDouble())
-                                : v.asInt()  ? static_cast<float>(*v.asInt())
-                                             : NAN;
-            if (!std::isfinite(parsedValue) ||
-                (increasing ? parsedValue <= previous : parsedValue < 0 || parsedValue > previous))
+            float value = static_cast<float>(values[i]);
+            if (!std::isfinite(value) ||
+                (increasing ? value <= previous : value < 0 || value > previous))
                 return;
-            parsed[i] = parsedValue;
-            previous = parsedValue;
+            parsed[i] = value;
+            previous = value;
         }
         out = parsed;
     };
-    readArray("distance_factors", bounds.policy.factors, true);
-    readArray("fractions", bounds.policy.fractions, false);
-    if (metadata->find("hint_pixels")) {
-        const float width = number("hint_pixels");
-        if (std::isfinite(width) && width >= 0)
-            bounds.policy.hintPixels = width;
-    }
+    readArray(metadata->distanceFactors, bounds.policy.factors, true);
+    readArray(metadata->fractions, bounds.policy.fractions, false);
+    const auto width = static_cast<float>(metadata->hintPixels);
+    if (std::isfinite(width) && width >= 0)
+        bounds.policy.hintPixels = width;
     return bounds;
 }
 

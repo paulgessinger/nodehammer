@@ -114,8 +114,9 @@ TEST_CASE("Opted-in cut wires share one mesh and preserve material and extras",
             continue;
         ++drawn;
         CHECK(node.extras.at("user_note") == detail::JsonValue{"preserved"});
-        CHECK(node.extras.at("nodehammer_wire_lod").at("radius") == detail::JsonValue{1.0});
-        CHECK(node.extras.at("nodehammer_wire_lod").at("half_length") == detail::JsonValue{1.0});
+        REQUIRE(node.wireLod);
+        CHECK(node.wireLod->radius == 1.0);
+        CHECK(node.wireLod->halfLength == 1.0);
         CHECK(node.worldTransform[3].y == Catch::Approx(-10));
         CHECK(glm::length(glm::vec3(node.worldTransform[2])) == Catch::Approx(10));
     }
@@ -191,7 +192,7 @@ TEST_CASE("Uncut opted-in wires use shared canonical cylinder and exact LOD can 
     REQUIRE_FALSE(exact.diags.hasErrors());
     for (const auto &[id, node] : exact.scene.nodes) {
         (void)id;
-        CHECK(node.extras.find("nodehammer_wire_lod") == nullptr);
+        CHECK_FALSE(node.wireLod);
     }
 }
 
@@ -209,19 +210,14 @@ TEST_CASE("Wire policy resolves defaults and last matching overrides into render
     REQUIRE_FALSE(lowered.diags.hasErrors());
     int seen = 0;
     for (const auto &[id, node] : lowered.scene.nodes) {
-        const auto *metadata = node.extras.find("nodehammer_wire_lod");
-        if (!metadata)
+        if (!node.wireLod)
             continue;
         ++seen;
-        REQUIRE(metadata->find("fractions"));
-        const auto *fractions = metadata->find("fractions")->asArray();
-        REQUIRE(fractions);
-        REQUIRE(fractions->size() == 4);
-        CHECK(*(*fractions)[0].asDouble() == 0.8);
-        CHECK(*(*fractions)[3].asDouble() == 0);
-        CHECK(*metadata->find("hint_pixels")->asDouble() == 0);
-        CHECK(*metadata->find("max_distance")->asDouble() == 40);
-        CHECK(*(*metadata->find("distance_factors")->asArray())[1].asDouble() == 0.2);
+        CHECK(node.wireLod->fractions[0] == 0.8);
+        CHECK(node.wireLod->fractions[3] == 0);
+        CHECK(node.wireLod->hintPixels == 0);
+        CHECK(node.wireLod->maxDistance == 40);
+        CHECK(node.wireLod->distanceFactors[1] == 0.2);
     }
     CHECK(seen > 0);
 }

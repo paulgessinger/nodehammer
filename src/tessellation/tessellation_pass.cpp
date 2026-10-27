@@ -1529,24 +1529,13 @@ void wireLod(ir::render::Node &node, double radius, double dz, double pixels, do
              const ResolvedTessellation &rule) {
     if (pixels <= 0 && distance <= 0)
         return;
-    // Rule extras are normally objects; retain any custom scalar extras rather
-    // than replacing them just to attach optional viewer metadata.
-    if (!node.extras.isNull() && !node.extras.isObject())
-        return;
-    detail::JsonValue::Array factors, fractions;
-    for (double value : rule.wireLodDistanceFactors)
-        factors.emplace_back(value);
-    for (double value : rule.wireLodFractions)
-        fractions.emplace_back(value);
-    node.extras.set("nodehammer_wire_lod",
-                    detail::JsonValue::makeObject(
-                        {{"radius", radius},
-                         {"half_length", dz},
-                         {"min_pixels", pixels},
-                         {"max_distance", distance},
-                         {"distance_factors", detail::JsonValue::makeArray(std::move(factors))},
-                         {"fractions", detail::JsonValue::makeArray(std::move(fractions))},
-                         {"hint_pixels", rule.wireLodHintPixels}}));
+    node.wireLod = ir::render::WireLod{radius,
+                                       dz,
+                                       pixels,
+                                       distance,
+                                       rule.wireLodDistanceFactors,
+                                       rule.wireLodFractions,
+                                       rule.wireLodHintPixels};
 }
 } // namespace
 
