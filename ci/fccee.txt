@@ -45,3 +45,10 @@ failure, retained for seven days. Geometry is not committed.
 
 The local harness checks run with:
   python3 -m pytest ci -q
+
+Gallery publications use the authored simplified/detailed pair for each model,
+not the smoke scene. Each preset is selected and packaged from the full NHB;
+its result embeds the smoke report separately and carries no smoke triangle
+counts at the top level. The detailed IDEA configs explicitly drop dual-readout
+calorimeter internals. Selection guards reject more than 200,000 simplified or
+5,000,000 detailed placements before packaging.

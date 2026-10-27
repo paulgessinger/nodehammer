@@ -1,0 +1,222 @@
+# Approximate visible surface finishes, not optical/simulation material data.
+# Unmapped mixtures use a neutral dielectric instead of a subsystem color.
+
+[materials.neutral]
+base_color = "#91918C"
+metallic = 0
+roughness = 0.65
+
+[materials.silicon]
+base_color = "#454B59"
+metallic = 0.55
+roughness = 0.24
+
+[materials.aluminium]
+base_color = "#C4C7CA"
+metallic = 1
+roughness = 0.32
+
+[materials.copper]
+base_color = "#B8734A"
+metallic = 1
+roughness = 0.3
+
+[materials.gold]
+base_color = "#D9B45C"
+metallic = 1
+roughness = 0.25
+
+[materials.steel]
+base_color = "#8B8E91"
+metallic = 1
+roughness = 0.42
+
+[materials.tungsten]
+base_color = "#777A7D"
+metallic = 1
+roughness = 0.5
+
+[materials.lead]
+base_color = "#686B75"
+metallic = 1
+roughness = 0.55
+
+[materials.carbon]
+base_color = "#292C30"
+metallic = 0
+roughness = 0.8
+
+[materials.polymer]
+base_color = "#E5E0D2"
+metallic = 0
+roughness = 0.55
+
+[materials.foam]
+base_color = "#E7E4D8"
+metallic = 0
+roughness = 0.95
+
+[materials.board]
+base_color = "#617259"
+metallic = 0
+roughness = 0.65
+
+[materials.kapton]
+base_color = "#A66C2C"
+metallic = 0
+roughness = 0.48
+
+[materials.glass]
+base_color = "#D8E1DF"
+metallic = 0
+roughness = 0.18
+
+[materials.fluid]
+base_color = "#E0E7E725"
+alpha_mode = "blend"
+metallic = 0
+roughness = 0.15
+
+[materials.gas]
+base_color = "#E9EEEE10"
+metallic = 0
+roughness = 0.8
+alpha_mode = "blend"
+
+[[rules]]
+material = "neutral"
+
+[[rules]]
+match = [
+  'material ~= "Silicon"',
+  'material ~= "G4_Si"',
+]
+material = "silicon"
+
+[[rules]]
+match = [
+  'material ~= "Aluminum"',
+  'material ~= "Aluminium"',
+  'material ~= "AlBeMet162"',
+  'material ~= "SolenoidMixture"',
+  'material ~= "Beryllium"',
+]
+material = "aluminium"
+
+[[rules]]
+match = [
+  'material ~= "Copper"',
+  'material ~= "G4_Cu"',
+  'material ~= "Brass*"',
+]
+material = "copper"
+
+[[rules]]
+match = [
+  'material ~= "Gold"',
+  'material ~= "DCH_SWireMat"',
+]
+material = "gold"
+
+[[rules]]
+match = [
+  'material ~= "Iron"',
+  'material ~= "G4_Fe"',
+  'material ~= "Steel*"',
+  'material ~= "StainlessSteel*"',
+  'material ~= "lArCaloSteel"',
+]
+material = "steel"
+
+[[rules]]
+match = [
+  'material ~= "Tungsten*"',
+]
+material = "tungsten"
+
+[[rules]]
+match = [
+  'material ~= "Lead"',
+]
+material = "lead"
+
+[[rules]]
+match = [
+  'material ~= "CarbonFib*"',
+  'material ~= "CarbonFleece"',
+  'material ~= "Allcomp_K9"',
+]
+material = "carbon"
+
+[[rules]]
+match = [
+  'material ~= "Polystyrene"',
+  'material ~= "G4_POLYSTYRENE"',
+  'material ~= "Scintillator*"',
+  'material ~= "Epoxy"',
+  'material ~= "GlueEcobond45"',
+  'material ~= "PEEK"',
+  'material ~= "lArCaloGlue"',
+]
+material = "polymer"
+
+[[rules]]
+match = [
+  'material ~= "PolystyreneFoam"',
+  'material ~= "Rohacell*"',
+]
+material = "foam"
+
+[[rules]]
+match = [
+  'material ~= "G10"',
+  'material ~= "G10_FR4"',
+  'material ~= "PCB"',
+  'material ~= "siPCBMix"',
+  'material ~= "GroundOrHVMix"',
+]
+material = "board"
+
+[[rules]]
+match = [
+  'material ~= "Kapton"',
+  'material ~= "KaptonVtx"',
+]
+material = "kapton"
+
+[[rules]]
+match = [
+  'material ~= "PyrexGlass"',
+  'material ~= "Glass"',
+  'material ~= "LYSO"',
+  'material ~= "Quartz"',
+  'material ~= "PbWO"',
+]
+material = "glass"
+
+[[rules]]
+match = [
+  'material ~= "LiquidArgon"',
+  'material ~= "LAr"',
+  'material ~= "Water"',
+  'material ~= "LiquidNDecane"',
+]
+material = "fluid"
+
+[[rules]]
+match = [
+  'material ~= "RPCGasDefault"',
+  'material ~= "GasHe_90Isob_10"',
+  'material ~= "ARCO2CF4"',
+]
+material = "gas"
+
+# IDEA field wires have a silver coating; sense wires are gold-coated tungsten.
+[materials.silver]
+base_color = "#D5D7D8"
+metallic = 1
+roughness = 0.25
+
+[[rules]]
+match = 'material ~= "DCH_F*WireMat"'
+material = "silver"

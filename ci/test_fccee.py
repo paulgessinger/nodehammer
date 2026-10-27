@@ -150,3 +150,14 @@ def test_authored_preset_rejects_full_idea_before_pack(tmp_path, bindings):
         fccee.pack_project(tmp_path / 'full.nhb', tmp_path / 'scene.toml',
                            tmp_path, {}, max_selected=200_000)
     assert not any(args[0] == 'project' for args in bindings.cli_calls)
+
+
+@pytest.mark.parametrize('variant,limit', [('simplified', 200_000), ('detailed', 5_000_000)])
+def test_fixture_selection_limit_depends_on_detail(tmp_path, bindings, monkeypatch, variant, limit):
+    seen = []
+    monkeypatch.setattr(sys.modules['nodehammer'].cli, 'run', lambda args: 0)
+    monkeypatch.setattr(fccee, 'pack_project',
+                        lambda *args, max_selected: seen.append(max_selected))
+    result = fccee.pack_fixture(tmp_path / 'full.nhb', Path(variant + '.toml'), tmp_path)
+    assert result['status'] == 'packaged'
+    assert seen == [limit]

@@ -2,83 +2,13 @@
 # Source: FCCee/IDEA/compact/IDEA_o1_v03/IDEA_o1_v03.xml
 # Use with analysis/fccee/geometry/IDEA_o1_v03.nhb.zst.
 # ROOT/DD4hep native length unit in this build is cm; exports below use metres.
-# PARTIAL GEOMETRY: large dual-readout calorimeter internals intentionally omitted.
-# Tagged retained envelopes are proxies. Detailed means all remaining imported parts.
-# See analysis/fccee/IDEA_o1_v03.omissions.json and FOLLOW_UP.txt.
-# Detailed: retain all placements and material layers; no merging or face removal.
 # Suppress non-sensitive air/vacuum and synthetic assembly boxes, not their children.
+
+# Detailed: material-based appearance; retain supports and material layers.
+include = ["../physical-materials.toml", "../idea-drift.toml"]
 
 hoist_orphans = false
 deduplicate_shapes = true
-
-[materials.vertex]
-base_color = "#E6B422"
-metallic = 0.15
-roughness = 0.55
-
-[materials.tracker]
-base_color = "#33B8B0"
-metallic = 0.15
-roughness = 0.55
-
-[materials.drift]
-base_color = "#65C7C2"
-metallic = 0.15
-roughness = 0.55
-
-[materials.ecal]
-base_color = "#E65B50"
-metallic = 0.15
-roughness = 0.55
-
-[materials.hcal]
-base_color = "#A75CB3"
-metallic = 0.15
-roughness = 0.55
-
-[materials.muon]
-base_color = "#527ED1"
-metallic = 0.15
-roughness = 0.55
-
-[materials.magnet]
-base_color = "#85919E"
-metallic = 0.15
-roughness = 0.55
-
-[materials.beam]
-base_color = "#ADB5BD"
-metallic = 0.15
-roughness = 0.55
-
-[materials.other]
-base_color = "#8EAD88"
-metallic = 0.15
-roughness = 0.55
-
-[materials.silicon]
-base_color = "#52B8A8"
-metallic = 0.35
-roughness = 0.35
-
-[materials.metal]
-base_color = "#A9AFB8"
-metallic = 0.8
-roughness = 0.4
-
-[materials.carbon]
-base_color = "#414852"
-metallic = 0.15
-roughness = 0.7
-
-[materials.scintillator]
-base_color = "#ED9D45"
-roughness = 0.5
-
-[materials.gas]
-base_color = "#68BCC218"
-alpha_mode = "blend"
-roughness = 0.7
 
 [export.gltf]
 unit_scale = 0.01
@@ -98,136 +28,21 @@ average_material_stack = false
 keep_if = 'true'
 
 [[rules]]
-match = 'path ~= "/world/BeBeampipe" || path ~= "/world/BeBeampipe/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/BeamPipe" || path ~= "/world/BeamPipe/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/SynchRadMask" || path ~= "/world/SynchRadMask/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/BeamPipeShield" || path ~= "/world/BeamPipeShield/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/BeamPipeShield_noRot" || path ~= "/world/BeamPipeShield_noRot/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/CompSol" || path ~= "/world/CompSol/**"'
-material = "magnet"
-
-[[rules]]
-match = 'path ~= "/world/ScreenSol" || path ~= "/world/ScreenSol/**"'
-material = "magnet"
-
-[[rules]]
-match = 'path ~= "/world/LumiCal" || path ~= "/world/LumiCal/**"'
-material = "ecal"
-
-[[rules]]
-match = 'path ~= "/world/LumiCalInstrumentation" || path ~= "/world/LumiCalInstrumentation/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/LumiCalCooling" || path ~= "/world/LumiCalCooling/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/LumiCalBackShield" || path ~= "/world/LumiCalBackShield/**"'
-material = "beam"
-
-[[rules]]
-match = 'path ~= "/world/Vertex" || path ~= "/world/Vertex/**"'
-material = "vertex"
-
-[[rules]]
-match = 'path ~= "/world/DCH_v2" || path ~= "/world/DCH_v2/**"'
-material = "drift"
-
-[[rules]]
-match = 'path ~= "/world/SiWrB" || path ~= "/world/SiWrB/**"'
-material = "tracker"
-
-[[rules]]
-match = 'path ~= "/world/SiWrD" || path ~= "/world/SiWrD/**"'
-material = "tracker"
-
-[[rules]]
-match = 'path ~= "/world/Solenoid" || path ~= "/world/Solenoid/**"'
-material = "magnet"
-
-[[rules]]
-match = 'path ~= "/world/EndPlateAbsorber_positive" || path ~= "/world/EndPlateAbsorber_positive/**"'
-material = "other"
-
-[[rules]]
-match = 'path ~= "/world/EndPlateAbsorber_negative" || path ~= "/world/EndPlateAbsorber_negative/**"'
-material = "other"
-
-[[rules]]
-match = 'path ~= "/world/Preshower" || path ~= "/world/Preshower/**"'
-material = "ecal"
-
-[[rules]]
-match = 'path ~= "/world/DRcalo" || path ~= "/world/DRcalo/**"'
-material = "hcal"
-
-[[rules]]
-match = 'path ~= "/world/Muon-System" || path ~= "/world/Muon-System/**"'
-material = "muon"
-
-[[rules]]
-match = [
-  'material ~= "Silicon"',
-]
-material = "silicon"
-
-[[rules]]
-match = [
-  'material ~= "AlBeMet162"',
-  'material ~= "Aluminum"',
-  'material ~= "Copper"',
-  'material ~= "Gold"',
-  'material ~= "Steel235"',
-  'material ~= "Tungsten"',
-]
-material = "metal"
-
-[[rules]]
-match = [
-  'material ~= "CarbonFibStr"',
-  'material ~= "CarbonFiber"',
-  'material ~= "CarbonFiberVtx"',
-  'material ~= "CarbonFiberVtx66D"',
-  'material ~= "CarbonFleece"',
-]
-material = "carbon"
-
-[[rules]]
-match = [
-  'material ~= "PolystyreneFoam"',
-]
-material = "scintillator"
-
-[[rules]]
-match = [
-  'material ~= "GasHe_90Isob_10"',
-]
-material = "gas"
-
-[[rules]]
 match = 'path ~= "/world" || ((material ~= "Air" || material ~= "Vacuum" || material ~= "beam" || material ~= "dummy") && !(tag.sensitive == "true"))'
 [rules.tessellation]
 skip_geometry = true
 
-# Explicit proxy for the user-approved omission; never imply full fiber detail.
+# Calorimeter internals are intentionally omitted, including on full CI inputs.
+# Keep the assembly solids as neutral proxies; no external reduction tags needed.
+[[selection_rules]]
+drop_if = [
+  'path ~= "/world/DRcalo/AssemblyTube_*/**"',
+]
+
 [[rules]]
-match = 'tag.omitted_calorimeter_internals == "true"'
-material = "hcal"
+match = [
+  'path ~= "/world/DRcalo/AssemblyTube_*"',
+]
+material = "neutral"
 [rules.tessellation]
 skip_geometry = false

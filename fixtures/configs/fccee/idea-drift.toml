@@ -1,0 +1,34 @@
+# Shared IDEA detailed drift-chamber rendering (source units: centimetres).
+# Gas cells retain their wire descendants; the bulk gas surface is not rendered.
+# Wire selection and appearance remain camera-dependent in the viewer.
+[[rules]]
+match = 'path ~= "/world/DCH_v2"'
+[rules.geometry.drift_chamber]
+detect = "auto"
+gas = 'material ~= "GasHe_90Isob_10"'
+wires = 'material ~= "DCH_F*WireMat" || material ~= "DCH_SWireMat"'
+gas_representation = "parent"
+wire_representation = "instanced"
+
+[[rules]]
+match = 'tag.nodehammer_drift_role == "wire"'
+[rules.tessellation]
+max_segments_circle = 12
+wire_cut = "centerline"
+wire_lod_pixels = 1.5
+wire_lod_distance = 40
+wire_lod_distance_factors = [0.25, 0.5, 1.0]
+wire_lod_fractions = [1.0, 0.3, 0.1, 0.005]
+wire_lod_hint_pixels = 0.5
+
+# The gas mother overlaps its vessel daughters; retain hierarchy but omit its surface.
+[[rules]]
+match = 'tag.nodehammer_drift_role == "gas_envelope"'
+[rules.tessellation]
+skip_geometry = true
+
+[[rules]]
+match = 'volume ~= "DCH_v2_vessel_outerR" || volume ~= "DCH_v2_vessel_endcap"'
+[rules.tessellation]
+subtract_daughters = true
+subtract_daughters_match = 'material ~= "PolystyreneFoam"'
