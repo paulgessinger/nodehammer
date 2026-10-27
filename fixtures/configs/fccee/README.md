@@ -20,22 +20,27 @@ not measured optical properties or simulation material-budget models.
 
 ## IDEA calorimeter reduction
 
-Detailed configs now explicitly omit descendants at the original reduction
+Detailed configs explicitly omit descendants below the retained display
 boundaries, so they can also be applied to full CI imports:
 
 | Model | Retained proxy boundaries | Omitted detail |
 | --- | --- | --- |
 | IDEA_o1_v03 | `/world/DRcalo/AssemblyTube_*` | Dual-readout calorimeter internals |
-| IDEA_o2_v01 | `/world/DREndcapTubes/phiER_*`, `/world/DRBarrelTubes/stave_volume_*` | Dual-readout calorimeter internals |
+| IDEA_o2_v01 | `/world/DREndcapTubes/phiER_*/towerLog_*`, `/world/DRBarrelTubes/stave_volume_*/tower_*` | Tower air, capillaries and fibres |
 
-The retained barrel assembly solids use a neutral proxy finish. IDEA o2 endcap
-`phiER_*` boxes are hidden in both presets: their centred rectangular bounds
-overlap into a false solid disc across the beam axis. Their fibre contents remain
-excluded, so these dual-readout endcaps currently have no display proxy. Other
-subsystems retain their material layers; IDEA o2 crystal sectors use fitted hulls
-as described below. Selection drops these descendant subtrees before tessellation and before
-packaging, so the browser never receives their fibers. Inspection of both
-selected IDEA presets confirmed zero descendants under every listed boundary.
+IDEA o1 assembly proxies use a neutral finish. IDEA o2 detailed retains 6,480
+barrel brass towers and 5,040 positioned endcap tower containers, with a brass
+finish representing their omitted contents. These are bulk display proxies;
+the air and fibre channels are not represented. The larger stave and `phiER_*`
+assembly boxes remain hidden because they span empty space and overlap adjacent
+sections. Tower boxes can still approximate boundaries imperfectly.
+IDEA o2 simplified continues to hide the endcap boxes without adding towers.
+
+Other subsystems retain their material layers; IDEA o2 crystal sectors use
+fitted hulls as described below. Selection drops tower descendants before
+tessellation and packaging, so the browser never receives their capillaries or
+fibres. Previously reduced inputs cannot recover the towers; regenerate from
+the full CI import when switching to this preset.
 No external `tag.omitted_calorimeter_internals` annotation is required. These are detailed
 views with a calorimeter approximation, not full fiber-level scenes.
 
@@ -86,12 +91,18 @@ not material-budget or wire-density visualizations; exports do not apply LOD.
 IDEA o2 also replaces dense crystal-cell sectors with fitted convex hulls.
 Simplified presets retain the conceptual subsystem palette and omit wires.
 
-The final IDEA presets were selected from those original CI imports under a
+The IDEA presets before the tower update were selected from those original CI imports under a
 30-second per-process timeout: o1 completed in 2.6 s (598,411 placements), o2 in
 20.6 s (592,289 placements). Both selected scenes were packaged successfully.
 Headless tessellation with and without the viewing wedge completed in 3.7–4.7 s
 for o1 and 14.6–16.2 s for o2 using the CI-derived selected inputs. These are
 local wall times, not browser frame-rate or CI performance guarantees.
+
+With both barrel and endcap towers enabled, IDEA o2 selection from the original
+CI import completed in 27.9 s (603,809 placements). Rebuilding that selected NHB
+with the viewing wedge took 6.9 s; packaging and visual inspection passed.
+Inspection confirmed 6,480 barrel and 5,040 endcap towers, all leaves. Geometry
+checks used the same 30-second per-process limit.
 
 The gallery packages semantic NHB with the flattened preset, so the viewer
 retains wire LOD metadata when rebuilding. NHR currently does not preserve that

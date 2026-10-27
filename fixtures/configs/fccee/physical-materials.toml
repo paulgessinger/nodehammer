@@ -26,6 +26,11 @@ base_color = "#D9B45C"
 metallic = 1
 roughness = 0.25
 
+[materials.brass]
+base_color = "#B59B55"
+metallic = 1
+roughness = 0.4
+
 [materials.steel]
 base_color = "#8B8E91"
 metallic = 1
@@ -107,9 +112,12 @@ material = "aluminium"
 match = [
   'material ~= "Copper"',
   'material ~= "G4_Cu"',
-  'material ~= "Brass*"',
 ]
 material = "copper"
+
+[[rules]]
+match = 'material ~= "Brass*" || material ~= "DRBTBrass"'
+material = "brass"
 
 [[rules]]
 match = [
