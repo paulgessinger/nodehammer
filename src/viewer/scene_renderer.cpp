@@ -612,7 +612,7 @@ void SceneRenderer::Impl::finalizeUpload() {
             auto &group = groups[it->second];
             group.instances.push_back(node.worldTransform);
             group.wire_lod.push_back(
-                wireHintBounds(wireLodBounds(node.extras, node.worldTransform)));
+                wireHintBounds(wireLodBounds(node.wireLod, node.worldTransform)));
             group.bounds_min.push_back(wmin);
             group.bounds_max.push_back(wmax);
             bmin = glm::min(bmin, wmin);

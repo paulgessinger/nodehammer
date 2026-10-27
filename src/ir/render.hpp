@@ -9,7 +9,9 @@
 // The JSON codec for these types lives in render_json.hpp / render_json.cpp so
 // this header stays free of the Semantic IR's codec and cheap to include.
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -104,6 +106,14 @@ using ExtrasMap = detail::JsonValue;
 
 // ── Render node ───────────────────────────────────────────────────────────────
 
+/// Runtime wire sampling policy; distances use scene units.
+struct WireLod {
+    double radius{}, halfLength{}, minPixels{}, maxDistance{};
+    std::array<double, 3> distanceFactors{0.25, 0.5, 1.0};
+    std::array<double, 4> fractions{1.0, 0.3, 0.1, 0.005};
+    double hintPixels{0.5};
+};
+
 struct Node {
     NodeId id;
     std::string name;
@@ -129,6 +139,8 @@ struct Node {
 
     /// Free-form metadata for export (e.g. glTF scene extras)
     ExtrasMap extras;
+
+    std::optional<WireLod> wireLod;
 };
 
 // ── Render scene ─────────────────────────────────────────────────────────────

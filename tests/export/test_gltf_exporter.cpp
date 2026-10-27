@@ -192,3 +192,35 @@ TEST_CASE("ObjExporter: single box -> OBJ + MTL files exist", "[export][obj]") {
     std::filesystem::remove(out);
     std::filesystem::remove(mtl);
 }
+
+TEST_CASE("GltfExporter: typed wire LOD becomes extras only at export", "[export][gltf][wire]") {
+    auto scene = buildBoxRenderScene();
+    for (auto &[id, node] : scene.nodes) {
+        node.wireLod = nodehammer::ir::render::WireLod{1, 2, 1.5, 40};
+        node.extras.set("custom", "retained");
+    }
+    const auto out = tmpPath("wire_lod.glb");
+    nodehammer::ir::ExportConfig cfg;
+    cfg.format = nodehammer::ir::ExportConfig::Format::GLB;
+    nodehammer::ir::GltfExporter{}.write(scene, out, cfg);
+    tinygltf::TinyGLTF reader;
+    tinygltf::Model model;
+    std::string err, warn;
+    REQUIRE(reader.LoadBinaryFromFile(&model, &err, &warn, out.string()));
+    REQUIRE(model.nodes.size() == scene.nodes.size());
+    for (const auto &node : model.nodes) {
+        REQUIRE(node.extras.Has("nodehammer_wire_lod"));
+        CHECK(node.extras.Get("custom").Get<std::string>() == "retained");
+        const auto &wire = node.extras.Get("nodehammer_wire_lod");
+        CHECK(wire.Get("radius").GetNumberAsDouble() == 1);
+        CHECK(wire.Get("half_length").GetNumberAsDouble() == 2);
+        CHECK(wire.Get("min_pixels").GetNumberAsDouble() == 1.5);
+        CHECK(wire.Get("max_distance").GetNumberAsDouble() == 40);
+        CHECK(wire.Get("hint_pixels").GetNumberAsDouble() == 0.5);
+        CHECK(wire.Get("fractions").Get(3).GetNumberAsDouble() == 0.005);
+        CHECK(wire.Get("distance_factors").Get(1).GetNumberAsDouble() == 0.5);
+    }
+    for (const auto &[id, node] : scene.nodes)
+        CHECK(node.extras.find("nodehammer_wire_lod") == nullptr);
+    std::filesystem::remove(out);
+}

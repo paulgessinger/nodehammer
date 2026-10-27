@@ -427,9 +427,26 @@ void GltfExporter::write(const render::Scene &scene, const std::filesystem::path
             }
         }
 
-        if (!rn.extras.empty()) {
-            gn.extras = extrasToValue(rn.extras);
+        auto extras = rn.extras;
+        if (rn.wireLod && (extras.isNull() || extras.isObject())) {
+            const auto &wire = *rn.wireLod;
+            detail::JsonValue::Array factors, fractions;
+            for (double value : wire.distanceFactors)
+                factors.emplace_back(value);
+            for (double value : wire.fractions)
+                fractions.emplace_back(value);
+            extras.set("nodehammer_wire_lod",
+                       detail::JsonValue::makeObject(
+                           {{"radius", wire.radius},
+                            {"half_length", wire.halfLength},
+                            {"min_pixels", wire.minPixels},
+                            {"max_distance", wire.maxDistance},
+                            {"distance_factors", detail::JsonValue::makeArray(std::move(factors))},
+                            {"fractions", detail::JsonValue::makeArray(std::move(fractions))},
+                            {"hint_pixels", wire.hintPixels}}));
         }
+        if (!extras.empty())
+            gn.extras = extrasToValue(extras);
     }
 
     // ── Scene(s) ──────────────────────────────────────────────────────────────
