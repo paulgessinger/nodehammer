@@ -85,10 +85,11 @@ class Pass {
                     const auto it = output_.metadata.volumeTags.find(volume);
                     if (it == output_.metadata.volumeTags.end())
                         continue;
-                    const auto &volumeTags = output_.metadata.tagSets.at(it->second);
+                    const auto &volumeTags =
+                        output_.metadata.tagSets.at(static_cast<std::size_t>(it->second));
                     if (!volumeTags.contains(marker))
                         continue;
-                    auto augmented = output_.metadata.tagSets.at(tagSet);
+                    auto augmented = output_.metadata.tagSets.at(static_cast<std::size_t>(tagSet));
                     augmented[marker] = volumeTags.at(marker);
                     tagSet = output_.metadata.tagSets.size();
                     output_.metadata.tagSets.push_back(std::move(augmented));
@@ -204,7 +205,7 @@ class Pass {
         OccurrenceTags volumeTags;
         if (const auto it = source_.metadata.volumeTags.find(volume.id);
             it != source_.metadata.volumeTags.end())
-            volumeTags = source_.metadata.tagSets.at(it->second);
+            volumeTags = source_.metadata.tagSets.at(static_cast<std::size_t>(it->second));
         if (!operands.empty())
             volumeTags[marker] = policy;
         if (!volumeTags.empty()) {

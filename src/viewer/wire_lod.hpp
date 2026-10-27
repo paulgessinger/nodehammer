@@ -67,13 +67,14 @@ inline WireLodBounds wireLodBounds(const detail::JsonValue &extras, const glm::m
         float previous = increasing ? 0.f : 1.f;
         for (size_t i = 0; i < parsed.size(); ++i) {
             const auto &v = (*array)[i];
-            float x = v.asDouble() ? static_cast<float>(*v.asDouble())
-                      : v.asInt()  ? static_cast<float>(*v.asInt())
-                                   : NAN;
-            if (!std::isfinite(x) || (increasing ? x <= previous : x < 0 || x > previous))
+            float parsedValue = v.asDouble() ? static_cast<float>(*v.asDouble())
+                                : v.asInt()  ? static_cast<float>(*v.asInt())
+                                             : NAN;
+            if (!std::isfinite(parsedValue) ||
+                (increasing ? parsedValue <= previous : parsedValue < 0 || parsedValue > previous))
                 return;
-            parsed[i] = x;
-            previous = x;
+            parsed[i] = parsedValue;
+            previous = parsedValue;
         }
         out = parsed;
     };
