@@ -11,6 +11,10 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
     DiagnosticList diags;
 
     auto validateTrapTolerance = [&](const Rule::Tessellation &t) {
+        if (t.smoothAngle &&
+            (!std::isfinite(*t.smoothAngle) || *t.smoothAngle < 0 || *t.smoothAngle > 180))
+            diags.error(codes::kErrConfigParse,
+                        "smooth_angle must be finite and between 0 and 180 degrees");
         if (t.genericTrapTolerance &&
             (!std::isfinite(*t.genericTrapTolerance) || *t.genericTrapTolerance <= 0))
             diags.error(codes::kErrNegativeTolerance,

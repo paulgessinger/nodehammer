@@ -253,6 +253,7 @@ set(NH_CORE_SOURCES
     src/selection/occurrence_selector.cpp
     src/selection/selector.cpp
     src/selection/shared_scene.cpp
+    src/tessellation/shading.cpp
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
     src/tessellation/wedge_cut.cpp

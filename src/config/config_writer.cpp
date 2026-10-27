@@ -238,6 +238,10 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
             if (tess.averageMaterialStack) {
                 tessTbl.insert("average_material_stack", *tess.averageMaterialStack);
             }
+            if (tess.shading)
+                tessTbl.insert("shading", std::string(shadingToString(*tess.shading)));
+            if (tess.smoothAngle)
+                tessTbl.insert("smooth_angle", *tess.smoothAngle);
             if (tess.genericTrapTolerance)
                 tessTbl.insert("generic_trap_tolerance", *tess.genericTrapTolerance);
             if (tess.maxSegmentsCircle) {
@@ -266,7 +270,7 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
     const auto &td = cfg.tessellationDefaults;
     const bool any_tess = td.skipGeometry || td.mergeDescendants || td.dropCoincidentFaces ||
                           td.averageMaterialStack || td.maxSegmentsCircle ||
-                          td.genericTrapTolerance || td.fallback;
+                          td.genericTrapTolerance || td.shading || td.smoothAngle || td.fallback;
     if (any_tess) {
         toml::table tessTbl;
         if (td.skipGeometry) {
@@ -281,6 +285,10 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
         if (td.averageMaterialStack) {
             tessTbl.insert("average_material_stack", *td.averageMaterialStack);
         }
+        if (td.shading)
+            tessTbl.insert("shading", std::string(shadingToString(*td.shading)));
+        if (td.smoothAngle)
+            tessTbl.insert("smooth_angle", *td.smoothAngle);
         if (td.genericTrapTolerance)
             tessTbl.insert("generic_trap_tolerance", *td.genericTrapTolerance);
         if (td.maxSegmentsCircle) {

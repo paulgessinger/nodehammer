@@ -602,6 +602,16 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             tess.averageMaterialStack = (*tessTbl)["average_material_stack"].value<bool>();
             tess.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             tess.genericTrapTolerance = (*tessTbl)["generic_trap_tolerance"].value<double>();
+            tess.smoothAngle = (*tessTbl)["smooth_angle"].value<double>();
+            if (tessTbl->contains("smooth_angle") && !tess.smoothAngle)
+                diags.error(codes::kErrConfigParse, "smooth_angle must be a number");
+            if (tessTbl->contains("shading")) {
+                auto value = (*tessTbl)["shading"].value<std::string>();
+                tess.shading = value ? parseShading(*value) : std::nullopt;
+                if (!tess.shading)
+                    diags.error(codes::kErrConfigParse,
+                                "shading must be preserve, smooth, or flat");
+            }
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);
                 if (!parsed) {
@@ -748,6 +758,16 @@ ConfigResult parseTable(const toml::table &tbl) {
             td.averageMaterialStack = (*tessTbl)["average_material_stack"].value<bool>();
             td.maxSegmentsCircle = (*tessTbl)["max_segments_circle"].value<int>();
             td.genericTrapTolerance = (*tessTbl)["generic_trap_tolerance"].value<double>();
+            td.smoothAngle = (*tessTbl)["smooth_angle"].value<double>();
+            if (tessTbl->contains("smooth_angle") && !td.smoothAngle)
+                diags.error(codes::kErrConfigParse, "smooth_angle must be a number");
+            if (tessTbl->contains("shading")) {
+                auto value = (*tessTbl)["shading"].value<std::string>();
+                td.shading = value ? parseShading(*value) : std::nullopt;
+                if (!td.shading)
+                    diags.error(codes::kErrConfigParse,
+                                "shading must be preserve, smooth, or flat");
+            }
             if (auto fallbackStr = (*tessTbl)["fallback"].value<std::string>()) {
                 auto parsed = parseBooleanFallback(*fallbackStr);
                 if (!parsed) {

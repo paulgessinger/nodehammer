@@ -230,6 +230,18 @@ config::Rule::Tessellation tessFromLua(const sol::table &t, const std::string &c
     if (const sol::optional<double> v = t[config::keys::kGenericTrapTolerance]) {
         tess.genericTrapTolerance = *v;
     }
+    if (const sol::object v = t[config::keys::kSmoothAngle]; v.valid()) {
+        if (v.get_type() == sol::type::number)
+            tess.smoothAngle = v.as<double>();
+        else
+            diags.error(codes::kErrConfigParse, "smooth_angle must be a number", ctx);
+    }
+    if (const sol::object v = t[config::keys::kShading]; v.valid()) {
+        if (v.get_type() == sol::type::string)
+            tess.shading = config::parseShading(v.as<std::string>());
+        if (!tess.shading)
+            diags.error(codes::kErrConfigParse, "shading must be preserve, smooth, or flat", ctx);
+    }
     if (const sol::optional<int> v = t[config::keys::kMaxSegmentsCircle]) {
         tess.maxSegmentsCircle = *v;
     }
