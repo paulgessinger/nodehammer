@@ -68,7 +68,14 @@ inline constexpr std::string_view kMaterialRef = "material";
 inline constexpr std::string_view kTessellation = "tessellation";
 inline constexpr std::string_view kExtras = "extras";
 
-inline constexpr std::array kRuleKeys = {kMatch, kMaterialRef, kTessellation, kExtras};
+inline constexpr std::string_view kGeometry = "geometry";
+inline constexpr std::string_view kReplaceDescendants = "replace_descendants";
+inline constexpr std::string_view kDriftChamber = "drift_chamber";
+inline constexpr std::array kGeometryKeys = {kReplaceDescendants, kDriftChamber};
+inline constexpr std::array<std::string_view, 5> kDriftChamberKeys = {
+    "detect", "gas", "wires", "gas_representation", "wire_representation"};
+
+inline constexpr std::array kRuleKeys = {kMatch, kMaterialRef, kTessellation, kExtras, kGeometry};
 
 // ── [rules.tessellation] / [defaults.tessellation] ───────────────────────────
 inline constexpr std::string_view kSkipGeometry = "skip_geometry";
@@ -80,6 +87,14 @@ inline constexpr std::string_view kGenericTrapTolerance = "generic_trap_toleranc
 inline constexpr std::string_view kShading = "shading";
 inline constexpr std::string_view kSmoothAngle = "smooth_angle";
 inline constexpr std::string_view kFallback = "fallback";
+inline constexpr std::string_view kSubtractDaughters = "subtract_daughters";
+inline constexpr std::string_view kSubtractDaughtersMatch = "subtract_daughters_match";
+inline constexpr std::string_view kWireCut = "wire_cut";
+inline constexpr std::string_view kWireLodDistance = "wire_lod_distance";
+inline constexpr std::string_view kWireLodDistanceFactors = "wire_lod_distance_factors";
+inline constexpr std::string_view kWireLodFractions = "wire_lod_fractions";
+inline constexpr std::string_view kWireLodHintPixels = "wire_lod_hint_pixels";
+inline constexpr std::string_view kWireLodPixels = "wire_lod_pixels";
 
 inline constexpr std::array kTessellationKeys = {
     kSkipGeometry,
@@ -91,6 +106,14 @@ inline constexpr std::array kTessellationKeys = {
     kShading,
     kSmoothAngle,
     kFallback,
+    kSubtractDaughters,
+    kSubtractDaughtersMatch,
+    kWireCut,
+    kWireLodPixels,
+    kWireLodDistance,
+    kWireLodDistanceFactors,
+    kWireLodFractions,
+    kWireLodHintPixels,
 };
 
 // ── [defaults] ───────────────────────────────────────────────────────────────

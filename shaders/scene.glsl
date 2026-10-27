@@ -30,16 +30,18 @@ in vec4 inst1;
 in vec4 inst2;
 in vec4 inst3;
 // Per-instance LOD cross-fade factor: x = fade (0 = full detail, 1 = full
-// hull proxy); yzw reserved. Computed per frame on the CPU from the
+// hull proxy); y = wire disappearance fade; zw reserved. Computed per frame on the CPU from the
 // instance's projected screen size and uploaded alongside the world matrix.
 in vec4 inst_lod;
 
 out vec3 v_normal_world;
 out vec3 v_world_pos;
 out float v_lod_fade;
+out float v_wire_fade;
 
 void main() {
     v_lod_fade = inst_lod.x;
+    v_wire_fade = inst_lod.y;
     vec4 world_pos =
           a_position.x * inst0
         + a_position.y * inst1
@@ -113,6 +115,7 @@ layout(binding=1) uniform sampler     smp_lut;
 in vec3 v_normal_world;
 in vec3 v_world_pos;
 in float v_lod_fade;
+in float v_wire_fade;
 out vec4 frag_color;
 
 const float PI = 3.14159265358979323846;
@@ -161,6 +164,10 @@ void main() {
     }
 
     if (alpha_params.x > 0.5 && base_color.a < alpha_params.y) {
+        discard;
+    }
+
+    if (v_wire_fade > 0.0 && v_wire_fade > ignDither(gl_FragCoord.xy)) {
         discard;
     }
 

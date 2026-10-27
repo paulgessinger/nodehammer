@@ -3,6 +3,9 @@
 #include <config/config_loader.hpp>
 #include <config/config_validator.hpp>
 #include <diagnostic_codes.hpp>
+#include <geometry/approximation.hpp>
+#include <geometry/drift_chamber.hpp>
+#include <geometry/subtract_daughters.hpp>
 #include <ir/semantic/importer.hpp>
 #include <selection/shared_scene.hpp>
 #include <tessellation/build_pipeline.hpp>
@@ -27,14 +30,31 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, const ir::semanti
     diagnostics::throwIfErrors(validDiags, "prepareSceneForTessellation");
 
     ir::semantic::Scene scene;
+    std::optional<ir::semantic::Scene> carved;
+    if (geometry::hasDaughterSubtraction(prep.config)) {
+        carved = source;
+        prep.diags.append(geometry::subtractDaughters(*carved, prep.config));
+    }
+    const auto &selectionSource = carved ? *carved : source;
     if (!prep.config.selection.empty()) {
         DiagnosticList selectionDiags;
-        scene = ir::semantic::selectCopy(source, prep.config.selection, prep.config.hoistOrphans,
-                                         selectionDiags);
+        scene = ir::semantic::selectCopy(selectionSource, prep.config.selection,
+                                         prep.config.hoistOrphans, selectionDiags);
         prep.diags.append(selectionDiags);
     } else {
-        scene = source;
+        if (carved)
+            scene = std::move(*carved);
+        else
+            scene = source;
     }
+
+    auto chamberDiags = geometry::optimizeDriftChambers(scene, prep.config);
+    prep.diags.append(chamberDiags);
+    diagnostics::throwIfErrors(chamberDiags, "drift chamber optimization");
+
+    auto approximationDiags = geometry::approximate(scene, prep.config);
+    prep.diags.append(approximationDiags);
+    diagnostics::throwIfErrors(approximationDiags, "geometry approximation");
 
     if (prep.config.deduplicateShapes) {
         scene.deduplicateMaterials();
@@ -55,7 +75,8 @@ prepareSceneForTessellationFromInputs(config::NHConfig config, const ir::semanti
 
 SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
                                      const std::filesystem::path &geometry_path,
-                                     const SemanticReadOptions &options) {
+                                     const SemanticReadOptions &options,
+                                     std::optional<tessellation::WedgeCutParams> wedgeCut) {
     SceneBuildResult result;
 
     if (geometry_path.empty()) {
@@ -82,17 +103,17 @@ SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
 
     // Drive the shared BuildPipeline to completion — the same prep → (wedge) →
     // tessellate core the viewer backends use, so this synchronous shim is no
-    // longer a hand-copied 4th sequence. `buildSceneFromPaths` applies no wedge
-    // (nullopt), and prep now runs with a deferred wedge like every other site
-    // (invariant #1). A single unbounded slice finishes in one drive loop.
+    // longer a hand-copied sequence. Optional wedges follow the same deferred
+    // path as viewer builds. A single unbounded slice finishes in one drive loop.
     tessellation::BuildPipeline pipe;
     pipe.start(std::make_shared<const config::NHConfig>(std::move(cfg)),
                std::make_shared<const ir::semantic::Scene>(std::move(importResult.scene)),
-               std::nullopt);
+               wedgeCut);
     while (!pipe.advance(std::numeric_limits<std::uint64_t>::max())) {
     }
     SceneBuildResult built = pipe.take();
     result.diags.append(built.diags);
+    result.failure = std::move(built.failure);
     result.scene = std::move(built.scene); // null when prep/tessellation failed
     return result;
 }

@@ -121,7 +121,9 @@ void BuildController::poll(ProjectFs *project, const AngleCut &cut, bool cut_upl
         // (docs/error-model.md).
         for (const auto &d : built.diags.items()) {
             std::println(stderr, "scene_build: {} {}", d.code, d.message);
-            if (notifications_ != nullptr) {
+            // Routine build summaries belong in the log; only actionable
+            // diagnostics should interrupt the viewer with a toast.
+            if (notifications_ != nullptr && d.severity >= diagnostics::Severity::Warning) {
                 notifications_->diagnostic(d);
             }
         }

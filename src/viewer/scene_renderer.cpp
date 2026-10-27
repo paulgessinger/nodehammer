@@ -3,6 +3,7 @@
 #include <viewer/backend_caps.hpp>
 #include <viewer/camera.hpp>
 #include <viewer/mesh_buffer_batch.hpp>
+#include <viewer/wire_lod.hpp>
 
 #include <ankerl/unordered_dense.h>
 #include <glm/gtc/type_ptr.hpp>
@@ -235,6 +236,8 @@ struct SceneRenderer::Impl {
         std::vector<glm::mat4> instances;
         std::vector<glm::vec3> bounds_min;
         std::vector<glm::vec3> bounds_max;
+        std::vector<WireLodBounds> wire_lod;
+        WireLodIndex wire_index;
         // Mesh-space bounding sphere (constant per group). Drives the LOD size
         // metric: transforming this center by the instance matrix and scaling
         // this radius by the transform's scale gives a *rotation-invariant*
@@ -608,6 +611,8 @@ void SceneRenderer::Impl::finalizeUpload() {
                           wmin, wmax);
             auto &group = groups[it->second];
             group.instances.push_back(node.worldTransform);
+            group.wire_lod.push_back(
+                wireHintBounds(wireLodBounds(node.extras, node.worldTransform)));
             group.bounds_min.push_back(wmin);
             group.bounds_max.push_back(wmax);
             bmin = glm::min(bmin, wmin);
@@ -624,6 +629,8 @@ void SceneRenderer::Impl::finalizeUpload() {
         addBindings(node, node.meshBindings, detailRole);
         addBindings(node, node.lodProxyBindings, LodRole::Proxy);
     }
+    for (auto &group : groups)
+        group.wire_index = buildWireLodIndex(group.wire_lod);
     bounds_min = bmin;
     bounds_max = bmax;
     has_bounds = any_bounds;
@@ -780,6 +787,11 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         return 1.f - glm::smoothstep(lod_lo, lod_hi, screen_px);
     };
 
+    const auto visibilityStart = stm_now();
+    const auto wireEye = camera.eye();
+    const bool wirePerspective = camera.projection == ProjectionMode::Perspective;
+    const float wireFocal = std::max(std::abs(proj[0][0]) * fb_width_f,
+                                     std::abs(proj[1][1]) * static_cast<float>(fb_height));
     for (auto &g : impl_->groups) {
         g.visible_byte_offset = impl_->visible_instances.size() * sizeof(InstanceGpu);
 
@@ -799,14 +811,20 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
         }
 
         const size_t start_count = impl_->visible_instances.size();
-        for (size_t i = 0; i < g.instances.size(); ++i) {
+        auto appendInstance = [&](size_t i, float distanceFade = 0.f) {
             if (aabbOutsideFrustum(g.bounds_min[i], g.bounds_max[i], planes)) {
-                continue;
+                return;
             }
             if (flags.angle_cut &&
                 aabbFullyInsideAngleCut(g.bounds_min[i], g.bounds_max[i], cut_start, cut_end)) {
-                continue;
+                return;
             }
+            const float wireFade = std::max(
+                distanceFade,
+                wireLodFade(g.wire_lod[i], view, proj, fb_width_f, static_cast<float>(fb_height),
+                            camera.projection == ProjectionMode::Perspective, camera.near_plane));
+            if (wireFade >= 1.f)
+                return;
             float fade = 0.f;
             if (is_detail || is_proxy) {
                 if (flags.lod_hull_force) {
@@ -818,17 +836,65 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
                 // faded-in stack contributes nothing to Detail, a fully
                 // faded-out one nothing to Proxy. In the band both keep it.
                 if (is_detail && fade >= 1.f) {
-                    continue;
+                    return;
                 }
                 if (is_proxy && fade <= 0.f) {
-                    continue;
+                    return;
                 }
             }
+            auto transform = g.instances[i];
+            // The stable hint subset remains legible as a schematic half-pixel
+            // wire. Change only radial columns, preserving endpoints/length.
+            const float hintScale =
+                wireHintScale(g.wire_lod[i], view, wireFocal, wirePerspective, camera.near_plane);
+            transform[0] *= hintScale;
+            transform[1] *= hintScale;
             impl_->visible_instances.push_back(
-                InstanceGpu{g.instances[i], glm::vec4{fade, 0.f, 0.f, 0.f}});
+                InstanceGpu{transform, glm::vec4{fade, wireFade, 0.f, 0.f}});
+        };
+        if (g.wire_index.blocks.empty()) {
+            for (size_t i = 0; i < g.instances.size(); ++i) {
+                const auto &wire = g.wire_lod[i];
+                const float fade =
+                    wire.maxDistance > 0
+                        ? wireDistanceFade(wireSampleRank(wire), wirePointDistance(wire, wireEye),
+                                           wire.maxDistance, wire.policy)
+                        : 0;
+                if (fade >= 1)
+                    continue;
+                appendInstance(i, fade);
+            }
+        } else {
+            for (const auto &block : g.wire_index.blocks) {
+                if (aabbOutsideFrustum(block.min, block.max, planes) ||
+                    (flags.angle_cut &&
+                     aabbFullyInsideAngleCut(block.min, block.max, cut_start, cut_end)) ||
+                    wireBlockBelowPixels(block, view, wireFocal, wirePerspective,
+                                         camera.near_plane))
+                    continue;
+                const float fraction = wireDistanceFraction(wireBlockDistance(block, wireEye),
+                                                            block.maxDistance, block.policy);
+                const float upper = fraction;
+                for (size_t n = block.begin; n < block.end; ++n) {
+                    const size_t i = g.wire_index.order[n];
+                    const float rank = g.wire_index.ranks[i];
+                    if (rank >= upper)
+                        break;
+                    const auto &wire = g.wire_lod[i];
+                    const float fade =
+                        rank < wire.policy.fractions.back()
+                            ? 0
+                            : wireDistanceFade(rank, wirePointDistance(wire, wireEye),
+                                               wire.maxDistance, wire.policy);
+                    if (fade >= 1)
+                        continue;
+                    appendInstance(i, fade);
+                }
+            }
         }
         g.visible_count = static_cast<uint32_t>(impl_->visible_instances.size() - start_count);
     }
+    impl_->last_stats.visibility_ms = stm_ms(stm_since(visibilityStart));
     if (impl_->visible_instances.empty()) {
         return;
     }
@@ -891,13 +957,10 @@ void SceneRenderer::render(const Camera &camera, uint32_t fb_width, uint32_t fb_
             // Switch only when the pipeline actually changes; VS uniforms must
             // be reapplied after each pipeline change.
             bool use_back_cull = !g.double_sided;
-            // The shader angle-cut discards the near wedge and exposes the interior
-            // back-faces of the far wall; culling them makes the cut-away look
-            // hollow. Render double-sided while it's active so cuts stay solid.
-            // (The baked boolean cut adds watertight caps, so it keeps culling.)
-            if (flags.shader_angle_cut) {
-                use_back_cull = false;
-            }
+            // Shader cuts do not add caps, but must still honor material culling.
+            // Forcing double-sided rendering exposes both opposing faces at
+            // mother/daughter interfaces and causes depth fighting. Use the
+            // explicit override below when inspecting back faces is desired.
             if (flags.cull == CullOverride::ForceCull) {
                 use_back_cull = true;
             } else if (flags.cull == CullOverride::ForceNoCull) {

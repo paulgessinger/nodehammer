@@ -146,6 +146,13 @@ class OccurrenceNodes {
         if (overrides_) {
             if (const auto it = overrides_->volumes.find(id); it != overrides_->volumes.end()) {
                 node.logVolId = it->second;
+                if (overrides_->wedgeShapeId) {
+                    const auto shape = scene_.logVols.at(node.logVolId).shapeId;
+                    if (const auto *cut = std::get_if<ir::semantic::BooleanSubtraction>(
+                            &scene_.shapes.at(shape).data);
+                        cut && cut->right == *overrides_->wedgeShapeId)
+                        node.tags[kWedgeCutTag] = "azimuthal_v1";
+                }
             }
         }
         return node;

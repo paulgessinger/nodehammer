@@ -87,6 +87,10 @@ inline constexpr std::string_view kInfoGdmlTessellated = "NH0112";
 // because "dedup ran" and "dedup did something" are different facts, and only
 // the pass knows which happened.
 inline constexpr std::string_view kInfoDedupMerged = "NH0200";
+inline constexpr std::string_view kErrGeometryApproximation = "NH0201";
+inline constexpr std::string_view kInfoDriftChamber = "NH0202";
+inline constexpr std::string_view kWarnDriftChamber = "NH0203";
+inline constexpr std::string_view kWarnDaughterSubtraction = "NH0204";
 
 // ── TGeo importer ─────────────────────────────────────────────────────────────
 inline constexpr std::string_view kFatalTgeoOpenFailed = "NH0300";

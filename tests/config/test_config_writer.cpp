@@ -358,3 +358,87 @@ TEST_CASE("ConfigWriter: logical volume selection roundtrips", "[config][writer]
     REQUIRE(std::get<VolumeGlobPredicate>(restored.selection.at(0).predicate.data).pattern ==
             "*Toroid*");
 }
+
+TEST_CASE("ConfigWriter: geometry replacement round-trips", "[config][writer]") {
+    NHConfig cfg;
+    Rule rule;
+    rule.geometry = Rule::Geometry{"convex_hull", std::nullopt};
+    cfg.rules.push_back(rule);
+    const auto rt = roundTrip(cfg);
+    REQUIRE(rt.rules.size() == 1);
+    REQUIRE(rt.rules.front().geometry);
+    REQUIRE(rt.rules.front().geometry->replaceDescendants == "convex_hull");
+}
+
+TEST_CASE("ConfigWriter: drift chamber predicates round-trip", "[config][writer]") {
+    NHConfig cfg;
+    Rule rule;
+    rule.geometry.emplace();
+    auto &drift = rule.geometry->driftChamber.emplace();
+    drift.gas = R"(material == "gas")";
+    drift.wires = R"(material ~= "*Wire*" && name != "support")";
+    cfg.rules.push_back(rule);
+    const auto restored = roundTrip(cfg);
+    const auto &rt = *restored.rules.at(0).geometry->driftChamber;
+    REQUIRE(restored.rules.at(0).geometry->replaceDescendants.empty());
+    REQUIRE(rt.detect == drift.detect);
+    REQUIRE(rt.gas == drift.gas);
+    REQUIRE(rt.wires == drift.wires);
+    REQUIRE(rt.gasRepresentation == drift.gasRepresentation);
+    REQUIRE(rt.wireRepresentation == drift.wireRepresentation);
+}
+
+TEST_CASE("ConfigWriter: wire defaults and explicit zero override round-trip",
+          "[config][writer][wire]") {
+    NHConfig cfg;
+    cfg.tessellationDefaults.wireCut = "centerline";
+    cfg.tessellationDefaults.wireLodPixels = 0.75;
+    cfg.tessellationDefaults.wireLodDistance = 50;
+    auto &rule = cfg.rules.emplace_back();
+    rule.tessellation.emplace();
+    rule.tessellation->wireCut = "exact";
+    rule.tessellation->wireLodPixels = 0;
+    rule.tessellation->wireLodDistance = 0;
+    const auto rt = roundTrip(cfg);
+    CHECK(rt.tessellationDefaults.wireCut == "centerline");
+    CHECK(rt.tessellationDefaults.wireLodPixels == 0.75);
+    CHECK(rt.tessellationDefaults.wireLodDistance == 50);
+    CHECK(rt.rules.front().tessellation->wireCut == "exact");
+    CHECK(rt.rules.front().tessellation->wireLodPixels == 0);
+    CHECK(rt.rules.front().tessellation->wireLodDistance == 0);
+}
+
+TEST_CASE("ConfigWriter: daughter subtraction defaults and override round-trip",
+          "[config][writer][subtract_daughters]") {
+    NHConfig cfg;
+    cfg.tessellationDefaults.subtractDaughters = true;
+    cfg.tessellationDefaults.subtractDaughtersMatch = "material == \"foam\"";
+    auto &rule = cfg.rules.emplace_back();
+    rule.tessellation.emplace();
+    rule.tessellation->subtractDaughters = false;
+    rule.tessellation->subtractDaughtersMatch = "";
+    const auto rt = roundTrip(cfg);
+    CHECK(rt.tessellationDefaults.subtractDaughters == true);
+    CHECK(rt.tessellationDefaults.subtractDaughtersMatch == "material == \"foam\"");
+    CHECK(rt.rules.front().tessellation->subtractDaughters == false);
+    CHECK(rt.rules.front().tessellation->subtractDaughtersMatch == "");
+}
+
+TEST_CASE("wire policy-only defaults and zero hint survive roundtrip", "[config][wire]") {
+    NHConfig cfg;
+    cfg.tessellationDefaults.wireLodDistanceFactors = {0.1, 0.4, 2};
+    cfg.tessellationDefaults.wireLodFractions = {1, 0.2, 0.05, 0};
+    cfg.tessellationDefaults.wireLodHintPixels = 0;
+    auto &t = cfg.rules.emplace_back().tessellation.emplace();
+    t.wireLodDistanceFactors = {0.2, 0.7, 3};
+    t.wireLodFractions = {0.8, 0.4, 0.1, 0.01};
+    t.wireLodHintPixels = 1;
+    auto rt = roundTrip(cfg);
+    CHECK(rt.tessellationDefaults.wireLodDistanceFactors ==
+          cfg.tessellationDefaults.wireLodDistanceFactors);
+    CHECK(rt.tessellationDefaults.wireLodFractions == cfg.tessellationDefaults.wireLodFractions);
+    CHECK(rt.tessellationDefaults.wireLodHintPixels == 0);
+    CHECK(rt.rules[0].tessellation->wireLodDistanceFactors == t.wireLodDistanceFactors);
+    CHECK(rt.rules[0].tessellation->wireLodFractions == t.wireLodFractions);
+    CHECK(rt.rules[0].tessellation->wireLodHintPixels == 1);
+}

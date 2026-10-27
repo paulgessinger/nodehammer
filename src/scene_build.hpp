@@ -52,21 +52,21 @@ struct ScenePrepResult {
 /// (`nodehammer_bench`). Loads the config straight from the filesystem
 /// (so `include = [...]` is resolved against the config's parent dir),
 /// imports the geometry through the default `ImporterRegistry`, then
-/// validates / selects / dedups / tessellates and returns the
-/// `render::Scene`. Mirrors the `convert` CLI pipeline minus the export
-/// stage and CLI surface.
-SceneBuildResult buildSceneFromPaths(const std::filesystem::path &config_path,
-                                     const std::filesystem::path &geometry_path,
-                                     const SemanticReadOptions &options = {});
+/// validates / selects / optimizes / approximates / dedups / optionally cuts / tessellates and
+/// returns the `render::Scene`. Mirrors the `convert` CLI pipeline minus the export stage and CLI
+/// surface.
+SceneBuildResult
+buildSceneFromPaths(const std::filesystem::path &config_path,
+                    const std::filesystem::path &geometry_path,
+                    const SemanticReadOptions &options = {},
+                    std::optional<tessellation::WedgeCutParams> wedgeCut = std::nullopt);
 
-/// Run validate + select + dedup against an immutable source, projecting selection
-/// into an owned result without first copying the complete source. With no
-/// selection, copy the source before mutation. Accepts an already-parsed config and
-/// already-imported semantic scene. Used by the viewer's BuildSession,
-/// which has done the resolve + parse + import dance against bytes
-/// pulled from a `ProjectFs`. No filesystem access. The result's
-/// `scene` is handed off to `TessellationJob` for cooperative
-/// iteration.
+/// Run validate + select + optimize + approximate + dedup against an immutable source, projecting
+/// selection into an owned result without first copying the complete source. With no selection,
+/// copy the source before mutation. Accepts an already-parsed config and already-imported semantic
+/// scene. Used by the viewer's BuildSession, which has done the resolve + parse + import dance
+/// against bytes pulled from a `ProjectFs`. No filesystem access. The result's `scene` is handed
+/// off to `TessellationJob` for cooperative iteration.
 ///
 /// When `wedgeCut` is set, an azimuthal wedge cut is applied after dedup
 /// (matching the `convert --angle-cut` pipeline ordering), so the scene

@@ -162,18 +162,14 @@ std::optional<manifold::Manifold> shapeToManifoldBuiltin(const ir::semantic::Sha
             [&](const ir::semantic::TubeShape &tube) -> MaybeManifold {
                 const bool fullPhi = std::abs(tube.phiDelta - 2.0 * std::numbers::pi) < 1e-6 &&
                                      std::abs(tube.phiStart) < 1e-6;
-                if (fullPhi && tube.rMin < 1e-9) {
-                    return manifold::Manifold::Cylinder(tube.dz * 2, tube.rMax, tube.rMax, segments,
-                                                        true);
-                }
-                // Full phi, rMin > 0 → hollow tube via subtraction
-                if (fullPhi && tube.rMin > 1e-9) {
-                    auto outer = manifold::Manifold::Cylinder(tube.dz * 2, tube.rMax, tube.rMax,
-                                                              segments, true);
-                    auto inner = manifold::Manifold::Cylinder(tube.dz * 2, tube.rMin, tube.rMin,
-                                                              segments, true);
-                    return outer - inner;
-                }
+                // Use exactly the same float boundary vertices as a directly
+                // rendered tube. Independent double-precision Cylinder operands
+                // leave sub-float mother/daughter skins (and slightly different
+                // polygon boundaries) that overlap when exported to float meshes.
+                // The primitive tube is watertight, so the common mesh fallback
+                // below is also suitable for Boolean operations.
+                if (fullPhi)
+                    return std::nullopt;
                 // Partial phi: construct as (full cylinder ∩ wedge), optionally - inner.
                 const double r = std::max(tube.rMax, tube.rMin) * 2; // oversized for safe clipping
                 const double h = tube.dz * 2;

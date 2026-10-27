@@ -899,3 +899,139 @@ TEST_CASE("ConfigLoader: loadFromString keeps its source name in parse diagnosti
     REQUIRE(result.diags.hasErrors());
     REQUIRE(result.diags.items().front().context.starts_with("test_input:"));
 }
+
+TEST_CASE("ConfigLoader: geometry replacement accepts only convex_hull", "[config][loader]") {
+    using nodehammer::config::ConfigLoader;
+    auto valid = ConfigLoader::collectFromString(R"(
+[[rules]]
+match = 'name ~= "module"'
+[rules.geometry]
+replace_descendants = "convex_hull"
+)");
+    REQUIRE_FALSE(valid.diags.hasErrors());
+    REQUIRE(valid.config.rules.size() == 1);
+    REQUIRE(valid.config.rules.front().geometry);
+    REQUIRE(valid.config.rules.front().geometry->replaceDescendants == "convex_hull");
+    for (const auto *value : {"\"bbox\"", "true", "42", "[]", "{}"}) {
+        CAPTURE(value);
+        auto invalid = ConfigLoader::collectFromString(
+            std::string{"[[rules]]\n[rules.geometry]\nreplace_descendants = "} + value);
+        REQUIRE(invalid.diags.hasErrors());
+    }
+    for (const auto *geometry : {"true", "\"convex_hull\"", "{}"}) {
+        CAPTURE(geometry);
+        auto invalid =
+            ConfigLoader::collectFromString(std::string{"[[rules]]\ngeometry = "} + geometry);
+        REQUIRE(invalid.diags.hasErrors());
+    }
+}
+
+TEST_CASE("ConfigLoader: drift chamber predicates and options", "[config][loader]") {
+    using nodehammer::config::ConfigLoader;
+    auto valid = ConfigLoader::collectFromString(R"(
+[[rules]]
+match = 'name == "DCH"'
+[rules.geometry.drift_chamber]
+gas = 'material == "helium"'
+wires = 'material ~= "*Wire*" && name != "support"'
+)");
+    REQUIRE_FALSE(valid.diags.hasErrors());
+    const auto &drift = *valid.config.rules.at(0).geometry->driftChamber;
+    REQUIRE(drift.detect == "auto");
+    REQUIRE(drift.gas == "material == \"helium\"");
+    REQUIRE(drift.wireRepresentation == "instanced");
+    REQUIRE_FALSE(ConfigLoader::collectFromString("[[rules]]\n[rules.geometry.drift_chamber]\n")
+                      .diags.hasErrors());
+    for (const auto *setting :
+         {"detect = 'manual'", "gas_representation = 'union'", "wire_representation = 'lod'",
+          "gas = 12", "wires = []", "gas = ''", "wires = 'not a predicate'", "detect = true"}) {
+        CAPTURE(setting);
+        REQUIRE(ConfigLoader::collectFromString(
+                    std::string{"[[rules]]\n[rules.geometry.drift_chamber]\n"} + setting)
+                    .diags.hasErrors());
+    }
+    REQUIRE(ConfigLoader::collectFromString("[[rules]]\n[rules.geometry]\ndrift_chamber = true\n")
+                .diags.hasErrors());
+    REQUIRE(ConfigLoader::collectFromString(
+                "[[rules]]\n[rules.geometry]\nreplace_descendants = 'convex_hull'\n"
+                "[rules.geometry.drift_chamber]\n")
+                .diags.hasErrors());
+}
+
+TEST_CASE("ConfigLoader: wire cutting and LOD settings", "[config][loader][wire]") {
+    using nodehammer::config::ConfigLoader;
+    for (const auto *header : {"[defaults.tessellation]\n", "[[rules]]\n[rules.tessellation]\n"}) {
+        auto valid = ConfigLoader::collectFromString(
+            std::string{header} +
+            "wire_cut = 'centerline'\nwire_lod_pixels = 0.75\nwire_lod_distance = 50\n");
+        REQUIRE_FALSE(valid.diags.hasErrors());
+        const auto &tess = valid.config.rules.empty() ? valid.config.tessellationDefaults
+                                                      : *valid.config.rules.front().tessellation;
+        CHECK(tess.wireCut == "centerline");
+        CHECK(tess.wireLodPixels == 0.75);
+        CHECK(tess.wireLodDistance == 50);
+        REQUIRE_FALSE(ConfigLoader::collectFromString(
+                          std::string{header} +
+                          "wire_cut = 'exact'\nwire_lod_pixels = 0\nwire_lod_distance = 0\n")
+                          .diags.hasErrors());
+        for (const auto *setting :
+             {"wire_cut = 'shader'", "wire_cut = 1", "wire_cut = true", "wire_lod_pixels = -1",
+              "wire_lod_pixels = nan", "wire_lod_pixels = inf", "wire_lod_pixels = '1'",
+              "wire_lod_pixels = true", "wire_lod_distance = -1", "wire_lod_distance = nan",
+              "wire_lod_distance = inf", "wire_lod_distance = true", "wire_lod_distance = '1'"}) {
+            CAPTURE(header, setting);
+            CHECK(ConfigLoader::collectFromString(std::string{header} + setting).diags.hasErrors());
+        }
+    }
+}
+
+TEST_CASE("ConfigLoader: daughter subtraction settings", "[config][loader][subtract_daughters]") {
+    using nodehammer::config::ConfigLoader;
+    for (const auto *header : {"[defaults.tessellation]\n", "[[rules]]\n[rules.tessellation]\n"}) {
+        auto valid = ConfigLoader::collectFromString(
+            std::string{header} +
+            "subtract_daughters = true\nsubtract_daughters_match = 'material == \"foam\"'\n");
+        REQUIRE_FALSE(valid.diags.hasErrors());
+        const auto &tess = valid.config.rules.empty() ? valid.config.tessellationDefaults
+                                                      : *valid.config.rules.front().tessellation;
+        CHECK(tess.subtractDaughters == true);
+        CHECK(tess.subtractDaughtersMatch == "material == \"foam\"");
+        CHECK_FALSE(
+            ConfigLoader::collectFromString(
+                std::string{header} + "subtract_daughters = false\nsubtract_daughters_match = ''\n")
+                .diags.hasErrors());
+        for (const auto *setting :
+             {"subtract_daughters = 1", "subtract_daughters = 'true'",
+              "subtract_daughters_match = false", "subtract_daughters_match = 12",
+              "subtract_daughters_match = 'not a predicate'"}) {
+            CAPTURE(header, setting);
+            CHECK(ConfigLoader::collectFromString(std::string{header} + setting).diags.hasErrors());
+        }
+    }
+}
+
+TEST_CASE("wire density policy accepts arrays and rejects malformed bands", "[config][wire]") {
+    using nodehammer::config::ConfigLoader;
+    for (auto header : {"[defaults.tessellation]\n", "[[rules]]\n[rules.tessellation]\n"}) {
+        auto result = ConfigLoader::collectFromString(
+            std::string(header) + "wire_lod_distance_factors = [0.1, 0.4, 2.0]\nwire_lod_fractions "
+                                  "= [0.8, 0.2, 0.05, 0.0]\nwire_lod_hint_pixels = 0.75\n");
+        REQUIRE_FALSE(result.diags.hasErrors());
+        const auto &t = result.config.rules.empty() ? result.config.tessellationDefaults
+                                                    : *result.config.rules[0].tessellation;
+        REQUIRE(t.wireLodDistanceFactors);
+        CHECK(*t.wireLodDistanceFactors == std::vector<double>{0.1, 0.4, 2});
+        CHECK(*t.wireLodFractions == std::vector<double>{0.8, 0.2, 0.05, 0});
+        CHECK(t.wireLodHintPixels == 0.75);
+        for (auto invalid :
+             {"wire_lod_distance_factors = [1, 1, 2]", "wire_lod_distance_factors = [0, 1, 2]",
+              "wire_lod_distance_factors = [1, 2]", "wire_lod_distance_factors = [1, 2, inf]",
+              "wire_lod_fractions = [1, 0.1, 0.2, 0]", "wire_lod_fractions = [1.1, 0.3, 0.1, 0]",
+              "wire_lod_fractions = [1, 0.3, 0.1, -1]", "wire_lod_hint_pixels = nan",
+              "wire_lod_hint_pixels = -1", "wire_lod_fractions = 'bad'",
+              "wire_lod_fractions = [1, 0.3, 0.1, 'bad']"}) {
+            CAPTURE(invalid);
+            CHECK(ConfigLoader::collectFromString(std::string(header) + invalid).diags.hasErrors());
+        }
+    }
+}

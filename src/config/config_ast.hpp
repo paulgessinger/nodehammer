@@ -137,7 +137,25 @@ struct Rule {
     // ── Concerns (all optional; a rule may set any combination) ──────────
     std::optional<std::string> material; ///< References a MaterialDef::name
 
+    struct Geometry {
+        /// Replace the matched subtree with a fitted convex polyhedron before cutting.
+        std::string replaceDescendants; ///< Empty or "convex_hull"
+        struct DriftChamber {
+            std::string detect = "auto";
+            std::optional<std::string> gas;
+            std::optional<std::string> wires;
+            std::string gasRepresentation = "parent";
+            std::string wireRepresentation = "instanced";
+        };
+        std::optional<DriftChamber> driftChamber;
+    };
+    std::optional<Geometry> geometry;
+
     struct Tessellation {
+        std::optional<bool>
+            subtractDaughters; ///< Resolve mother material around immediate daughters
+        std::optional<std::string>
+            subtractDaughtersMatch; ///< Optional daughter predicate; empty selects all
         std::optional<bool> skipGeometry;
         std::optional<bool> mergeDescendants;
         // Opt-in post-pass on a merge_descendants group: removes exact-coincident,
@@ -160,6 +178,12 @@ struct Rule {
         std::optional<double> genericTrapTolerance;
         std::optional<Shading> shading;
         std::optional<double> smoothAngle;
+        std::optional<std::string> wireCut; ///< "exact" (default) or approximate "centerline"
+        std::optional<std::vector<double>> wireLodDistanceFactors;
+        std::optional<std::vector<double>> wireLodFractions;
+        std::optional<double> wireLodHintPixels;
+        std::optional<double> wireLodDistance; ///< World-space detail range (cm); zero disables
+        std::optional<double> wireLodPixels;   ///< Projected thickness threshold; zero disables LOD
         std::optional<BooleanFallback> fallback;
     };
     std::optional<Tessellation> tessellation;

@@ -4,12 +4,17 @@
 #include <api/handles_render.hpp>
 
 #include <diagnostic_codes.hpp>
+#include <geometry/approximation.hpp>
+#include <geometry/drift_chamber.hpp>
+#include <geometry/subtract_daughters.hpp>
 #include <ir/expanded/conversion.hpp>
 #include <selection/selector.hpp>
 #include <tessellation/tessellation_pass.hpp>
 
+#include <algorithm>
 #include <exception>
 #include <format>
+#include <optional>
 #include <utility>
 
 namespace nodehammer {
@@ -81,27 +86,41 @@ RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config) {
     const auto &input = api::sceneOrThrow(scene, "tessellate");
     const auto &cfg = api::documentOf(config);
     const tessellation::TessellationPass pass{cfg};
-    auto result = pass.lower(input);
+    std::optional<ir::semantic::Scene> working;
+    DiagnosticList diags;
+    if (geometry::hasDaughterSubtraction(cfg) ||
+        std::any_of(cfg.rules.begin(), cfg.rules.end(),
+                    [](const auto &rule) { return rule.geometry.has_value(); })) {
+        working = input;
+        diags.append(geometry::subtractDaughters(*working, cfg));
+        diags.append(geometry::optimizeDriftChambers(*working, cfg));
+        diags.append(geometry::approximate(*working, cfg));
+    }
+    auto result = pass.lower(working ? *working : input);
+    diags.append(result.diags);
     // Errors and a usable scene genuinely coexist here: NH0500 reports an
     // unknown shape and leaves that one node without a mesh binding, and the
     // rest of the scene is still a scene. Returning it is what lets a caller
     // decide whether to export anyway, exactly as the internal pass allows.
-    return RenderResult{api::asHandle(std::move(result.scene)), std::move(result.diags)};
+    return RenderResult{api::asHandle(std::move(result.scene)), std::move(diags)};
 }
 
 RenderResult build(const SemanticScene &scene, const SceneConfig &config) {
     const auto &input = api::sceneOrThrow(scene, "build");
     const auto &cfg = api::documentOf(config);
 
-    // One working copy for all three stages rather than three handles chained
+    // One working copy for the stages rather than separate handles chained
     // through the public verbs: same order, same conditions, one copy of the
     // scene instead of three.
     ir::semantic::Scene working = input;
     DiagnosticList diags;
 
+    diags.append(geometry::subtractDaughters(working, cfg));
     if (selectionApplies(cfg)) {
         runSelection(working, cfg, diags);
     }
+    diags.append(geometry::optimizeDriftChambers(working, cfg));
+    diags.append(geometry::approximate(working, cfg));
     if (dedupApplies(cfg)) {
         runDedup(working, diags);
     }

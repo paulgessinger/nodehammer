@@ -254,6 +254,10 @@ set(NH_CORE_SOURCES
     src/selection/selector.cpp
     src/selection/shared_scene.cpp
     src/tessellation/shading.cpp
+    src/geometry/approximation.cpp
+    src/geometry/drift_chamber.cpp
+    src/geometry/subtract_daughters.cpp
+    src/tessellation/wire_cut.cpp
     src/tessellation/primitive_tessellator.cpp
     src/tessellation/tessellation_pass.cpp
     src/tessellation/wedge_cut.cpp

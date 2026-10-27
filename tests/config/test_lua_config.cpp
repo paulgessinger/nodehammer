@@ -482,3 +482,130 @@ TEST_CASE("evalLuaConfig: shading settings roundtrip", "[config][lua][shading]")
     REQUIRE(eval(R"(defaults { tessellation = { shading = true } })").diags.hasErrors());
     REQUIRE(eval(R"(defaults { tessellation = { smooth_angle = "30" } })").diags.hasErrors());
 }
+
+TEST_CASE("Lua config: geometry replacement accepts only convex_hull", "[config][lua]") {
+    auto valid = eval(R"(
+rule { match = 'name ~= "module"', geometry = { replace_descendants = "convex_hull" } }
+)");
+    REQUIRE_FALSE(valid.diags.hasErrors());
+    REQUIRE(valid.config.rules.size() == 1);
+    REQUIRE(valid.config.rules.front().geometry);
+    REQUIRE(valid.config.rules.front().geometry->replaceDescendants == "convex_hull");
+    auto rt = ConfigLoader::collectFromString(configToToml(valid.config));
+    REQUIRE_FALSE(rt.diags.hasErrors());
+    REQUIRE(rt.config.rules.front().geometry->replaceDescendants == "convex_hull");
+    for (const auto *value : {"'bbox'", "true", "42", "{}", "nil"}) {
+        CAPTURE(value);
+        REQUIRE(eval(std::string{"rule { geometry = { replace_descendants = "} + value + " } }")
+                    .diags.hasErrors());
+    }
+    for (const auto *value : {"true", "'convex_hull'", "{}"}) {
+        CAPTURE(value);
+        REQUIRE(eval(std::string{"rule { geometry = "} + value + " }").diags.hasErrors());
+    }
+}
+
+TEST_CASE("Lua config: drift chamber predicates and validation", "[config][lua]") {
+    auto valid = eval(R"(
+rule { match = 'name == "DCH"', geometry = { drift_chamber = {
+    gas = 'material == "gas"', wires = 'material ~= "*Wire*"',
+    detect = "auto", gas_representation = "parent", wire_representation = "instanced"
+} } }
+)");
+    REQUIRE_FALSE(valid.diags.hasErrors());
+    auto rt = ConfigLoader::collectFromString(configToToml(valid.config));
+    REQUIRE_FALSE(rt.diags.hasErrors());
+    const auto &drift = *rt.config.rules.at(0).geometry->driftChamber;
+    REQUIRE(drift.gas == R"(material == "gas")");
+    REQUIRE(drift.wires == R"(material ~= "*Wire*")");
+    REQUIRE_FALSE(eval("rule { geometry = { drift_chamber = {} } }").diags.hasErrors());
+    for (const auto *setting :
+         {"detect = 'manual'", "gas_representation = 'union'", "wire_representation = 'lod'",
+          "gas = 12", "wires = {}", "gas = ''", "wires = 'not a predicate'", "detect = true"}) {
+        CAPTURE(setting);
+        REQUIRE(eval(std::string{"rule { geometry = { drift_chamber = {"} + setting + "} } }")
+                    .diags.hasErrors());
+    }
+    REQUIRE(eval("rule { geometry = { drift_chamber = true } }").diags.hasErrors());
+    REQUIRE(eval("rule { geometry = { replace_descendants = 'convex_hull', drift_chamber = {} } }")
+                .diags.hasErrors());
+}
+
+TEST_CASE("Lua config: wire cutting and LOD settings", "[config][lua][wire]") {
+    for (const auto *prefix : {"defaults", "rule"}) {
+        auto valid =
+            eval(std::string{prefix} + " { tessellation = { wire_cut = 'centerline', "
+                                       "wire_lod_pixels = 0.75, wire_lod_distance = 50 } }");
+        REQUIRE_FALSE(valid.diags.hasErrors());
+        const auto rt = ConfigLoader::collectFromString(configToToml(valid.config));
+        REQUIRE_FALSE(rt.diags.hasErrors());
+        const auto &tess = rt.config.rules.empty() ? rt.config.tessellationDefaults
+                                                   : *rt.config.rules.front().tessellation;
+        CHECK(tess.wireCut == "centerline");
+        CHECK(tess.wireLodPixels == 0.75);
+        CHECK(tess.wireLodDistance == 50);
+        CHECK_FALSE(eval(std::string{prefix} + " { tessellation = { wire_cut = 'exact', "
+                                               "wire_lod_pixels = 0, wire_lod_distance = 0 } }")
+                        .diags.hasErrors());
+        for (const auto *setting :
+             {"wire_cut = 'shader'", "wire_cut = 1", "wire_cut = true", "wire_lod_pixels = -1",
+              "wire_lod_pixels = 0/0", "wire_lod_pixels = math.huge", "wire_lod_pixels = '1'",
+              "wire_lod_pixels = true", "wire_lod_distance = -1", "wire_lod_distance = 0/0",
+              "wire_lod_distance = math.huge", "wire_lod_distance = true",
+              "wire_lod_distance = '1'"}) {
+            CAPTURE(prefix, setting);
+            CHECK(eval(std::string{prefix} + " { tessellation = { " + setting + " } }")
+                      .diags.hasErrors());
+        }
+    }
+}
+
+TEST_CASE("Lua config: daughter subtraction settings", "[config][lua][subtract_daughters]") {
+    for (const auto *prefix : {"defaults", "rule"}) {
+        auto valid =
+            eval(std::string{prefix} + " { tessellation = { subtract_daughters = true, "
+                                       "subtract_daughters_match = 'material == \"foam\"' } }");
+        REQUIRE_FALSE(valid.diags.hasErrors());
+        const auto rt = ConfigLoader::collectFromString(configToToml(valid.config));
+        REQUIRE_FALSE(rt.diags.hasErrors());
+        const auto &tess = rt.config.rules.empty() ? rt.config.tessellationDefaults
+                                                   : *rt.config.rules.front().tessellation;
+        CHECK(tess.subtractDaughters == true);
+        CHECK(tess.subtractDaughtersMatch == "material == \"foam\"");
+        CHECK_FALSE(
+            eval(
+                std::string{prefix} +
+                " { tessellation = { subtract_daughters = false, subtract_daughters_match = '' } }")
+                .diags.hasErrors());
+        for (const auto *setting :
+             {"subtract_daughters = 1", "subtract_daughters = 'true'",
+              "subtract_daughters_match = false", "subtract_daughters_match = 12",
+              "subtract_daughters_match = 'not a predicate'"}) {
+            CAPTURE(prefix, setting);
+            CHECK(eval(std::string{prefix} + " { tessellation = { " + setting + " } }")
+                      .diags.hasErrors());
+        }
+    }
+}
+
+TEST_CASE("Lua wire density arrays roundtrip", "[config][lua][wire]") {
+    for (auto prefix : {"defaults", "rule"}) {
+        auto result =
+            eval(std::string(prefix) +
+                 " { tessellation = { wire_lod_distance_factors = {0.1, 0.4, 2}, "
+                 "wire_lod_fractions = {1, 0.2, 0.05, 0}, wire_lod_hint_pixels = 0.75 } }");
+        REQUIRE_FALSE(result.diags.hasErrors());
+        auto rt = ConfigLoader::collectFromString(configToToml(result.config));
+        REQUIRE_FALSE(rt.diags.hasErrors());
+        const auto &t = rt.config.rules.empty() ? rt.config.tessellationDefaults
+                                                : *rt.config.rules[0].tessellation;
+        CHECK(*t.wireLodDistanceFactors == std::vector<double>{0.1, 0.4, 2});
+        CHECK(*t.wireLodFractions == std::vector<double>{1, 0.2, 0.05, 0});
+        CHECK(t.wireLodHintPixels == 0.75);
+        for (auto bad :
+             {"wire_lod_distance_factors = {1, 0, 2}", "wire_lod_fractions = {1, 0.2, 0.5, 0}",
+              "wire_lod_hint_pixels = -1", "wire_lod_fractions = true"})
+            CHECK(eval(std::string(prefix) + " { tessellation = { " + bad + " } }")
+                      .diags.hasErrors());
+    }
+}

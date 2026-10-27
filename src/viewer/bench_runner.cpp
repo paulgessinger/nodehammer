@@ -175,6 +175,7 @@ void BenchRunner::accumulate(const BenchFrameInput &in) {
     accum_.denoise.push_back(segMs(in.gpu, "denoise"));
     accum_.composite.push_back(segMs(in.gpu, "composite"));
     accum_.cpu.push_back(in.cpu_submit_ms);
+    accum_.visibility.push_back(in.visibility_ms);
     accum_.frame.push_back(in.frame_ms);
     accum_.stats = in.stats; // constant while the state holds — last sample wins
 }
@@ -190,6 +191,7 @@ void BenchRunner::finalizeSegment(const Step &s, std::string screenshot) {
     r.denoise = computeStat(accum_.denoise);
     r.composite = computeStat(accum_.composite);
     r.cpu = computeStat(accum_.cpu);
+    r.visibility = computeStat(accum_.visibility);
     r.frame = computeStat(accum_.frame);
     r.stats = accum_.stats;
     r.screenshot = std::move(screenshot);
@@ -329,6 +331,9 @@ void BenchRunner::writeResults(const char *backend_name, std::uint32_t width,
         j += "},\n";
         j += "      \"cpu_submit_ms\": {";
         emit_stat(j, "v", r.cpu);
+        j += "},\n";
+        j += "      \"visibility_ms\": {";
+        emit_stat(j, "v", r.visibility);
         j += "},\n";
         j += "      \"frame_ms\": {";
         emit_stat(j, "v", r.frame);

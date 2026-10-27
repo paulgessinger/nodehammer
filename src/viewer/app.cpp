@@ -899,6 +899,7 @@ void App::Impl::benchFrame() {
     in.stats = BenchSceneStats{fs.draw_calls, fs.instances, fs.triangles};
     in.frame_ms = frame_interval_ms;
     in.cpu_submit_ms = encode_ms + present_ms;
+    in.visibility_ms = fs.visibility_ms;
     in.capture_done = bench_capture_done_;
     bench_capture_done_ = false;
 

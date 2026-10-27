@@ -43,12 +43,12 @@ namespace nodehammer {
 [[nodiscard]] NH_API SemanticResult deduplicate(const SemanticScene &scene,
                                                 const SceneConfig &config);
 
-/// Lower a semantic scene to triangles. One pass, nothing else: no selection,
-/// no deduplication.
+/// Apply configured geometry optimizations and approximations, then lower to triangles.
+/// Does not apply selection or the standalone deduplication stage.
 [[nodiscard]] NH_API RenderResult tessellate(const SemanticScene &scene, const SceneConfig &config);
 
-/// `applySelection` then `deduplicate` then `tessellate`, in that order — the
-/// same order, and the same conditions, as `nodehammer convert`.
+/// Subtract configured daughters, select, optimize and approximate geometry,
+/// deduplicate, then tessellate — the same order and conditions as `nodehammer convert`.
 ///
 /// Config *validation* is not part of this: it happens when the document is
 /// read, and a config that does not validate never reaches here (#41 §8).

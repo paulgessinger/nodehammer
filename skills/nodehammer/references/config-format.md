@@ -53,7 +53,7 @@ belong to the most recent `[[rules]]`.
 | `hoist_orphans` | Default false. True reparents kept descendants of dropped nodes to the nearest kept ancestor (or root), preserving world placement. The root stays. |
 | `deduplicate_shapes` | Default true. Deduplicates identical shape definitions. |
 | `[[selection_rules]]` | Exactly one `keep_if` or `drop_if`, plus optional `scope` (a path glob pre-filter). |
-| `[[rules]]` | Optional `match`, `material`, `tessellation`, and `extras`. Omitted `match` matches every node. These rules do not select nodes. |
+| `[[rules]]` | Optional `match`, `material`, `geometry`, `tessellation`, and `extras`. Omitted `match` matches every node. These rules do not select nodes. |
 | `[defaults.tessellation]` | Fallback per field, below every matching rule. |
 | `[defaults.extras]` | Fallback object when no matching rule supplies extras. |
 
@@ -143,6 +143,10 @@ All these fields work in `[rules.tessellation]` and `[defaults.tessellation]`.
 | `generic_trap_tolerance` | Finite positive boundary tolerance for twisted generic traps, in source length units (mm for GeoModel); default 0.01. Affects rendering, not NHB parameters. |
 | `shading` | `"preserve"` (default) keeps generated normals; `"smooth"` rebuilds normals across gentle edges; `"flat"` assigns face normals. Applies to viewer meshes and mesh exports. |
 | `smooth_angle` | Finite angle in degrees from 0 to 180, default 30; used by `shading = "smooth"`. Adjacent faces at or below this angle are joined into smooth vertex fans. |
+| `subtract_daughters` | Opt-in subtraction of original immediate daughter solids from the mother; default false. |
+| `subtract_daughters_match` | Optional predicate evaluated on immediate daughters; absent or empty selects all. |
+| `wire_cut` | `exact` (default) or approximate `centerline` clipping for recognized wires; see below. |
+| `wire_lod_pixels` | Finite nonnegative viewer projected-thickness threshold; default 0 disables wire LOD. |
 | `fallback` | Unsupported boolean handling: "skip" (default), "bbox" (bounding-box proxy), "fail" |
 | `drop_coincident_faces` | Remove coincident internal triangle pairs on merged opaque stacks |
 | `average_material_stack` | Compute merged-stack average data for viewer filtering of distant material bands |
@@ -211,3 +215,279 @@ When maintaining this reference in the source repository, check
 `src/config/config_keys.hpp`, `config_loader.cpp`, `config_ast.hpp`,
 `src/selection/selector.cpp`, `src/tessellation/tessellation_pass.cpp`, and
 `src/export_resolve.cpp`. Installed copies of this skill are self-contained.
+
+### Fitted convex envelopes
+
+Geometry rules can replace a retained subtree with a fitted convex polyhedron before
+Boolean wedge cutting and final tessellation:
+
+```toml
+[[rules]]
+match = 'path ~= "/world/Calorimeter/module_*"'
+material = "glass"
+[rules.geometry]
+replace_descendants = "convex_hull"
+```
+
+`convex_hull` is currently the only supported `replace_descendants` value. This is
+an approximation: it fills gaps and concavities between descendant solids. Match
+local modules or sectors; a hull around an entire barrel fills the central opening.
+The matched node keeps its placement and identity, but its descendant cells are
+replaced with the hull. Apply a material rule to the matched node for the desired
+appearance. Unlike `merge_descendants`, this reduces the semantic geometry that
+cutting must process, rather than batching the original surfaces after cutting.
+
+Lua uses the same operation:
+
+```lua
+rule {
+    match = 'path ~= "/world/Calorimeter/module_*"',
+    material = "glass",
+    geometry = { replace_descendants = "convex_hull" },
+}
+```
+
+The matched node's own solid contributes to the hull unless `skip_geometry = true`
+excludes it. Each descendant's skip rule is evaluated independently: skipping an
+assembly envelope does not skip its children. The generated hull carries a
+persistent `nodehammer.geometry = "convex_hull"` tag, which overrides structural
+`skip_geometry` rules so the replacement remains visible after an NHB reload.
+Other tags and the matched placement's identity are preserved.
+
+Box, Trd, GenericTrap, Extruded and Tessellated shapes contribute their exact
+vertices; other shapes contribute samples from their tessellation settings. For
+curved shapes this is a fitted approximation of those samples, not a guaranteed
+conservative analytic envelope. Outermost matching subtrees take precedence over
+nested matches. Empty or degenerate hulls report errors and leave the scene unchanged.
+
+To persist fitted geometry in a project, first run `convert` with the rule and
+write an NHB, then pass that NHB to `project pack`. Packing an existing NHB
+embeds it verbatim; it does not bake config rules. The viewer applies rules at
+build time, and already-generated hulls are unchanged on subsequent builds.
+
+### Drift chambers
+
+An opt-in drift chamber rule suppresses internal gas-cell surfaces and identifies
+wire instances before wedge cutting. Predicates use the same syntax as selection
+and rule matching; they inspect the source geometry's names, paths, materials and
+tags, rather than configured display materials.
+
+```toml
+[[rules]]
+match = 'name == "DCH"'
+[rules.geometry.drift_chamber]
+detect = "auto"
+gas = 'material == "GasHe_90Isob_10"'
+wires = 'material ~= "DCH_F*WireMat" || material ~= "DCH_SWireMat"'
+gas_representation = "parent"
+wire_representation = "instanced"
+```
+
+Lua accepts the equivalent nested table:
+
+```lua
+rule {
+    match = 'name == "DCH"',
+    geometry = {
+        drift_chamber = {
+            detect = "auto",
+            gas = 'material == "GasHe_90Isob_10"',
+            wires = 'material ~= "DCH_F*WireMat" || material ~= "DCH_SWireMat"',
+            gas_representation = "parent",
+            wire_representation = "instanced",
+        },
+    },
+}
+```
+
+`auto`, `parent` and `instanced` are the defaults and the only supported values
+for these options. `gas` and `wires` are optional predicate strings. Gas suppression
+requires an explicit `gas` predicate: the pass retains the outermost matched gas
+solid in each branch and suppresses nested matching gas solids of the same source
+material, retaining all their children. It relies on the geometry's original
+mother/daughter containment. Do not match unrelated solids as gas.
+
+Without a `wires` predicate, the pass recognizes straight, solid, slender cylinders
+structurally; an explicit predicate restricts the candidate set. Unsupported solids,
+vessels, supports and other unmatched geometry remain intact. Recognized wires keep
+their existing shared semantic instances and hierarchy, annotated with persistent
+tags. Subsequent rules can address recognized wires with
+`match = 'tag.nodehammer_drift_role == "wire"'`, for example to lower
+`max_segments_circle`. The other role values are `gas_envelope` and `gas_cell`.
+The chamber root carries `nodehammer_drift_chamber = "v1"`.
+The recognition pass alone does not change wire cutting or visibility. The optional
+wire tessellation settings below enable those changes; `instanced` does not promise
+one batched GPU draw.
+
+The pass runs after selection and before cutting. Its tags and gas-surface changes
+persist when written to NHB, and marked chambers are left unchanged on reapplication.
+A baked chamber records its policy; reapplying different settings emits a warning.
+To change optimization settings, start from the original input. A rule cannot combine
+`drift_chamber` with `replace_descendants`; use distinct, nonoverlapping roots.
+
+
+### Wire cutting and screen-space LOD
+
+After drift chamber recognition, use the generated role tag to opt wires into
+approximate cutting and viewer visibility thresholds:
+
+```toml
+[[rules]]
+match = 'tag.nodehammer_drift_role == "wire"'
+[rules.tessellation]
+wire_cut = "centerline"
+wire_lod_pixels = 0.75
+max_segments_circle = 12
+```
+
+```lua
+rule {
+    match = 'tag.nodehammer_drift_role == "wire"',
+    tessellation = {
+        wire_cut = "centerline",
+        wire_lod_pixels = 0.75,
+        max_segments_circle = 12,
+    },
+}
+```
+
+Both fields also work in `[defaults.tessellation]` / Lua `defaults { tessellation = ... }`.
+As with other tessellation settings, the last matching rule wins per field and
+unspecified fields inherit defaults.
+
+`wire_cut = "exact"` is the default. `"centerline"` clips the centerline of a
+recognized straight cylindrical wire against the wedge and renders the retained
+segments as shared cylinders. Their caps are perpendicular to the wire axis;
+they approximate the exact oblique intersection surface. Supported marked wire
+leaves use this path without Manifold. Grazing or unsupported cases fall back to
+exact cutting. The approximation bounds cap displacement along the wire to
+0.5% of its original full length; near-axis wires, grazing caps, non-rigid cut
+frames and finite cutters that do not enclose the wire retain exact cutting.
+Use `"exact"` when the detailed cut-end shape matters.
+
+`wire_lod_pixels` is a finite nonnegative projected-thickness threshold in pixels.
+Zero (the default) disables the threshold; a positive value hides wires that are
+thinner than the threshold in the viewer, with a screen-door fade between the
+threshold and twice that thickness. It measures wire thickness rather than
+the bounding box of a long wire. It controls viewer visibility, not geometry
+selection or export, and does not by itself avoid headless tessellation/cutting.
+
+Wire LOD metadata is currently attached during source-driven scene builds and
+preserved in glTF extras. NHR does not yet persist render-node extras, so reopening
+an exported NHR loses this LOD metadata; use NHB plus the config for the viewer.
+
+
+### Mother/daughter material boundaries
+
+Simulation daughters replace their mother's material within their occupied volume.
+To reproduce that boundary when rendering, opt in on selected mothers:
+
+```toml
+[[rules]]
+match = 'name ~= "DCH_v2_vessel_*"'
+[rules.tessellation]
+subtract_daughters = true
+subtract_daughters_match = 'material ~= "*foam*"'
+```
+
+```lua
+rule {
+    match = 'name ~= "DCH_v2_vessel_*"',
+    tessellation = {
+        subtract_daughters = true,
+        subtract_daughters_match = 'material ~= "*foam*"',
+    },
+}
+```
+
+The daughter predicate is optional: omitted or empty means all immediate daughters.
+The pass uses original daughter solids from the input scene, transformed into the
+mother's coordinates, before display selection and the viewing wedge. A daughter
+hidden by selection or `skip_geometry` still carves its mother. A daughter's full
+occupied solid is used even when that daughter itself has children or a subtraction
+rule. Daughter materials and their separate rendering remain intact.
+
+These fields also work in `[defaults.tessellation]` / Lua `defaults`; matching rules
+override each field in order, and explicit `false` disables subtraction. Keep the
+operation scoped to suitable mothers: subtracting hundreds of thousands of wires
+from a gas volume can be expensive. Repeated geometry can reuse the resulting
+mother solid.
+
+### Wire distance sampling
+
+`wire_lod_distance` opts recognized wires into spatially grouped distance sampling
+in the viewer. Its value is a camera-to-wire detail range in scene units
+(centimetres for detector imports); zero disables this policy. Below one quarter
+of that distance all wires are eligible; from one quarter to one half 30% are
+eligible, from one half to the configured distance 10%, and beyond it a stable
+0.5% hint subset remains. These are discrete steps with nested, stable samples.
+The hint subset is also included in the closer samples; it bypasses the thickness cutoff and gets a
+minimum display diameter of half a pixel. All other wires retain the configured
+pixel-thickness test. Hint widening is viewer-only and does not alter exports.
+For example, `wire_lod_distance = 100` with `wire_lod_pixels = 1.5` gives a 100 cm
+detail range. Set the distance to zero to restore pixel-only LOD.
+
+The boundaries, densities, and hint width are configurable in both defaults and
+predicate-selected tessellation rules. Arrays replace the entire previous array;
+other fields retain normal last-matching-field precedence.
+
+```toml
+[[rules]]
+match = 'tag.nodehammer_drift_role == "wire"'
+[rules.tessellation]
+wire_lod_pixels = 1.5
+wire_lod_distance = 40 # cm
+wire_lod_distance_factors = [0.25, 0.5, 1.0]
+wire_lod_fractions = [1.0, 0.3, 0.1, 0.005]
+wire_lod_hint_pixels = 0.5
+```
+
+```lua
+rule {
+    match = 'tag.nodehammer_drift_role == "wire"',
+    tessellation = {
+        wire_lod_pixels = 1.5,
+        wire_lod_distance = 40,
+        wire_lod_distance_factors = {0.25, 0.5, 1.0},
+        wire_lod_fractions = {1.0, 0.3, 0.1, 0.005},
+        wire_lod_hint_pixels = 0.5,
+    },
+}
+```
+
+| Field | Meaning and default |
+|---|---|
+| `wire_lod_distance_factors` | Exactly three finite positive, strictly increasing multipliers of `wire_lod_distance`; default `[0.25, 0.5, 1.0]`. |
+| `wire_lod_fractions` | Exactly four finite, nonincreasing fractions in `[0, 1]`, one for each band; default `[1.0, 0.3, 0.1, 0.005]`. The fourth is the hint fraction; zero disables the hint. |
+| `wire_lod_hint_pixels` | Finite nonnegative minimum hint diameter in pixels; default `0.5`. Zero disables widening but retains the hint sample. |
+
+The example's boundaries are 10, 20, and 40 cm (100, 200, and 400 mm).
+The first fraction applies below the first boundary; subsequent fractions start
+at their respective boundaries. The hint is a nested subset of all nearer bands
+and bypasses the thickness cutoff. Set all fractions to one to disable density
+reduction; set `wire_lod_distance = 0` to disable distance sampling and hints
+entirely, retaining pixel-only LOD. There are currently three boundaries/four
+bands, not an arbitrary-length band list.
+
+Spatial blocks and deterministic sampling ranks are computed once during upload;
+rendering skips whole blocks and visits hash-ordered nested subsets. Sampling is
+stable during camera motion; density changes at the distance boundaries. Distance
+is measured to the nearest point of each full wire segment, not its midpoint.
+A nearby portion can therefore keep a long wire visible; this option does not
+clip wire lengths to the local inspection region or implement focus-target LOD.
+The sampled view is illustrative and does not depict true wire density. It shares
+the source-driven/NHR metadata limitation described above.
+
+Subtraction creates analytic Boolean shapes; Manifold evaluates those shapes during
+tessellation, using the mother's tessellation settings and Boolean fallback policy.
+It does not change daughter transforms or material assignments. Saving semantic
+NHB also saves the Boolean shapes: reapplying the same rule is idempotent, but to
+change the daughter selector or undo a baked subtraction, reload the original
+geometry. A standalone tessellation API call can only carve daughters present in
+its input; use the combined build pipeline to carve before display selection.
+
+For very large shared geometry, prefer `volume` and `material` predicates when
+placement identity is not needed. Subtraction can then process each shared volume
+definition once instead of visiting every physical occurrence. Path, placement
+name, and tag predicates retain occurrence-specific behavior; unrelated rendering
+rules do not affect this optimization.

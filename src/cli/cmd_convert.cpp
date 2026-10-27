@@ -10,6 +10,9 @@
 #include <export_resolve.hpp>
 #include <filesystem>
 #include <format>
+#include <geometry/approximation.hpp>
+#include <geometry/drift_chamber.hpp>
+#include <geometry/subtract_daughters.hpp>
 #include <ir/expanded/adapt.hpp>
 #include <ir/expanded/conversion.hpp>
 #include <ir/fb/semantic/flatbuffer.hpp>
@@ -238,6 +241,13 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options, ir::ImporterRe
             }
             (void)importFmt;
 
+            {
+                auto _t = timings.scope("subtract_daughters");
+                auto diags = nodehammer::geometry::subtractDaughters(importResult.scene, cfg);
+                printDiags(diags);
+                demandClean(diags, "daughter subtraction");
+            }
+
             // ── Select ─────────────────────────────────────────────────────────────
             if (!cfg.selection.empty()) {
                 auto _t = timings.scope("select");
@@ -245,6 +255,20 @@ void registerCmdConvert(CLI::App &app, const CliOptions &options, ir::ImporterRe
                 auto selDiags = sel.prune(importResult.scene);
                 printDiags(selDiags);
                 demandClean(selDiags, "selection");
+            }
+
+            {
+                auto _t = timings.scope("drift_chamber");
+                auto diags = nodehammer::geometry::optimizeDriftChambers(importResult.scene, cfg);
+                printDiags(diags);
+                demandClean(diags, "drift chamber optimization");
+            }
+
+            {
+                auto _t = timings.scope("approximate");
+                auto diags = nodehammer::geometry::approximate(importResult.scene, cfg);
+                printDiags(diags);
+                demandClean(diags, "geometry approximation");
             }
 
             // ── Deduplicate shapes ─────────────────────────────────────────────────
