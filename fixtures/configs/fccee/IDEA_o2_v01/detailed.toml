@@ -33,18 +33,19 @@ match = 'path ~= "/world" || ((material ~= "Air" || material ~= "Vacuum" || mate
 skip_geometry = true
 
 # Calorimeter internals are intentionally omitted, including on full CI inputs.
-# Keep barrel assembly proxies; endcap bounding boxes are hidden below.
+# Retain positioned tower solids; exclude their capillaries, air and fibres.
 [[selection_rules]]
 drop_if = [
-  'path ~= "/world/DREndcapTubes/phiER_*/**"',
-  'path ~= "/world/DRBarrelTubes/stave_volume_*/**"',
+  'path ~= "/world/DREndcapTubes/phiER_*/towerLog_*/**"',
+  'path ~= "/world/DRBarrelTubes/stave_volume_*/tower_*/**"',
 ]
 
 [[rules]]
 match = [
-  'path ~= "/world/DRBarrelTubes/stave_volume_*"',
+  'path ~= "/world/DRBarrelTubes/stave_volume_*/tower_*"',
+  'path ~= "/world/DREndcapTubes/phiER_*/towerLog_*"',
 ]
-material = "neutral"
+material = "brass"
 [rules.tessellation]
 skip_geometry = false
 
@@ -56,9 +57,9 @@ material = "glass"
 [rules.geometry]
 replace_descendants = "convex_hull"
 
-# Endcap assembly bounding boxes are centred on the beam axis and overlap into
-# a solid disc. They are not physical endcap solids; hide these false proxies.
+# Parent assembly boxes span empty regions and overlap the opposite calorimeter
+# section. Render the smaller towers above, leaving these containers hidden.
 [[rules]]
-match = 'path ~= "/world/DREndcapTubes/phiER_*"'
+match = 'path ~= "/world/DREndcapTubes/phiER_*" || path ~= "/world/DRBarrelTubes/stave_volume_*"'
 [rules.tessellation]
 skip_geometry = true
