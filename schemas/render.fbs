@@ -90,6 +90,17 @@ table RenderMaterial {
 
 // ── Render node (instance in the scene graph) ────────────────────────────────
 
+// Runtime wire policy must survive the compute-worker NHR transfer.
+table WireLod {
+    radius:double = null;
+    half_length:double = null;
+    min_pixels:double = null;
+    max_distance:double = null;
+    distance_factors:[double];
+    fractions:[double];
+    hint_pixels:double = null;
+}
+
 table RenderNode {
     id:ulong;
     name:string;
@@ -103,8 +114,8 @@ table RenderNode {
     // when present the viewer cross-fades to these at distance. Must be carried
     // across the worker→viewer round-trip or hull LOD is a no-op in WASM.
     lod_proxy_bindings:[MeshBinding];
-    // RenderNode::extras (free-form nlohmann::json) is export-only metadata the
-    // GPU path never reads, so it is intentionally omitted from this schema.
+    wire_lod:WireLod;
+    // Other free-form extras remain export-only and are omitted.
 }
 
 // ── Scene (root) ─────────────────────────────────────────────────────────────

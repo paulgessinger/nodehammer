@@ -372,9 +372,9 @@ threshold and twice that thickness. It measures wire thickness rather than
 the bounding box of a long wire. It controls viewer visibility, not geometry
 selection or export, and does not by itself avoid headless tessellation/cutting.
 
-Wire LOD metadata is currently attached during source-driven scene builds and
-preserved in glTF extras. NHR does not yet persist render-node extras, so reopening
-an exported NHR loses this LOD metadata; use NHB plus the config for the viewer.
+Wire LOD metadata is attached during source-driven scene builds and preserved in
+glTF extras and a typed NHR field, including the wasm compute-worker transfer.
+Older NHR files written without that field need rebuilding from NHB plus config.
 
 
 ### Mother/daughter material boundaries
@@ -475,8 +475,7 @@ stable during camera motion; density changes at the distance boundaries. Distanc
 is measured to the nearest point of each full wire segment, not its midpoint.
 A nearby portion can therefore keep a long wire visible; this option does not
 clip wire lengths to the local inspection region or implement focus-target LOD.
-The sampled view is illustrative and does not depict true wire density. It shares
-the source-driven/NHR metadata limitation described above.
+The sampled view is illustrative and does not depict true wire density.
 
 Subtraction creates analytic Boolean shapes; Manifold evaluates those shapes during
 tessellation, using the mother's tessellation settings and Boolean fallback policy.

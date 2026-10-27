@@ -3,6 +3,7 @@
 
 #include <ir/fb/render/flatbuffer.hpp>
 #include <ir/render.hpp>
+#include <viewer/wire_lod.hpp>
 
 #include <cstdint>
 #include <span>
@@ -318,4 +319,47 @@ TEST_CASE("Render FlatBuffer: file identifier check", "[ir][render][flatbuffer]"
 
     std::vector<uint8_t> garbage = {0, 1, 2, 3, 4, 5, 6, 7};
     REQUIRE_THROWS_AS(renderSceneFromBytes(std::as_bytes(std::span{garbage})), std::runtime_error);
+}
+
+TEST_CASE("Render FlatBuffer: worker transfer preserves wire sampling",
+          "[ir][render][flatbuffer][wire]") {
+    auto scene = makeScene();
+    auto &node = scene.nodes.at(scene.rootId);
+    using detail::JsonValue;
+    auto policy =
+        JsonValue::makeObject({{"radius", 1.0},
+                               {"half_length", 2.0},
+                               {"min_pixels", 1.5},
+                               {"max_distance", 40},
+                               {"distance_factors", JsonValue::makeArray({0.2, 0.6, 1.2})},
+                               {"fractions", JsonValue::makeArray({1.0, 0.4, 0.15, 0.007})},
+                               {"hint_pixels", 0.75}});
+    SECTION("custom policy") {}
+    SECTION("legacy policy uses viewer defaults") {
+        policy = JsonValue::makeObject(
+            {{"radius", 1.0}, {"half_length", 2.0}, {"min_pixels", 1.5}, {"max_distance", 40}});
+    }
+    SECTION("disabled hint survives as zero") { policy.set("hint_pixels", 0.0); }
+    node.extras.set("nodehammer_wire_lod", policy);
+    const auto before = viewer::wireLodBounds(node.extras, node.worldTransform);
+    const auto restored = renderSceneFromBytes(renderSceneToBytes(scene));
+    const auto &copy = restored.nodes.at(scene.rootId);
+    const auto after = viewer::wireLodBounds(copy.extras, copy.worldTransform);
+    REQUIRE(after.radius == before.radius);
+    REQUIRE(after.radius > 0);
+    REQUIRE(after.start == before.start);
+    REQUIRE(after.end == before.end);
+    REQUIRE(after.minPixels == before.minPixels);
+    REQUIRE(after.maxDistance == before.maxDistance);
+    REQUIRE(after.policy.factors == before.policy.factors);
+    REQUIRE(after.policy.fractions == before.policy.fractions);
+    REQUIRE(after.policy.hintPixels == before.policy.hintPixels);
+    for (float distance : {0.f, 10.f, 20.f, 40.f, 100.f}) {
+        REQUIRE(viewer::wireDistanceFraction(distance, after.maxDistance, after.policy) ==
+                viewer::wireDistanceFraction(distance, before.maxDistance, before.policy));
+    }
+    for (const auto &[id, other] : restored.nodes) {
+        if (id != scene.rootId)
+            REQUIRE(other.extras.find("nodehammer_wire_lod") == nullptr);
+    }
 }

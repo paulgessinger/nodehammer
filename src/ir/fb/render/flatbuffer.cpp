@@ -135,6 +135,46 @@ flatbuffers::Offset<fbr::RenderMaterial> serializeMaterial(flatbuffers::FlatBuff
     return mb.Finish();
 }
 
+flatbuffers::Offset<fbr::WireLod> serializeWireLod(flatbuffers::FlatBufferBuilder &b,
+                                                   const detail::JsonValue &extras) {
+    const auto *policy = extras.find("nodehammer_wire_lod");
+    if (!policy || !policy->isObject())
+        return {};
+    auto array = [&](const char *key) {
+        std::vector<double> values;
+        const auto *value = policy->find(key);
+        if (!value || !value->asArray())
+            return flatbuffers::Offset<flatbuffers::Vector<double>>{};
+        for (const auto &v : *value->asArray()) {
+            if (v.asDouble())
+                values.push_back(*v.asDouble());
+            else if (v.asInt())
+                values.push_back(static_cast<double>(*v.asInt()));
+            else
+                return flatbuffers::Offset<flatbuffers::Vector<double>>{};
+        }
+        return b.CreateVector(values);
+    };
+    const auto factors = array("distance_factors"), fractions = array("fractions");
+    fbr::WireLodBuilder builder(b);
+    auto number = [&](const char *key, auto add) {
+        if (const auto *v = policy->find(key)) {
+            if (v->asDouble())
+                (builder.*add)(*v->asDouble());
+            else if (v->asInt())
+                (builder.*add)(static_cast<double>(*v->asInt()));
+        }
+    };
+    number("radius", &fbr::WireLodBuilder::add_radius);
+    number("half_length", &fbr::WireLodBuilder::add_half_length);
+    number("min_pixels", &fbr::WireLodBuilder::add_min_pixels);
+    number("max_distance", &fbr::WireLodBuilder::add_max_distance);
+    number("hint_pixels", &fbr::WireLodBuilder::add_hint_pixels);
+    builder.add_distance_factors(factors);
+    builder.add_fractions(fractions);
+    return builder.Finish();
+}
+
 flatbuffers::Offset<fbr::RenderNode> serializeNode(flatbuffers::FlatBufferBuilder &b,
                                                    const render::Node &node) {
     auto name = b.CreateString(node.name);
@@ -156,6 +196,7 @@ flatbuffers::Offset<fbr::RenderNode> serializeNode(flatbuffers::FlatBufferBuilde
         proxyBindings.emplace_back(mb.meshId.value, mb.materialId.value);
     }
     auto lodProxyBindings = b.CreateVectorOfStructs(proxyBindings);
+    const auto wireLod = serializeWireLod(b, node.extras);
     const fbr::Mat4f local = toMat4(node.localTransform);
     const fbr::Mat4f world = toMat4(node.worldTransform);
     fbr::RenderNodeBuilder nb(b);
@@ -167,6 +208,7 @@ flatbuffers::Offset<fbr::RenderNode> serializeNode(flatbuffers::FlatBufferBuilde
     nb.add_children(children);
     nb.add_mesh_bindings(meshBindings);
     nb.add_lod_proxy_bindings(lodProxyBindings);
+    nb.add_wire_lod(wireLod);
     nb.add_semantic_node_id(node.semanticNodeId.value);
     return nb.Finish();
 }
@@ -341,6 +383,29 @@ render::Scene renderSceneFromFlatBuffer(const fbr::RenderScene &fb) {
                     node.lodProxyBindings.push_back({render::MeshAssetId{bnd->mesh_id()},
                                                      render::MaterialId{bnd->material_id()}});
                 }
+            }
+            if (const auto *wire = n->wire_lod()) {
+                auto policy = detail::JsonValue::makeObject({});
+                auto number = [&](const char *key, auto value) {
+                    if (value)
+                        policy.set(key, *value);
+                };
+                number("radius", wire->radius());
+                number("half_length", wire->half_length());
+                number("min_pixels", wire->min_pixels());
+                number("max_distance", wire->max_distance());
+                number("hint_pixels", wire->hint_pixels());
+                auto array = [&](const char *key, const auto *values) {
+                    if (!values)
+                        return;
+                    detail::JsonValue::Array result;
+                    for (double value : *values)
+                        result.emplace_back(value);
+                    policy.set(key, detail::JsonValue::makeArray(std::move(result)));
+                };
+                array("distance_factors", wire->distance_factors());
+                array("fractions", wire->fractions());
+                node.extras.set("nodehammer_wire_lod", std::move(policy));
             }
             node.semanticNodeId = expanded::NodeId{n->semantic_node_id()};
             scene.nodes.emplace(node.id, std::move(node));
