@@ -182,7 +182,7 @@ class Pass {
             OccurrenceTags volumeTags;
             if (const auto it = source_.metadata.volumeTags.find(volume.id);
                 it != source_.metadata.volumeTags.end())
-                volumeTags = source_.metadata.tagSets.at(it->second);
+                volumeTags = source_.metadata.tagSets.at(static_cast<std::size_t>(it->second));
             if (!role.empty())
                 volumeTags[kDriftRoleTag] = role;
             if (chamberRoot) {

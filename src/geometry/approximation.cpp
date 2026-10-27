@@ -232,7 +232,7 @@ class Approximation {
         for (std::size_t i = 0; i < mesh.triVerts.size(); i += 3) {
             TessellatedShape::Triangle triangle;
             for (std::size_t j = 0; j != 3; ++j) {
-                const auto vertex = mesh.triVerts[i + j] * mesh.numProp;
+                const auto vertex = static_cast<std::size_t>(mesh.triVerts[i + j] * mesh.numProp);
                 triangle.vertices[j] = {mesh.vertProperties[vertex],
                                         mesh.vertProperties[vertex + 1],
                                         mesh.vertProperties[vertex + 2]};
