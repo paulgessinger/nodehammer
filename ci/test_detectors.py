@@ -132,18 +132,42 @@ def test_fcc_fixture_reuses_full_import_and_keeps_separate_validation(tmp_path, 
 
     def run_case(source, output, minimum, package):
         calls.append(('import', source))
+        assert package is False
         return {'triangles': 123}
 
     def pack_fixture(nhb, config, output):
-        calls.append(('fixture', nhb))
-        assert config.name == 'simplified.toml'
+        calls.append((config.stem, nhb))
         return {'status': 'packaged'}
 
     monkeypatch.setattr(detectors.fccee, 'run_case', run_case)
     monkeypatch.setattr(detectors.fccee, 'pack_fixture', pack_fixture)
     result = detectors.fcc_case(model, tmp_path, tmp_path / 'results')
     assert calls == [('import', source),
-                     ('fixture', tmp_path / 'results' / model / 'geometry.nhb.zst')]
-    assert result[model]['status'] == 'passed'
+                     ('simplified', tmp_path / 'results' / model / 'geometry.nhb.zst'),
+                     ('detailed', tmp_path / 'results' / model / 'geometry.nhb.zst')]
+    assert set(result) == {model + '-simplified', model + '-detailed'}
+    assert result[model + '-detailed']['status'] == 'packaged'
+    assert result[model + '-detailed']['smoke_check']['triangles'] == 123
     assert result[model + '-simplified']['status'] == 'packaged'
     assert 'triangles' not in result[model + '-simplified']
+
+
+def test_fcc_detailed_still_runs_after_simplified_failure(tmp_path, monkeypatch):
+    model = 'IDEA_o2_v01'
+    source = tmp_path / 'FCCee/IDEA/compact' / model / f'{model}.xml'
+    source.parent.mkdir(parents=True)
+    source.touch()
+    monkeypatch.setattr(detectors.fccee, 'run_case', lambda *args, **kwargs: {})
+    seen = []
+
+    def pack(nhb, config, output):
+        seen.append(config.stem)
+        if config.stem == 'simplified':
+            raise ValueError('selection failed')
+        return {'status': 'packaged'}
+
+    monkeypatch.setattr(detectors.fccee, 'pack_fixture', pack)
+    report = detectors.fcc_case(model, tmp_path, tmp_path / 'results')
+    assert seen == ['simplified', 'detailed']
+    assert report[model + '-simplified']['status'] == 'failed'
+    assert report[model + '-detailed']['status'] == 'packaged'

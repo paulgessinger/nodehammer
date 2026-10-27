@@ -2,9 +2,6 @@
 # Source: FCCee/IDEA/compact/IDEA_o2_v01/IDEA_o2_v01.xml
 # Use with analysis/fccee/geometry/IDEA_o2_v01.nhb.zst.
 # ROOT/DD4hep native length unit in this build is cm; exports below use metres.
-# PARTIAL GEOMETRY: large dual-readout calorimeter internals intentionally omitted.
-# Tagged retained envelopes are proxies. Detailed means all remaining imported parts.
-# See analysis/fccee/IDEA_o2_v01.omissions.json and FOLLOW_UP.txt.
 # Simplified: sensitive silicon tracker placements, calorimeter/muon/drift envelopes,
 # and physical beam-line parts. Envelopes are display proxies, not material-budget models.
 # Fine calorimeter sampling, tracker support/services, wires and straws are omitted.
@@ -14,72 +11,48 @@ deduplicate_shapes = true
 
 [materials.vertex]
 base_color = "#E6B422"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.tracker]
 base_color = "#33B8B0"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.drift]
 base_color = "#65C7C2"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.ecal]
 base_color = "#E65B50"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.hcal]
 base_color = "#A75CB3"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.muon]
 base_color = "#527ED1"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.magnet]
 base_color = "#85919E"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.beam]
 base_color = "#ADB5BD"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.other]
 base_color = "#8EAD88"
-metallic = 0.15
-roughness = 0.55
-
-[materials.silicon]
-base_color = "#52B8A8"
-metallic = 0.35
-roughness = 0.35
-
-[materials.metal]
-base_color = "#A9AFB8"
-metallic = 0.8
-roughness = 0.4
-
-[materials.carbon]
-base_color = "#414852"
-metallic = 0.15
-roughness = 0.7
-
-[materials.scintillator]
-base_color = "#ED9D45"
-roughness = 0.5
-
-[materials.gas]
-base_color = "#68BCC218"
-alpha_mode = "blend"
-roughness = 0.7
+metallic = 0.0
+roughness = 0.65
 
 [export.gltf]
 unit_scale = 0.01
@@ -307,6 +280,10 @@ keep_if = [
   'path ~= "/world/SiWrD/**" && tag.sensitive == "true"',
 ]
 
+# Conceptual palette: subsystem assignments override this neutral fallback.
+[[rules]]
+material = "other"
+
 [[rules]]
 match = 'path ~= "/world/BeBeampipe" || path ~= "/world/BeBeampipe/**"'
 material = "beam"
@@ -385,11 +362,11 @@ material = "ecal"
 
 [[rules]]
 match = 'path ~= "/world/endcapGlobalAssemblyVol_19" || path ~= "/world/endcapGlobalAssemblyVol_19/**"'
-material = "other"
+material = "ecal"
 
 [[rules]]
 match = 'path ~= "/world/endcapGlobalAssemblyVol_1_20" || path ~= "/world/endcapGlobalAssemblyVol_1_20/**"'
-material = "other"
+material = "ecal"
 
 [[rules]]
 match = 'path ~= "/world/SCEPCal_TimingLayer" || path ~= "/world/SCEPCal_TimingLayer/**"'
@@ -397,11 +374,11 @@ material = "ecal"
 
 [[rules]]
 match = 'path ~= "/world/tlendcapGlobalAssemblyVol_22" || path ~= "/world/tlendcapGlobalAssemblyVol_22/**"'
-material = "other"
+material = "ecal"
 
 [[rules]]
 match = 'path ~= "/world/tlendcapGlobalAssemblyVol_1_23" || path ~= "/world/tlendcapGlobalAssemblyVol_1_23/**"'
-material = "other"
+material = "ecal"
 
 [[rules]]
 match = 'path ~= "/world/DREndcapTubes" || path ~= "/world/DREndcapTubes/**"'

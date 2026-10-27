@@ -11,72 +11,48 @@ deduplicate_shapes = true
 
 [materials.vertex]
 base_color = "#E6B422"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.tracker]
 base_color = "#33B8B0"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.drift]
 base_color = "#65C7C2"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.ecal]
 base_color = "#E65B50"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.hcal]
 base_color = "#A75CB3"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.muon]
 base_color = "#527ED1"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.magnet]
 base_color = "#85919E"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.beam]
 base_color = "#ADB5BD"
-metallic = 0.15
-roughness = 0.55
+metallic = 0.0
+roughness = 0.65
 
 [materials.other]
 base_color = "#8EAD88"
-metallic = 0.15
-roughness = 0.55
-
-[materials.silicon]
-base_color = "#52B8A8"
-metallic = 0.35
-roughness = 0.35
-
-[materials.metal]
-base_color = "#A9AFB8"
-metallic = 0.8
-roughness = 0.4
-
-[materials.carbon]
-base_color = "#414852"
-metallic = 0.15
-roughness = 0.7
-
-[materials.scintillator]
-base_color = "#ED9D45"
-roughness = 0.5
-
-[materials.gas]
-base_color = "#68BCC218"
-alpha_mode = "blend"
-roughness = 0.7
+metallic = 0.0
+roughness = 0.65
 
 [export.gltf]
 unit_scale = 0.01
@@ -176,6 +152,10 @@ keep_if = [
   'path ~= "/world/HOMAbsorbers_PunchThrough" || path ~= "/world/HOMAbsorbers_PunchThrough/**"',
   'path ~= "/world/Vertex/**" && tag.sensitive == "true"',
 ]
+
+# Conceptual palette: subsystem assignments override this neutral fallback.
+[[rules]]
+material = "other"
 
 [[rules]]
 match = 'path ~= "/world/BeBeampipe" || path ~= "/world/BeBeampipe/**"'

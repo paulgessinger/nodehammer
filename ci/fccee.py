@@ -191,5 +191,8 @@ def pack_fixture(nhb, config, output):
         code = nh.cli.run(['config', 'flatten', '-c', str(config), '-o', str(flat)])
         if code:
             raise RuntimeError(f'config flatten exited {code}')
-    pack_project(nhb, flat, output, timings, max_selected=200_000)
+    # Detailed scenes retain supports and sampling layers. A hard bound still
+    # catches an accidental unfiltered IDEA import before archive creation.
+    limit = 5_000_000 if config.name == 'detailed.toml' else 200_000
+    pack_project(nhb, flat, output, timings, max_selected=limit)
     return {'status': 'packaged', 'seconds': timings}

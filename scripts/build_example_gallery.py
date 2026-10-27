@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Add a Zensical dashboard and tested projects to the existing Pages site."""
 import argparse
+from html import escape
 import json
 import re
 from pathlib import Path
@@ -29,11 +30,24 @@ def readme_page(text):
     return "[Explore the detector catalog](catalog.md)\n\n" + text
 
 
+def detector_cards(entries):
+    """Name-only cards; a separate title span leaves room for future thumbnails."""
+    cards = ['<div class="detector-grid">']
+    for title, href in entries:
+        cards.append(f'<a class="detector-card" href="{escape(href, quote=True)}">'
+                     f'<span class="detector-card__title">{escape(title)}</span></a>')
+    return "\n".join([*cards, '</div>', ''])
+
+
 def source_catalog():
     catalog = tomllib.loads((ROOT / "examples/catalog.toml").read_text())
     lines = ["# Detector catalog", "",
              "Available presets and pinned inputs. Build results were not supplied;",
              "this documentation-only build does not include viewer publications or validation results.", "",
+             detector_cards((row["title"],
+                 "https://github.com/paulgessinger/nodehammer/blob/main/" + row.get("config", "examples/catalog.toml"))
+                 for row in catalog["examples"]),
+             "## Inputs and configurations", "",
              "| Example | Source | Configuration |", "| --- | --- | --- |"]
     for row in catalog["examples"]:
         entry = catalog["inputs"][row["input"]]
@@ -47,9 +61,10 @@ def source_catalog():
 
 def fixture_links():
     lines = ["", "## Authored FCC-ee configurations", "",
-             "Simplified presets are published from the same full imports used by CI.",
-             "Detailed configs are provided for authoring, not automatically published.",
-             "**IDEA detailed requires the original reduced input; it does not remove fibers itself.**", "",
+             "Simplified and detailed presets use the same full imports as CI.",
+             "IDEA detailed omits dual-readout calorimeter internals and uses assembly proxies.", "",
+             "Detailed TOML downloads also need [shared physical materials](configs/fccee/physical-materials.toml);",
+             "IDEA additionally needs [drift-chamber settings](configs/fccee/idea-drift.toml) in the parent directory.", "",
              "[Fixture provenance and input restrictions](https://github.com/paulgessinger/"
              "nodehammer/blob/main/fixtures/configs/fccee/README.md)", "",
              "| Model | Simplified | Detailed |", "| --- | --- | --- |"]
@@ -76,12 +91,17 @@ def build(runtime, site, results):
                             str(archive.resolve()), str(site / "viewers" / key),
                             str(runtime)], check=True, stdout=subprocess.DEVNULL)
             rows[key] = row
+    # Keep each detector's lighter preset first, independent of worker completion order.
+    rows = dict(sorted(rows.items(), key=lambda item: (
+        item[0].rsplit("-", 1)[0], "detailed" in item[0], item[0])))
     lines = [
         "# nodehammer examples", "",
         "Preconfigured detector scenes, built with the same revision as the web viewer.",
-        "Choose **simplified** for a lighter ATLAS scene. Detailed scenes need more GPU memory.", "",
+        "Choose **simplified** for a lighter scene with subsystem colors. Detailed scenes need more GPU memory.", "",
         "[Open the application](app/) · [ODD full](odd/) · [ODD simplified](odd-simple/)", "",
         "## Detector examples", "",
+        detector_cards((row["title"], f"viewers/{key}/") for key, row in rows.items()),
+        "## Build validation", "",
         "| Example | Validation | Render nodes | Unique triangles |", "| --- | --- | ---: | ---: |",
     ]
     for key, row in rows.items():
@@ -95,7 +115,7 @@ def build(runtime, site, results):
         "One ATLAS detailed preset and both sPHENIX inputs are tessellated;",
         "the other ATLAS presets are packaged without duplicating those tests.",
         "FCC-ee smoke checks and sPHENIX use bounded depth-2 overviews.",
-        "Authored FCC-ee simplified presets are additional package-only publications.", "",
+        "FCC-ee simplified and detailed presets are package-only publications.", "",
         "CI validates native processing, project archives, and the static site layout.",
         "Browser rendering is not automatically tested.",
         "Only successful builds deploy. Counts describe unique meshes, not instanced GPU cost.", "",

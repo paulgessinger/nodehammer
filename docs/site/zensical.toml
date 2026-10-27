@@ -4,6 +4,7 @@ site_description = "Detector geometry conversion, configuration, and visualizati
 repo_url = "https://github.com/paulgessinger/nodehammer"
 docs_dir = "pages"
 site_dir = "site"
+extra_css = ["assets/catalog.css"]
 # Keep generated links relative to the site root, including under /nodehammer/.
 use_directory_urls = false
 nav = [
