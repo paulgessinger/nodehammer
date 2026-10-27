@@ -105,6 +105,7 @@ Inspection confirmed 6,480 barrel and 5,040 endcap towers, all leaves. Geometry
 checks used the same 30-second per-process limit.
 
 The gallery packages semantic NHB with the flattened preset, so the viewer
-retains wire LOD metadata when rebuilding. NHR currently does not preserve that
-metadata. Geometry optimizations baked into NHB are idempotent; use original
-input when changing the baked geometry policy.
+retains wire LOD metadata when rebuilding. NHR also preserves that
+metadata, including when transferring scenes from the wasm compute worker.
+Geometry optimizations baked into NHB are idempotent; use original input when
+changing the baked geometry policy.
