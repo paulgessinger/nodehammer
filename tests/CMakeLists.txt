@@ -1,5 +1,9 @@
 add_executable(nodehammer_tests
     test_main.cpp
+    geometry/test_approximation.cpp
+    geometry/test_drift_chamber.cpp
+    geometry/test_subtract_daughters.cpp
+    tessellation/test_wire_cut.cpp
     ir/test_occurrence_tree.cpp
     ir/test_shared_flatbuffer.cpp
     ir/test_legacy_shared.cpp
@@ -41,6 +45,7 @@ add_executable(nodehammer_tests
     viewer/test_build_session.cpp
     viewer/test_byte_buffer.cpp
     viewer/test_app_state.cpp
+    viewer/test_wire_lod.cpp
     viewer/test_mesh_buffer_batch.cpp
     viewer/test_camera_json.cpp
     viewer/test_camera_transition.cpp

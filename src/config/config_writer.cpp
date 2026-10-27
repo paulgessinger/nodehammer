@@ -223,6 +223,24 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
         if (rule.match) {
             tbl.insert("match", predicateToTable(*rule.match));
         }
+        if (rule.geometry) {
+            toml::table geometryTbl;
+            if (!rule.geometry->replaceDescendants.empty())
+                geometryTbl.insert("replace_descendants", rule.geometry->replaceDescendants);
+            if (rule.geometry->driftChamber) {
+                const auto &drift = *rule.geometry->driftChamber;
+                toml::table dt;
+                dt.insert("detect", drift.detect);
+                if (drift.gas)
+                    dt.insert("gas", *drift.gas);
+                if (drift.wires)
+                    dt.insert("wires", *drift.wires);
+                dt.insert("gas_representation", drift.gasRepresentation);
+                dt.insert("wire_representation", drift.wireRepresentation);
+                geometryTbl.insert("drift_chamber", std::move(dt));
+            }
+            tbl.insert("geometry", std::move(geometryTbl));
+        }
         if (rule.tessellation) {
             toml::table tessTbl;
             const auto &tess = *rule.tessellation;
@@ -242,6 +260,30 @@ toml::array buildRulesArray(const std::vector<Rule> &rules) {
                 tessTbl.insert("shading", std::string(shadingToString(*tess.shading)));
             if (tess.smoothAngle)
                 tessTbl.insert("smooth_angle", *tess.smoothAngle);
+            if (tess.subtractDaughters)
+                tessTbl.insert("subtract_daughters", *tess.subtractDaughters);
+            if (tess.subtractDaughtersMatch)
+                tessTbl.insert("subtract_daughters_match", *tess.subtractDaughtersMatch);
+            if (tess.wireCut)
+                tessTbl.insert("wire_cut", *tess.wireCut);
+            if (tess.wireLodDistanceFactors) {
+                toml::array values;
+                for (double value : *tess.wireLodDistanceFactors)
+                    values.push_back(value);
+                tessTbl.insert("wire_lod_distance_factors", std::move(values));
+            }
+            if (tess.wireLodFractions) {
+                toml::array values;
+                for (double value : *tess.wireLodFractions)
+                    values.push_back(value);
+                tessTbl.insert("wire_lod_fractions", std::move(values));
+            }
+            if (tess.wireLodHintPixels)
+                tessTbl.insert("wire_lod_hint_pixels", *tess.wireLodHintPixels);
+            if (tess.wireLodDistance)
+                tessTbl.insert("wire_lod_distance", *tess.wireLodDistance);
+            if (tess.wireLodPixels)
+                tessTbl.insert("wire_lod_pixels", *tess.wireLodPixels);
             if (tess.genericTrapTolerance)
                 tessTbl.insert("generic_trap_tolerance", *tess.genericTrapTolerance);
             if (tess.maxSegmentsCircle) {
@@ -270,7 +312,10 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
     const auto &td = cfg.tessellationDefaults;
     const bool any_tess = td.skipGeometry || td.mergeDescendants || td.dropCoincidentFaces ||
                           td.averageMaterialStack || td.maxSegmentsCircle ||
-                          td.genericTrapTolerance || td.shading || td.smoothAngle || td.fallback;
+                          td.genericTrapTolerance || td.shading || td.smoothAngle ||
+                          td.subtractDaughters || td.subtractDaughtersMatch || td.wireCut ||
+                          td.wireLodPixels || td.wireLodDistance || td.wireLodDistanceFactors ||
+                          td.wireLodFractions || td.wireLodHintPixels || td.fallback;
     if (any_tess) {
         toml::table tessTbl;
         if (td.skipGeometry) {
@@ -289,6 +334,30 @@ toml::table buildDefaultsTable(const NHConfig &cfg) {
             tessTbl.insert("shading", std::string(shadingToString(*td.shading)));
         if (td.smoothAngle)
             tessTbl.insert("smooth_angle", *td.smoothAngle);
+        if (td.subtractDaughters)
+            tessTbl.insert("subtract_daughters", *td.subtractDaughters);
+        if (td.subtractDaughtersMatch)
+            tessTbl.insert("subtract_daughters_match", *td.subtractDaughtersMatch);
+        if (td.wireCut)
+            tessTbl.insert("wire_cut", *td.wireCut);
+        if (td.wireLodDistanceFactors) {
+            toml::array values;
+            for (double value : *td.wireLodDistanceFactors)
+                values.push_back(value);
+            tessTbl.insert("wire_lod_distance_factors", std::move(values));
+        }
+        if (td.wireLodFractions) {
+            toml::array values;
+            for (double value : *td.wireLodFractions)
+                values.push_back(value);
+            tessTbl.insert("wire_lod_fractions", std::move(values));
+        }
+        if (td.wireLodHintPixels)
+            tessTbl.insert("wire_lod_hint_pixels", *td.wireLodHintPixels);
+        if (td.wireLodDistance)
+            tessTbl.insert("wire_lod_distance", *td.wireLodDistance);
+        if (td.wireLodPixels)
+            tessTbl.insert("wire_lod_pixels", *td.wireLodPixels);
         if (td.genericTrapTolerance)
             tessTbl.insert("generic_trap_tolerance", *td.genericTrapTolerance);
         if (td.maxSegmentsCircle) {

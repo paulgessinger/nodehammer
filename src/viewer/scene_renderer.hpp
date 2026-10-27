@@ -147,6 +147,7 @@ class SceneRenderer {
         uint32_t draw_calls{0};
         uint32_t instances{0};
         uint64_t triangles{0};
+        double visibility_ms{0};
     };
     [[nodiscard]] FrameStats lastFrameStats() const;
 

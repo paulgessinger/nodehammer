@@ -10,11 +10,19 @@
 #include <config/config_loader.hpp>
 #include <export_resolve.hpp>
 #include <ir/render/exporter.hpp>
+#include <ir/semantic/importer.hpp>
 #include <scene_build.hpp>
+#include <tessellation/build_pipeline.hpp>
 
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <print>
+#include <string>
 
 namespace {
 
@@ -30,8 +38,8 @@ void printDiags(const nodehammer::DiagnosticList &diags) {
 } // namespace
 
 int main(int argc, char **argv) {
-    if (argc != 4) {
-        std::println(std::cerr, "usage: {} <config.toml> <input> <output>",
+    if (argc != 4 && !(argc == 7 && std::string_view{argv[4]} == "--wedge-cut")) {
+        std::println(std::cerr, "usage: {} <config.toml> <input> <output> [--wedge-cut START END]",
                      argc > 0 ? argv[0] : "nodehammer_bench");
         return 2;
     }
@@ -40,9 +48,72 @@ int main(int argc, char **argv) {
     const std::filesystem::path input_path = argv[2];
     const std::filesystem::path output_path = argv[3];
 
-    auto built = nodehammer::pipeline::buildSceneFromPaths(config_path, input_path);
+    std::optional<nodehammer::tessellation::WedgeCutParams> wedge;
+    if (argc == 7) {
+        try {
+            auto angle = [](const char *text) {
+                std::size_t used = 0;
+                const std::string value{text};
+                const double result = std::stod(value, &used);
+                if (used != value.size() || !std::isfinite(result))
+                    throw std::invalid_argument{"invalid angle"};
+                return result;
+            };
+            wedge = nodehammer::tessellation::WedgeCutParams{angle(argv[5]), angle(argv[6])};
+        } catch (const std::exception &e) {
+            std::println(std::cerr, "bench: invalid wedge angles: {}", e.what());
+            return 2;
+        }
+    }
+    // Opt-in JSON-lines timing output also survives a timeout during a later stage.
+    auto build = [&]() {
+        if (!std::getenv("NH_BENCH_TIMING"))
+            return nodehammer::pipeline::buildSceneFromPaths(config_path, input_path, {}, wedge);
+        using Clock = std::chrono::steady_clock;
+        auto last = Clock::now();
+        auto record = [&](std::string_view stage) {
+            const auto now = Clock::now();
+            std::println("{{\"stage\":\"{}\",\"seconds\":{:.6f}}}", stage,
+                         std::chrono::duration<double>(now - last).count());
+            std::fflush(stdout);
+            last = now;
+        };
+        auto loaded = nodehammer::config::ConfigLoader::loadFromFile(config_path);
+        printDiags(loaded.diags);
+        nodehammer::diagnostics::throwIfErrors(loaded.diags, "benchmark config");
+        record("config");
+        const auto importers = nodehammer::ir::ImporterRegistry::makeDefault();
+        const auto *importer = importers.resolve(input_path);
+        if (!importer)
+            throw std::invalid_argument{"unsupported input format"};
+        auto imported = importer->import(input_path);
+        printDiags(imported.diags);
+        record("import");
+        nodehammer::tessellation::BuildPipeline pipe;
+        pipe.start(
+            std::make_shared<const nodehammer::config::NHConfig>(std::move(loaded.config)),
+            std::make_shared<const nodehammer::ir::semantic::Scene>(std::move(imported.scene)),
+            wedge);
+        auto phase = pipe.phase();
+        bool done = false;
+        do {
+            done = pipe.advance();
+            if (pipe.phase() != phase) {
+                constexpr std::array names{
+                    "idle", "prepare", "classify_cut", "tessellate", "finalize",
+                    "done", "queue",   "prepare_cut",  "bounds",     "prepare_tessellation",
+                    "prune"};
+                record(names.at(static_cast<std::size_t>(phase)));
+                phase = pipe.phase();
+            }
+        } while (!done);
+        return pipe.take();
+    };
+    auto built = build();
     printDiags(built.diags);
-    if (!built.scene) {
+    if (built.failure)
+        std::println(std::cerr, "bench: {}", built.failure->what());
+    if (!built.scene || built.diags.hasErrors()) {
         std::println(std::cerr, "bench: scene build failed");
         return 1;
     }

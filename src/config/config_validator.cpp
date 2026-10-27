@@ -1,4 +1,5 @@
 #include <config/config_validator.hpp>
+#include <config/predicate_parser.hpp>
 #include <diagnostic_codes.hpp>
 
 #include <cmath>
@@ -6,6 +7,92 @@
 #include <unordered_set>
 
 namespace nodehammer::config {
+
+DiagnosticList ConfigValidator::validateWireSettings(const Rule::Tessellation &tessellation) {
+    DiagnosticList diags;
+    if (tessellation.wireCut && *tessellation.wireCut != "exact" &&
+        *tessellation.wireCut != "centerline")
+        diags.error(codes::kErrConfigParse, "wire_cut must be 'exact' or 'centerline'");
+    if (tessellation.wireLodPixels &&
+        (!std::isfinite(*tessellation.wireLodPixels) || *tessellation.wireLodPixels < 0))
+        diags.error(codes::kErrConfigParse, "wire_lod_pixels must be finite and nonnegative");
+    if (tessellation.wireLodDistance &&
+        (!std::isfinite(*tessellation.wireLodDistance) || *tessellation.wireLodDistance < 0))
+        diags.error(codes::kErrConfigParse, "wire_lod_distance must be finite and nonnegative");
+    if (tessellation.wireLodHintPixels &&
+        (!std::isfinite(*tessellation.wireLodHintPixels) || *tessellation.wireLodHintPixels < 0))
+        diags.error(codes::kErrConfigParse, "wire_lod_hint_pixels must be finite and nonnegative");
+    if (tessellation.wireLodDistanceFactors) {
+        const auto &v = *tessellation.wireLodDistanceFactors;
+        bool valid = v.size() == 3;
+        double previous = 0;
+        for (double x : v) {
+            valid &= std::isfinite(x) && x > previous;
+            previous = x;
+        }
+        if (!valid)
+            diags.error(codes::kErrConfigParse, "wire_lod_distance_factors must contain three "
+                                                "finite positive strictly increasing values");
+    }
+    if (tessellation.wireLodFractions) {
+        const auto &v = *tessellation.wireLodFractions;
+        bool valid = v.size() == 4;
+        double previous = 1;
+        for (double x : v) {
+            valid &= std::isfinite(x) && x >= 0 && x <= previous;
+            previous = x;
+        }
+        if (!valid)
+            diags.error(
+                codes::kErrConfigParse,
+                "wire_lod_fractions must contain four nonincreasing finite fractions in [0, 1]");
+    }
+    return diags;
+}
+
+DiagnosticList ConfigValidator::validateDaughterSettings(const Rule::Tessellation &tessellation) {
+    DiagnosticList diags;
+    if (tessellation.subtractDaughtersMatch && !tessellation.subtractDaughtersMatch->empty()) {
+        const auto parsed = parsePredicateExpr(*tessellation.subtractDaughtersMatch);
+        if (!parsed)
+            diags.error(
+                codes::kErrConfigParse,
+                std::format("invalid subtract_daughters_match predicate: {}", parsed.error()));
+    }
+    return diags;
+}
+
+DiagnosticList ConfigValidator::validateGeometry(const Rule::Geometry &geometry) {
+    DiagnosticList diags;
+    auto error = [&](std::string message) {
+        diags.error(codes::kErrConfigParse, std::move(message), "rules.geometry");
+    };
+    if (geometry.replaceDescendants.empty() && !geometry.driftChamber)
+        error("geometry must specify replace_descendants or drift_chamber");
+    if (!geometry.replaceDescendants.empty() && geometry.replaceDescendants != "convex_hull")
+        error("replace_descendants must be the string 'convex_hull'");
+    if (!geometry.replaceDescendants.empty() && geometry.driftChamber)
+        error("replace_descendants and drift_chamber cannot be combined in one rule");
+    if (geometry.driftChamber) {
+        const auto &drift = *geometry.driftChamber;
+        if (drift.detect != "auto")
+            error("drift_chamber.detect must be 'auto'");
+        if (drift.gasRepresentation != "parent")
+            error("drift_chamber.gas_representation must be 'parent'");
+        if (drift.wireRepresentation != "instanced")
+            error("drift_chamber.wire_representation must be 'instanced'");
+        for (const auto &[key, value] :
+             {std::pair{"gas", drift.gas}, std::pair{"wires", drift.wires}}) {
+            if (value) {
+                const auto parsed = parsePredicateExpr(*value);
+                if (!parsed)
+                    error(
+                        std::format("invalid drift_chamber.{} predicate: {}", key, parsed.error()));
+            }
+        }
+    }
+    return diags;
+}
 
 DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
     DiagnosticList diags;
@@ -15,6 +102,8 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
             (!std::isfinite(*t.smoothAngle) || *t.smoothAngle < 0 || *t.smoothAngle > 180))
             diags.error(codes::kErrConfigParse,
                         "smooth_angle must be finite and between 0 and 180 degrees");
+        diags.append(validateWireSettings(t));
+        diags.append(validateDaughterSettings(t));
         if (t.genericTrapTolerance &&
             (!std::isfinite(*t.genericTrapTolerance) || *t.genericTrapTolerance <= 0))
             diags.error(codes::kErrNegativeTolerance,
@@ -32,6 +121,8 @@ DiagnosticList ConfigValidator::validate(const NHConfig &cfg) {
 
     bool sawEarlierMaterialRule = false;
     for (const auto &rule : cfg.rules) {
+        if (rule.geometry)
+            diags.append(validateGeometry(*rule.geometry));
         // Every referenced material must be defined.
         if (rule.material.has_value() && !definedMaterials.contains(*rule.material)) {
             diags.error(codes::kErrUndefinedMaterialRef,

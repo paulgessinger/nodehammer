@@ -448,6 +448,8 @@ struct WedgeCutJob::Impl {
 
         // Shared cutting solid: a phi-sector tube covering the removed wedge.
         wedgeId = scene->nextShapeId();
+        if (overrides)
+            overrides->wedgeShapeId = wedgeId;
         scene->shapes[wedgeId] = ir::semantic::Shape{
             wedgeId, ir::semantic::TubeShape{0.0, cutR, cutZ, startRad, removedWidth}};
 
@@ -509,6 +511,8 @@ struct WedgeCutJob::Impl {
             const CutKey key{origShapeId.value, planeSignature(planeStart, node.world),
                              planeSignature(planeEnd, node.world)};
             ++stats.cut;
+            if (expanded)
+                expanded->nodes.at(id).tags[kWedgeCutTag] = "azimuthal_v1";
             if (auto it = cutCache.find(key); it != cutCache.end()) {
                 setVolume(id, it->second);
             } else {

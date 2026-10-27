@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <config/config_loader.hpp>
 #include <ir/expanded/adapt.hpp>
 #include <ir/expanded/conversion.hpp>
 
@@ -173,4 +174,152 @@ TEST_CASE("prepareScene: hoisted repeated assemblies retain mesh sharing",
     const auto rendered = TessellationPass{prep.config}.lower(prep.scene);
     REQUIRE_FALSE(rendered.diags.hasErrors());
     CHECK(rendered.scene.meshAssets.size() == 2); // shared primitive and shared merged mesh
+}
+
+TEST_CASE("prepareScene: fitted hull replaces cells before cutting and survives assembly skip",
+          "[scene_build][approximation][wedgecut]") {
+    using namespace ir::semantic;
+    Scene scene;
+    const MaterialId material{1};
+    scene.materials.emplace(material, SourceMaterial{material, "glass", std::nullopt, 2.5});
+    scene.shapes.emplace(ShapeId{1}, Shape{ShapeId{1}, BoxShape{100, 100, 100}});
+    scene.shapes.emplace(ShapeId{2}, Shape{ShapeId{2}, BoxShape{1, 1, 1}});
+    for (uint64_t i = 1; i <= 3; ++i)
+        scene.logVols.emplace(LogVolId{i}, LogicalVolume{LogVolId{i}, "volume",
+                                                         ShapeId{i == 3 ? 2ULL : 1ULL}, material});
+    scene.root = {"world", LogVolId{1}, glm::dmat4{1}};
+    scene.logVols.at(LogVolId{1}).daughters = {
+        {"module", LogVolId{2}, glm::translate(glm::dmat4{1}, glm::dvec3{10, 0, 0})}};
+    scene.logVols.at(LogVolId{2}).daughters = {
+        {"cell0", LogVolId{3}, glm::translate(glm::dmat4{1}, glm::dvec3{-2, 0, 0})},
+        {"cell1", LogVolId{3}, glm::translate(glm::dmat4{1}, glm::dvec3{2, 0, 0})}};
+    scene.reseedIdCounters();
+    NHConfig cfg;
+    Rule world;
+    world.match = PredicateExpr{NameGlobPredicate{"world"}};
+    world.tessellation.emplace();
+    world.tessellation->skipGeometry = true;
+    Rule module;
+    module.match = PredicateExpr{NameGlobPredicate{"module"}};
+    module.tessellation.emplace();
+    module.tessellation->skipGeometry = true;
+    module.geometry = Rule::Geometry{"convex_hull", std::nullopt};
+    cfg.rules = {world, module};
+    std::optional<WedgeCutParams> cut;
+    SECTION("uncut generated hull remains visible") {}
+    SECTION("Boolean wedge operates on hull instead of cells") { cut = WedgeCutParams{0, 90}; }
+    const auto prep = prepareSceneForTessellationFromInputs(cfg, scene, cut);
+    REQUIRE_FALSE(prep.diags.hasErrors());
+    CHECK(scene.nodeCount() == 4); // Input remains immutable.
+    REQUIRE(prep.scene.nodeCount() == 2);
+    if (cut) {
+        bool cutHull = false;
+        for (const auto &[id, shape] : prep.scene.shapes) {
+            (void)id;
+            if (const auto *subtraction = std::get_if<BooleanSubtraction>(&shape.data))
+                cutHull |= std::holds_alternative<TessellatedShape>(
+                    prep.scene.shapes.at(subtraction->left).data);
+        }
+        CHECK(cutHull);
+    }
+    const auto rendered = TessellationPass{prep.config}.lower(prep.scene, &prep.cutOverrides);
+    REQUIRE_FALSE(rendered.diags.hasErrors());
+    REQUIRE(rendered.scene.nodes.size() == 2);
+    bool visible = false;
+    for (const auto &[id, node] : rendered.scene.nodes) {
+        (void)id;
+        if (node.name == "module") {
+            REQUIRE_FALSE(node.meshBindings.empty());
+            visible = true;
+        }
+        CHECK(node.name != "cell0");
+        CHECK(node.name != "cell1");
+    }
+    REQUIRE(visible);
+    REQUIRE_FALSE(rendered.scene.meshAssets.empty());
+    for (const auto &[id, mesh] : rendered.scene.meshAssets) {
+        (void)id;
+        REQUIRE_FALSE(mesh.indices.empty());
+        for (const auto &vertex : mesh.vertices)
+            for (int axis = 0; axis < 3; ++axis)
+                CHECK(std::isfinite(vertex.position[axis]));
+    }
+}
+
+TEST_CASE("prepareScene: drift gas suppression precedes cutting and wire tag rules apply",
+          "[scene_build][drift][wedgecut]") {
+    using namespace ir::semantic;
+    Scene scene;
+    scene.materials.emplace(MaterialId{1}, SourceMaterial{MaterialId{1}, "gas", std::nullopt, 0});
+    scene.materials.emplace(MaterialId{2},
+                            SourceMaterial{MaterialId{2}, "wire_metal", std::nullopt, 0});
+    scene.shapes.emplace(ShapeId{1}, Shape{ShapeId{1}, TubeShape{10, 100, 100}});
+    scene.shapes.emplace(ShapeId{2}, Shape{ShapeId{2}, BoxShape{2, 1, 50}});
+    scene.shapes.emplace(ShapeId{3}, Shape{ShapeId{3}, TubeShape{0, 0.01, 50}});
+    scene.logVols.emplace(LogVolId{1},
+                          LogicalVolume{LogVolId{1}, "chamber", ShapeId{1}, MaterialId{1}});
+    scene.logVols.emplace(LogVolId{2},
+                          LogicalVolume{LogVolId{2}, "cell", ShapeId{2}, MaterialId{1}});
+    scene.logVols.emplace(LogVolId{3},
+                          LogicalVolume{LogVolId{3}, "wire", ShapeId{3}, MaterialId{2}});
+    scene.root = {"chamber", LogVolId{1}};
+    scene.logVols.at(LogVolId{1}).daughters = {
+        {"cell", LogVolId{2}, glm::translate(glm::dmat4{1}, glm::dvec3{20, 0, 0})}};
+    // The gas cell straddles the cut boundary; its wire sits outside the wedge.
+    scene.logVols.at(LogVolId{2}).daughters = {
+        {"wire", LogVolId{3}, glm::translate(glm::dmat4{1}, glm::dvec3{0, -0.5, 0})}};
+    scene.reseedIdCounters();
+    auto cfg = ConfigLoader::loadFromString(R"(
+[[rules]]
+match = 'name == "chamber"'
+[rules.geometry.drift_chamber]
+gas = 'material == "gas"'
+wires = 'material == "wire_metal"'
+
+[[rules]]
+match = 'tag.nodehammer_drift_role == "wire"'
+[rules.tessellation]
+max_segments_circle = 12
+)")
+                   .config;
+    std::optional<WedgeCutParams> cut;
+    SECTION("uncut") {}
+    SECTION("wedge cuts the envelope but not the suppressed cell") { cut = WedgeCutParams{0, 90}; }
+    const auto prep = prepareSceneForTessellationFromInputs(cfg, scene, cut);
+    REQUIRE_FALSE(prep.diags.hasErrors());
+    REQUIRE(prep.scene.nodeCount() == 3);
+    const auto tree = prep.scene.makeTree();
+    const auto cell = tree->materialize({0});
+    REQUIRE(cell != nullptr);
+    const auto cellShape = prep.scene.logVols.at(cell->logVolId).shapeId;
+    const auto *empty = std::get_if<TessellatedShape>(&prep.scene.shapes.at(cellShape).data);
+    REQUIRE(empty != nullptr);
+    CHECK(empty->triangles.empty());
+    // A late suppression would leave an unnecessary Boolean for the cell.
+    for (const auto &[id, shape] : prep.scene.shapes) {
+        (void)id;
+        if (const auto *boolean = std::get_if<BooleanSubtraction>(&shape.data)) {
+            CHECK(boolean->left != cellShape);
+            CHECK_FALSE(std::holds_alternative<BoxShape>(prep.scene.shapes.at(boolean->left).data));
+        }
+    }
+    if (cut)
+        CHECK(hasBooleanSubtraction(prep.scene));
+    CHECK(std::holds_alternative<BoxShape>(scene.shapes.at(ShapeId{2}).data));
+    const auto rendered = TessellationPass{prep.config}.lower(prep.scene, &prep.cutOverrides);
+    REQUIRE_FALSE(rendered.diags.hasErrors());
+    bool sawWire = false;
+    for (const auto &[id, node] : rendered.scene.nodes) {
+        (void)id;
+        if (node.name == "cell")
+            CHECK(node.meshBindings.empty());
+        if (node.name != "wire")
+            continue;
+        sawWire = true;
+        REQUIRE(node.meshBindings.size() == 1);
+        const auto &mesh = rendered.scene.meshAssets.at(node.meshBindings.front().meshId);
+        // Twelve cylinder sectors: two wall triangles and two cap triangles each.
+        CHECK(mesh.indices.size() == 12 * 4 * 3);
+    }
+    CHECK(sawWire);
 }

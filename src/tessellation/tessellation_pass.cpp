@@ -1,5 +1,8 @@
 #include <detail/overloaded.hpp>
 #include <diagnostic_codes.hpp>
+#include <geometry/approximation.hpp>
+#include <geometry/drift_chamber.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <selection/predicate.hpp>
 #include <tessellation/occurrence_nodes.hpp>
 #include <tessellation/primitive_tessellator.hpp>
@@ -7,6 +10,7 @@
 #include <tessellation/tessellation_job.hpp>
 #include <tessellation/tessellation_pass.hpp>
 #include <tessellation/wedge_cut.hpp>
+#include <tessellation/wire_cut.hpp>
 
 #include <tessellation/boolean_tessellator.hpp>
 
@@ -97,6 +101,12 @@ bool ruleMatches(const CompiledRule &cr, const selection::NodeView &view) {
 
 // Resolved tessellation settings with all fields filled in (no optionals).
 struct ResolvedTessellation {
+    std::string wireCut{"exact"};
+    double wireLodPixels{0};
+    double wireLodDistance{0};
+    std::array<double, 3> wireLodDistanceFactors{0.25, 0.5, 1};
+    std::array<double, 4> wireLodFractions{1, 0.3, 0.1, 0.005};
+    double wireLodHintPixels{0.5};
     bool skipGeometry{false};
     bool mergeDescendants{false};
     // See Rule::Tessellation::dropCoincidentFaces (config_ast.hpp) — only acted on
@@ -343,6 +353,14 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
                                          const config::Rule::Tessellation &defaults,
                                          const selection::NodeView &view) {
     config::Rule::Tessellation merged;
+    auto factors = defaults.wireLodDistanceFactors ? &*defaults.wireLodDistanceFactors : nullptr;
+    auto fractions = defaults.wireLodFractions ? &*defaults.wireLodFractions : nullptr;
+    auto policyArray = []<size_t N>(const std::vector<double> *values,
+                                    std::array<double, N> fallback) {
+        if (values && values->size() == N)
+            std::copy_n(values->begin(), N, fallback.begin());
+        return fallback;
+    };
     for (const auto &cr : rules) {
         if (!cr.rule->tessellation.has_value()) {
             continue;
@@ -351,6 +369,18 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
             continue;
         }
         const auto &t = *cr.rule->tessellation;
+        if (t.wireCut)
+            merged.wireCut = t.wireCut;
+        if (t.wireLodPixels)
+            merged.wireLodPixels = t.wireLodPixels;
+        if (t.wireLodDistanceFactors)
+            factors = &*t.wireLodDistanceFactors;
+        if (t.wireLodFractions)
+            fractions = &*t.wireLodFractions;
+        if (t.wireLodHintPixels)
+            merged.wireLodHintPixels = t.wireLodHintPixels;
+        if (t.wireLodDistance)
+            merged.wireLodDistance = t.wireLodDistance;
         if (t.skipGeometry.has_value()) {
             merged.skipGeometry = *t.skipGeometry;
         }
@@ -376,8 +406,20 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
             merged.fallback = *t.fallback;
         }
     }
+    // The replacement solid supersedes structural assembly suppression.
+    if (view.tags && view.tags->contains(geometry::kApproximationTag) &&
+        view.tags->at(geometry::kApproximationTag) == "convex_hull") {
+        merged.skipGeometry = false;
+    }
     // Config defaults override hardcoded defaults but not rule-matched values.
     return ResolvedTessellation{
+        .wireCut = merged.wireCut.value_or(defaults.wireCut.value_or("exact")),
+        .wireLodPixels = merged.wireLodPixels.value_or(defaults.wireLodPixels.value_or(0)),
+        .wireLodDistance = merged.wireLodDistance.value_or(defaults.wireLodDistance.value_or(0)),
+        .wireLodDistanceFactors = policyArray(factors, std::array<double, 3>{0.25, 0.5, 1}),
+        .wireLodFractions = policyArray(fractions, std::array<double, 4>{1, 0.3, 0.1, 0.005}),
+        .wireLodHintPixels =
+            merged.wireLodHintPixels.value_or(defaults.wireLodHintPixels.value_or(0.5)),
         .skipGeometry = merged.skipGeometry.value_or(defaults.skipGeometry.value_or(false)),
         .mergeDescendants =
             merged.mergeDescendants.value_or(defaults.mergeDescendants.value_or(false)),
@@ -739,6 +781,7 @@ struct TessellationJob::Impl {
     const ir::semantic::GeometryCatalogs *scene{nullptr};
     const ir::expanded::Scene *expanded{nullptr};
     std::unique_ptr<OccurrenceNodes> occurrences;
+    const OccurrenceOverrides *cutOverrides{};
     ir::expanded::NodeId rootId;
 
     bool contains(ir::expanded::NodeId id) const {
@@ -782,6 +825,8 @@ struct TessellationJob::Impl {
         meshCache;
     ankerl::unordered_dense::map<MergeCacheKey, MergeResult, MergeCacheKeyHash> mergeCache;
     ankerl::unordered_dense::map<ir::expanded::NodeId, ir::render::NodeId> nodeMap;
+
+    std::map<std::tuple<int, config::Shading, double>, ir::render::MeshAssetId> wireMeshCache;
 
     std::queue<ir::expanded::NodeId> q;
 
@@ -881,6 +926,10 @@ struct TessellationJob::Impl {
     // finalizes `rn` into the render scene and returns the same bool contract
     // as stepOneNode (false only on a fallback=fail abort).
     bool stepOneNode();
+    bool tessellateWireNode(const ir::expanded::Node &semNode,
+                            const ir::semantic::LogicalVolume &lv, const ir::semantic::Shape &shape,
+                            ir::render::Node &rn, const ResolvedTessellation &rule,
+                            const TessellationParams &params);
     bool tessellateMergeDescendants(const ir::expanded::Node &semNode, ir::render::Node &rn,
                                     ir::render::NodeId rnId, const ResolvedTessellation &rule);
     bool tessellateBooleanNode(const ir::expanded::Node &semNode,
@@ -1080,6 +1129,9 @@ bool TessellationJob::Impl::stepOneNode() {
         return true;
     }
     const ir::semantic::Shape &shape = scene->shapes.at(lv.shapeId);
+
+    if (tessellateWireNode(semNode, lv, shape, rn, rule, params))
+        return true;
 
     if (ir::semantic::isBooleanShape(shape.data)) {
         return tessellateBooleanNode(semNode, lv, shape, rn, rnId, rule, params);
@@ -1472,6 +1524,126 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::expanded::Node 
     return true;
 }
 
+namespace {
+void wireLod(ir::render::Node &node, double radius, double dz, double pixels, double distance,
+             const ResolvedTessellation &rule) {
+    if (pixels <= 0 && distance <= 0)
+        return;
+    // Rule extras are normally objects; retain any custom scalar extras rather
+    // than replacing them just to attach optional viewer metadata.
+    if (!node.extras.isNull() && !node.extras.isObject())
+        return;
+    detail::JsonValue::Array factors, fractions;
+    for (double value : rule.wireLodDistanceFactors)
+        factors.emplace_back(value);
+    for (double value : rule.wireLodFractions)
+        fractions.emplace_back(value);
+    node.extras.set("nodehammer_wire_lod",
+                    detail::JsonValue::makeObject(
+                        {{"radius", radius},
+                         {"half_length", dz},
+                         {"min_pixels", pixels},
+                         {"max_distance", distance},
+                         {"distance_factors", detail::JsonValue::makeArray(std::move(factors))},
+                         {"fractions", detail::JsonValue::makeArray(std::move(fractions))},
+                         {"hint_pixels", rule.wireLodHintPixels}}));
+}
+} // namespace
+
+bool TessellationJob::Impl::tessellateWireNode(const ir::expanded::Node &semNode,
+                                               const ir::semantic::LogicalVolume &lv,
+                                               const ir::semantic::Shape &shape,
+                                               ir::render::Node &rn,
+                                               const ResolvedTessellation &rule,
+                                               const TessellationParams &params) {
+    if (!semNode.tags.contains(geometry::kDriftRoleTag) ||
+        semNode.tags.at(geometry::kDriftRoleTag) != "wire")
+        return false;
+    const auto *tube = std::get_if<ir::semantic::TubeShape>(&shape.data);
+    const auto *cut = std::get_if<ir::semantic::BooleanSubtraction>(&shape.data);
+    if (cut && scene->shapes.contains(cut->left))
+        tube = std::get_if<ir::semantic::TubeShape>(&scene->shapes.at(cut->left).data);
+    if (!tube || !isStraightSlenderWire(*tube))
+        return false;
+    std::optional<std::vector<WireInterval>> intervals;
+    if (rule.wireCut == "centerline" && semNode.children.empty()) {
+        if (!cut) {
+            intervals = std::vector<WireInterval>{{-tube->dz, tube->dz}};
+        } else {
+            const bool generated = (cutOverrides && cutOverrides->wedgeShapeId &&
+                                    cut->right == *cutOverrides->wedgeShapeId) ||
+                                   (semNode.tags.contains(kWedgeCutTag) &&
+                                    semNode.tags.at(kWedgeCutTag) == "azimuthal_v1");
+            if (generated && scene->shapes.contains(cut->right))
+                if (const auto *sector =
+                        std::get_if<ir::semantic::TubeShape>(&scene->shapes.at(cut->right).data))
+                    intervals =
+                        clipWireCenterline(*tube, *sector, glm::inverse(cut->rightTransform));
+        }
+    }
+    if (!intervals) {
+        // The original cylinder bounds also conservatively bound an exact cut.
+        wireLod(rn, tube->rMax, tube->dz, rule.wireLodPixels, rule.wireLodDistance, rule);
+        return false;
+    }
+    const auto root = rn.id;
+    if (intervals->empty()) {
+        result.scene.nodes[root] = std::move(rn);
+        return true;
+    }
+    const auto wireKey = std::tuple{params.maxSegmentsCircle, params.shading, params.smoothAngle};
+    auto cached = wireMeshCache.find(wireKey);
+    ir::render::MeshAssetId meshId;
+    if (cached == wireMeshCache.end()) {
+        auto out = tess.tessellate(ir::semantic::TubeShape{0, 1, 1}, params);
+        applyShading(out, params.shading, params.smoothAngle);
+        result.diags.append(out.diags);
+        ir::render::MeshAsset mesh;
+        mesh.id = result.scene.nextMeshId();
+        meshId = mesh.id;
+        mesh.name = "wire_unit_cylinder";
+        mesh.vertices = std::move(out.vertices);
+        mesh.indices = std::move(out.indices);
+        mesh.provenance.sourceSystem = "tessellation_pass/wire_centerline";
+        mesh.provenance.sourceName = "shared_wire_cylinder";
+        result.scene.meshAssets.emplace(meshId, std::move(mesh));
+        wireMeshCache.emplace(wireKey, meshId);
+    } else {
+        meshId = cached->second;
+    }
+    const auto material = resolveRenderMaterial(lv.materialId, semNode);
+    auto localSpan = [&](const WireInterval &span) {
+        return glm::translate(glm::dmat4{1}, glm::dvec3{0, 0, (span.lo + span.hi) / 2}) *
+               glm::scale(glm::dmat4{1},
+                          glm::dvec3{tube->rMax, tube->rMax, (span.hi - span.lo) / 2});
+    };
+    if (intervals->size() == 1) {
+        const auto transform = localSpan(intervals->front());
+        rn.localTransform = glm::mat4(semNode.localTransform * transform);
+        rn.worldTransform = glm::mat4(semNode.worldTransform * transform);
+        rn.meshBindings.push_back({meshId, material});
+        wireLod(rn, 1, 1, rule.wireLodPixels, rule.wireLodDistance, rule);
+    } else {
+        for (const auto &span : *intervals) {
+            ir::render::Node child;
+            child.id = result.scene.nextNodeId();
+            child.name = semNode.name + "_span" + std::to_string(rn.children.size());
+            child.parentId = root;
+            child.semanticNodeId = semNode.id;
+            child.extras = rn.extras;
+            const auto transform = localSpan(span);
+            child.localTransform = glm::mat4(transform);
+            child.worldTransform = glm::mat4(semNode.worldTransform * transform);
+            child.meshBindings.push_back({meshId, material});
+            wireLod(child, 1, 1, rule.wireLodPixels, rule.wireLodDistance, rule);
+            rn.children.push_back(child.id);
+            result.scene.nodes.emplace(child.id, std::move(child));
+        }
+    }
+    result.scene.nodes[root] = std::move(rn);
+    return true;
+}
+
 bool TessellationJob::Impl::tessellateBooleanNode(const ir::expanded::Node &semNode,
                                                   const ir::semantic::LogicalVolume &lv,
                                                   const ir::semantic::Shape &shape,
@@ -1650,6 +1822,7 @@ void TessellationJob::start(const config::NHConfig &config, const ir::semantic::
     impl_ = std::make_unique<Impl>();
     impl_->config = &config;
     impl_->scene = &scene;
+    impl_->cutOverrides = overrides;
     impl_->occurrences = std::make_unique<OccurrenceNodes>(scene, overrides);
     impl_->rootId = ir::expanded::NodeId{1};
     impl_->initialize();

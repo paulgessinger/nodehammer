@@ -2,6 +2,7 @@
 #include <config/config_enums.hpp>
 #include <config/config_keys.hpp>
 #include <config/config_loader.hpp>
+#include <config/config_validator.hpp>
 #include <config/predicate_parser.hpp>
 #include <detail/file_io.hpp>
 #include <diagnostic_codes.hpp>
@@ -18,6 +19,78 @@
 namespace nodehammer::config {
 
 namespace {
+
+void parseTessellationSpecialSettings(const toml::table &table, Rule::Tessellation &tess,
+                                      const std::string &context, DiagnosticList &diags) {
+    if (const auto node = table["subtract_daughters"]; node) {
+        if (node.is_boolean())
+            tess.subtractDaughters = *node.value<bool>();
+        else
+            diags.error(codes::kErrConfigParse, "subtract_daughters must be a boolean", context);
+    }
+    if (const auto node = table["subtract_daughters_match"]; node) {
+        if (auto value = node.value<std::string>())
+            tess.subtractDaughtersMatch = *value;
+        else
+            diags.error(codes::kErrConfigParse, "subtract_daughters_match must be a string",
+                        context);
+    }
+    diags.append(ConfigValidator::validateDaughterSettings(tess));
+    if (const auto node = table["wire_cut"]; node) {
+        if (auto value = node.value<std::string>())
+            tess.wireCut = *value;
+        else
+            diags.error(codes::kErrConfigParse, "wire_cut must be a string", context);
+    }
+    if (const auto node = table["wire_lod_pixels"]; node) {
+        if (auto value = node.value<double>())
+            tess.wireLodPixels = *value;
+        else
+            diags.error(codes::kErrConfigParse, "wire_lod_pixels must be a number", context);
+    }
+    if (const auto node = table["wire_lod_distance"]; node) {
+        if (auto value = node.value<double>())
+            tess.wireLodDistance = *value;
+        else
+            diags.error(codes::kErrConfigParse, "wire_lod_distance must be a number", context);
+    }
+    if (const auto node = table["wire_lod_distance_factors"]; node) {
+        if (const auto *array = node.as_array()) {
+            std::vector<double> values;
+            for (const auto &item : *array) {
+                if (auto v = item.value<double>())
+                    values.push_back(*v);
+                else
+                    diags.error(codes::kErrConfigParse,
+                                "wire_lod_distance_factors must contain numbers", context);
+            }
+            tess.wireLodDistanceFactors = std::move(values);
+        } else
+            diags.error(codes::kErrConfigParse, "wire_lod_distance_factors must be an array",
+                        context);
+    }
+    if (const auto node = table["wire_lod_fractions"]; node) {
+        if (const auto *array = node.as_array()) {
+            std::vector<double> values;
+            for (const auto &item : *array) {
+                if (auto v = item.value<double>())
+                    values.push_back(*v);
+                else
+                    diags.error(codes::kErrConfigParse, "wire_lod_fractions must contain numbers",
+                                context);
+            }
+            tess.wireLodFractions = std::move(values);
+        } else
+            diags.error(codes::kErrConfigParse, "wire_lod_fractions must be an array", context);
+    }
+    if (const auto node = table["wire_lod_hint_pixels"]; node) {
+        if (auto value = node.value<double>())
+            tess.wireLodHintPixels = *value;
+        else
+            diags.error(codes::kErrConfigParse, "wire_lod_hint_pixels must be a number", context);
+    }
+    diags.append(ConfigValidator::validateWireSettings(tess));
+}
 
 // ── Include resolution ───────────────────────────────────────────────────────
 //
@@ -592,10 +665,57 @@ void parseRules(const toml::table &root, NHConfig &cfg, DiagnosticList &diags) {
             rule.material = std::move(*mat);
         }
 
+        if (const auto geometry = (*tbl)["geometry"]; geometry) {
+            const auto *geometryTbl = geometry.as_table();
+            if (geometryTbl == nullptr) {
+                diags.error(codes::kErrConfigParse, "geometry must be a table", "rules.geometry");
+                continue;
+            }
+            warnUnknownKeys(*geometryTbl, keys::kGeometryKeys, "rules.geometry", diags);
+            Rule::Geometry parsedGeometry;
+            if (const auto operation = (*geometryTbl)["replace_descendants"]; operation) {
+                const auto value = operation.value<std::string>();
+                if (!value || *value != "convex_hull")
+                    diags.error(codes::kErrConfigParse,
+                                "replace_descendants must be the string 'convex_hull'",
+                                "rules.geometry");
+                else
+                    parsedGeometry.replaceDescendants = *value;
+            }
+            if (const auto driftNode = (*geometryTbl)["drift_chamber"]; driftNode) {
+                if (const auto *dt = driftNode.as_table()) {
+                    warnUnknownKeys(*dt, keys::kDriftChamberKeys, "rules.geometry.drift_chamber",
+                                    diags);
+                    Rule::Geometry::DriftChamber drift;
+                    auto readString = [&](std::string_view key, auto &target) {
+                        if (const auto node = (*dt)[key]; node) {
+                            if (auto value = node.template value<std::string>())
+                                target = *value;
+                            else
+                                diags.error(codes::kErrConfigParse,
+                                            std::format("{} must be a string", key),
+                                            "rules.geometry.drift_chamber");
+                        }
+                    };
+                    readString("detect", drift.detect);
+                    readString("gas", drift.gas);
+                    readString("wires", drift.wires);
+                    readString("gas_representation", drift.gasRepresentation);
+                    readString("wire_representation", drift.wireRepresentation);
+                    parsedGeometry.driftChamber = std::move(drift);
+                } else
+                    diags.error(codes::kErrConfigParse, "drift_chamber must be a table",
+                                "rules.geometry");
+            }
+            diags.append(ConfigValidator::validateGeometry(parsedGeometry));
+            rule.geometry = std::move(parsedGeometry);
+        }
+
         // ── tessellation sub-table ───────────────────────────────────────────
         if (const auto *tessTbl = (*tbl)["tessellation"].as_table()) {
             warnUnknownKeys(*tessTbl, keys::kTessellationKeys, "rules.tessellation", diags);
             Rule::Tessellation tess;
+            parseTessellationSpecialSettings(*tessTbl, tess, "rules.tessellation", diags);
             tess.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             tess.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
             tess.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();
@@ -752,6 +872,7 @@ ConfigResult parseTable(const toml::table &tbl) {
         if (const auto *tessTbl = (*defTbl)["tessellation"].as_table()) {
             warnUnknownKeys(*tessTbl, keys::kTessellationKeys, "defaults.tessellation", diags);
             auto &td = cfg.tessellationDefaults;
+            parseTessellationSpecialSettings(*tessTbl, td, "defaults.tessellation", diags);
             td.skipGeometry = (*tessTbl)["skip_geometry"].value<bool>();
             td.mergeDescendants = (*tessTbl)["merge_descendants"].value<bool>();
             td.dropCoincidentFaces = (*tessTbl)["drop_coincident_faces"].value<bool>();

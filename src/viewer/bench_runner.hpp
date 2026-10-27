@@ -33,6 +33,7 @@ struct BenchFrameInput {
     GpuPassTimings gpu{}; ///< last frame's per-pass GPU times
     BenchSceneStats stats{};
     double frame_ms{0.0};
+    double visibility_ms{0.0}; ///< CPU visibility selection, excludes GPU/present waits
     double cpu_submit_ms{0.0}; ///< encode + present (CPU submit total)
     bool capture_done{false};  ///< a requested screenshot finished writing
 };
@@ -91,7 +92,7 @@ class BenchRunner {
     };
 
     struct Accum {
-        std::vector<double> total, scene, ao, denoise, composite, cpu, frame;
+        std::vector<double> total, scene, ao, denoise, composite, cpu, frame, visibility;
         BenchSceneStats stats{};
         bool gpu_valid{true};
         void clear() {
@@ -101,6 +102,7 @@ class BenchRunner {
             denoise.clear();
             composite.clear();
             cpu.clear();
+            visibility.clear();
             frame.clear();
             stats = {};
             gpu_valid = true;
@@ -111,7 +113,7 @@ class BenchRunner {
         std::string label;
         int frames{0};
         bool gpu_valid{false};
-        Stat total, scene, ao, denoise, composite, cpu, frame;
+        Stat total, scene, ao, denoise, composite, cpu, frame, visibility;
         BenchSceneStats stats{};
         std::string screenshot;
     };

@@ -189,3 +189,29 @@ material = "aluminum"
     auto diags = nodehammer::config::ConfigValidator::validate(loaded.config);
     REQUIRE_FALSE(diags.hasErrors());
 }
+
+TEST_CASE("ConfigValidator: programmatic drift chamber options", "[config][validator]") {
+    using namespace nodehammer::config;
+    NHConfig cfg;
+    cfg.rules.emplace_back().geometry.emplace().driftChamber.emplace();
+    REQUIRE_FALSE(ConfigValidator::validate(cfg).hasErrors());
+    auto &geometry = *cfg.rules.front().geometry;
+    geometry.driftChamber->gas = "invalid predicate";
+    REQUIRE(ConfigValidator::validate(cfg).hasErrors());
+    geometry.driftChamber->gas.reset();
+    geometry.replaceDescendants = "convex_hull";
+    REQUIRE(ConfigValidator::validate(cfg).hasErrors());
+}
+
+TEST_CASE("ConfigValidator: programmatic wire settings", "[config][validator][wire]") {
+    using namespace nodehammer::config;
+    NHConfig cfg;
+    cfg.tessellationDefaults.wireCut = "exact";
+    cfg.tessellationDefaults.wireLodPixels = 0;
+    CHECK_FALSE(ConfigValidator::validate(cfg).hasErrors());
+    cfg.tessellationDefaults.wireCut = "unknown";
+    CHECK(ConfigValidator::validate(cfg).hasErrors());
+    cfg.tessellationDefaults.wireCut = "centerline";
+    cfg.rules.emplace_back().tessellation.emplace().wireLodPixels = -0.5;
+    CHECK(ConfigValidator::validate(cfg).hasErrors());
+}

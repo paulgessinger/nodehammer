@@ -4,6 +4,7 @@
 #include <config/config_ast.hpp>
 #include <config/config_enums.hpp>
 #include <config/config_keys.hpp>
+#include <config/config_validator.hpp>
 #include <config/predicate_parser.hpp>
 #include <diagnostic_codes.hpp>
 
@@ -215,6 +216,81 @@ config::Rule::Tessellation tessFromLua(const sol::table &t, const std::string &c
                                        DiagnosticList &diags) {
     warnUnknownKeys(t, config::keys::kTessellationKeys, ctx, diags);
     config::Rule::Tessellation tess;
+    if (const sol::object value = t[config::keys::kSubtractDaughters]; isPresent(value)) {
+        if (value.get_type() == sol::type::boolean)
+            tess.subtractDaughters = value.as<bool>();
+        else
+            diags.error(codes::kErrConfigParse, "subtract_daughters must be a boolean", ctx);
+    }
+    if (const sol::object value = t[config::keys::kSubtractDaughtersMatch]; isPresent(value)) {
+        if (value.get_type() == sol::type::string)
+            tess.subtractDaughtersMatch = value.as<std::string>();
+        else
+            diags.error(codes::kErrConfigParse, "subtract_daughters_match must be a string", ctx);
+    }
+    diags.append(config::ConfigValidator::validateDaughterSettings(tess));
+    if (const sol::object value = t[config::keys::kWireCut]; isPresent(value)) {
+        if (value.get_type() == sol::type::string)
+            tess.wireCut = value.as<std::string>();
+        else
+            diags.error(codes::kErrConfigParse, "wire_cut must be a string", ctx);
+    }
+    if (const sol::object value = t[config::keys::kWireLodPixels]; isPresent(value)) {
+        if (value.get_type() == sol::type::number)
+            tess.wireLodPixels = value.as<double>();
+        else
+            diags.error(codes::kErrConfigParse, "wire_lod_pixels must be a number", ctx);
+    }
+    if (const sol::object value = t[config::keys::kWireLodDistance]; isPresent(value)) {
+        if (value.get_type() == sol::type::number)
+            tess.wireLodDistance = value.as<double>();
+        else
+            diags.error(codes::kErrConfigParse, "wire_lod_distance must be a number", ctx);
+    }
+    if (const sol::object value = t["wire_lod_distance_factors"]; isPresent(value)) {
+        if (value.get_type() == sol::type::table) {
+            std::vector<double> values;
+            const auto array = value.as<sol::table>();
+            for (size_t i = 1; i <= array.size(); ++i) {
+                const sol::object item = array[i];
+                if (item.get_type() == sol::type::number)
+                    values.push_back(item.as<double>());
+                else
+                    diags.error(codes::kErrConfigParse,
+                                "wire_lod_distance_factors must contain numbers", ctx);
+            }
+            if (array.size() != 3)
+                diags.error(codes::kErrConfigParse, "wire_lod_distance_factors has wrong length",
+                            ctx);
+            tess.wireLodDistanceFactors = std::move(values);
+        } else
+            diags.error(codes::kErrConfigParse, "wire_lod_distance_factors must be an array", ctx);
+    }
+    if (const sol::object value = t["wire_lod_fractions"]; isPresent(value)) {
+        if (value.get_type() == sol::type::table) {
+            std::vector<double> values;
+            const auto array = value.as<sol::table>();
+            for (size_t i = 1; i <= array.size(); ++i) {
+                const sol::object item = array[i];
+                if (item.get_type() == sol::type::number)
+                    values.push_back(item.as<double>());
+                else
+                    diags.error(codes::kErrConfigParse, "wire_lod_fractions must contain numbers",
+                                ctx);
+            }
+            if (array.size() != 4)
+                diags.error(codes::kErrConfigParse, "wire_lod_fractions has wrong length", ctx);
+            tess.wireLodFractions = std::move(values);
+        } else
+            diags.error(codes::kErrConfigParse, "wire_lod_fractions must be an array", ctx);
+    }
+    if (const sol::object value = t["wire_lod_hint_pixels"]; isPresent(value)) {
+        if (value.get_type() == sol::type::number)
+            tess.wireLodHintPixels = value.as<double>();
+        else
+            diags.error(codes::kErrConfigParse, "wire_lod_hint_pixels must be a number", ctx);
+    }
+    diags.append(config::ConfigValidator::validateWireSettings(tess));
     if (const sol::optional<bool> v = t[config::keys::kSkipGeometry]) {
         tess.skipGeometry = *v;
     }
@@ -573,6 +649,56 @@ config::ConfigResult evalLuaConfig(std::string_view src, std::string_view rootKe
 
             if (const sol::optional<std::string> mat = t[config::keys::kMaterialRef]) {
                 rule.material = *mat;
+            }
+            if (const sol::object geometry = t[config::keys::kGeometry]; isPresent(geometry)) {
+                if (geometry.get_type() != sol::type::table) {
+                    diags.error(codes::kErrConfigParse, "geometry must be a table",
+                                "rule.geometry");
+                } else {
+                    const auto gt = geometry.as<sol::table>();
+                    warnUnknownKeys(gt, config::keys::kGeometryKeys, "rule.geometry", diags);
+                    config::Rule::Geometry parsedGeometry;
+                    const sol::object op = gt[config::keys::kReplaceDescendants];
+                    if (isPresent(op)) {
+                        if (op.get_type() != sol::type::string ||
+                            op.as<std::string>() != "convex_hull")
+                            diags.error(codes::kErrConfigParse,
+                                        "replace_descendants must be the string 'convex_hull'",
+                                        "rule.geometry");
+                        else
+                            parsedGeometry.replaceDescendants = op.as<std::string>();
+                    }
+                    const sol::object driftObject = gt[config::keys::kDriftChamber];
+                    if (isPresent(driftObject)) {
+                        if (driftObject.get_type() == sol::type::table) {
+                            const auto dt = driftObject.as<sol::table>();
+                            warnUnknownKeys(dt, config::keys::kDriftChamberKeys,
+                                            "rule.geometry.drift_chamber", diags);
+                            config::Rule::Geometry::DriftChamber drift;
+                            auto readString = [&](std::string_view key, auto &target) {
+                                const sol::object value = dt[key];
+                                if (!isPresent(value))
+                                    return;
+                                if (value.get_type() == sol::type::string)
+                                    target = value.as<std::string>();
+                                else
+                                    diags.error(codes::kErrConfigParse,
+                                                std::format("{} must be a string", key),
+                                                "rule.geometry.drift_chamber");
+                            };
+                            readString("detect", drift.detect);
+                            readString("gas", drift.gas);
+                            readString("wires", drift.wires);
+                            readString("gas_representation", drift.gasRepresentation);
+                            readString("wire_representation", drift.wireRepresentation);
+                            parsedGeometry.driftChamber = std::move(drift);
+                        } else
+                            diags.error(codes::kErrConfigParse, "drift_chamber must be a table",
+                                        "rule.geometry");
+                    }
+                    diags.append(config::ConfigValidator::validateGeometry(parsedGeometry));
+                    rule.geometry = std::move(parsedGeometry);
+                }
             }
             if (const sol::object te = t[config::keys::kTessellation];
                 te.get_type() == sol::type::table) {
