@@ -14,6 +14,7 @@ namespace nodehammer::config {
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
 enum class SelectionAction { KeepIf, DropIf };
+enum class Shading { Preserve, Smooth, Flat };
 enum class BooleanFallback { Skip, BBox, Fail };
 
 // ── Predicate AST ─────────────────────────────────────────────────────────────
@@ -157,6 +158,8 @@ struct Rule {
         std::optional<bool> averageMaterialStack;
         std::optional<int> maxSegmentsCircle;
         std::optional<double> genericTrapTolerance;
+        std::optional<Shading> shading;
+        std::optional<double> smoothAngle;
         std::optional<BooleanFallback> fallback;
     };
     std::optional<Tessellation> tessellation;

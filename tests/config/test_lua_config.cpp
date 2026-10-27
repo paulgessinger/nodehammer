@@ -466,3 +466,19 @@ TEST_CASE("evalLuaConfig: generic trap render tolerances roundtrip",
     REQUIRE(restored.config.tessellationDefaults.genericTrapTolerance == 0.1);
     REQUIRE(restored.config.rules[0].tessellation->genericTrapTolerance == 0.001);
 }
+
+TEST_CASE("evalLuaConfig: shading settings roundtrip", "[config][lua][shading]") {
+    auto result = eval(R"LUA(
+        defaults { tessellation = { shading = "smooth", smooth_angle = 45 } }
+        rule { match = 'name == "flat"', tessellation = { shading = "flat", smooth_angle = 0 } }
+    )LUA");
+    REQUIRE_FALSE(result.diags.hasErrors());
+    auto restored = ConfigLoader::loadFromString(configToToml(result.config));
+    REQUIRE(restored.config.tessellationDefaults.shading == Shading::Smooth);
+    REQUIRE(restored.config.tessellationDefaults.smoothAngle == 45);
+    REQUIRE(restored.config.rules[0].tessellation->shading == Shading::Flat);
+    REQUIRE(restored.config.rules[0].tessellation->smoothAngle == 0);
+    REQUIRE(eval(R"(defaults { tessellation = { shading = "typo" } })").diags.hasErrors());
+    REQUIRE(eval(R"(defaults { tessellation = { shading = true } })").diags.hasErrors());
+    REQUIRE(eval(R"(defaults { tessellation = { smooth_angle = "30" } })").diags.hasErrors());
+}

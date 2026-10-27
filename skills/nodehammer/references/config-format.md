@@ -141,9 +141,35 @@ All these fields work in `[rules.tessellation]` and `[defaults.tessellation]`.
 | `merge_descendants` | Merge retained descendant geometry into a group; assign to a stave/disk/module container, not every leaf |
 | `max_segments_circle` | Positive integer controlling curved-shape resolution; built-in default 64 |
 | `generic_trap_tolerance` | Finite positive boundary tolerance for twisted generic traps, in source length units (mm for GeoModel); default 0.01. Affects rendering, not NHB parameters. |
+| `shading` | `"preserve"` (default) keeps generated normals; `"smooth"` rebuilds normals across gentle edges; `"flat"` assigns face normals. Applies to viewer meshes and mesh exports. |
+| `smooth_angle` | Finite angle in degrees from 0 to 180, default 30; used by `shading = "smooth"`. Adjacent faces at or below this angle are joined into smooth vertex fans. |
 | `fallback` | Unsupported boolean handling: "skip" (default), "bbox" (bounding-box proxy), "fail" |
 | `drop_coincident_faces` | Remove coincident internal triangle pairs on merged opaque stacks |
 | `average_material_stack` | Compute merged-stack average data for viewer filtering of distant material bands |
+
+For example, smooth boolean-cut curved surfaces globally and keep a selected
+part flat:
+
+```toml
+[defaults.tessellation]
+shading = "smooth"
+smooth_angle = 30
+
+[[rules]]
+match = 'name == "FacetedSupport"'
+[rules.tessellation]
+shading = "flat"
+```
+
+Shading and angle resolve independently, last matching rule per field wins.
+Smoothing changes normals, not triangle positions or the silhouette. It runs
+per shape after tessellation/booleans and before descendant merging; match the
+descendants (or use defaults) to control their shading inside a merged group.
+Separate shapes are never smoothed together. Only manifold edges with exactly
+coincident endpoints are joined; disconnected fans and non-manifold edges remain
+sharp. Imported cracks or nearly coincident seams are not repaired. Small face
+angles can be intentional mechanical features, so enable smoothing selectively.
+Lua uses the same keys: `tessellation = { shading = "smooth", smooth_angle = 30 }`.
 
 Boolean switches default false. Merging changes mesh granularity, so retain
 separate groups when per-part interaction matters. `skip_geometry` takes

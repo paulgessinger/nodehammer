@@ -1,5 +1,6 @@
 #pragma once
 
+#include <config/config_ast.hpp>
 #include <diagnostics.hpp>
 #include <ir/render.hpp>
 #include <ir/semantic.hpp>
@@ -11,6 +12,9 @@ namespace nodehammer::tessellation {
 struct TessellationParams {
     int maxSegmentsCircle{64}; ///< Segments per full circle (tubes, cones, torus, pcon, pgon)
     double genericTrapTolerance{0.01}; ///< Bilinear boundary error in source length units (mm)
+    // Applied by the lowering pass after the final boolean/primitive mesh exists.
+    config::Shading shading{config::Shading::Preserve};
+    double smoothAngle{30.0};
 };
 
 struct TessellationOutput {

@@ -33,6 +33,27 @@ inline std::optional<BooleanFallback> parseBooleanFallback(std::string_view s) {
     return std::nullopt;
 }
 
+inline std::string_view shadingToString(Shading s) {
+    switch (s) {
+    case Shading::Preserve:
+        return "preserve";
+    case Shading::Smooth:
+        return "smooth";
+    case Shading::Flat:
+        return "flat";
+    }
+    return "preserve";
+}
+inline std::optional<Shading> parseShading(std::string_view s) {
+    if (s == "preserve")
+        return Shading::Preserve;
+    if (s == "smooth")
+        return Shading::Smooth;
+    if (s == "flat")
+        return Shading::Flat;
+    return std::nullopt;
+}
+
 // ── AlphaMode ───────────────────────────────────────────────────────────────
 
 inline std::string_view alphaModeToString(AlphaMode m) {

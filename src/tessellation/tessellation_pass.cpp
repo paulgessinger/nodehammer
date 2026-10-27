@@ -3,6 +3,7 @@
 #include <selection/predicate.hpp>
 #include <tessellation/occurrence_nodes.hpp>
 #include <tessellation/primitive_tessellator.hpp>
+#include <tessellation/shading.hpp>
 #include <tessellation/tessellation_job.hpp>
 #include <tessellation/tessellation_pass.hpp>
 #include <tessellation/wedge_cut.hpp>
@@ -25,6 +26,7 @@
 #include <limits>
 #include <map>
 #include <queue>
+#include <tuple>
 
 namespace nodehammer::tessellation {
 
@@ -107,6 +109,8 @@ struct ResolvedTessellation {
     bool averageMaterialStack{false};
     int maxSegmentsCircle{64};
     double genericTrapTolerance{0.01};
+    config::Shading shading{config::Shading::Preserve};
+    double smoothAngle{30.0};
     config::BooleanFallback fallback{config::BooleanFallback::Skip};
 };
 
@@ -117,12 +121,15 @@ struct MergeDescendantSignature {
     glm::dmat4 toMergeLocal{1.0};
     int maxSegmentsCircle{64};
     double genericTrapTolerance{0.01};
+    config::Shading shading{config::Shading::Preserve};
+    double smoothAngle{30.0};
 
     bool operator==(const MergeDescendantSignature &o) const {
         return shapeId == o.shapeId && sourceMaterialId == o.sourceMaterialId &&
                materialKey == o.materialKey && matrixEqual(toMergeLocal, o.toMergeLocal) &&
                maxSegmentsCircle == o.maxSegmentsCircle &&
-               genericTrapTolerance == o.genericTrapTolerance;
+               genericTrapTolerance == o.genericTrapTolerance && shading == o.shading &&
+               smoothAngle == o.smoothAngle;
     }
 };
 
@@ -154,6 +161,8 @@ struct MergeCacheKeyHash {
             h = hashCombine(h, hashMatrix(d.toMergeLocal));
             h = hashCombine(h, std::hash<int>{}(d.maxSegmentsCircle));
             h = hashCombine(h, std::hash<double>{}(d.genericTrapTolerance));
+            h = hashCombine(h, std::hash<int>{}(static_cast<int>(d.shading)));
+            h = hashCombine(h, std::hash<double>{}(d.smoothAngle));
         }
         return h;
     }
@@ -172,6 +181,8 @@ struct MergeDescendant {
     glm::dmat4 toMergeLocal{1.0};
     int maxSegmentsCircle{64};
     double genericTrapTolerance{0.01};
+    config::Shading shading{config::Shading::Preserve};
+    double smoothAngle{30.0};
 };
 
 struct PrototypeDescendantSignature {
@@ -241,6 +252,10 @@ bool mergeDescendantLess(const MergeDescendantSignature &a, const MergeDescendan
     }
     if (a.genericTrapTolerance != b.genericTrapTolerance)
         return a.genericTrapTolerance < b.genericTrapTolerance;
+    if (a.shading != b.shading)
+        return a.shading < b.shading;
+    if (a.smoothAngle != b.smoothAngle)
+        return a.smoothAngle < b.smoothAngle;
     return matrixLess(a.toMergeLocal, b.toMergeLocal);
 }
 
@@ -263,6 +278,8 @@ bool tryUsePrototypeMergeKey(const ir::semantic::GeometryCatalogs &scene,
         std::string materialKey;
         int maxSegmentsCircle{64};
         double genericTrapTolerance{0.01};
+        config::Shading shading{config::Shading::Preserve};
+        double smoothAngle{30.0};
         bool hasMaterialKey{false};
         bool ambiguous{false};
     };
@@ -275,10 +292,13 @@ bool tryUsePrototypeMergeKey(const ir::semantic::GeometryCatalogs &scene,
             use.materialKey = selected.materialKey;
             use.maxSegmentsCircle = selected.maxSegmentsCircle;
             use.genericTrapTolerance = selected.genericTrapTolerance;
+            use.shading = selected.shading;
+            use.smoothAngle = selected.smoothAngle;
             use.hasMaterialKey = true;
         } else if (use.materialKey != selected.materialKey ||
                    use.maxSegmentsCircle != selected.maxSegmentsCircle ||
-                   use.genericTrapTolerance != selected.genericTrapTolerance) {
+                   use.genericTrapTolerance != selected.genericTrapTolerance ||
+                   use.shading != selected.shading || use.smoothAngle != selected.smoothAngle) {
             use.ambiguous = true;
         }
     }
@@ -301,7 +321,8 @@ bool tryUsePrototypeMergeKey(const ir::semantic::GeometryCatalogs &scene,
         --it->second.count;
         prototypeKey.push_back({proto.shapeId, proto.sourceMaterialId, it->second.materialKey,
                                 proto.toMergeLocal, it->second.maxSegmentsCircle,
-                                it->second.genericTrapTolerance});
+                                it->second.genericTrapTolerance, it->second.shading,
+                                it->second.smoothAngle});
     }
 
     for (const auto &[_, use] : selectedUses) {
@@ -342,6 +363,10 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
         if (t.averageMaterialStack.has_value()) {
             merged.averageMaterialStack = *t.averageMaterialStack;
         }
+        if (t.shading)
+            merged.shading = t.shading;
+        if (t.smoothAngle)
+            merged.smoothAngle = t.smoothAngle;
         if (t.genericTrapTolerance.has_value())
             merged.genericTrapTolerance = *t.genericTrapTolerance;
         if (t.maxSegmentsCircle.has_value()) {
@@ -364,6 +389,8 @@ ResolvedTessellation resolveTessellation(const std::vector<CompiledRule> &rules,
             merged.maxSegmentsCircle.value_or(defaults.maxSegmentsCircle.value_or(64)),
         .genericTrapTolerance =
             merged.genericTrapTolerance.value_or(defaults.genericTrapTolerance.value_or(0.01)),
+        .shading = merged.shading.value_or(defaults.shading.value_or(config::Shading::Preserve)),
+        .smoothAngle = merged.smoothAngle.value_or(defaults.smoothAngle.value_or(30.0)),
         .fallback =
             merged.fallback.value_or(defaults.fallback.value_or(config::BooleanFallback::Skip)),
     };
@@ -749,8 +776,9 @@ struct TessellationJob::Impl {
 
     ankerl::unordered_dense::map<ir::semantic::MaterialId, ir::render::MaterialId> defaultMatCache;
     ankerl::unordered_dense::map<std::string, ir::render::MaterialId> namedMatCache;
-    ankerl::unordered_dense::map<ir::semantic::ShapeId,
-                                 std::map<std::pair<int, double>, ir::render::MeshAssetId>>
+    ankerl::unordered_dense::map<
+        ir::semantic::ShapeId,
+        std::map<std::tuple<int, double, config::Shading, double>, ir::render::MeshAssetId>>
         meshCache;
     ankerl::unordered_dense::map<MergeCacheKey, MergeResult, MergeCacheKeyHash> mergeCache;
     ankerl::unordered_dense::map<ir::expanded::NodeId, ir::render::NodeId> nodeMap;
@@ -1016,6 +1044,8 @@ bool TessellationJob::Impl::stepOneNode() {
     TessellationParams params;
     params.maxSegmentsCircle = rule.maxSegmentsCircle;
     params.genericTrapTolerance = rule.genericTrapTolerance;
+    params.shading = rule.shading;
+    params.smoothAngle = rule.smoothAngle;
 
     // skip_geometry: add the node to the render tree as a structural node but produce no mesh.
     if (rule.skipGeometry) {
@@ -1113,11 +1143,12 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::expanded::Node 
             resolveTessellation(compiledRules, config->tessellationDefaults, descView);
         const int descSegs = descTess.maxSegmentsCircle;
 
-        mergeKey.descendants.push_back({descLv.shapeId, descLv.materialId, materialKey,
-                                        mergeDesc.toMergeLocal, descSegs,
-                                        descTess.genericTrapTolerance});
-        mergeDescendants.push_back(
-            {mergeDesc.nodeId, mergeDesc.toMergeLocal, descSegs, descTess.genericTrapTolerance});
+        mergeKey.descendants.push_back(
+            {descLv.shapeId, descLv.materialId, materialKey, mergeDesc.toMergeLocal, descSegs,
+             descTess.genericTrapTolerance, descTess.shading, descTess.smoothAngle});
+        mergeDescendants.push_back({mergeDesc.nodeId, mergeDesc.toMergeLocal, descSegs,
+                                    descTess.genericTrapTolerance, descTess.shading,
+                                    descTess.smoothAngle});
     }
 
     if (!tryUsePrototypeMergeKey(*scene, semNode.logVolId, mergeKey)) {
@@ -1182,13 +1213,16 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::expanded::Node 
         TessellationParams descParams;
         descParams.maxSegmentsCircle = mergeDesc.maxSegmentsCircle;
         descParams.genericTrapTolerance = mergeDesc.genericTrapTolerance;
+        descParams.shading = mergeDesc.shading;
+        descParams.smoothAngle = mergeDesc.smoothAngle;
 
         const ir::semantic::Shape &descShape = scene->shapes.at(descLv.shapeId);
         const bool descIsBoolean = ir::semantic::isBooleanShape(descShape.data);
         auto &descSegMap = meshCache[descLv.shapeId];
         ir::render::MeshAssetId descMid;
         bool isBBoxProxy = false;
-        if (!descSegMap.contains({descParams.maxSegmentsCircle, descParams.genericTrapTolerance})) {
+        if (!descSegMap.contains({descParams.maxSegmentsCircle, descParams.genericTrapTolerance,
+                                  descParams.shading, descParams.smoothAngle})) {
             TessellationOutput tessOut;
             if (descIsBoolean) {
                 tessOut = tessellateBooleanShape(descShape.data, *scene, tess, descParams);
@@ -1225,6 +1259,7 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::expanded::Node 
             if (tessOut.vertices.empty()) {
                 continue;
             }
+            applyShading(tessOut, descParams.shading, descParams.smoothAngle);
             ir::render::MeshAsset ma;
             ma.id = result.scene.nextMeshId();
             ma.name = descLv.name;
@@ -1234,10 +1269,11 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::expanded::Node 
             ma.provenance.sourceName = descLv.name;
             descMid = ma.id;
             result.scene.meshAssets[descMid] = std::move(ma);
-            descSegMap[{descParams.maxSegmentsCircle, descParams.genericTrapTolerance}] = descMid;
+            descSegMap[{descParams.maxSegmentsCircle, descParams.genericTrapTolerance,
+                        descParams.shading, descParams.smoothAngle}] = descMid;
         } else {
-            descMid =
-                descSegMap.at({descParams.maxSegmentsCircle, descParams.genericTrapTolerance});
+            descMid = descSegMap.at({descParams.maxSegmentsCircle, descParams.genericTrapTolerance,
+                                     descParams.shading, descParams.smoothAngle});
         }
 
         if (!result.scene.meshAssets.contains(descMid)) {
@@ -1450,15 +1486,17 @@ bool TessellationJob::Impl::tessellateBooleanNode(const ir::expanded::Node &semN
     constexpr ir::render::MeshAssetId kFullyRemoved{0};
     auto &boolSegMap = meshCache[lv.shapeId];
     ir::render::MeshAssetId boolMid;
-    bool boolCacheHit =
-        boolSegMap.contains({params.maxSegmentsCircle, params.genericTrapTolerance});
+    bool boolCacheHit = boolSegMap.contains({params.maxSegmentsCircle, params.genericTrapTolerance,
+                                             params.shading, params.smoothAngle});
     bool fullyRemoved = false;
     if (boolCacheHit) {
-        boolMid = boolSegMap.at({params.maxSegmentsCircle, params.genericTrapTolerance});
+        boolMid = boolSegMap.at({params.maxSegmentsCircle, params.genericTrapTolerance,
+                                 params.shading, params.smoothAngle});
         fullyRemoved = (boolMid == kFullyRemoved);
     } else {
         auto boolOut = tessellateBooleanShape(shape.data, *scene, tess, params);
         result.diags.append(boolOut.diags);
+        applyShading(boolOut, params.shading, params.smoothAngle);
         if (!boolOut.vertices.empty()) {
             boolMid = result.scene.nextMeshId();
             ir::render::MeshAsset ma;
@@ -1469,11 +1507,13 @@ bool TessellationJob::Impl::tessellateBooleanNode(const ir::expanded::Node &semN
             ma.provenance.sourceSystem = "tessellation_pass/manifold";
             ma.provenance.sourceName = lv.name;
             result.scene.meshAssets[boolMid] = std::move(ma);
-            boolSegMap[{params.maxSegmentsCircle, params.genericTrapTolerance}] = boolMid;
+            boolSegMap[{params.maxSegmentsCircle, params.genericTrapTolerance, params.shading,
+                        params.smoothAngle}] = boolMid;
             boolCacheHit = true;
         } else if (boolOut.succeeded) {
             // Empty but valid: the solid was fully cut away. Render nothing.
-            boolSegMap[{params.maxSegmentsCircle, params.genericTrapTolerance}] = kFullyRemoved;
+            boolSegMap[{params.maxSegmentsCircle, params.genericTrapTolerance, params.shading,
+                        params.smoothAngle}] = kFullyRemoved;
             fullyRemoved = true;
         }
     }
@@ -1510,6 +1550,7 @@ bool TessellationJob::Impl::tessellateBooleanNode(const ir::expanded::Node &semN
                                       semNode.name),
                           semNode.name);
         auto bboxOut = makeBBoxProxy(shape.data, *scene, tess, params);
+        applyShading(bboxOut, params.shading, params.smoothAngle);
         result.diags.append(bboxOut.diags);
         ir::render::MeshAssetId mid = result.scene.nextMeshId();
         ir::render::MeshAsset ma;
@@ -1547,8 +1588,10 @@ bool TessellationJob::Impl::tessellatePrimitiveNode(const ir::expanded::Node &se
     // ── Tessellate primitive shape ─────────────────────────────────────────
     ir::render::MeshAssetId mid;
     auto &segMap = meshCache[lv.shapeId];
-    if (!segMap.contains({params.maxSegmentsCircle, params.genericTrapTolerance})) {
+    if (!segMap.contains({params.maxSegmentsCircle, params.genericTrapTolerance, params.shading,
+                          params.smoothAngle})) {
         auto tessOut = tess.tessellate(shape.data, params);
+        applyShading(tessOut, params.shading, params.smoothAngle);
         result.diags.append(tessOut.diags);
         ir::render::MeshAsset ma;
         ma.id = result.scene.nextMeshId();
@@ -1559,9 +1602,11 @@ bool TessellationJob::Impl::tessellatePrimitiveNode(const ir::expanded::Node &se
         ma.provenance.sourceName = lv.name;
         mid = ma.id;
         result.scene.meshAssets[mid] = std::move(ma);
-        segMap[{params.maxSegmentsCircle, params.genericTrapTolerance}] = mid;
+        segMap[{params.maxSegmentsCircle, params.genericTrapTolerance, params.shading,
+                params.smoothAngle}] = mid;
     } else {
-        mid = segMap.at({params.maxSegmentsCircle, params.genericTrapTolerance});
+        mid = segMap.at({params.maxSegmentsCircle, params.genericTrapTolerance, params.shading,
+                         params.smoothAngle});
     }
 
     // ── Resolve material ───────────────────────────────────────────────────
