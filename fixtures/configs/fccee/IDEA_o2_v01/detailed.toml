@@ -33,7 +33,7 @@ match = 'path ~= "/world" || ((material ~= "Air" || material ~= "Vacuum" || mate
 skip_geometry = true
 
 # Calorimeter internals are intentionally omitted, including on full CI inputs.
-# Keep the assembly solids as neutral proxies; no external reduction tags needed.
+# Keep barrel assembly proxies; endcap bounding boxes are hidden below.
 [[selection_rules]]
 drop_if = [
   'path ~= "/world/DREndcapTubes/phiER_*/**"',
@@ -42,7 +42,6 @@ drop_if = [
 
 [[rules]]
 match = [
-  'path ~= "/world/DREndcapTubes/phiER_*"',
   'path ~= "/world/DRBarrelTubes/stave_volume_*"',
 ]
 material = "neutral"
@@ -56,3 +55,10 @@ match = 'name ~= "barrelPhiAssembly_*" || name ~= "endcapPhiVol*" || name ~= "ti
 material = "glass"
 [rules.geometry]
 replace_descendants = "convex_hull"
+
+# Endcap assembly bounding boxes are centred on the beam axis and overlap into
+# a solid disc. They are not physical endcap solids; hide these false proxies.
+[[rules]]
+match = 'path ~= "/world/DREndcapTubes/phiER_*"'
+[rules.tessellation]
+skip_geometry = true

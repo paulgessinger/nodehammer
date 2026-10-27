@@ -28,8 +28,12 @@ boundaries, so they can also be applied to full CI imports:
 | IDEA_o1_v03 | `/world/DRcalo/AssemblyTube_*` | Dual-readout calorimeter internals |
 | IDEA_o2_v01 | `/world/DREndcapTubes/phiER_*`, `/world/DRBarrelTubes/stave_volume_*` | Dual-readout calorimeter internals |
 
-The retained assembly solids use a neutral proxy finish. Other subsystems,
-retain their material layers; IDEA o2 crystal sectors use fitted hulls as described below. Selection drops these descendant subtrees before tessellation and before
+The retained barrel assembly solids use a neutral proxy finish. IDEA o2 endcap
+`phiER_*` boxes are hidden in both presets: their centred rectangular bounds
+overlap into a false solid disc across the beam axis. Their fibre contents remain
+excluded, so these dual-readout endcaps currently have no display proxy. Other
+subsystems retain their material layers; IDEA o2 crystal sectors use fitted hulls
+as described below. Selection drops these descendant subtrees before tessellation and before
 packaging, so the browser never receives their fibers. Inspection of both
 selected IDEA presets confirmed zero descendants under every listed boundary.
 No external `tag.omitted_calorimeter_internals` annotation is required. These are detailed
