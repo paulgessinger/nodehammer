@@ -8,6 +8,7 @@
 // Exit code is non-zero on any pipeline-stage error; diagnostics go to stderr.
 
 #include <config/config_loader.hpp>
+#include <detail/env.hpp>
 #include <export_resolve.hpp>
 #include <ir/render/exporter.hpp>
 #include <ir/semantic/importer.hpp>
@@ -17,7 +18,6 @@
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
     }
     // Opt-in JSON-lines timing output also survives a timeout during a later stage.
     auto build = [&]() {
-        if (!std::getenv("NH_BENCH_TIMING"))
+        if (nodehammer::detail::getEnv("NH_BENCH_TIMING").empty())
             return nodehammer::pipeline::buildSceneFromPaths(config_path, input_path, {}, wedge);
         using Clock = std::chrono::steady_clock;
         auto last = Clock::now();
