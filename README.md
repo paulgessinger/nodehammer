@@ -269,6 +269,36 @@ just build
 just test
 ```
 
+To build the native executable with a co-shipped WASM runtime for `viewer serve`
+and `project publish`, activate Emscripten and build the bundle:
+
+```bash
+source ~/emsdk/emsdk_env.sh
+just bundle
+build/bundle/bin/nodehammer viewer serve --no-browser
+```
+
+`just bundle` prepares both Conan configurations, builds both halves, installs
+them under `build/bundle`, and checks that the executable serves the runtime
+without `--web-assets` or `NODEHAMMER_WEB_ASSETS`. Use `just bundle-build` for
+incremental rebuilds, or `just bundle-install` to assemble existing builds and
+`just bundle-check` to check them. Both builds use RelWithDebInfo. The native
+build has the same importer options as `just configure`.
+
+For native Geant4/GDML, DD4hep/ROOT and GeoModel SQLite support from installed Homebrew packages,
+use `just bundle-homebrew` instead of `just bundle`. `just configure-homebrew`
+also configures these backends independently. Subsequent `just bundle-build`
+runs preserve those options. The WASM build keeps its existing importer set.
+See [the Homebrew backend instructions](docs/gdml-import.md#homebrew-development-build)
+for the DD4hep plugin environment needed when importing detector XML.
+These native backends remain linked to your Homebrew installation; the bundle
+does not copy their libraries.
+
+The runtime lives in `share/nodehammer/web` beside `bin/`; keep those directories
+together when moving the bundle. To choose another install prefix, pass
+`just --set bundle_dir /absolute/path bundle` (use the same override for later
+rebuilds and checks).
+
 Or drive `conan`/`cmake` directly — see the [Justfile](Justfile) for the
 exact flags, including the Emscripten/wasm targets (`just wasm-deps`,
 requires [emsdk](https://github.com/emscripten-core/emsdk)) and the

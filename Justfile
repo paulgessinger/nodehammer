@@ -152,6 +152,62 @@ wasm-set *args: _require-emsdk
 
 wasm: wasm-deps wasm-configure wasm-build wasm-test
 
+# Native CLI + co-shipped web runtime, using the existing install-tree lookup.
+# Prerequisite: source ~/emsdk/emsdk_env.sh (see wasm recipes above).
+# Run build/bundle/bin/nodehammer; keep bin/ and share/ together when moving it.
+# Override the destination with: just --set bundle_dir /absolute/path bundle
+bundle_dir := justfile_directory() / "build/bundle"
+bundle_executable := if os_family() == "windows" { "nodehammer.exe" } else { "nodehammer" }
+
+# Configure and build both toolchains, then install and smoke-test the pair.
+bundle: _require-emsdk deps configure wasm-deps wasm-configure bundle-build
+
+# Same bundle with native ROOT/DD4hep, Geant4 and GeoModel from Homebrew.
+bundle-homebrew: _require-emsdk deps configure-homebrew wasm-deps wasm-configure bundle-build
+
+# Locate installed Homebrew backends before replacing the native configuration.
+configure-homebrew:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dd4hep_prefix=$(brew --prefix dd4hep)
+    geant4_prefix=$(brew --prefix geant4)
+    root_prefix=$(brew --prefix root)
+    geomodel_prefix=$(brew --prefix geomodel)
+    for config in "$dd4hep_prefix/cmake/DD4hepConfig.cmake" \
+                  "$geant4_prefix/lib/cmake/Geant4/Geant4Config.cmake" \
+                  "$root_prefix/share/root/cmake/ROOTConfig.cmake" \
+                  "$geomodel_prefix/lib/cmake/GeoModelCore/GeoModelCoreConfig.cmake" \
+                  "$geomodel_prefix/lib/cmake/GeoModelIO/GeoModelIOConfig.cmake"; do
+        if [ ! -f "$config" ]; then
+            echo "Missing Homebrew backend configuration: $config" >&2
+            exit 1
+        fi
+    done
+    {{configure_native_cmd}}
+    cmake --preset conan-relwithdebinfo \
+        -DNODEHAMMER_WITH_DD4HEP=ON -DNODEHAMMER_WITH_GEANT4=ON \
+        -DNODEHAMMER_WITH_GEOMODEL=ON -DNODEHAMMER_FETCH_GEOMODEL=OFF \
+        -DDD4hep_DIR="$dd4hep_prefix/cmake" \
+        -DGeant4_DIR="$geant4_prefix/lib/cmake/Geant4" \
+        -DROOT_DIR="$root_prefix/share/root/cmake" \
+        -DGeoModelCore_DIR="$geomodel_prefix/lib/cmake/GeoModelCore" \
+        -DGeoModelIO_DIR="$geomodel_prefix/lib/cmake/GeoModelIO"
+
+# Incremental rebuild of both already-configured trees; refresh the bundle.
+bundle-build: _require-emsdk build wasm-build bundle-install bundle-check
+
+# Merge existing native and wasm builds into one prefix (no rebuild).
+bundle-install:
+    cmake --install build/RelWithDebInfo --component Runtime --prefix "{{bundle_dir}}"
+    cmake --install build/emscripten/RelWithDebInfo --component WebRuntime --prefix "{{bundle_dir}}"
+
+# Exercise automatic discovery, with no environment override or browser launch.
+bundle-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    unset NODEHAMMER_WEB_ASSETS
+    python3 "{{justfile_directory()}}/scripts/check_web_serve.py" "{{bundle_dir}}/bin/{{bundle_executable}}"
+
 # Release wasm build: -Oz + LTO + closure + assertions stripped. Slower link,
 # smaller .wasm/.js, harder-to-read browser stack traces. Use for shipping.
 wasm-deps-release: _require-emsdk recipes
