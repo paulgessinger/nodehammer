@@ -32,17 +32,13 @@ match = 'path ~= "/world" || ((material ~= "Air" || material ~= "Vacuum" || mate
 [rules.tessellation]
 skip_geometry = true
 
-# Calorimeter internals are intentionally omitted, including on full CI inputs.
-# Keep the assembly solids as neutral proxies; no external reduction tags needed.
+# Retain the positioned copper towers and silicon readout wafers, as o2 retains
+# its brass towers. Drop fibre/capillary detail below these display boundaries.
 [[selection_rules]]
-drop_if = [
-  'path ~= "/world/DRcalo/AssemblyTube_*/**"',
-]
+drop_if = 'path ~= "/world/DRcalo/AssemblyTube_*/*/**"'
 
+# The two assembly envelopes overlap the tower contents; keep only their hierarchy.
 [[rules]]
-match = [
-  'path ~= "/world/DRcalo/AssemblyTube_*"',
-]
-material = "neutral"
+match = 'path ~= "/world/DRcalo/AssemblyTube_*"'
 [rules.tessellation]
-skip_geometry = false
+skip_geometry = true

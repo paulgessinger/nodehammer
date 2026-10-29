@@ -1193,6 +1193,11 @@ bool TessellationJob::Impl::tessellateMergeDescendants(const ir::expanded::Node 
 
         const auto descTess =
             resolveTessellation(compiledRules, config->tessellationDefaults, descView);
+        // A merge consumes the hierarchy, not suppressed envelope solids. Children
+        // were queued above so skipping a mother still retains its visible daughters.
+        if (descTess.skipGeometry) {
+            continue;
+        }
         const int descSegs = descTess.maxSegmentsCircle;
 
         mergeKey.descendants.push_back(
