@@ -799,3 +799,44 @@ TEST_CASE("Canonical occurrence indexing validates before traversing",
     }
     REQUIRE_THROWS(OccurrenceNodes{source});
 }
+
+TEST_CASE("TessellationPass: merging omits hidden mothers but retains their daughters",
+          "[tessellation][pass]") {
+    auto scene = makeNestedBoxScene();
+    const auto innerId = scene.nodes.at(scene.rootId).children.front();
+    const auto leafId = scene.nextNodeId();
+    auto leaf = scene.nodes.at(innerId);
+    leaf.id = leafId;
+    leaf.name = "leaf";
+    leaf.parentId = innerId;
+    leaf.localTransform = glm::dmat4{1.0};
+    scene.nodes[leafId] = leaf;
+    scene.nodes.at(innerId).children.push_back(leafId);
+    scene.computeWorldTransforms();
+    scene.computeOriginalPaths();
+
+    NHConfig cfg;
+    Rule merge;
+    merge.match = PredicateExpr{NameGlobPredicate{"world"}};
+    merge.tessellation = Rule::Tessellation{};
+    merge.tessellation->mergeDescendants = true;
+    cfg.rules.push_back(merge);
+    Rule hide;
+    hide.match = PredicateExpr{NameGlobPredicate{"inner"}};
+    hide.tessellation = Rule::Tessellation{};
+    hide.tessellation->skipGeometry = true;
+    cfg.rules.push_back(hide);
+
+    // Exercise both catalog-backed occurrences and the expanded compatibility path.
+    const auto check = [&](const auto &input) {
+        auto result = TessellationPass{cfg}.lower(input);
+        REQUIRE_FALSE(result.diags.hasErrors());
+        REQUIRE(result.scene.nodes.size() == 1);
+        const auto &bindings = result.scene.nodes.begin()->second.meshBindings;
+        REQUIRE(bindings.size() == 1);
+        // Only the leaf box survives, not the coincident hidden mother box.
+        CHECK(result.scene.meshAssets.at(bindings.front().meshId).indices.size() == 36);
+    };
+    check(scene);
+    check(ir::semantic::fromExpanded(scene));
+}

@@ -31,3 +31,12 @@ keep_if = 'true'
 match = 'path ~= "/world" || ((material ~= "Air" || material ~= "Vacuum" || material ~= "beam" || material ~= "dummy") && !(tag.sensitive == "true"))'
 [rules.tessellation]
 skip_geometry = true
+
+# Keep the physical sensor/support layers, but emit each repeated tracker module
+# as one render node. Expanding every component produced over two million nodes.
+[[rules]]
+match = 'volume ~= "InnerTracker*Module*" || volume ~= "OuterTracker*Module*"'
+[rules.tessellation]
+skip_geometry = false
+merge_descendants = true
+drop_coincident_faces = true

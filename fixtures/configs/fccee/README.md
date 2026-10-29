@@ -25,10 +25,12 @@ boundaries, so they can also be applied to full CI imports:
 
 | Model | Retained proxy boundaries | Omitted detail |
 | --- | --- | --- |
-| IDEA_o1_v03 | `/world/DRcalo/AssemblyTube_*` | Dual-readout calorimeter internals |
+| IDEA_o1_v03 | `/world/DRcalo/AssemblyTube_*/tower_*`, `/world/DRcalo/AssemblyTube_*/sipmWafer_*` | Tower fibres and readout internals |
 | IDEA_o2_v01 | `/world/DREndcapTubes/phiER_*/towerLog_*`, `/world/DRBarrelTubes/stave_volume_*/tower_*` | Tower air, capillaries and fibres |
 
-IDEA o1 assembly proxies use a neutral finish. IDEA o2 detailed retains 6,480
+IDEA o1 detailed retains 21,600 copper tower proxies and 21,600 silicon readout
+wafers, using their source-material mappings. Its two assembly envelopes stay
+hidden. IDEA o2 detailed retains 6,480
 barrel brass towers and 5,040 positioned endcap tower containers, with a brass
 finish representing their omitted contents. These are bulk display proxies;
 the air and fibre channels are not represented. The larger stave and `phiER_*`
@@ -109,3 +111,72 @@ retains wire LOD metadata when rebuilding. NHR also preserves that
 metadata, including when transferring scenes from the wasm compute worker.
 Geometry optimizations baked into NHB are idempotent; use original input when
 changing the baked geometry policy.
+
+## Detailed preset maintenance (2026-10-29)
+
+IDEA o1 now follows o2's positioned-tower policy, with its own copper/silicon
+materials rather than o2's brass. It selects 641,611 placements from the full
+260,245,099-placement CI input. Both versions continue to share drift-wire LOD
+and vessel subtraction through `idea-drift.toml`. The crystal hull rules remain
+o2-specific: o1 does not contain that crystal calorimeter.
+
+CLD merges the physical components of each repeated inner/outer tracker module
+and removes their coincident interior faces. Sensor/support material layers
+remain; picking now stops at the module. On the compact CI input this reduces
+the render tree from 2,034,249 to 111,489 nodes and the uncompressed NHR from
+476 MiB to about 37 MiB. The original preset exhausted the wasm worker's 2 GiB
+heap during finalization; the revised preset completed using a 331 MiB heap.
+A 90-degree cut also completes (397 MiB heap). These measurements use a
+Node-hosted wasm compute build, not a browser frame-rate benchmark. Older expanded imports can still exhaust memory during
+preparation; rebuild packages from the compact CI import.
+
+ALLEGRO hides gas-only `CDCHlayer*` shells and the `LAr_bath` mother while
+retaining the physical cryostat walls and liquid-argon sampling layers. Endcap
+`layerEnvelope` solids are replaced by merged daughter surfaces. Repeated HCAL
+sampling sequences and barrel ECAL passive plates also merge with
+`drop_coincident_faces`; HCAL sequences use material-stack prefiltering for
+subpixel bands. That initial pass removed 60,428 interior triangles and produced
+33,176 render nodes. Dense bands and partially coincident interfaces can still
+alias in cut views: this is not a general boolean union of the calorimeter.
+
+Merging now honors descendant `skip_geometry` rules while still traversing
+those nodes' daughters. Rebuild the runtime as well as repacking the presets to
+pick up this fix. Native cut previews were checked for IDEA o1 and ALLEGRO;
+all eight preset configs validate, and the tessellation suite passes (62 cases).
+
+### ALLEGRO follow-up: interaction cost and the central cavity
+
+The source CDCH contains 112 gas-only cylindrical layers (radii 34.4–168.8 cm,
+length 570 cm), with no wire/cell daughters. Suppressing those shells exposes
+the central cavity; this input cannot supply the missing wire detail. The
+preset does not invent wire geometry or fill the cavity with a solid proxy.
+
+The detailed preset also merges the twelve liquid-argon slices within each
+barrel ECAL active cell. HCAL sampling cylinders use 32 circle segments instead
+of 64; ECAL and cryostat resolution remain unchanged. Liquid argon uses a local
+opaque, matte blue display material to avoid overlapping translucent sampling
+surfaces. This is a display convention, not an optical model of liquid argon.
+
+At the same native 90-degree-cut camera, submitted triangles fell from about
+13.1 million to 7.7 million; this measures geometry workload, not frame rate.
+The bright transparent appearance is reduced, but residual HCAL band aliasing
+and partially coincident radial interfaces remain. Merging whole HCAL layers
+was tested and rejected because it inflated the uncompressed render payload
+to 362 MiB. The smaller repeated-unit merges preserve instancing.
+
+### Cut-volume rule matching
+
+Viewing cuts create logical-volume names ending in `_wedgecut`. ALLEGRO's
+volume-based envelope suppression and merge rules use globs that also match
+those generated names. Exact-name rules previously stopped matching after a
+cut, re-exposing `LAr_bath` and `layerEnvelope` solids and disabling repeated
+sampling-unit merges. In an isolated positive-endcap 90-degree cut, correcting
+these matches reduced render nodes from 557 to 21 and removed 15,936 interior
+triangles. The full cut scene now has 13,571 render nodes and removes 38,764
+interior triangles.
+
+Inspection of the positive endcap's 535 axial leaf-material intervals found no
+volume overlap between those layers. Residual fine banding remains in isolated
+renders after envelope removal, including the liquid-only view; it should not
+be attributed entirely to overlapping envelopes. Material-stack averaging was
+trialled on the endcap but did not resolve this, and was not added there.
