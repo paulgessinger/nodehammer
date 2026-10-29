@@ -117,6 +117,14 @@ bool isFarSample(float d) {
         : (d >= 1.0 - 1e-5);
 }
 
+// Nearest depth belongs to the sampled texel's center, not the requested
+// subpixel UV. Pairing it with a different camera ray invents an off-surface
+// position and creates false self-occlusion on smooth-shaded meshes.
+vec2 depthUV(vec2 uv) {
+    vec2 size = vec2(textureSize(sampler2D(scene_depth, smp_depth), 0));
+    return (clamp(floor(uv * size), vec2(0.0), size - 1.0) + 0.5) / size;
+}
+
 // Cheap per-pixel rotation phase. Jorge Jiménez's interleaved gradient noise
 // (Activision 2014) — three magic constants, returns a value in roughly
 // [0, 1) that decorrelates neighboring pixels enough to break up slice-
@@ -127,7 +135,7 @@ float ign(vec2 px) {
 
 void main() {
     float flip_v = frame_params.x;
-    vec2 uv = vec2(v_uv.x, mix(v_uv.y, 1.0 - v_uv.y, flip_v));
+    vec2 uv = depthUV(vec2(v_uv.x, mix(v_uv.y, 1.0 - v_uv.y, flip_v)));
 
     // Center sample. Reject background — depth at the far plane has no
     // meaningful occluders, so write fully-unoccluded and bail.
@@ -159,29 +167,33 @@ void main() {
     // nearest depth sampling (which would give a degenerate gradient).
     const float NORMAL_RECON_UV = 0.0015;
     vec2 texel = max(vec2(NORMAL_RECON_UV), ao_params.zw);
-    float d_l = texture(sampler2D(scene_depth, smp_depth), uv - vec2(texel.x, 0.0)).r;
-    float d_r = texture(sampler2D(scene_depth, smp_depth), uv + vec2(texel.x, 0.0)).r;
-    float d_d = texture(sampler2D(scene_depth, smp_depth), uv - vec2(0.0, texel.y)).r;
-    float d_u = texture(sampler2D(scene_depth, smp_depth), uv + vec2(0.0, texel.y)).r;
-    // If a cardinal tap is on the sky, treat it as a wall by using center_z —
-    // this throws the depth delta to "infinity" so the *other* side is
+    vec2 uv_l = depthUV(uv - vec2(texel.x, 0.0));
+    vec2 uv_r = depthUV(uv + vec2(texel.x, 0.0));
+    vec2 uv_dn = depthUV(uv - vec2(0.0, texel.y));
+    vec2 uv_up = depthUV(uv + vec2(0.0, texel.y));
+    float d_l = texture(sampler2D(scene_depth, smp_depth), uv_l).r;
+    float d_r = texture(sampler2D(scene_depth, smp_depth), uv_r).r;
+    float d_d = texture(sampler2D(scene_depth, smp_depth), uv_dn).r;
+    float d_u = texture(sampler2D(scene_depth, smp_depth), uv_up).r;
+    // Reject sky taps and taps clamped onto the center at viewport edges:
+    // throw the depth delta to "infinity" so the *other* side is
     // automatically picked by the min-difference logic below.
-    float z_l = isFarSample(d_l) ? center_z + 1e9
+    float z_l = (all(equal(uv_l, uv)) || isFarSample(d_l)) ? center_z + 1e9
               : linearize_depth(d_l, depth_params.z, depth_params.y,
                                 depth_params.x, depth_params.y);
-    float z_r = isFarSample(d_r) ? center_z + 1e9
+    float z_r = (all(equal(uv_r, uv)) || isFarSample(d_r)) ? center_z + 1e9
               : linearize_depth(d_r, depth_params.z, depth_params.y,
                                 depth_params.x, depth_params.y);
-    float z_dn = isFarSample(d_d) ? center_z + 1e9
+    float z_dn = (all(equal(uv_dn, uv)) || isFarSample(d_d)) ? center_z + 1e9
                : linearize_depth(d_d, depth_params.z, depth_params.y,
                                  depth_params.x, depth_params.y);
-    float z_up = isFarSample(d_u) ? center_z + 1e9
+    float z_up = (all(equal(uv_up, uv)) || isFarSample(d_u)) ? center_z + 1e9
                : linearize_depth(d_u, depth_params.z, depth_params.y,
                                  depth_params.x, depth_params.y);
-    vec3 P_l = viewPosFromUV(uv - vec2(texel.x, 0.0), z_l);
-    vec3 P_r = viewPosFromUV(uv + vec2(texel.x, 0.0), z_r);
-    vec3 P_dn = viewPosFromUV(uv - vec2(0.0, texel.y), z_dn);
-    vec3 P_up = viewPosFromUV(uv + vec2(0.0, texel.y), z_up);
+    vec3 P_l = viewPosFromUV(uv_l, z_l);
+    vec3 P_r = viewPosFromUV(uv_r, z_r);
+    vec3 P_dn = viewPosFromUV(uv_dn, z_dn);
+    vec3 P_up = viewPosFromUV(uv_up, z_up);
     vec3 dx = (abs(z_l - center_z) < abs(z_r - center_z)) ? (P - P_l) : (P_r - P);
     vec3 dy = (abs(z_dn - center_z) < abs(z_up - center_z)) ? (P - P_dn) : (P_up - P);
     vec3 N = normalize(cross(dy, dx));
@@ -276,12 +288,15 @@ void main() {
             if (i > num_steps) break;
             vec2 du = dir * step_len * float(i);
 
-            vec2 uv_p = uv + du;
+            vec2 uv_p = depthUV(uv + du);
             // Explicit LOD 0: sampling inside this varying-count loop with an
             // implicit-derivative texture() forces the HLSL/FXC back-end to
             // unroll (X3570). The depth buffer is single-mip, so this is exact.
             float dp = textureLod(sampler2D(scene_depth, smp_depth), uv_p, 0.0).r;
-            if (!isFarSample(dp)) {
+            // Subpixel steps can hit the center texel again. Reject those
+            // explicitly: floating-point cancellation in H can otherwise
+            // turn the zero-length vector into a false horizon.
+            if (any(notEqual(uv_p, uv)) && !isFarSample(dp)) {
                 float zp = linearize_depth(dp, depth_params.z, depth_params.y,
                                            depth_params.x, depth_params.y);
                 vec3 H_p = viewPosFromUV(uv_p, zp) - P;
@@ -292,9 +307,9 @@ void main() {
                 }
             }
 
-            vec2 uv_n = uv - du;
+            vec2 uv_n = depthUV(uv - du);
             float dn = textureLod(sampler2D(scene_depth, smp_depth), uv_n, 0.0).r;
-            if (!isFarSample(dn)) {
+            if (any(notEqual(uv_n, uv)) && !isFarSample(dn)) {
                 float zn = linearize_depth(dn, depth_params.z, depth_params.y,
                                            depth_params.x, depth_params.y);
                 vec3 H_n = viewPosFromUV(uv_n, zn) - P;

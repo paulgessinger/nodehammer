@@ -18,6 +18,9 @@ bake_unit_scale = true
 unit_scale = 0.01
 
 [defaults.tessellation]
+# Smooth cylindrical facets while retaining sharp sampling and cut edges.
+shading = "smooth"
+smooth_angle = 30
 max_segments_circle = 64
 fallback = "fail"
 merge_descendants = false
@@ -49,12 +52,8 @@ skip_geometry = false
 merge_descendants = true
 drop_coincident_faces = true
 
-# The retained sampling bands remain physical; prefilter their appearance when
-# individual layers are smaller than a pixel to reduce distant stripe aliasing.
-[[rules]]
-match = 'volume ~= "HCalTileSequenceVol*" || volume ~= "HCalECTileSequenceVol*"'
-[rules.tessellation]
-average_material_stack = true
+# Do not average annular HCAL stacks: that option also builds convex-hull LOD
+# proxies, which fill their beam opening. Retain the detailed annular meshes.
 
 # Active barrel ECAL cells are air mothers containing twelve LAr slices.
 [[rules]]

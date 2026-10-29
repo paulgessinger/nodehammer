@@ -134,8 +134,7 @@ ALLEGRO hides gas-only `CDCHlayer*` shells and the `LAr_bath` mother while
 retaining the physical cryostat walls and liquid-argon sampling layers. Endcap
 `layerEnvelope` solids are replaced by merged daughter surfaces. Repeated HCAL
 sampling sequences and barrel ECAL passive plates also merge with
-`drop_coincident_faces`; HCAL sequences use material-stack prefiltering for
-subpixel bands. That initial pass removed 60,428 interior triangles and produced
+`drop_coincident_faces`. That initial pass removed 60,428 interior triangles and produced
 33,176 render nodes. Dense bands and partially coincident interfaces can still
 alias in cut views: this is not a general boolean union of the calorimeter.
 
@@ -163,6 +162,16 @@ The bright transparent appearance is reduced, but residual HCAL band aliasing
 and partially coincident radial interfaces remain. Merging whole HCAL layers
 was tested and rejected because it inflated the uncompressed render payload
 to 362 MiB. The smaller repeated-unit merges preserve instancing.
+
+HCAL annular sequences do not use `average_material_stack`: its convex-hull
+LOD proxies fill the beam opening and introduce overlapping disk surfaces.
+Matched endcap renders confirm that disabling these proxies removes the
+blotchy disk artifact while retaining merging and coincident-face removal.
+The preset uses smooth shading with a 30-degree crease threshold. The viewer's
+AO depth samples now reconstruct positions at the sampled texel centers and
+reject repeated center samples. Matched native renders show that this removes
+the broad false AO bands on the smooth outer shell; rebuild the viewer to pick
+up the shader fix.
 
 ### Cut-volume rule matching
 
