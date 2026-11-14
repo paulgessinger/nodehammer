@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: j178/prek-action@1382ad72dea72f9d53832f2bcb65b3e87a947204 # v3.0.1
+      - uses: j178/prek-action@44924fe9ef4a6f88253c4b6b1bf11c689d3ce53d # v3.1.0
 
   build:
     name: ${{ matrix.artifact-name }}
@@ -94,7 +94,7 @@ jobs:
         run: brew untap aws/tap || true
 
       - name: Install CMake and Ninja
-        uses: lukka/get-cmake@a89e43e22a96abafcd7a62db652a65ecd33052c9 # v4.4.4
+        uses: lukka/get-cmake@f86dd60acae0d132056913e248bdabf0e0580b7a # v4.4.5
 
       - name: Install GCC 14 and viewer deps (Linux)
         if: runner.os == 'Linux'
@@ -176,7 +176,7 @@ jobs:
           key: naga-cli-30.0.0-${{ runner.os }}-${{ runner.arch }}
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -319,7 +319,7 @@ jobs:
         run: ci/build.sh test ${{ matrix.kind }}
 
       - name: Install hyperfine
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@3a3daafd3b7f23b8f65d9f5ba2db203fb59b79e2 # v2.90.2
         with:
           tool: hyperfine
 
@@ -407,7 +407,7 @@ jobs:
           # a wheel must not inherit that.
           fetch-depth: 0
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -474,7 +474,7 @@ jobs:
           name: nodehammer-web-wheel
           path: dist-web
 
-      - uses: pypa/cibuildwheel@b3395e271a35f73dad77f21802abe9b986dfe299 # v4.3.1
+      - uses: pypa/cibuildwheel@f9b966cfadf4109556cadc5bb39ddb72d0ce664e # v4.3.5
         env:
           CIBW_ONLY: ${{ matrix.identifier }}
           NH_CONAN_CACHE_ARCHIVE: ${{ runner.os == 'Linux' && format('/host{0}/.cache/conan/dependencies.tgz', github.workspace) || format('{0}/.cache/conan/dependencies.tgz', github.workspace) }}
@@ -538,7 +538,7 @@ jobs:
           fetch-depth: 0  # setuptools_scm reads tags, as in the wheels job.
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -598,7 +598,7 @@ jobs:
           fetch-depth: 0  # setuptools_scm reads tags, as in the wheels job.
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -705,7 +705,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -834,14 +834,14 @@ jobs:
       # only window in which the pair is incomplete is the seconds between these
       # two steps.
       - name: Publish nodehammer-web
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
           packages-dir: dist-web
           skip-existing: true
 
       - name: Publish nodehammer
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
@@ -897,12 +897,12 @@ jobs:
       # No skip-existing, unlike TestPyPI: there it absorbs a re-run of the same
       # commit, here a collision means the tag is wrong and should fail loudly.
       - name: Publish nodehammer-web
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: dist-web
 
       - name: Publish nodehammer
-        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
 
   bench-summary:
     name: Benchmark summary
@@ -1046,7 +1046,7 @@ jobs:
           name: detector-examples
           path: example-artifact
 
-      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: false
 
@@ -1170,7 +1170,7 @@ jobs:
       # another is updating, which 404s and fails the job (and leaves no
       # bench.json attached at all). Anything not listed here stays out.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           files: |
             artifacts/nodehammer-*/*
